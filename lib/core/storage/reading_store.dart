@@ -67,6 +67,16 @@ class ReadingStore {
 
   static const _shelfKey = 'shelf_books_v1';
   static const _progressKey = 'reading_progress_v1';
+
+  /// 最近阅读：独立列表，只保留 [recentLimit] 本。
+  ///
+  /// 和 [_progressKey] 分开存是刻意的：进度表是"每本书读到哪"（第几本都要能
+  /// 继续阅读），最近阅读只是首页展示用的 3 条入口，砍掉旧条目不能影响
+  /// 那些书本身的续读位置。
+  static const _recentKey = 'recent_reading_v1';
+
+  /// 最近阅读的存储/展示条数。
+  static const int recentLimit = 3;
   static const _lastReadKey = 'last_read_book_v1';
 
   Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
@@ -119,6 +129,16 @@ class ReadingStore {
         updatedAt: DateTime.now(),
       ).toJson();
     await prefs.setString(_progressKey, jsonEncode(map));
+
+    // 最近阅读单独一张表，只留最近 [recentLimit] 本。
+    final recent = _decodeRecent(prefs.getString(_recentKey))
+      ..removeWhere((entry) => asString(entry['bookId']) == bookId)
+      ..insert(0, map[bookId]!);
+    if (recent.length > recentLimit) {
+      recent.removeRange(recentLimit, recent.length);
+    }
+    await prefs.setString(_recentKey, jsonEncode(recent));
+
     await prefs.setString(_lastReadKey, bookId);
     revision.value++;
   }
@@ -134,14 +154,44 @@ class ReadingStore {
     return prefs.getString(_lastReadKey);
   }
 
-  /// 最近阅读（按更新时间倒序）。
-  Future<List<ReadingProgress>> history({int limit = 20}) async {
+  /// 最近阅读（按最近一次阅读时间倒序，最多 [recentLimit] 条）。
+  Future<List<ReadingProgress>> recent({int limit = recentLimit}) async {
     final prefs = await _prefs;
-    final all = _decodeProgress(
-      prefs.getString(_progressKey),
-    ).values.map(ReadingProgress.fromJson).whereType<ReadingProgress>().toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return all.take(limit).toList();
+    var entries = _decodeRecent(prefs.getString(_recentKey));
+    if (entries.isEmpty) {
+      // 老版本只有进度表：首次读取时按更新时间补出最近几条并落盘，避免升级后
+      // "最近阅读" 空白直到用户再读一本。
+      final progress = _decodeProgress(prefs.getString(_progressKey));
+      final derived =
+          progress.values.toList()
+            ..sort(
+              (a, b) =>
+                  asInt(b['updatedAt']).compareTo(asInt(a['updatedAt'])),
+            );
+      entries = derived.take(limit).toList();
+      if (entries.isNotEmpty) {
+        await prefs.setString(_recentKey, jsonEncode(entries));
+      }
+    }
+    return entries
+        .map(ReadingProgress.fromJson)
+        .whereType<ReadingProgress>()
+        .take(limit)
+        .toList();
+  }
+
+  List<Map<String, dynamic>> _decodeRecent(String? raw) {
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = jsonDecode(raw);
+      if (list is! List) return [];
+      return list
+          .map(asMap)
+          .whereType<Map<String, dynamic>>()
+          .toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   List<NovelItem> _decodeShelf(String? raw) {

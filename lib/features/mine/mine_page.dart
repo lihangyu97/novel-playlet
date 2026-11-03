@@ -101,6 +101,14 @@ class MinePage extends ConsumerWidget {
         6;
 
     return [
+      // 最近阅读在上、书架在下：最近读的几本是最常用的入口。
+      if (data.recent.isNotEmpty) ...[
+        const SliverToBoxAdapter(child: _SectionHeader(title: '最近阅读')),
+        MineRecentReading(
+          items: data.recent,
+          onOpen: (progress) => _openReader(context, progress),
+        ),
+      ],
       SliverToBoxAdapter(
         child: _SectionHeader(
           title: '我的书架',
@@ -116,13 +124,6 @@ class MinePage extends ConsumerWidget {
         onOpen: (item) => _openDetail(context, item),
         onLongPress: (item) => _showShelfMenu(context, ref, item),
       ),
-      if (data.recent.isNotEmpty) ...[
-        const SliverToBoxAdapter(child: _SectionHeader(title: '最近阅读')),
-        MineRecentReading(
-          items: data.recent,
-          onOpen: (progress) => _openReader(context, progress),
-        ),
-      ],
       const SliverToBoxAdapter(child: SizedBox(height: 28)),
     ];
   }
@@ -243,7 +244,7 @@ class _MineHeader extends StatelessWidget {
     final shelf = shelfCount;
     final recent = recentCount;
     final stats = shelf != null && recent != null
-        ? '书架 $shelf 本 · 最近阅读 $recent 本'
+        ? '最近阅读 $recent 本 · 书架 $shelf 本'
         : (statusText ?? '正在读取书架…');
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),

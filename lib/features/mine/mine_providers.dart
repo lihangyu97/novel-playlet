@@ -8,7 +8,7 @@ import '../../data/models/novel_item.dart';
 ///
 /// 统计行的「最近阅读 M 本」与列表保持一致，避免出现"统计 37 本、列表只
 /// 看到 20 本"的割裂感。
-const mineRecentLimit = 20;
+const mineRecentLimit = 3;
 
 /// 「我的」页需要的一份本地快照。
 class MineData {
@@ -48,6 +48,6 @@ final mineDataProvider = FutureProvider<MineData>((ref) async {
   ref.watch(readingRevisionProvider);
   final store = ref.watch(readingStoreProvider);
   final shelf = await store.shelf();
-  final recent = await store.history(limit: mineRecentLimit);
+  final recent = await store.recent(limit: mineRecentLimit);
   return MineData(shelf: shelf, recent: recent);
 });
