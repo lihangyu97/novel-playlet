@@ -1,0 +1,37 @@
+name: novel_playlet
+description: "小说阅读 App：iOS，小说-only，复用 Rust 内核的加解密与接口。"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # 中文 Material 文案（复制/粘贴/全选）。
+  flutter_localizations:
+    sdk: flutter
+  # 后端桥：与 rust/Cargo.toml 的 flutter_rust_bridge 版本必须完全一致。
+  flutter_rust_bridge: 2.13.0
+  # 状态管理：每个功能域一个 Notifier，页面只读 provider。
+  flutter_riverpod: ^3.4.3
+  path_provider: ^2.1.0
+  # 设备池密钥（Keychain）。密钥材料不落任何明文存储。
+  flutter_secure_storage: ^9.0.0
+  # 书架/阅读进度等轻量本地状态。
+  shared_preferences: ^2.3.0
+  cached_network_image: ^4.0.0
+  # 正文 HTML → 段落。
+  html: 0.15.6
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/config/

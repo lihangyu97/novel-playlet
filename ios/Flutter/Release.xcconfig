@@ -1,0 +1,14 @@
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
+#include "Generated.xcconfig"
+
+// ---- novel-playlet: Rust 内核（fqapi_core）静态库链接 ----
+// iOS 不允许从 App 包内 dlopen 共享库，Rust 以 staticlib 整体链进主二进制；
+// 运行时由 flutter_rust_bridge 的 ExternalLibrary.process() 从进程符号里找入口
+// （见 lib/core/backend/rust_bootstrap_io.dart）。三件事缺一不可：
+//   1) -force_load：静态库默认按需取目标文件，这里全部装进来；
+//   2) DEAD_CODE_STRIPPING=NO：Release 的 dead_strip 会删掉"只在运行时 dlsym"的符号；
+//   3) -Wl,-export_dynamic：主可执行文件默认不导出全局符号。
+// STRIP_INSTALLED_PRODUCT=NO 避免安装期 strip 再裁一次符号表。
+OTHER_LDFLAGS = $(inherited) -force_load $(SRCROOT)/Frameworks/libfqapi_core.a -framework Security -framework CoreFoundation -Wl,-export_dynamic
+DEAD_CODE_STRIPPING = NO
+STRIP_INSTALLED_PRODUCT = NO
