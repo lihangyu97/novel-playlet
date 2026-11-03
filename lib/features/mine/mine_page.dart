@@ -154,6 +154,7 @@ class MinePage extends ConsumerWidget {
         cover: progress.cover,
         chapterId: progress.chapterId,
         chapterIndex: progress.chapterIndex,
+        blockIndex: progress.blockIndex,
       ),
     );
   }

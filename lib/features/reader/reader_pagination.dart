@@ -195,11 +195,21 @@ class ReaderPagination {
     );
   }
 
-  /// 当前页（或之后第一页）的首段索引，供重排后恢复阅读位置。
+  /// 当前页的落点段落下标：优先取本页"开头"的段落（firstLine == 0），
+  /// 而不是本页首片段所在段落。
+  ///
+  /// 段落可能跨页，本页第一行只是上一段的后半截；若存它的下标，恢复时
+  /// `pageIndexForBlock` 会把它算到上一页（因为段落从上一页开始）。
+  /// 取本页真正开头的段落，才能"读到第几页就回到第几页"。
+  /// 整页只有一段的后半截时退回首片段下标（只能回到该段开始处）。
   int blockAtPage(int pageIndex) {
     if (pages.isEmpty) return 0;
     final clamped = pageIndex.clamp(0, pages.length - 1).toInt();
-    return pages[clamped].firstBlockIndex;
+    final fragments = pages[clamped].fragments;
+    for (final fragment in fragments) {
+      if (fragment.firstLine == 0) return fragment.block.index;
+    }
+    return fragments.first.block.index;
   }
 
   /// 找到包含 [blockIndex] 的第一页。

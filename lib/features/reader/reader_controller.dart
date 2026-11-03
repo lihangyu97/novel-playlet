@@ -29,6 +29,8 @@ class ReaderSessionState {
     this.cover = '',
     this.loading = true,
     this.error,
+    this.resumeBlockIndex = 0,
+    this.resumeChapterIndex = -1,
   });
 
   final List<Chapter> chapters;
@@ -42,6 +44,13 @@ class ReaderSessionState {
   final String cover;
   final bool loading;
   final String? error;
+
+  /// 续读入口的落点：当前页首段下标。只有"按本地进度续读"时才有值；
+  /// 用户显式点章节进入，或跳过头后会被清成 0。
+  final int resumeBlockIndex;
+
+  /// [resumeBlockIndex] 属于哪一章（目录下标）。-1 表示没有待恢复的落点。
+  final int resumeChapterIndex;
 
   bool get hasChapters => chapters.isNotEmpty;
 
@@ -68,6 +77,8 @@ class ReaderSessionState {
     String? cover,
     bool? loading,
     Object? error = _unset,
+    int? resumeBlockIndex,
+    int? resumeChapterIndex,
   }) => ReaderSessionState(
     chapters: chapters ?? this.chapters,
     index: index ?? this.index,
@@ -79,6 +90,8 @@ class ReaderSessionState {
     cover: cover ?? this.cover,
     loading: loading ?? this.loading,
     error: identical(error, _unset) ? this.error : error as String?,
+    resumeBlockIndex: resumeBlockIndex ?? this.resumeBlockIndex,
+    resumeChapterIndex: resumeChapterIndex ?? this.resumeChapterIndex,
   );
 }
 
@@ -100,6 +113,11 @@ class ReaderController extends Notifier<ReaderSessionState> {
   bool _bootstrapping = false;
   int _requestToken = 0;
 
+  /// 页级进度防抖：翻页很频繁，没必要每一页都写一次 SharedPreferences。
+  Timer? _progressTimer;
+  int? _pendingBlockIndex;
+  static const Duration _progressDebounce = Duration(milliseconds: 400);
+
   late ReaderChapterCache _cache;
 
   /// 下一章/上一章的后台预取队列。并发上限 1，避免快速滑动时打爆请求。
@@ -112,7 +130,11 @@ class ReaderController extends Notifier<ReaderSessionState> {
 
   @override
   ReaderSessionState build() {
-    ref.onDispose(() => _disposed = true);
+    ref.onDispose(() {
+      _disposed = true;
+      _progressTimer?.cancel();
+      _progressTimer = null;
+    });
     _cache = ref.read(readerChapterCacheProvider);
     // 目录与正文都是网络请求，不能阻塞 build；先给加载态，回来后刷新。
     _bootstrap();
@@ -138,11 +160,13 @@ class ReaderController extends Notifier<ReaderSessionState> {
         );
         return;
       }
-      final start = await _resolveStartIndex(chapters, store);
+      final start = await _resolveStart(chapters, store);
       if (_disposed) return;
       state = state.copyWith(
         chapters: chapters,
-        index: start,
+        index: start.index,
+        resumeBlockIndex: start.blockIndex,
+        resumeChapterIndex: start.blockIndex > 0 ? start.index : -1,
         bookTitle: args.bookTitle.isNotEmpty
             ? args.bookTitle
             : (detail?.title ?? ''),
@@ -150,7 +174,7 @@ class ReaderController extends Notifier<ReaderSessionState> {
         loading: true,
         error: null,
       );
-      await _loadChapter(start);
+      await _loadChapter(start.index);
     } catch (error) {
       if (_disposed) return;
       state = state.copyWith(
@@ -173,7 +197,10 @@ class ReaderController extends Notifier<ReaderSessionState> {
   }
 
   /// 起始章优先级：显式指定的章 > 本地进度 > 第一章。
-  Future<int> _resolveStartIndex(
+  ///
+  /// 只有走到"本地进度"这一路才带回 `blockIndex`：显式点章节进入是从页首
+  /// 开始读，不该跳到上次停下的段落。
+  Future<({int index, int blockIndex})> _resolveStart(
     List<Chapter> chapters,
     ReadingStore store,
   ) async {
@@ -182,33 +209,37 @@ class ReaderController extends Notifier<ReaderSessionState> {
 
     final requestedId = args.chapterId;
     if (requestedId != null && requestedId.isNotEmpty) {
+      // 入口可以同时指定章与段落落点：详情页「继续阅读」/「我的」最近阅读
+      // 就是这么进来的，不带 blockIndex 时才从页首开始（用户主动点某章）。
+      final requestedBlock = (args.blockIndex ?? 0).clamp(0, 1 << 30);
       final found = indexOf(requestedId);
-      if (found >= 0) return found;
+      if (found >= 0) return (index: found, blockIndex: requestedBlock);
       final fallback = args.chapterIndex;
       if (fallback != null && fallback >= 0 && fallback < chapters.length) {
-        return fallback;
+        return (index: fallback, blockIndex: requestedBlock);
       }
-      return 0;
+      return (index: 0, blockIndex: 0);
     }
 
     try {
       final progress = await store.progress(args.bookId);
       if (progress != null) {
+        final blockIndex = progress.blockIndex < 0 ? 0 : progress.blockIndex;
         if (progress.chapterId.isNotEmpty) {
           final found = indexOf(progress.chapterId);
-          if (found >= 0) return found;
+          if (found >= 0) return (index: found, blockIndex: blockIndex);
         }
         // 目录换源/重排后 chapterId 对不上，退回序号。
         if (progress.chapterIndex >= 0 &&
             progress.chapterIndex < chapters.length) {
-          return progress.chapterIndex;
+          return (index: progress.chapterIndex, blockIndex: blockIndex);
         }
       }
     } catch (_) {
       // 本地进度损坏时从第一章开始。
-      return 0;
+      return (index: 0, blockIndex: 0);
     }
-    return 0;
+    return (index: 0, blockIndex: 0);
   }
 
   Future<void> _loadChapter(int position) async {
@@ -216,10 +247,26 @@ class ReaderController extends Notifier<ReaderSessionState> {
     final clamped = position.clamp(0, state.chapters.length - 1).toInt();
     final chapter = state.chapters[clamped];
     final token = ++_requestToken;
+
+    // 切章前先把上一章最后一次翻页的兜底进度落盘（防抖可能还没到点）。
+    _flushPendingProgress();
+
+    final resumeChapterIndex = state.resumeChapterIndex;
+    final resumeBlockIndex = state.resumeBlockIndex;
+    final leavesResumeEntry =
+        resumeChapterIndex >= 0 && clamped != resumeChapterIndex;
     // 目标章立刻生效（工具栏/进度用）；正文等缓存或请求回来再换。
-    state = state.copyWith(index: clamped, error: null);
+    state = state.copyWith(
+      index: clamped,
+      error: null,
+      // 跳到别的章后，原来的续读落点就失效了，别影响后续进入本章。
+      resumeBlockIndex: leavesResumeEntry ? 0 : resumeBlockIndex,
+      resumeChapterIndex: leavesResumeEntry ? -1 : resumeChapterIndex,
+    );
     // 切章即落进度：即使正文请求失败，下次进入也能回到用户想去的那章。
-    _saveProgress(chapter);
+    // 续读入口这一章要保住 blockIndex，否则第二次进来又回到页首。
+    final resumeBlock = resumeChapterIndex == clamped ? resumeBlockIndex : 0;
+    _saveProgress(chapter, blockIndex: resumeBlock);
 
     // 命中本地缓存就直接展示，连 loading 态都不进，才不会闪一下。
     final cached = await _cache.get(chapter.id);
@@ -332,7 +379,7 @@ class ReaderController extends Notifier<ReaderSessionState> {
     }
   }
 
-  Future<void> _saveProgress(Chapter chapter) async {
+  Future<void> _saveProgress(Chapter chapter, {int blockIndex = 0}) async {
     try {
       await ref
           .read(readingStoreProvider)
@@ -342,11 +389,49 @@ class ReaderController extends Notifier<ReaderSessionState> {
             cover: state.cover,
             chapterId: chapter.id,
             chapterIndex: chapter.index,
+            blockIndex: blockIndex < 0 ? 0 : blockIndex,
           );
     } catch (_) {
       // 进度是锦上添花，写失败不影响阅读。
       return;
     }
+  }
+
+  /// 页面报告"当前页首段下标"，400ms 防抖后落盘；切章/退出时立即 flush。
+  void noteReadingBlock(int blockIndex) {
+    if (_disposed) return;
+    final chapter = state.chapterAt(state.contentIndex);
+    if (chapter == null || blockIndex < 0) return;
+    _pendingBlockIndex = blockIndex;
+    _progressTimer?.cancel();
+    _progressTimer = Timer(_progressDebounce, _flushPendingProgress);
+  }
+
+  /// 立即把待落盘的页级进度写掉（切章、页面 dispose 前调用）。
+  void flushPendingProgress() => _flushPendingProgress();
+
+  /// 仅取消防抖计时器，不碰 provider state：页面 dispose 时 provider 可能
+  /// 已经在销毁流程里，不能安全读取 state。
+  void cancelProgressTimer() {
+    _progressTimer?.cancel();
+    _progressTimer = null;
+  }
+
+  void _flushPendingProgress() {
+    _progressTimer?.cancel();
+    _progressTimer = null;
+    final blockIndex = _pendingBlockIndex;
+    _pendingBlockIndex = null;
+    if (blockIndex == null || _disposed) return;
+    final chapter = state.chapterAt(state.contentIndex);
+    if (chapter == null) return;
+    _saveProgress(chapter, blockIndex: blockIndex);
+  }
+
+  /// 续读落点已由页面消费时调用，避免重排/重进时重复跳页。
+  void clearResumeBlock() {
+    if (state.resumeBlockIndex == 0 && state.resumeChapterIndex < 0) return;
+    state = state.copyWith(resumeBlockIndex: 0, resumeChapterIndex: -1);
   }
 
   /// 是否正在切章。缓存命中的那一小段窗口里 [ReaderSessionState.loading]

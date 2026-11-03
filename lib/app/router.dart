@@ -21,6 +21,7 @@ class ReaderArgs {
     this.cover = '',
     this.chapterId,
     this.chapterIndex,
+    this.blockIndex,
   });
 
   final String bookId;
@@ -28,6 +29,10 @@ class ReaderArgs {
   final String cover;
   final String? chapterId;
   final int? chapterIndex;
+
+  /// 目标章内的段落落点（当前页首段下标）。详情页「继续阅读」/「我的」最近
+  /// 阅读会带上它，让页级进度真正生效；显式点某一章时为 null（从页首开始）。
+  final int? blockIndex;
 }
 
 class AppRoutes {

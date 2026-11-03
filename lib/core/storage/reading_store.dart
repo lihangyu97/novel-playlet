@@ -15,6 +15,7 @@ class ReadingProgress {
     required this.chapterId,
     required this.chapterIndex,
     required this.updatedAt,
+    this.blockIndex = 0,
   });
 
   final String bookId;
@@ -22,6 +23,10 @@ class ReadingProgress {
   final String cover;
   final String chapterId;
   final int chapterIndex;
+
+  /// 当前页首段在整章段落里的下标（不是页号）。换字号/换设备后靠它重新定位
+  /// 到读到的那一段，所以恢复比"第 N 页"稳。旧版本没有该字段，按 0 读。
+  final int blockIndex;
   final DateTime updatedAt;
 
   Map<String, dynamic> toJson() => {
@@ -30,6 +35,7 @@ class ReadingProgress {
     'cover': cover,
     'chapterId': chapterId,
     'chapterIndex': chapterIndex,
+    'blockIndex': blockIndex,
     'updatedAt': updatedAt.millisecondsSinceEpoch,
   };
 
@@ -42,6 +48,7 @@ class ReadingProgress {
       cover: asString(json['cover']),
       chapterId: asString(json['chapterId']),
       chapterIndex: asInt(json['chapterIndex']),
+      blockIndex: asInt(json['blockIndex']),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(
         asInt(json['updatedAt']),
       ),
@@ -97,6 +104,7 @@ class ReadingStore {
     required String cover,
     required String chapterId,
     required int chapterIndex,
+    int blockIndex = 0,
   }) async {
     if (bookId.isEmpty || chapterId.isEmpty) return;
     final prefs = await _prefs;
@@ -107,6 +115,7 @@ class ReadingStore {
         cover: cover,
         chapterId: chapterId,
         chapterIndex: chapterIndex,
+        blockIndex: blockIndex,
         updatedAt: DateTime.now(),
       ).toJson();
     await prefs.setString(_progressKey, jsonEncode(map));

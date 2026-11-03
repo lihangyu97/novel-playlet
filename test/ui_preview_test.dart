@@ -380,6 +380,33 @@ void main() {
     );
   });
 
+  testWidgets('阅读页-入口带 blockIndex 时恢复到对应页', (tester) async {
+    // 假数据每章 18 段，第 9 段一定不在第 1 页。
+    await _pump(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(
+          bookId: '1',
+          bookTitle: '剑来',
+          chapterId: 'c1',
+          chapterIndex: 0,
+          blockIndex: 9,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    final label = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((text) => text.data ?? '')
+        .firstWhere(
+          (data) => RegExp(r'^\d+/\d+$').hasMatch(data),
+          orElse: () => '',
+        );
+    expect(label, isNotEmpty, reason: '底部信息条应显示页码');
+    final currentPage = int.parse(label.split('/').first);
+    expect(currentPage, greaterThan(1), reason: '带 blockIndex 进入不应落在第 1 页');
+  });
+
   testWidgets('阅读页-切章有过渡且底栏章节名更新', (tester) async {
     await _pump(
       tester,

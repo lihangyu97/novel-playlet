@@ -190,6 +190,10 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                       chapterIndex: resumeChapterId != null
                           ? resumeIndex
                           : firstChapter?.index,
+                      // 续读入口带段落落点，回到上次那一页；从头开始读时为 0。
+                      blockIndex: resumeChapterId != null
+                          ? progress?.blockIndex
+                          : 0,
                     )
                   : null,
               shelfLabel: onShelf ? '已在书架' : '加入书架',
@@ -219,6 +223,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     WidgetRef ref, {
     String? chapterId,
     int? chapterIndex,
+    int? blockIndex,
   }) async {
     final detail = ref
         .read(detailBundleProvider(widget.bookId))
@@ -232,6 +237,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         cover: detail?.cover ?? widget.preview?.cover ?? '',
         chapterId: chapterId,
         chapterIndex: chapterIndex,
+        blockIndex: blockIndex,
       ),
     );
     if (!context.mounted) return;

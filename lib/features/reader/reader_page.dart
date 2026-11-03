@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/providers.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/states.dart';
+import '../../core/storage/reading_store.dart';
 import '../../data/models/chapter_content.dart';
 import 'reader_controller.dart';
 import 'reader_pagination.dart';
@@ -66,10 +68,46 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   bool _edgeTriggered = false;
   bool _boundaryPending = false;
 
+  // 最近一次 build 的快照：dispose 时 provider 可能已在销毁流程里，不能再
+  // 通过 ref 读状态，只能靠这些字段把最后一页位置写回进度。
+  ReaderSessionState? _lastSession;
+  ReaderController? _controller;
+  ReadingStore? _readingStore;
+
+  /// 续读落点只恢复一次；后续重排、重进本章都不该再跳。
+  bool _resumeApplied = false;
+
   @override
   void dispose() {
+    _flushReadingPositionOnDispose();
     _pageController.dispose();
     super.dispose();
+  }
+
+  /// 退出阅读页时立即兜底写一次页级进度（防抖可能还没到点）。
+  void _flushReadingPositionOnDispose() {
+    // 纯字段操作，provider 已进入销毁流程也能安全调用。
+    _controller?.cancelProgressTimer();
+    final session = _lastSession;
+    final pagination = _pagination;
+    final store = _readingStore;
+    if (session == null || pagination == null || store == null) return;
+    if (pagination.pages.isEmpty) return;
+    // 切章在途时显示的还是上一章正文、控制器已保存目标章：不要用旧页覆盖。
+    if (session.index != session.contentIndex) return;
+    final chapter = session.chapterAt(session.contentIndex);
+    if (chapter == null) return;
+    final pageIndex = _pageIndex.clamp(0, pagination.pages.length - 1).toInt();
+    unawaited(
+      store.saveProgress(
+        bookId: widget.args.bookId,
+        bookTitle: session.bookTitle,
+        cover: session.cover,
+        chapterId: chapter.id,
+        chapterIndex: chapter.index,
+        blockIndex: pagination.blockAtPage(pageIndex),
+      ),
+    );
   }
 
   @override
@@ -78,6 +116,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final session = ref.watch(provider);
     final settings = ref.watch(readerSettingsProvider);
     final controller = ref.read(provider.notifier);
+    _lastSession = session;
+    _controller = controller;
+    // ReadingStore 是进程级 Provider，页面 dispose 后实例仍然有效。
+    _readingStore ??= ref.read(readingStoreProvider);
     final paper = settings.paper;
 
     // 正文真正换了（contentIndex 变化）才播过渡：向前翻从右侧滑入、向后翻
@@ -262,6 +304,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           );
         }
         final pages = pagination.pages;
+        // 续读入口：首次分页完成后按 blockIndex 落到对应页（只做一次）。
+        _applyResumeIfNeeded(session, pagination);
         final pageIndex = _pageIndex.clamp(0, pages.length - 1).toInt();
         return AnimatedBuilder(
           animation: _chapterTransition,
@@ -314,7 +358,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               ),
               SizedBox(
                 height: _infoBarHeight,
-                child: _buildInfoBar(session, pageIndex, pages.length, infoStyle),
+                child: _buildInfoBar(
+                  session,
+                  pageIndex,
+                  pages.length,
+                  infoStyle,
+                ),
               ),
             ],
           ),
@@ -333,6 +382,46 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         );
       },
     );
+  }
+
+  /// 按 [ReaderSessionState.resumeBlockIndex] 恢复页级进度。
+  ///
+  /// 只对"按本地进度续读"的入口章生效一次：换字号重排、返回本章都走
+  /// 已有的首段锚点逻辑，不能再跳回旧的恢复点。
+  void _applyResumeIfNeeded(
+    ReaderSessionState session,
+    ReaderPagination pagination,
+  ) {
+    if (_resumeApplied) return;
+    final resumeChapter = session.resumeChapterIndex;
+    if (resumeChapter < 0 || session.contentIndex != resumeChapter) return;
+    _resumeApplied = true;
+    final blockIndex = session.resumeBlockIndex;
+    if (blockIndex > 0 && pagination.pages.isNotEmpty) {
+      // pageIndexForBlock 会把越界 blockIndex 夹到最后一页，不会因为目录/正文
+      // 变短而落到无效页。
+      final target = pagination.pageIndexForBlock(blockIndex);
+      if (target != _pageIndex) {
+        _pageIndex = target;
+        // 首次分页时直接用目标页做 PageController 初始页，避免先画第 0 页。
+        _restartPageController(target);
+      }
+    }
+    final provider = readerSessionProvider(widget.args);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(provider.notifier).clearResumeBlock();
+      // 越界的 blockIndex 会被夹到最后一页，顺手把归一化后的落点写回去。
+      _rememberPosition();
+    });
+  }
+
+  /// 把当前页首段下标报给控制器（400ms 防抖后落盘）。
+  void _rememberPosition() {
+    final pagination = _pagination;
+    if (pagination == null || pagination.pages.isEmpty) return;
+    final pageIndex = _pageIndex.clamp(0, pagination.pages.length - 1).toInt();
+    _controller?.noteReadingBlock(pagination.blockAtPage(pageIndex));
   }
 
   /// 常驻信息条：左侧章节名最多半屏宽，右侧当前页/本章总页数。
@@ -419,6 +508,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (session.loading || session.index != session.contentIndex) return;
     if (direction < 0 && !session.hasPrevious) return;
     if (direction > 0 && !session.hasNext) return;
+    // 边界切章前先把当前页的段落下标记下来，由控制器立即落盘。
+    _rememberPosition();
     final controller = ref.read(readerSessionProvider(widget.args).notifier);
     _pendingEntry = direction < 0
         ? _ChapterEntry.lastPage
@@ -506,6 +597,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           : 0;
       _pageIndex = target;
       _restartPageController(target);
+      // 上一章落最后一页时 PageView 直接以该页为初始页，不会触发
+      // onPageChanged，这里补记一次，退出/切章时进度才是这一页。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _rememberPosition();
+      });
     } else {
       final anchor = anchorBlock;
       final target = anchor == null ? 0 : pagination.pageIndexForBlock(anchor);
@@ -534,8 +630,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   void _onPageChanged(int index) {
-    if (!mounted || index == _pageIndex) return;
-    setState(() => _pageIndex = index);
+    if (!mounted) return;
+    if (index != _pageIndex) {
+      setState(() => _pageIndex = index);
+    }
+    _rememberPosition();
   }
 
   void _handleTap(TapUpDetails details) {
@@ -565,12 +664,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     if (target < 0) {
       if (!session.hasPrevious) return;
+      _rememberPosition();
       _pendingEntry = _ChapterEntry.lastPage;
       await controller.previousChapter();
       return;
     }
     if (target >= pagination.pages.length) {
       if (!session.hasNext) return;
+      _rememberPosition();
       _pendingEntry = _ChapterEntry.firstPage;
       await controller.nextChapter();
       return;
@@ -585,6 +686,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     } finally {
       _turning = false;
     }
+    // 动画结束再确认一次当前页（onPageChanged 也可能没触发）。
+    _rememberPosition();
   }
 
   void _hideToolbar() {
@@ -641,11 +744,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           onPrevious: () {
             _hideToolbar();
             _pendingEntry = null;
+            _rememberPosition();
             controller.previousChapter();
           },
           onNext: () {
             _hideToolbar();
             _pendingEntry = null;
+            _rememberPosition();
             controller.nextChapter();
           },
           onSettings: _openSettings,
@@ -686,6 +791,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         onSelected: (index) {
           Navigator.of(sheetContext).pop();
           _pendingEntry = null;
+          _rememberPosition();
           controller.goToChapter(index);
         },
       ),
