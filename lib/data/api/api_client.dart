@@ -30,12 +30,16 @@ class ApiClient {
     };
     final payload = await _getJson('/api/v1/recommend/homepage', query);
     final data = unwrapEnvelope(payload);
+    // 游标与 session 挂在"被回答的那个 tab_item"上（data.tab_item[]），
+    // tab 的身份由 data.tab_index 指定；data 顶层没有这两个字段。
+    final tab = _answeredRecommendTab(data);
+    final nextOffset = tab == null ? 0 : asInt(tab['next_offset']);
+    // 上游的 has_more 不可信：实测 has_more=false 时继续用 offset=2 仍会返回
+    // 一大批新书。所以只认"游标是否前进"，游标后退/不动才停止翻页。
     return NovelFeedPage(
       items: parseNovelItems(payload),
-      nextOffset: asInt(data['next_offset'], 0) > 0
-          ? asInt(data['next_offset'])
-          : null,
-      sessionId: firstString(data, ['session_id']),
+      nextOffset: nextOffset > offset ? nextOffset : null,
+      sessionId: tab == null ? null : firstString(tab, ['session_id']),
     );
   }
 
@@ -43,6 +47,7 @@ class ApiClient {
   Future<NovelFeedPage> search(String query, {int offset = 0}) async {
     final payload = await _getJson('/api/v1/search', {
       'query': query,
+      // 上游 tab 语义：1 综合 / 2 听书 / 3 书籍 / 8 漫画 / 11 短剧。
       'tab_type': '3',
       'offset': '$offset',
       'count': '10',
@@ -123,7 +128,25 @@ class ApiClient {
   }
 }
 
-const _novelIdKeys = ['book_id', 'item_id', 'id', 'cell_id'];
+/// 从推荐响应里挑出"被回答"的 tab：`data.tab_index` 指向 `data.tab_item[]`，
+/// 其余 tab 只有标题。取不到时退回第一个带 cell_data 的 tab。
+Map<String, dynamic>? _answeredRecommendTab(Map<String, dynamic> data) {
+  final tabs = asList(data['tab_item'])
+      .map(asMap)
+      .whereType<Map<String, dynamic>>()
+      .toList();
+  if (tabs.isEmpty) return null;
+  final index = asInt(data['tab_index'], 0);
+  if (index >= 0 && index < tabs.length) return tabs[index];
+  for (final tab in tabs) {
+    if (asList(tab['cell_data']).isNotEmpty) return tab;
+  }
+  return tabs.first;
+}
+
+// cell_id 属于"区块"，不属于书：排行榜区块本身也带 cell_id，
+// 用它会把「排行榜」当成一本书。只认书自己的身份字段。
+const _novelIdKeys = ['book_id', 'item_id', 'id'];
 const _nonNovelKeys = [
   'video_id',
   'vid',

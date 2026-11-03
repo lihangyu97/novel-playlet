@@ -43,26 +43,39 @@ class _FakeTransport extends BackendTransport {
 
   Map<String, dynamic> _payloadFor(String path) {
     if (path.startsWith('/api/v1/recommend/homepage')) {
+      // 与真实响应同形：游标/session 挂在被回答的 tab_item 上，
+      // 卡片藏在 tab.cell_data[].cell_data[].book_data[] 里。
       return {
         'code': 0,
         'data': {
-          'next_offset': 10,
-          'session_id': 'sess-preview',
-          'cell_data': [
+          'tab_index': 0,
+          'tab_item': [
             {
-              'cell_name': '猜你喜欢',
-              'items': [
-                for (var i = 1; i <= 9; i++)
-                  {
-                    'book_data': {
-                      'book_id': '$i',
-                      'book_name': _titles[(i - 1) % _titles.length],
-                      'author': _authors[(i - 1) % _authors.length],
-                      'category': i.isEven ? '玄幻' : '都市',
-                      'word_number': '${i * 180000}',
-                      'thumb_url': '',
+              'tab_type': 2,
+              'title': '推荐',
+              'next_offset': 10,
+              'has_more': false,
+              'session_id': 'sess-preview',
+              'cell_data': [
+                {
+                  'show_type': 384,
+                  'cell_name': '猜你喜欢',
+                  'cell_data': [
+                    {
+                      'book_data': [
+                        for (var i = 1; i <= 9; i++)
+                          {
+                            'book_id': '$i',
+                            'book_name': _titles[(i - 1) % _titles.length],
+                            'author': _authors[(i - 1) % _authors.length],
+                            'category': i.isEven ? '玄幻' : '都市',
+                            'word_number': '${i * 180000}',
+                            'thumb_url': '',
+                          },
+                      ],
                     },
-                  },
+                  ],
+                },
               ],
             },
           ],

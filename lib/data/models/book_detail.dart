@@ -54,6 +54,14 @@ class BookDetail {
   }
 
   /// 分类 · 状态 · 字数，详情页信息行。
+  /// 在读人数：上游给的是裸数字（1660045），展示时换算成"166.0万人在读"。
+  String get readLabel {
+    final count = int.tryParse(readCount.trim());
+    if (count == null) return readCount;
+    if (count < 10000) return '$count人在读';
+    return '${(count / 10000).toStringAsFixed(1)}万人在读';
+  }
+
   List<String> get metaParts => [
     if (category.isNotEmpty) category,
     if (statusLabel.isNotEmpty) statusLabel,
@@ -67,7 +75,8 @@ class BookDetail {
         .where((tag) => tag.isNotEmpty)
         .toList();
     final authorInfo = asMap(data['author_info']);
-    final author = firstString(authorInfo ?? const {}, ['name']);
+    // 上游 author_info 里显示名是 user_name（不是 name）。
+    final author = firstString(authorInfo ?? const {}, ['user_name', 'name']);
     final category = firstString(data, ['category']);
     return BookDetail(
       bookId: firstString(data, ['book_id', 'item_id']),

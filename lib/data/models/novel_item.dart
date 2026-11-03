@@ -32,7 +32,8 @@ class NovelItem {
   /// 卡片字段优先，其次 `book_data` 内层。
   factory NovelItem.fromRaw(Map<String, dynamic> raw) {
     final inner = asMap(raw['book_data']) ?? raw;
-    final id = firstString(inner, ['book_id', 'item_id', 'id', 'cell_id']);
+    // cell_id 是区块 id，不是书 id（排行榜区块也带它），不参与回退。
+    final id = firstString(inner, ['book_id', 'item_id', 'id']);
     final title = firstString(inner, [
       'book_name',
       'title',
@@ -40,10 +41,8 @@ class NovelItem {
       'raw_book_name',
     ]);
     return NovelItem(
-      id: id.isEmpty
-          ? firstString(raw, ['book_id', 'item_id', 'id', 'cell_id'])
-          : id,
-      title: title.isEmpty ? firstString(raw, ['title', 'name', 'cell_name']) : title,
+      id: id.isEmpty ? firstString(raw, ['book_id', 'item_id', 'id']) : id,
+      title: title.isEmpty ? firstString(raw, ['title', 'name']) : title,
       cover: firstString(inner, [
         'thumb_url',
         'cover',

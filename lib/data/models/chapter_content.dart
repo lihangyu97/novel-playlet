@@ -35,14 +35,16 @@ ChapterContent parseChapterContent(
   if (decrypted != null && decrypted != true) {
     throw ApiException('正文尚未解密');
   }
+  final resolvedTitle =
+      title.isNotEmpty ? title : firstString(data, ['title', 'chapter_title']);
   final html = firstString(data, ['content', 'chapter_content', 'text']);
-  final paragraphs = htmlToParagraphs(html);
+  final paragraphs = _stripLeadingTitle(htmlToParagraphs(html), resolvedTitle);
   if (paragraphs.isEmpty) {
     throw ApiException('正文为空');
   }
   return ChapterContent(
     id: chapterId,
-    title: title.isNotEmpty ? title : firstString(data, ['title', 'chapter_title']),
+    title: resolvedTitle,
     paragraphs: paragraphs,
   );
 }
@@ -109,6 +111,16 @@ List<String> htmlToParagraphs(String html) {
     walk(node);
   }
   flush();
+  return paragraphs;
+}
+
+/// 上游正文 HTML 以 `<header><div class="tt-title">第1章 …</div></header>` 开头，
+/// 页面已经单独渲染标题，这里把与标题重复的首段去掉。
+List<String> _stripLeadingTitle(List<String> paragraphs, String title) {
+  if (paragraphs.isEmpty || title.trim().isEmpty) return paragraphs;
+  final first = paragraphs.first.replaceAll(RegExp(r'\s+'), '');
+  final normalized = title.replaceAll(RegExp(r'\s+'), '');
+  if (first == normalized) return paragraphs.sublist(1);
   return paragraphs;
 }
 
