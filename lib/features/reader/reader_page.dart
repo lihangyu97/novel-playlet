@@ -254,7 +254,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
               child: Stack(
                 children: [
                   PageView.builder(
-                    key: ValueKey<String>('reader-pager-${pagination.chapterId}'),
+                    key: ValueKey<String>(
+                      'reader-pager-${pagination.chapterId}',
+                    ),
                     controller: _pageController,
                     itemCount: pages.length,
                     onPageChanged: _onPageChanged,
@@ -285,7 +287,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             SizedBox(
               height: _footerHeight,
               child: Center(
-                child: Text('${pageIndex + 1}/${pages.length}', style: footerStyle),
+                child: Text(
+                  '${pageIndex + 1}/${pages.length}',
+                  style: footerStyle,
+                ),
               ),
             ),
           ],
@@ -358,9 +363,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       _restartPageController(target);
     } else {
       final anchor = anchorBlock;
-      final target = anchor == null
-          ? 0
-          : pagination.pageIndexForBlock(anchor);
+      final target = anchor == null ? 0 : pagination.pageIndexForBlock(anchor);
       _pageIndex = target;
       _scheduleJump(target);
     }
@@ -371,10 +374,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   /// 卸载（detach 掉 position）之后再释放旧控制器。
   void _restartPageController(int initialPage) {
     final retired = _pageController;
-    _pageController = PageController(
-      initialPage: initialPage,
-      keepPage: false,
-    );
+    _pageController = PageController(initialPage: initialPage, keepPage: false);
     WidgetsBinding.instance.addPostFrameCallback((_) => retired.dispose());
   }
 

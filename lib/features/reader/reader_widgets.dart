@@ -453,11 +453,7 @@ class _PaperOption extends StatelessWidget {
               ),
             ),
             child: selected
-                ? Icon(
-                    Icons.check_rounded,
-                    size: 18,
-                    color: option.foreground,
-                  )
+                ? Icon(Icons.check_rounded, size: 18, color: option.foreground)
                 : null,
           ),
           const SizedBox(height: 6),
@@ -465,7 +461,9 @@ class _PaperOption extends StatelessWidget {
             option.label,
             style: TextStyle(
               fontSize: 11.5,
-              color: selected ? AppTheme.accent : foreground.withValues(alpha: 0.6),
+              color: selected
+                  ? AppTheme.accent
+                  : foreground.withValues(alpha: 0.6),
               fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
             ),
           ),
@@ -569,8 +567,7 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
                 controller: _scrollController,
                 itemExtent: _itemExtent,
                 itemCount: widget.chapters.length,
-                itemBuilder: (context, index) =>
-                    _buildItem(context, index),
+                itemBuilder: (context, index) => _buildItem(context, index),
               ),
             ),
           ],
