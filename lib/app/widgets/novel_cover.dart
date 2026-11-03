@@ -1,6 +1,8 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/cache/app_image_cache.dart';
+
 /// 统一的书籍封面：固定圆角、占位底色、失败兜底。
 ///
 /// 上游封面 URL 可能是 http、可能为空、可能 403，所以不能直接用
@@ -50,6 +52,7 @@ class NovelCover extends StatelessWidget {
     Widget image(String imageUrl, {required bool isFallback}) =>
         CachedNetworkImage(
           imageUrl: imageUrl,
+          cacheManager: AppImageCache.manager,
           fit: BoxFit.cover,
           width: width,
           height: height,

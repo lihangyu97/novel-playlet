@@ -41,10 +41,10 @@ class RecommendSearchField extends StatelessWidget {
                 color: scheme.outlineVariant.withValues(alpha: 0.5),
               ),
             ),
-            // 高度写死：输入后出现的清空按钮是 IconButton，Material 3 默认
-            // 最小触控高度 48，会把整行撑高 8pt（真机上就是"打字后搜索框变高"）。
+            // 高度写死 48（与 IconButton 的最小触控高度一致）：既不会被清空
+            // 按钮撑高，也不会因为内容的内边距比按钮矮而显得文字偏上。
             child: SizedBox(
-              height: 44,
+              height: 48,
               child: TextField(
                 controller: controller,
                 focusNode: focusNode,
@@ -93,7 +93,7 @@ class RecommendSearchField extends StatelessWidget {
                       );
                     },
                   ),
-                  contentPadding: const EdgeInsets.symmetric(vertical: 11),
+                  contentPadding: EdgeInsets.zero,
                 ),
               ),
             ),
