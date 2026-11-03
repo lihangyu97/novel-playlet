@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/router.dart';
@@ -88,35 +89,6 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         resumeChapterId != null || firstChapter != null || preview != null;
 
     final slivers = <Widget>[
-      // 顶部导航条跟随滚动：初始透明叠在 Hero 渐变上，滚动后变实心并显示书名。
-      SliverAppBar(
-        pinned: true,
-        primary: true,
-        toolbarHeight: 44,
-        backgroundColor: _scrolled
-            ? Theme.of(context).scaffoldBackgroundColor
-            : Colors.transparent,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: _scrolled
-            ? Text(
-                detail?.title ?? preview?.title ?? '',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              )
-            : null,
-        bottom: _scrolled
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(0.5),
-                child: Divider(
-                  height: 0.5,
-                  thickness: 0.5,
-                  color: Theme.of(context).dividerColor,
-                ),
-              )
-            : null,
-      ),
       SliverToBoxAdapter(
         child: DetailHero(detail: detail, preview: preview),
       ),
@@ -159,24 +131,65 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     ];
 
     final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final topInset = MediaQuery.paddingOf(context).top;
+    // 沉浸式顶部：不设 AppBar / 返回按钮（iOS 边缘侧滑返回），Hero 与渐变
+    // 直接铺到状态栏后面，内容仍从安全区下方开始。滚动后只叠一层与底色同色
+    // 的渐变遮罩，避免正文从状态栏文字下面穿过去。
+    final overlayStyle = theme.brightness == Brightness.dark
+        ? SystemUiOverlayStyle.light
+        : SystemUiOverlayStyle.dark;
     return Scaffold(
-      // 顶部渐变垫在整个滚动区后面：状态栏 + 导航条这一段因此是"设计留白"
-      // 而不是一块空白。Hero 自己的渐变与它衔接。
-      body: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              scheme.primary.withValues(alpha: 0.10),
-              scheme.primary.withValues(alpha: 0),
-            ],
-            stops: const [0, 0.32],
-          ),
-        ),
-        child: CustomScrollView(
-          controller: _scrollController,
-          slivers: slivers,
+      body: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: overlayStyle,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      scheme.primary.withValues(alpha: 0.10),
+                      scheme.primary.withValues(alpha: 0),
+                    ],
+                    stops: const [0, 0.32],
+                  ),
+                ),
+                child: CustomScrollView(
+                  controller: _scrollController,
+                  slivers: slivers,
+                ),
+              ),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: _scrolled ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  child: Container(
+                    height: topInset + 14,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          theme.scaffoldBackgroundColor,
+                          theme.scaffoldBackgroundColor.withValues(alpha: 0.92),
+                          theme.scaffoldBackgroundColor.withValues(alpha: 0),
+                        ],
+                        stops: const [0, 0.62, 1],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
       bottomNavigationBar: (bundle != null || preview != null)
