@@ -22,6 +22,12 @@ class DetailHero extends StatelessWidget {
 
     final title = _firstNonEmpty([detail?.title, preview?.title]);
     final cover = _firstNonEmpty([detail?.cover, preview?.cover]);
+    // 列表封面（thumb_url）与详情封面（detail_page_thumb_url）是两张不同 URL
+    // 的图：详情图更大更清晰，但换 URL 必然重新下载。垫着列表那张直接替换，
+    // 不要灰块和淡入，否则从列表点进来会看到封面"刷新"一下。
+    final coverFallback = preview != null && preview!.cover != cover
+        ? preview!.cover
+        : '';
     // 深链进入且还没有任何数据时，这里不画空壳，交给下方的 Loading/Error
     // 占满视口。
     if (title.isEmpty && cover.isEmpty) return const SizedBox.shrink();
@@ -56,7 +62,13 @@ class DetailHero extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          NovelCover(url: cover, width: 96, height: 132),
+          NovelCover(
+            url: cover,
+            width: 96,
+            height: 132,
+            fallbackUrl: coverFallback,
+            fadeInDuration: Duration.zero,
+          ),
           const SizedBox(width: 16),
           Expanded(
             child: Column(

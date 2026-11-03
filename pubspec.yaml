@@ -1,7 +1,7 @@
 name: novel_playlet
 description: "小说阅读 App：iOS，小说-only，复用 Rust 内核的加解密与接口。"
 publish_to: 'none'
-version: 0.5.1+9
+version: 0.5.2+10
 
 environment:
   sdk: ^3.13.7
