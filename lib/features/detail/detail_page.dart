@@ -18,14 +18,44 @@ import 'detail_providers.dart';
 /// 页面只负责布局与导航；数据、进度、书架状态都在 detail_providers.dart。
 /// 构造函数与 router.dart 里的 `DetailArgs` 对应，[preview] 用来在接口返回
 /// 前先画封面/标题，避免白屏。
-class DetailPage extends ConsumerWidget {
+class DetailPage extends ConsumerStatefulWidget {
   const DetailPage({super.key, required this.bookId, this.preview});
 
   final String bookId;
   final NovelItem? preview;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DetailPage> createState() => _DetailPageState();
+}
+
+class _DetailPageState extends ConsumerState<DetailPage> {
+  final ScrollController _scrollController = ScrollController();
+  bool _scrolled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_handleScroll);
+  }
+
+  /// 滚动后给 AppBar 压上底色：初始透明是为了让 Hero 渐变透出，但一直透明
+  /// 会让正文钻到状态栏下面（真机上时间与内容重叠）。
+  void _handleScroll() {
+    final scrolled =
+        _scrollController.hasClients && _scrollController.offset > 10;
+    if (scrolled != _scrolled) setState(() => _scrolled = scrolled);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bookId = widget.bookId;
+    final preview = widget.preview;
     final bundleAsync = ref.watch(detailBundleProvider(bookId));
     final progressAsync = ref.watch(detailProgressProvider(bookId));
     final shelfAsync = ref.watch(detailShelfProvider(bookId));
@@ -103,11 +133,31 @@ class DetailPage extends ConsumerWidget {
       // body 顶到状态栏，Hero 的渐变才能垫在透明 AppBar 后面。
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _scrolled
+            ? Theme.of(context).scaffoldBackgroundColor
+            : Colors.transparent,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        title: _scrolled
+            ? Text(
+                detail?.title ?? preview?.title ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              )
+            : null,
+        bottom: _scrolled
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(0.5),
+                child: Divider(
+                  height: 0.5,
+                  thickness: 0.5,
+                  color: Theme.of(context).dividerColor,
+                ),
+              )
+            : null,
       ),
-      body: CustomScrollView(slivers: slivers),
+      body: CustomScrollView(controller: _scrollController, slivers: slivers),
       bottomNavigationBar: (bundle != null || preview != null)
           ? DetailActionBar(
               primaryLabel: primaryLabel,
@@ -149,19 +199,22 @@ class DetailPage extends ConsumerWidget {
     String? chapterId,
     int? chapterIndex,
   }) async {
-    final detail = ref.read(detailBundleProvider(bookId)).value?.detail;
+    final detail = ref
+        .read(detailBundleProvider(widget.bookId))
+        .value
+        ?.detail;
     await Navigator.of(context).pushNamed(
       AppRoutes.reader,
       arguments: ReaderArgs(
-        bookId: bookId,
-        bookTitle: detail?.title ?? preview?.title ?? '',
-        cover: detail?.cover ?? preview?.cover ?? '',
+        bookId: widget.bookId,
+        bookTitle: detail?.title ?? widget.preview?.title ?? '',
+        cover: detail?.cover ?? widget.preview?.cover ?? '',
         chapterId: chapterId,
         chapterIndex: chapterIndex,
       ),
     );
     if (!context.mounted) return;
-    ref.invalidate(detailProgressProvider(bookId));
+    ref.invalidate(detailProgressProvider(widget.bookId));
   }
 
   Future<void> _openDirectory(
@@ -192,7 +245,7 @@ class DetailPage extends ConsumerWidget {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final nowOnShelf = await ref
-          .read(detailShelfProvider(bookId).notifier)
+          .read(detailShelfProvider(widget.bookId).notifier)
           .toggle(item);
       if (!context.mounted) return;
       messenger
