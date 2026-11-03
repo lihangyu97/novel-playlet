@@ -288,6 +288,20 @@ void main() {
     );
   });
 
+  testWidgets('阅读页-工具栏', (tester) async {
+    await _pump(
+      tester,
+      const ReaderPage(args: ReaderArgs(bookId: '1', bookTitle: '剑来')),
+    );
+    // 点中间 1/3 呼出工具栏。
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await expectLater(
+      find.byType(ReaderPage),
+      matchesGoldenFile('goldens/reader_toolbar.png'),
+    );
+  });
+
   testWidgets('我的页（空书架）', (tester) async {
     await _pump(tester, const MinePage());
     await expectLater(

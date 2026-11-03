@@ -32,8 +32,8 @@ enum _ChapterEntry { firstPage, lastPage }
 
 class _ReaderPageState extends ConsumerState<ReaderPage> {
   static const double _horizontalPadding = 20;
-  static const double _headerHeight = 30;
-  static const double _footerHeight = 32;
+  // 页码只在工具栏打开时显示；常驻页眉/页脚已移除，正文占满可读区。
+  final ValueNotifier<int> _pageCount = ValueNotifier<int>(1);
   static const Duration _pageTurnDuration = Duration(milliseconds: 220);
   static const Duration _toolbarDuration = Duration(milliseconds: 200);
 
@@ -48,6 +48,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   @override
   void dispose() {
     _pageController.dispose();
+    _pageCount.dispose();
     super.dispose();
   }
 
@@ -198,23 +199,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     final foreground = paper.foreground;
     final textStyle = _readerTextStyle(settings, foreground);
     final textScaler = MediaQuery.textScalerOf(context);
-    final headerStyle = TextStyle(
-      fontSize: 12,
-      height: 1.2,
-      letterSpacing: 0.3,
-      color: foreground.withValues(alpha: 0.55),
-    );
-    final footerStyle = TextStyle(
-      fontSize: 12,
-      height: 1.2,
-      color: foreground.withValues(alpha: 0.45),
-    );
-
     return LayoutBuilder(
       builder: (context, constraints) {
         final contentWidth = constraints.maxWidth - _horizontalPadding * 2;
-        final pageHeight =
-            constraints.maxHeight - _headerHeight - _footerHeight;
+        final pageHeight = constraints.maxHeight;
         final pagination = contentWidth <= 0 || pageHeight <= 0
             ? null
             : _obtainPagination(
@@ -231,68 +219,46 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           );
         }
         final pages = pagination.pages;
-        final pageIndex = _pageIndex.clamp(0, pages.length - 1).toInt();
-        return Column(
+        if (_pageCount.value != pages.length) {
+          // 分页结果在 build 里产生，通知要放到帧后再发，避免 build 期回调。
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _pageCount.value != pages.length) {
+              _pageCount.value = pages.length;
+            }
+          });
+        }
+        return Stack(
           children: [
-            SizedBox(
-              height: _headerHeight,
-              child: Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: _horizontalPadding + 4,
+            Positioned.fill(
+              child: PageView.builder(
+                key: ValueKey<String>(
+                  'reader-pager-${pagination.chapterId}',
                 ),
+                controller: _pageController,
+                itemCount: pages.length,
+                onPageChanged: _onPageChanged,
+                itemBuilder: (context, index) => RepaintBoundary(
+                  child: ReaderPageContent(
+                    page: pages[index],
+                    textStyle: textStyle,
+                    textScaler: textScaler,
+                    horizontalPadding: _horizontalPadding,
+                  ),
+                ),
+              ),
+            ),
+            if (session.loading)
+              Positioned(
+                top: 10,
+                left: 0,
+                right: 0,
                 child: Center(
-                  child: Text(
-                    session.displayedChapter?.title ?? '',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: headerStyle,
+                  child: ReaderLoadingPill(
+                    message: '正在加载第 ${session.index + 1} 章…',
+                    foreground: foreground,
                   ),
                 ),
               ),
-            ),
-            Expanded(
-              child: Stack(
-                children: [
-                  PageView.builder(
-                    key: ValueKey<String>(
-                      'reader-pager-${pagination.chapterId}',
-                    ),
-                    controller: _pageController,
-                    itemCount: pages.length,
-                    onPageChanged: _onPageChanged,
-                    itemBuilder: (context, index) => RepaintBoundary(
-                      child: ReaderPageContent(
-                        page: pages[index],
-                        textStyle: textStyle,
-                        textScaler: textScaler,
-                        horizontalPadding: _horizontalPadding,
-                      ),
-                    ),
-                  ),
-                  if (session.loading)
-                    Positioned(
-                      top: 10,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: ReaderLoadingPill(
-                          message: '正在加载第 ${session.index + 1} 章…',
-                          foreground: foreground,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            SizedBox(
-              height: _footerHeight,
-              child: Center(
-                child: Text(
-                  '${pageIndex + 1}/${pages.length}',
-                  style: footerStyle,
-                ),
-              ),
-            ),
           ],
         );
       },
@@ -464,6 +430,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         curve: Curves.easeOutCubic,
         child: ReaderTopBar(
           title: title,
+          subtitle: session.displayedChapter?.title ?? '',
           background: paper.background,
           foreground: paper.foreground,
           onBack: _onBack,
@@ -484,7 +451,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         offset: _toolbarVisible ? Offset.zero : const Offset(0, 1.02),
         duration: _toolbarDuration,
         curve: Curves.easeOutCubic,
-        child: ReaderBottomBar(
+        child: ValueListenableBuilder<int>(
+          valueListenable: _pageCount,
+          builder: (context, pageCount, _) => ReaderBottomBar(
+          pageLabel: '${_pageIndex + 1}/$pageCount',
           background: paper.background,
           foreground: paper.foreground,
           hasPrevious: session.hasPrevious,
@@ -501,6 +471,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             controller.nextChapter();
           },
           onSettings: _openSettings,
+          ),
         ),
       ),
     );

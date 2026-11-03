@@ -75,9 +75,13 @@ class ReaderTopBar extends StatelessWidget {
     required this.background,
     required this.foreground,
     required this.onBack,
+    this.subtitle = '',
   });
 
   final String title;
+
+  /// 当前章节名。正文页不再常驻页眉，章节信息随工具栏一起出现。
+  final String subtitle;
   final Color background;
   final Color foreground;
   final VoidCallback onBack;
@@ -105,16 +109,34 @@ class ReaderTopBar extends StatelessWidget {
               icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
             ),
             Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: foreground,
-                ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: foreground,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: foreground.withValues(alpha: 0.55),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
             // 与左侧返回按钮等宽，标题保持视觉居中。
@@ -130,6 +152,7 @@ class ReaderTopBar extends StatelessWidget {
 class ReaderBottomBar extends StatelessWidget {
   const ReaderBottomBar({
     super.key,
+    this.pageLabel = '',
     required this.background,
     required this.foreground,
     required this.hasPrevious,
@@ -140,6 +163,8 @@ class ReaderBottomBar extends StatelessWidget {
     required this.onSettings,
   });
 
+  /// 页码（"3/12"）。工具栏收起时不存在，避免正文上下留常驻条。
+  final String pageLabel;
   final Color background;
   final Color foreground;
   final bool hasPrevious;
@@ -163,31 +188,47 @@ class ReaderBottomBar extends StatelessWidget {
           ),
         ),
         padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            _ReaderToolButton(
-              icon: Icons.format_list_bulleted_rounded,
-              label: '目录',
-              color: foreground,
-              onTap: onDirectory,
-            ),
-            _ReaderToolButton(
-              icon: Icons.skip_previous_rounded,
-              label: '上一章',
-              color: foreground,
-              onTap: hasPrevious ? onPrevious : null,
-            ),
-            _ReaderToolButton(
-              icon: Icons.skip_next_rounded,
-              label: '下一章',
-              color: foreground,
-              onTap: hasNext ? onNext : null,
-            ),
-            _ReaderToolButton(
-              icon: Icons.text_fields_rounded,
-              label: '设置',
-              color: foreground,
-              onTap: onSettings,
+            if (pageLabel.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  pageLabel,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: foreground.withValues(alpha: 0.45),
+                  ),
+                ),
+              ),
+            Row(
+              children: [
+                _ReaderToolButton(
+                  icon: Icons.format_list_bulleted_rounded,
+                  label: '目录',
+                  color: foreground,
+                  onTap: onDirectory,
+                ),
+                _ReaderToolButton(
+                  icon: Icons.skip_previous_rounded,
+                  label: '上一章',
+                  color: foreground,
+                  onTap: hasPrevious ? onPrevious : null,
+                ),
+                _ReaderToolButton(
+                  icon: Icons.skip_next_rounded,
+                  label: '下一章',
+                  color: foreground,
+                  onTap: hasNext ? onNext : null,
+                ),
+                _ReaderToolButton(
+                  icon: Icons.text_fields_rounded,
+                  label: '设置',
+                  color: foreground,
+                  onTap: onSettings,
+                ),
+              ],
             ),
           ],
         ),

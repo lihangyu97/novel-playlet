@@ -88,6 +88,35 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         resumeChapterId != null || firstChapter != null || preview != null;
 
     final slivers = <Widget>[
+      // 顶部导航条跟随滚动：初始透明叠在 Hero 渐变上，滚动后变实心并显示书名。
+      SliverAppBar(
+        pinned: true,
+        primary: true,
+        toolbarHeight: 44,
+        backgroundColor: _scrolled
+            ? Theme.of(context).scaffoldBackgroundColor
+            : Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: _scrolled
+            ? Text(
+                detail?.title ?? preview?.title ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              )
+            : null,
+        bottom: _scrolled
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(0.5),
+                child: Divider(
+                  height: 0.5,
+                  thickness: 0.5,
+                  color: Theme.of(context).dividerColor,
+                ),
+              )
+            : null,
+      ),
       SliverToBoxAdapter(
         child: DetailHero(detail: detail, preview: preview),
       ),
@@ -129,35 +158,27 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         ),
     ];
 
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      // body 顶到状态栏，Hero 的渐变才能垫在透明 AppBar 后面。
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: _scrolled
-            ? Theme.of(context).scaffoldBackgroundColor
-            : Colors.transparent,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: _scrolled
-            ? Text(
-                detail?.title ?? preview?.title ?? '',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              )
-            : null,
-        bottom: _scrolled
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(0.5),
-                child: Divider(
-                  height: 0.5,
-                  thickness: 0.5,
-                  color: Theme.of(context).dividerColor,
-                ),
-              )
-            : null,
+      // 顶部渐变垫在整个滚动区后面：状态栏 + 导航条这一段因此是"设计留白"
+      // 而不是一块空白。Hero 自己的渐变与它衔接。
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              scheme.primary.withValues(alpha: 0.10),
+              scheme.primary.withValues(alpha: 0),
+            ],
+            stops: const [0, 0.32],
+          ),
+        ),
+        child: CustomScrollView(
+          controller: _scrollController,
+          slivers: slivers,
+        ),
       ),
-      body: CustomScrollView(controller: _scrollController, slivers: slivers),
       bottomNavigationBar: (bundle != null || preview != null)
           ? DetailActionBar(
               primaryLabel: primaryLabel,

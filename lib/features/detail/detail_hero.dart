@@ -34,14 +34,13 @@ class DetailHero extends StatelessWidget {
     final lastChapter = _firstNonEmpty([detail?.lastChapterTitle]);
     final showRating = score.isNotEmpty || readers.isNotEmpty;
 
-    // extendBodyBehindAppBar 打开后 body 从屏幕顶部开始，Hero 自己让出
-    // 状态栏 + AppBar 的高度，背面的渐变才能一路铺到返回箭头底下。
-    final topInset = MediaQuery.paddingOf(context).top + kToolbarHeight;
-
+    // 顶部导航条由页面的 SliverAppBar 负责（它自带状态栏 padding），
+    // Hero 只留 8pt 呼吸位；这里再让 kToolbarHeight 会重复让位（真机上
+    // 顶部会空出 180pt+）。
     return Container(
       padding: EdgeInsets.fromLTRB(
         detailGutter + 4,
-        topInset + 8,
+        8,
         detailGutter + 4,
         detailGutter + 4,
       ),
