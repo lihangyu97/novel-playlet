@@ -41,46 +41,60 @@ class RecommendSearchField extends StatelessWidget {
                 color: scheme.outlineVariant.withValues(alpha: 0.5),
               ),
             ),
-            child: TextField(
-              controller: controller,
-              focusNode: focusNode,
-              textInputAction: TextInputAction.search,
-              style: theme.textTheme.bodyMedium,
-              onSubmitted: onSubmitted,
-              decoration: InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                hintText: '搜索书名/作者',
-                hintStyle: hintStyle,
-                prefixIcon: Icon(
-                  Icons.search_rounded,
-                  size: 20,
-                  color: scheme.onSurfaceVariant,
+            // 高度写死：输入后出现的清空按钮是 IconButton，Material 3 默认
+            // 最小触控高度 48，会把整行撑高 8pt（真机上就是"打字后搜索框变高"）。
+            child: SizedBox(
+              height: 44,
+              child: TextField(
+                controller: controller,
+                focusNode: focusNode,
+                textInputAction: TextInputAction.search,
+                textAlignVertical: TextAlignVertical.center,
+                style: theme.textTheme.bodyMedium,
+                onSubmitted: onSubmitted,
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  hintText: '搜索书名/作者',
+                  hintStyle: hintStyle,
+                  prefixIcon: Icon(
+                    Icons.search_rounded,
+                    size: 20,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  prefixIconConstraints: const BoxConstraints(
+                    minWidth: 40,
+                    minHeight: 40,
+                  ),
+                  suffixIconConstraints: const BoxConstraints(
+                    minWidth: 40,
+                    minHeight: 40,
+                  ),
+                  suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: controller,
+                    builder: (context, value, _) {
+                      if (value.text.isEmpty) return const SizedBox.shrink();
+                      return IconButton(
+                        tooltip: '清空',
+                        // 40x40 以内：和空态同高，且不吃掉行高。
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                          minWidth: 40,
+                          minHeight: 40,
+                        ),
+                        iconSize: 18,
+                        icon: Icon(
+                          Icons.cancel_rounded,
+                          size: 17,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        onPressed: onClear,
+                      );
+                    },
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 11),
                 ),
-                prefixIconConstraints: const BoxConstraints(
-                  minWidth: 40,
-                  minHeight: 40,
-                ),
-                suffixIconConstraints: const BoxConstraints(
-                  minWidth: 40,
-                  minHeight: 40,
-                ),
-                suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: controller,
-                  builder: (context, value, _) {
-                    if (value.text.isEmpty) return const SizedBox.shrink();
-                    return IconButton(
-                      tooltip: '清空',
-                      icon: Icon(
-                        Icons.cancel_rounded,
-                        size: 17,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                      onPressed: onClear,
-                    );
-                  },
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 11),
               ),
             ),
           ),

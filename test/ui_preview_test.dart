@@ -294,6 +294,15 @@ void main() {
     );
   });
 
+  testWidgets('推荐页-搜索框输入前后高度不变', (tester) async {
+    await _pump(tester, const RecommendPage());
+    final before = tester.getSize(find.byType(TextField)).height;
+    await tester.enterText(find.byType(TextField), '剑来');
+    await tester.pump();
+    final after = tester.getSize(find.byType(TextField)).height;
+    expect(after, before, reason: '输入后出现清空按钮不应把搜索框撑高');
+  });
+
   testWidgets('推荐页-搜索态', (tester) async {
     await _pump(tester, const RecommendPage());
     await tester.enterText(find.byType(TextField), '剑来');
