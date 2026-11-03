@@ -332,92 +332,92 @@ class ReaderSettingsSheet extends ConsumerWidget {
     final paper = settings.paper;
     final foreground = paper.foreground;
     final muted = foreground.withValues(alpha: 0.55);
+    // 弹层要一直铺到屏幕底：把 Home 指示条高度做成容器内部的 padding，
+    // 而不是 SafeArea 在外层留白。否则最底部会露出弹层外的灰色横条。
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
 
-    return SafeArea(
-      top: false,
-      child: Container(
-        decoration: BoxDecoration(
-          color: paper.background,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+    return Container(
+      decoration: BoxDecoration(
+        color: paper.background,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 10, 20, 18 + bottomInset),
+      child: SliderTheme(
+        data: SliderTheme.of(context).copyWith(
+          activeTrackColor: AppTheme.accent,
+          inactiveTrackColor: foreground.withValues(alpha: 0.14),
+          thumbColor: AppTheme.accent,
+          overlayColor: AppTheme.accent.withValues(alpha: 0.12),
+          trackHeight: 2.5,
+          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
         ),
-        padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
-        child: SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            activeTrackColor: AppTheme.accent,
-            inactiveTrackColor: foreground.withValues(alpha: 0.14),
-            thumbColor: AppTheme.accent,
-            overlayColor: AppTheme.accent.withValues(alpha: 0.12),
-            trackHeight: 2.5,
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: muted.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: muted.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
-                '阅读设置',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: foreground,
-                ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '阅读设置',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: foreground,
               ),
-              const SizedBox(height: 4),
-              _SettingRow(
-                label: '字号',
-                value: '${settings.fontSize.round()}',
-                color: muted,
-                child: Slider(
-                  min: ReaderSettingsController.minFontSize,
-                  max: ReaderSettingsController.maxFontSize,
-                  divisions: 15,
-                  value: settings.fontSize,
-                  label: '${settings.fontSize.round()}',
-                  onChanged: controller.setFontSize,
-                ),
+            ),
+            const SizedBox(height: 4),
+            _SettingRow(
+              label: '字号',
+              value: '${settings.fontSize.round()}',
+              color: muted,
+              child: Slider(
+                min: ReaderSettingsController.minFontSize,
+                max: ReaderSettingsController.maxFontSize,
+                divisions: 15,
+                value: settings.fontSize,
+                label: '${settings.fontSize.round()}',
+                onChanged: controller.setFontSize,
               ),
-              _SettingRow(
-                label: '行距',
-                value: settings.lineHeight.toStringAsFixed(2),
-                color: muted,
-                child: Slider(
-                  min: ReaderSettingsController.minLineHeight,
-                  max: ReaderSettingsController.maxLineHeight,
-                  divisions: 14,
-                  value: settings.lineHeight,
-                  label: settings.lineHeight.toStringAsFixed(2),
-                  onChanged: controller.setLineHeight,
-                ),
+            ),
+            _SettingRow(
+              label: '行距',
+              value: settings.lineHeight.toStringAsFixed(2),
+              color: muted,
+              child: Slider(
+                min: ReaderSettingsController.minLineHeight,
+                max: ReaderSettingsController.maxLineHeight,
+                divisions: 14,
+                value: settings.lineHeight,
+                label: settings.lineHeight.toStringAsFixed(2),
+                onChanged: controller.setLineHeight,
               ),
-              const SizedBox(height: 6),
-              Text('底色', style: TextStyle(fontSize: 13, color: muted)),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  for (final option in ReaderPaper.values)
-                    Expanded(
-                      child: _PaperOption(
-                        option: option,
-                        selected: option == paper,
-                        foreground: foreground,
-                        onTap: () => controller.setPaper(option),
-                      ),
+            ),
+            const SizedBox(height: 6),
+            Text('底色', style: TextStyle(fontSize: 13, color: muted)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                for (final option in ReaderPaper.values)
+                  Expanded(
+                    child: _PaperOption(
+                      option: option,
+                      selected: option == paper,
+                      foreground: foreground,
+                      onTap: () => controller.setPaper(option),
                     ),
-                ],
-              ),
-            ],
-          ),
+                  ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -563,6 +563,9 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
   @override
   Widget build(BuildContext context) {
     final muted = widget.foreground.withValues(alpha: 0.55);
+    // 背景铺到屏幕底，内容让出 Home 指示条；这样列表最后一项不会被挡住，
+    // 也不会出现"容器底边没铺满"的灰色空条。
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
     return SizedBox(
       height: MediaQuery.sizeOf(context).height * 0.72,
       child: Container(
@@ -570,6 +573,7 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
           color: widget.background,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
+        padding: EdgeInsets.only(bottom: bottomInset),
         child: Column(
           children: [
             Padding(

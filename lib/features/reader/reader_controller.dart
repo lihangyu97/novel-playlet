@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,6 +11,7 @@ import '../../data/models/book_detail.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/chapter_content.dart';
 import '../../data/models/json_utils.dart';
+import 'reader_chapter_cache.dart';
 
 /// 阅读会话状态。
 ///
@@ -97,9 +100,20 @@ class ReaderController extends Notifier<ReaderSessionState> {
   bool _bootstrapping = false;
   int _requestToken = 0;
 
+  late ReaderChapterCache _cache;
+
+  /// 下一章/上一章的后台预取队列。并发上限 1，避免快速滑动时打爆请求。
+  final List<Chapter> _prefetchQueue = <Chapter>[];
+  final Set<String> _prefetchQueued = <String>{};
+  final Set<String> _prefetching = <String>{};
+  final Set<String> _prefetched = <String>{};
+  bool _prefetchWorkerRunning = false;
+  static const int _maxPrefetchQueue = 4;
+
   @override
   ReaderSessionState build() {
     ref.onDispose(() => _disposed = true);
+    _cache = ref.read(readerChapterCacheProvider);
     // 目录与正文都是网络请求，不能阻塞 build；先给加载态，回来后刷新。
     _bootstrap();
     return ReaderSessionState(bookTitle: args.bookTitle, cover: args.cover);
@@ -202,9 +216,28 @@ class ReaderController extends Notifier<ReaderSessionState> {
     final clamped = position.clamp(0, state.chapters.length - 1).toInt();
     final chapter = state.chapters[clamped];
     final token = ++_requestToken;
-    state = state.copyWith(index: clamped, loading: true, error: null);
+    // 目标章立刻生效（工具栏/进度用）；正文等缓存或请求回来再换。
+    state = state.copyWith(index: clamped, error: null);
     // 切章即落进度：即使正文请求失败，下次进入也能回到用户想去的那章。
     _saveProgress(chapter);
+
+    // 命中本地缓存就直接展示，连 loading 态都不进，才不会闪一下。
+    final cached = await _cache.get(chapter.id);
+    if (_disposed || token != _requestToken) return;
+    if (cached != null) {
+      state = state.copyWith(
+        content: cached.content,
+        contentIndex: clamped,
+        loading: false,
+        error: null,
+      );
+      // 超过 7 天的旧正文仍先展示，同时悄悄刷新一次缓存。
+      if (cached.isStale) _enqueuePrefetch(chapter);
+      _prefetchNeighbors();
+      return;
+    }
+
+    state = state.copyWith(loading: true);
     try {
       final content = await ref
           .read(apiClientProvider)
@@ -216,12 +249,86 @@ class ReaderController extends Notifier<ReaderSessionState> {
         loading: false,
         error: null,
       );
+      unawaited(_cache.put(content));
+      _prefetchNeighbors();
     } catch (error) {
       if (_disposed || token != _requestToken) return;
       state = state.copyWith(
         loading: false,
         error: _messageOf(error, '正文加载失败'),
       );
+    }
+  }
+
+  /// 当前章展示后，把相邻章悄悄拉进本地缓存。只写缓存，不动 UI 状态，
+  /// 避免预取结果串到正在显示的章节上。
+  void _prefetchNeighbors() {
+    final chapters = state.chapters;
+    if (chapters.isEmpty) return;
+    final next = state.index + 1;
+    if (next < chapters.length) _enqueuePrefetch(chapters[next]);
+    final previous = state.index - 1;
+    if (previous >= 0) _enqueuePrefetch(chapters[previous]);
+  }
+
+  void _enqueuePrefetch(Chapter chapter) {
+    final id = chapter.id;
+    if (id.isEmpty) return;
+    if (_prefetched.contains(id) ||
+        _prefetching.contains(id) ||
+        _prefetchQueued.contains(id)) {
+      return;
+    }
+    // 快速连续切章时只保留最近几章，别让旧目标越排越多。
+    while (_prefetchQueue.length >= _maxPrefetchQueue) {
+      final dropped = _prefetchQueue.removeAt(0);
+      _prefetchQueued.remove(dropped.id);
+    }
+    _prefetchQueue.add(chapter);
+    _prefetchQueued.add(id);
+    unawaited(_drainPrefetchQueue());
+  }
+
+  Future<void> _drainPrefetchQueue() async {
+    if (_prefetchWorkerRunning) return;
+    _prefetchWorkerRunning = true;
+    try {
+      while (_prefetchQueue.isNotEmpty) {
+        final chapter = _prefetchQueue.removeAt(0);
+        _prefetchQueued.remove(chapter.id);
+        await _fetchIntoCache(chapter);
+        if (_disposed) return;
+      }
+    } finally {
+      _prefetchWorkerRunning = false;
+    }
+  }
+
+  Future<void> _fetchIntoCache(Chapter chapter) async {
+    final id = chapter.id;
+    if (_disposed || id.isEmpty) return;
+    if (_prefetched.contains(id) || _prefetching.contains(id)) return;
+    _prefetching.add(id);
+    try {
+      final cached = await _cache.get(id);
+      if (_disposed) return;
+      // 已有新鲜缓存（含之前预取过的）就不再请求。
+      if (cached != null && !cached.isStale) {
+        _prefetched.add(id);
+        return;
+      }
+      // miss 或已过期才请求；过期时 UI 仍用旧内容，这里只刷新磁盘。
+      final content = await ref
+          .read(apiClientProvider)
+          .chapter(id, title: chapter.title);
+      if (_disposed) return;
+      await _cache.put(content);
+      _prefetched.add(id);
+    } catch (_) {
+      // 预取失败静默丢弃：真正切到该章时会走正常请求（离线时也能用旧缓存）。
+      return;
+    } finally {
+      _prefetching.remove(id);
     }
   }
 
@@ -242,21 +349,26 @@ class ReaderController extends Notifier<ReaderSessionState> {
     }
   }
 
+  /// 是否正在切章。缓存命中的那一小段窗口里 [ReaderSessionState.loading]
+  /// 还没置位（命中就不该闪 loading），但 index 已指向目标章、正文还是旧的；
+  /// 此时再点"下一章"必须忽略，否则会从目标章再 +1 一次跳两章。
+  bool get _switching =>
+      state.loading ||
+      (state.error == null && state.index != state.contentIndex);
+
   Future<void> nextChapter() async {
-    // 正在加载时忽略重复点击，否则会从"目标章 + 1"再跳一章。
-    if (state.loading || !state.hasNext) return;
+    if (_switching || !state.hasNext) return;
     await _loadChapter(state.index + 1);
   }
 
   Future<void> previousChapter() async {
-    if (state.loading || !state.hasPrevious) return;
+    if (_switching || !state.hasPrevious) return;
     await _loadChapter(state.index - 1);
   }
 
   Future<void> goToChapter(int position) async {
-    if (_disposed || state.chapters.isEmpty) return;
+    if (_disposed || state.chapters.isEmpty || _switching) return;
     final clamped = position.clamp(0, state.chapters.length - 1).toInt();
-    if (clamped == state.index && state.loading) return;
     if (clamped == state.index &&
         state.contentIndex == clamped &&
         state.error == null) {
@@ -266,7 +378,7 @@ class ReaderController extends Notifier<ReaderSessionState> {
   }
 
   Future<void> retry() async {
-    if (_disposed) return;
+    if (_disposed || _switching) return;
     if (state.chapters.isEmpty) {
       state = state.copyWith(loading: true, error: null);
       await _bootstrap();

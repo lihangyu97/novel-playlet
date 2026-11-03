@@ -13,6 +13,8 @@ import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
+import 'package:novel_playlet/data/models/chapter_content.dart';
+import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
 import 'package:novel_playlet/features/reader/reader_widgets.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
@@ -138,7 +140,8 @@ class _FakeTransport extends BackendTransport {
             for (var i = 1; i <= 24; i++)
               {
                 'item_id': 'c$i',
-                'title': '第${_cn(i)}章 ${_chapterNames[(i - 1) % _chapterNames.length]}',
+                'title':
+                    '第${_cn(i)}章 ${_chapterNames[(i - 1) % _chapterNames.length]}',
                 'volume_name': i <= 12 ? '第一卷' : '第二卷',
               },
           ],
@@ -190,6 +193,31 @@ class _FakeTransport extends BackendTransport {
   }
 }
 
+/// 预览用内存缓存：widget 测试里 path_provider/真实磁盘 IO 在 fake async 下
+/// 不会完成，会让正文一直停在 loading。这里直接用内存实现，行为与磁盘实现
+/// 等价（只负责命中/落缓存，不影响页面形态）。
+class _PreviewChapterCache extends ReaderChapterCache {
+  _PreviewChapterCache() : super(supportDirectory: _unsupportedDirectory);
+
+  final Map<String, ChapterContent> _store = <String, ChapterContent>{};
+
+  @override
+  Future<ReaderChapterHit?> get(String chapterId) async {
+    final content = _store[chapterId];
+    return content == null
+        ? null
+        : ReaderChapterHit(content: content, isStale: false);
+  }
+
+  @override
+  Future<void> put(ChapterContent content) async {
+    _store[content.id] = content;
+  }
+}
+
+Future<Directory> _unsupportedDirectory() async =>
+    throw UnsupportedError('预览缓存不应访问磁盘');
+
 /// 测试环境默认没有中文字体（渲染成豆腐块）。加载系统里的 Arial Unicode
 /// 作为预览字体，让 golden 能真实反映中文排版与断行。
 const _previewFontFamily = 'PreviewCJK';
@@ -219,7 +247,11 @@ ThemeData _previewTheme() {
   );
 }
 
-Future<void> _pump(WidgetTester tester, Widget page, {ReadingStore? store}) async {
+Future<void> _pump(
+  WidgetTester tester,
+  Widget page, {
+  ReadingStore? store,
+}) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -228,6 +260,7 @@ Future<void> _pump(WidgetTester tester, Widget page, {ReadingStore? store}) asyn
     ProviderScope(
       overrides: [
         apiClientProvider.overrideWithValue(api),
+        readerChapterCacheProvider.overrideWithValue(_PreviewChapterCache()),
         if (store != null) readingStoreProvider.overrideWithValue(store),
       ],
       child: MaterialApp(
@@ -281,7 +314,9 @@ void main() {
   testWidgets('阅读页', (tester) async {
     await _pump(
       tester,
-      const ReaderPage(args: ReaderArgs(bookId: '1', bookTitle: '剑来')),
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
     );
     await expectLater(
       find.byType(ReaderPage),
@@ -292,7 +327,9 @@ void main() {
   testWidgets('阅读页-工具栏', (tester) async {
     await _pump(
       tester,
-      const ReaderPage(args: ReaderArgs(bookId: '1', bookTitle: '剑来')),
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
     );
     // 点中间 1/3 呼出工具栏。
     await tester.tapAt(const Offset(195, 420));
@@ -312,10 +349,15 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [apiClientProvider.overrideWithValue(ApiClient(_FakeTransport()))],
+        overrides: [
+          apiClientProvider.overrideWithValue(ApiClient(_FakeTransport())),
+          readerChapterCacheProvider.overrideWithValue(_PreviewChapterCache()),
+        ],
         child: MaterialApp(
           theme: AppTheme.light(),
-          home: const ReaderPage(args: ReaderArgs(bookId: '1', bookTitle: '剑来')),
+          home: const ReaderPage(
+            args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+          ),
         ),
       ),
     );
@@ -324,10 +366,16 @@ void main() {
     // 默认收起：顶部栏底边必须 <= 0，底部栏顶边必须 >= 屏幕高度。
     final topRect = tester.getRect(find.byType(ReaderTopBar));
     final bottomRect = tester.getRect(find.byType(ReaderBottomBar));
-    expect(topRect.bottom, lessThanOrEqualTo(0.5),
-        reason: '收起后顶部栏仍露出 ${topRect.bottom}pt');
-    expect(bottomRect.top, greaterThanOrEqualTo(873.5),
-        reason: '收起后底部栏仍露出 ${874 - bottomRect.top}pt');
+    expect(
+      topRect.bottom,
+      lessThanOrEqualTo(0.5),
+      reason: '收起后顶部栏仍露出 ${topRect.bottom}pt',
+    );
+    expect(
+      bottomRect.top,
+      greaterThanOrEqualTo(873.5),
+      reason: '收起后底部栏仍露出 ${874 - bottomRect.top}pt',
+    );
   });
 
   testWidgets('我的页（空书架）', (tester) async {
@@ -342,7 +390,12 @@ void main() {
     SharedPreferences.setMockInitialValues({
       'shelf_books_v1': jsonEncode([
         for (var i = 1; i <= 4; i++)
-          {'id': '$i', 'title': _FakeTransport._titles[i - 1], 'cover': '', 'author': '作者$i'},
+          {
+            'id': '$i',
+            'title': _FakeTransport._titles[i - 1],
+            'cover': '',
+            'author': '作者$i',
+          },
       ]),
       'reading_progress_v1': jsonEncode({
         '1': {
