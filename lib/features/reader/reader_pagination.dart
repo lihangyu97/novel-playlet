@@ -11,9 +11,61 @@ const TextHeightBehavior readerTextHeightBehavior = TextHeightBehavior(
   leadingDistribution: TextLeadingDistribution.proportional,
 );
 
-/// 段首缩进两个汉字宽。用全角空格拼进文本而不是 WidgetSpan，测量和渲染
-/// 用的是同一份字符串，不需要给 TextPainter 设置占位符。
-const String readerParagraphIndent = '　　';
+/// 段落 [TextSpan] 的测量结果：渲染复用同一份 span，缩进宽度也必须一致。
+@immutable
+class ReaderParagraphSpan {
+  const ReaderParagraphSpan({required this.span, required this.placeholder});
+
+  final TextSpan span;
+
+  /// TextPainter 需要显式塞进来的占位尺寸；渲染时由 RenderParagraph 从
+  /// WidgetSpan 子节点算出同一个值（见 [buildReaderParagraphSpan]）。
+  final PlaceholderDimensions placeholder;
+}
+
+/// 构造一个段落的 span：首行缩进用零高 WidgetSpan 占位，正文文字仍是干净
+/// 的 TextSpan（复制/选区/断行都不被全角空格污染）。
+///
+/// 测量（TextPainter）与渲染（Text.rich）必须调用同一个函数：缩进宽度与
+/// 占位尺寸都由这里算出来，任何一边单独改都会让首行少/多一个字。
+ReaderParagraphSpan buildReaderParagraphSpan({
+  required String text,
+  required TextStyle style,
+  required double width,
+  required TextScaler textScaler,
+}) {
+  final fontSize = style.fontSize ?? 14;
+  // RenderParagraph 会把 WidgetSpan 子节点按周围 span 的字号做自动缩放，
+  // 所以这里按"未缩放宽度"给 SizedBox，占位尺寸再乘以 scale。
+  final scale = _textScaleFactor(textScaler, fontSize);
+  final indent = math.min(
+    (fontSize + (style.letterSpacing ?? 0)) * 2,
+    math.max(0.0, width / scale - fontSize),
+  );
+  return ReaderParagraphSpan(
+    span: TextSpan(
+      style: style,
+      children: <InlineSpan>[
+        WidgetSpan(
+          alignment: PlaceholderAlignment.bottom,
+          child: SizedBox(width: indent, height: 0),
+        ),
+        TextSpan(text: text),
+      ],
+    ),
+    placeholder: PlaceholderDimensions(
+      size: Size(indent * scale, 0),
+      alignment: PlaceholderAlignment.bottom,
+    ),
+  );
+}
+
+double _textScaleFactor(TextScaler textScaler, double fontSize) {
+  if (fontSize <= 0) return 1;
+  final factor = textScaler.scale(fontSize) / fontSize;
+  if (!factor.isFinite || factor <= 0) return 1;
+  return factor;
+}
 
 /// 分页的几何输入。
 ///
@@ -46,7 +98,7 @@ class ReaderLayoutSpec {
 
 /// 一个段落的测量结果：整段文字、占位高度、每一行在段内的纵向位置。
 ///
-/// 分页时只在行边界切页，渲染时把整段 Text 按行偏移裁剪，所以行断点
+/// 分页时只在行边界切页，渲染时把整段 Text.rich 按行偏移裁剪，所以行断点
 /// 永远来自同一次 TextPainter 测量，不会因为二次排版而错位。
 @immutable
 class ReaderBlock {
@@ -133,11 +185,7 @@ class ReaderPagination {
     for (final paragraph in paragraphs) {
       final text = paragraph.trim();
       if (text.isEmpty) continue;
-      final block = _measureBlock(
-        blocks.length,
-        '$readerParagraphIndent$text',
-        spec,
-      );
+      final block = _measureBlock(blocks.length, text, spec);
       if (block != null) blocks.add(block);
     }
     return ReaderPagination._(
@@ -169,8 +217,14 @@ class ReaderPagination {
     String text,
     ReaderLayoutSpec spec,
   ) {
+    final paragraph = buildReaderParagraphSpan(
+      text: text,
+      style: spec.bodyStyle,
+      width: spec.width,
+      textScaler: spec.textScaler,
+    );
     final painter = TextPainter(
-      text: TextSpan(text: text, style: spec.bodyStyle),
+      text: paragraph.span,
       textAlign: TextAlign.justify,
       textDirection: TextDirection.ltr,
       textScaler: spec.textScaler,
@@ -178,6 +232,9 @@ class ReaderPagination {
       textWidthBasis: TextWidthBasis.parent,
       locale: const Locale('zh', 'CN'),
     );
+    painter.setPlaceholderDimensions(<PlaceholderDimensions>[
+      paragraph.placeholder,
+    ]);
     try {
       painter.layout(minWidth: spec.width, maxWidth: spec.width);
       final metrics = painter.computeLineMetrics();

@@ -67,7 +67,13 @@ List<String> htmlToParagraphs(String html) {
 
   void walk(Node node) {
     if (node is Text) {
-      buffer.write(node.text);
+      // 上游正文里有把换行直接写进 <p> 文本的情况（不是 <br>）。不按换行切开
+      // 的话，这几行会挤进同一个 block，只有首行有缩进，其余行贴左。
+      final parts = node.text.split('\n');
+      for (var i = 0; i < parts.length; i++) {
+        if (i > 0) flush();
+        buffer.write(parts[i]);
+      }
       return;
     }
     if (node is! Element) return;

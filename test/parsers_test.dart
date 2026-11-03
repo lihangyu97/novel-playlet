@@ -190,6 +190,11 @@ void main() {
       expect(paragraphs, ['第一段 内容', '第二段', '换行', '第三段']);
     });
 
+    test('p 里的裸换行也要切成独立段落（否则后续行没有首行缩进）', () {
+      const html = '<p>第一行\n第二行</p><p>第三段</p>';
+      expect(htmlToParagraphs(html), ['第一行', '第二行', '第三段']);
+    });
+
     test('正文响应必须显式标记已解密', () {
       expect(
         () => parseChapterContent(

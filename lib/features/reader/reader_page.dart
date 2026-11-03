@@ -32,8 +32,13 @@ enum _ChapterEntry { firstPage, lastPage }
 
 class _ReaderPageState extends ConsumerState<ReaderPage> {
   static const double _horizontalPadding = 20;
-  // 页码只在工具栏打开时显示；常驻页眉/页脚已移除，正文占满可读区。
-  final ValueNotifier<int> _pageCount = ValueNotifier<int>(1);
+
+  /// 底部常驻信息条高度。分页可用高度先扣掉它，所以必须是常量：若让它随
+  /// 内容/内边距变化，分页缓存 key 每帧都变，会反复重排。
+  static const double _infoBarHeight = 28;
+
+  /// 章边界继续滑动多少逻辑像素触发切章。
+  static const double _boundaryOverscrollThreshold = 32;
   static const Duration _pageTurnDuration = Duration(milliseconds: 220);
   static const Duration _toolbarDuration = Duration(milliseconds: 200);
 
@@ -45,10 +50,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _turning = false;
   _ChapterEntry? _pendingEntry;
 
+  // 章边界继续滑动的手势状态：只对本次手势从首页/末页开始的越界计数。
+  int? _dragStartPage;
+  double _overscroll = 0;
+  bool _edgeTriggered = false;
+  bool _boundaryPending = false;
+
   @override
   void dispose() {
     _pageController.dispose();
-    _pageCount.dispose();
     super.dispose();
   }
 
@@ -200,18 +210,29 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   ) {
     final paper = settings.paper;
     final foreground = paper.foreground;
-    final textStyle = _readerTextStyle(settings, foreground);
+    // 在 build 阶段取一次主题字体，避免在 LayoutBuilder 的布局阶段做
+    // InheritedWidget 查找；测量与渲染用同一个值。
+    final fontFamily = Theme.of(context).textTheme.bodyMedium?.fontFamily;
+    final textStyle = _readerTextStyle(settings, foreground, fontFamily);
     final textScaler = MediaQuery.textScalerOf(context);
+    final infoStyle = TextStyle(
+      fontSize: 11.5,
+      height: 1.2,
+      color: foreground.withValues(alpha: 0.5),
+    );
     return LayoutBuilder(
       builder: (context, constraints) {
         final contentWidth = constraints.maxWidth - _horizontalPadding * 2;
-        final pageHeight = constraints.maxHeight;
+        // 常驻信息条占固定高度，先扣掉再分页；布局与分页用同一个常量，
+        // 不会出现“信息条一刷新正文就重排”的抖动。
+        final pageHeight = constraints.maxHeight - _infoBarHeight;
         final pagination = contentWidth <= 0 || pageHeight <= 0
             ? null
             : _obtainPagination(
                 content: content,
                 settings: settings,
                 textScaler: textScaler,
+                fontFamily: fontFamily,
                 width: contentWidth,
                 height: pageHeight,
               );
@@ -222,61 +243,180 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           );
         }
         final pages = pagination.pages;
-        if (_pageCount.value != pages.length) {
-          // 分页结果在 build 里产生，通知要放到帧后再发，避免 build 期回调。
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _pageCount.value != pages.length) {
-              _pageCount.value = pages.length;
-            }
-          });
-        }
-        return Stack(
+        final pageIndex = _pageIndex.clamp(0, pages.length - 1).toInt();
+        return Column(
           children: [
-            Positioned.fill(
-              child: PageView.builder(
-                key: ValueKey<String>(
-                  'reader-pager-${pagination.chapterId}',
-                ),
-                controller: _pageController,
-                itemCount: pages.length,
-                onPageChanged: _onPageChanged,
-                itemBuilder: (context, index) => RepaintBoundary(
-                  child: ReaderPageContent(
-                    page: pages[index],
-                    textStyle: textStyle,
-                    textScaler: textScaler,
-                    horizontalPadding: _horizontalPadding,
+            SizedBox(
+              height: pageHeight,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: _onScrollNotification,
+                      child: PageView.builder(
+                        key: ValueKey<String>(
+                          'reader-pager-${pagination.chapterId}',
+                        ),
+                        controller: _pageController,
+                        // 不用 iOS 回弹物理：回弹不产生 OverscrollNotification，
+                        // 章边界继续滑动就检测不到。Clamping 既保留 PageView
+                        // 的贴页回弹吸附，又能拿到越界量。
+                        physics: const ClampingScrollPhysics(),
+                        itemCount: pages.length,
+                        onPageChanged: _onPageChanged,
+                        itemBuilder: (context, index) => RepaintBoundary(
+                          child: ReaderPageContent(
+                            page: pages[index],
+                            textStyle: textStyle,
+                            textScaler: textScaler,
+                            contentWidth: contentWidth,
+                            horizontalPadding: _horizontalPadding,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                  if (session.loading)
+                    Positioned(
+                      top: 10,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: ReaderLoadingPill(
+                          message: '正在加载第 ${session.index + 1} 章…',
+                          foreground: foreground,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
-            if (session.loading)
-              Positioned(
-                top: 10,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: ReaderLoadingPill(
-                    message: '正在加载第 ${session.index + 1} 章…',
-                    foreground: foreground,
-                  ),
-                ),
-              ),
+            SizedBox(
+              height: _infoBarHeight,
+              child: _buildInfoBar(session, pageIndex, pages.length, infoStyle),
+            ),
           ],
         );
       },
     );
   }
 
+  /// 常驻信息条：左侧章节名最多半屏宽，右侧当前页/本章总页数。
+  /// 它不属于工具栏，收起工具栏时也一直在，方便随时知道读到哪。
+  Widget _buildInfoBar(
+    ReaderSessionState session,
+    int pageIndex,
+    int pageCount,
+    TextStyle style,
+  ) {
+    final chapterTitle = session.displayedChapter?.title ?? '';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: _horizontalPadding),
+      child: Row(
+        children: [
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.sizeOf(context).width * 0.5,
+                ),
+                child: Text(
+                  chapterTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: style,
+                ),
+              ),
+            ),
+          ),
+          Text('${pageIndex + 1}/$pageCount', style: style),
+        ],
+      ),
+    );
+  }
+
+  /// PageView 滚动通知：只有「从首页继续往右滑」「从末页继续往左滑」
+  /// 才累计越界量并切章；手势途中先翻到边界的不算，避免一次手势连跳两章。
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0 ||
+        notification.metrics.axis != Axis.horizontal) {
+      return false;
+    }
+    if (notification is ScrollStartNotification &&
+        notification.dragDetails != null) {
+      _dragStartPage = _pageIndex;
+      _overscroll = 0;
+      _edgeTriggered = false;
+      return false;
+    }
+    if (notification is ScrollEndNotification) {
+      _dragStartPage = null;
+      return false;
+    }
+    if (notification is! OverscrollNotification ||
+        notification.dragDetails == null ||
+        _edgeTriggered ||
+        _boundaryPending) {
+      return false;
+    }
+    final pagination = _pagination;
+    final startPage = _dragStartPage;
+    if (pagination == null || pagination.pages.isEmpty || startPage == null) {
+      return false;
+    }
+    // 向右越界（负 overscroll）= 想回上一章；向左越界 = 想进下一章。
+    final direction = notification.overscroll < 0 ? -1 : 1;
+    final expectedStart = direction < 0 ? 0 : pagination.pages.length - 1;
+    if (startPage != expectedStart) return false;
+    _overscroll += notification.overscroll;
+    if (_overscroll.abs() > _boundaryOverscrollThreshold) {
+      _edgeTriggered = true;
+      unawaited(_crossChapter(direction));
+    }
+    return false;
+  }
+
+  /// 章边界继续滑动的切章入口。落点与点击分区一致：回上一章落最后一页，
+  /// 进下一章落第一页；并清掉旧落点、收起工具栏，避免连跳两章。
+  Future<void> _crossChapter(int direction) async {
+    if (_boundaryPending || _turning) return;
+    final session = ref.read(readerSessionProvider(widget.args));
+    if (session.loading || session.index != session.contentIndex) return;
+    if (direction < 0 && !session.hasPrevious) return;
+    if (direction > 0 && !session.hasNext) return;
+    final controller = ref.read(readerSessionProvider(widget.args).notifier);
+    _pendingEntry = direction < 0
+        ? _ChapterEntry.lastPage
+        : _ChapterEntry.firstPage;
+    _hideToolbar();
+    _boundaryPending = true;
+    try {
+      if (direction < 0) {
+        await controller.previousChapter();
+      } else {
+        await controller.nextChapter();
+      }
+    } finally {
+      if (mounted) _boundaryPending = false;
+    }
+  }
+
   /// 正文样式：`inherit: false` 是关键——Text 默认会和 DefaultTextStyle 合并
   /// （例如 leadingDistribution），而 TextPainter 不合并，两者行高会不一致。
   /// 这里用固定样式同时喂给测量与渲染，保证断行绝对一致。
-  TextStyle _readerTextStyle(ReaderSettings settings, Color color) {
+  ///
+  /// 字体跟随主题：App 若换了正文字体，分页测量也必须是同一套字形度量。
+  TextStyle _readerTextStyle(
+    ReaderSettings settings,
+    Color color,
+    String? fontFamily,
+  ) {
     return AppTheme.readerText(
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
       color: color,
-    ).copyWith(inherit: false);
+    ).copyWith(inherit: false, fontFamily: fontFamily);
   }
 
   /// 拿分页结果；输入没变就直接返回缓存，绝不每帧重排。
@@ -284,6 +424,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     required ChapterContent content,
     required ReaderSettings settings,
     required TextScaler textScaler,
+    required String? fontFamily,
     required double width,
     required double height,
   }) {
@@ -294,6 +435,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
       textScale: textScaler.scale(16),
+      fontFamily: fontFamily,
     );
     final cached = _pagination;
     if (cached != null && _paginationKey == key) return cached;
@@ -310,7 +452,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         width: width,
         height: height,
         textScaler: textScaler,
-        bodyStyle: _readerTextStyle(settings, Colors.black),
+        bodyStyle: _readerTextStyle(settings, Colors.black, fontFamily),
         paragraphSpacing: settings.fontSize * 0.55,
       ),
     );
@@ -455,11 +597,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         offset: _toolbarVisible ? Offset.zero : const Offset(0, 1.02),
         duration: _toolbarDuration,
         curve: Curves.easeOutCubic,
-        child: ValueListenableBuilder<int>(
-          valueListenable: _pageCount,
-          builder: (context, pageCount, _) => ReaderBottomBar(
+        child: ReaderBottomBar(
           bottomInset: MediaQuery.paddingOf(context).bottom,
-          pageLabel: '${_pageIndex + 1}/$pageCount',
           background: paper.background,
           foreground: paper.foreground,
           hasPrevious: session.hasPrevious,
@@ -476,7 +615,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             controller.nextChapter();
           },
           onSettings: _openSettings,
-          ),
         ),
       ),
     );
@@ -544,6 +682,7 @@ class _PaginationKey {
     required this.fontSize,
     required this.lineHeight,
     required this.textScale,
+    required this.fontFamily,
   });
 
   final ChapterContent content;
@@ -555,6 +694,9 @@ class _PaginationKey {
   /// 用实际缩放后的字号代替 TextScaler 对象，避免不同实例但等价时漏复用。
   final double textScale;
 
+  /// 主题字体变了字形度量也会变，必须一起重排。
+  final String? fontFamily;
+
   @override
   bool operator ==(Object other) =>
       other is _PaginationKey &&
@@ -563,7 +705,8 @@ class _PaginationKey {
       other.height == height &&
       other.fontSize == fontSize &&
       other.lineHeight == lineHeight &&
-      other.textScale == textScale;
+      other.textScale == textScale &&
+      other.fontFamily == fontFamily;
 
   @override
   int get hashCode => Object.hash(
@@ -573,5 +716,6 @@ class _PaginationKey {
     fontSize,
     lineHeight,
     textScale,
+    fontFamily,
   );
 }

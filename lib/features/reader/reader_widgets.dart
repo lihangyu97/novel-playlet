@@ -8,21 +8,25 @@ import 'reader_settings.dart';
 
 /// 渲染一页正文。
 ///
-/// 每段只裁剪、不重新排版：整段 Text 用与测量时完全相同的宽度/样式/缩放
-/// 画出来，再按行偏移把它上移到片段位置。这样断行永远和 TextPainter 的
-/// 测量一致，不会出现页尾文字被切掉半行。
+/// 每段只裁剪、不重新排版：整段 Text.rich 用与测量时完全相同的宽度/样式/
+/// 缩放画出来，再按行偏移把它上移到片段位置。这样断行永远和 TextPainter
+/// 的测量一致，不会出现页尾文字被切掉半行。
 class ReaderPageContent extends StatelessWidget {
   const ReaderPageContent({
     super.key,
     required this.page,
     required this.textStyle,
     required this.textScaler,
+    required this.contentWidth,
     required this.horizontalPadding,
   });
 
   final ReaderPage page;
   final TextStyle textStyle;
   final TextScaler textScaler;
+
+  /// 可读区宽度（不含左右内边距），首行缩进按它计算。
+  final double contentWidth;
   final double horizontalPadding;
 
   @override
@@ -38,6 +42,14 @@ class ReaderPageContent extends StatelessWidget {
   }
 
   Widget _buildFragment(ReaderFragment fragment) {
+    // 与分页测量共用同一个 span 构建函数：首行缩进 WidgetSpan 的文字度量
+    // 在测量与渲染两侧完全一致，缩进不再靠全角空格拼进正文。
+    final paragraph = buildReaderParagraphSpan(
+      text: fragment.block.text,
+      style: textStyle,
+      width: contentWidth,
+      textScaler: textScaler,
+    );
     return Positioned(
       top: fragment.top,
       left: 0,
@@ -50,8 +62,8 @@ class ReaderPageContent extends StatelessWidget {
           maxHeight: fragment.block.height,
           child: Transform.translate(
             offset: Offset(0, -fragment.sourceTop),
-            child: Text(
-              fragment.block.text,
+            child: Text.rich(
+              paragraph.span,
               style: textStyle,
               textAlign: TextAlign.justify,
               textDirection: TextDirection.ltr,
@@ -157,7 +169,6 @@ class ReaderBottomBar extends StatelessWidget {
   const ReaderBottomBar({
     super.key,
     this.bottomInset = 0,
-    this.pageLabel = '',
     required this.background,
     required this.foreground,
     required this.hasPrevious,
@@ -171,8 +182,6 @@ class ReaderBottomBar extends StatelessWidget {
   /// Home 指示条高度：工具栏贴屏幕底，背景铺到安全区后面。
   final double bottomInset;
 
-  /// 页码（"3/12"）。工具栏收起时不存在，避免正文上下留常驻条。
-  final String pageLabel;
   final Color background;
   final Color foreground;
   final bool hasPrevious;
@@ -196,47 +205,31 @@ class ReaderBottomBar extends StatelessWidget {
           ),
         ),
         padding: EdgeInsets.only(bottom: 6 + bottomInset),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: Row(
           children: [
-            if (pageLabel.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  pageLabel,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: foreground.withValues(alpha: 0.45),
-                  ),
-                ),
-              ),
-            Row(
-              children: [
-                _ReaderToolButton(
-                  icon: Icons.format_list_bulleted_rounded,
-                  label: '目录',
-                  color: foreground,
-                  onTap: onDirectory,
-                ),
-                _ReaderToolButton(
-                  icon: Icons.skip_previous_rounded,
-                  label: '上一章',
-                  color: foreground,
-                  onTap: hasPrevious ? onPrevious : null,
-                ),
-                _ReaderToolButton(
-                  icon: Icons.skip_next_rounded,
-                  label: '下一章',
-                  color: foreground,
-                  onTap: hasNext ? onNext : null,
-                ),
-                _ReaderToolButton(
-                  icon: Icons.text_fields_rounded,
-                  label: '设置',
-                  color: foreground,
-                  onTap: onSettings,
-                ),
-              ],
+            _ReaderToolButton(
+              icon: Icons.format_list_bulleted_rounded,
+              label: '目录',
+              color: foreground,
+              onTap: onDirectory,
+            ),
+            _ReaderToolButton(
+              icon: Icons.skip_previous_rounded,
+              label: '上一章',
+              color: foreground,
+              onTap: hasPrevious ? onPrevious : null,
+            ),
+            _ReaderToolButton(
+              icon: Icons.skip_next_rounded,
+              label: '下一章',
+              color: foreground,
+              onTap: hasNext ? onNext : null,
+            ),
+            _ReaderToolButton(
+              icon: Icons.text_fields_rounded,
+              label: '设置',
+              color: foreground,
+              onTap: onSettings,
             ),
           ],
         ),
