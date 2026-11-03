@@ -30,7 +30,8 @@ class ReaderPage extends ConsumerStatefulWidget {
 /// 点左侧回上一章，应该落在上一章最后一页，符合"往回翻"的直觉。
 enum _ChapterEntry { firstPage, lastPage }
 
-class _ReaderPageState extends ConsumerState<ReaderPage> {
+class _ReaderPageState extends ConsumerState<ReaderPage>
+    with SingleTickerProviderStateMixin {
   static const double _horizontalPadding = 20;
 
   /// 底部常驻信息条高度。分页可用高度先扣掉它，所以必须是常量：若让它随
@@ -49,6 +50,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _toolbarVisible = false;
   bool _turning = false;
   _ChapterEntry? _pendingEntry;
+
+  /// 换章过渡：正文淡入 + 轻微横向位移。切页（同一章内）仍走 PageView 自己
+  /// 的滑动动画，这里只负责"整块正文被换掉"那一下，避免生硬跳变。
+  late final AnimationController _chapterTransition = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+    value: 1,
+  );
+  double _chapterSlide = 0;
 
   // 章边界继续滑动的手势状态：只对本次手势从首页/末页开始的越界计数。
   int? _dragStartPage;
@@ -69,6 +79,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     final settings = ref.watch(readerSettingsProvider);
     final controller = ref.read(provider.notifier);
     final paper = settings.paper;
+
+    // 正文真正换了（contentIndex 变化）才播过渡：向前翻从右侧滑入、向后翻
+    // 从左侧滑入。加载态切换不播，避免"先淡入 loading 再淡入正文"两次闪。
+    ref.listen<ReaderSessionState>(provider, (previous, next) {
+      if (previous == null || next.contentIndex < 0) return;
+      if (previous.contentIndex == next.contentIndex) return;
+      _chapterSlide = next.contentIndex >= previous.contentIndex ? 1 : -1;
+      _chapterTransition.forward(from: 0);
+    });
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: _overlayStyle(paper),
@@ -244,58 +263,73 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         }
         final pages = pagination.pages;
         final pageIndex = _pageIndex.clamp(0, pages.length - 1).toInt();
-        return Column(
-          children: [
-            SizedBox(
-              height: pageHeight,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: NotificationListener<ScrollNotification>(
-                      onNotification: _onScrollNotification,
-                      child: PageView.builder(
-                        key: ValueKey<String>(
-                          'reader-pager-${pagination.chapterId}',
-                        ),
-                        controller: _pageController,
-                        // 不用 iOS 回弹物理：回弹不产生 OverscrollNotification，
-                        // 章边界继续滑动就检测不到。Clamping 既保留 PageView
-                        // 的贴页回弹吸附，又能拿到越界量。
-                        physics: const ClampingScrollPhysics(),
-                        itemCount: pages.length,
-                        onPageChanged: _onPageChanged,
-                        itemBuilder: (context, index) => RepaintBoundary(
-                          child: ReaderPageContent(
-                            page: pages[index],
-                            textStyle: textStyle,
-                            textScaler: textScaler,
-                            contentWidth: contentWidth,
-                            horizontalPadding: _horizontalPadding,
+        return AnimatedBuilder(
+          animation: _chapterTransition,
+          child: Column(
+            children: [
+              SizedBox(
+                height: pageHeight,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: _onScrollNotification,
+                        child: PageView.builder(
+                          key: ValueKey<String>(
+                            'reader-pager-${pagination.chapterId}',
+                          ),
+                          controller: _pageController,
+                          // 不用 iOS 回弹物理：回弹不产生 OverscrollNotification，
+                          // 章边界继续滑动就检测不到。Clamping 既保留 PageView
+                          // 的贴页回弹吸附，又能拿到越界量。
+                          physics: const ClampingScrollPhysics(),
+                          itemCount: pages.length,
+                          onPageChanged: _onPageChanged,
+                          itemBuilder: (context, index) => RepaintBoundary(
+                            child: ReaderPageContent(
+                              page: pages[index],
+                              textStyle: textStyle,
+                              textScaler: textScaler,
+                              contentWidth: contentWidth,
+                              horizontalPadding: _horizontalPadding,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  if (session.loading)
-                    Positioned(
-                      top: 10,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: ReaderLoadingPill(
-                          message: '正在加载第 ${session.index + 1} 章…',
-                          foreground: foreground,
+                    if (session.loading)
+                      Positioned(
+                        top: 10,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: ReaderLoadingPill(
+                            message: '正在加载第 ${session.index + 1} 章…',
+                            foreground: foreground,
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            SizedBox(
-              height: _infoBarHeight,
-              child: _buildInfoBar(session, pageIndex, pages.length, infoStyle),
-            ),
-          ],
+              SizedBox(
+                height: _infoBarHeight,
+                child: _buildInfoBar(session, pageIndex, pages.length, infoStyle),
+              ),
+            ],
+          ),
+          builder: (context, child) {
+            final t = Curves.easeOutCubic.transform(
+              _chapterTransition.value.clamp(0.0, 1.0),
+            );
+            return Opacity(
+              opacity: 0.65 + 0.35 * t,
+              child: FractionalTranslation(
+                translation: Offset((1 - t) * 0.06 * _chapterSlide, 0),
+                child: child,
+              ),
+            );
+          },
         );
       },
     );

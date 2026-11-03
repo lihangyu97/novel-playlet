@@ -16,6 +16,8 @@ import 'package:novel_playlet/features/mine/mine_page.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
+import 'package:novel_playlet/features/reader/reader_controller.dart';
+import 'package:novel_playlet/features/reader/reader_page.dart';
 import 'package:novel_playlet/features/reader/reader_widgets.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -376,6 +378,33 @@ void main() {
       greaterThanOrEqualTo(873.5),
       reason: '收起后底部栏仍露出 ${874 - bottomRect.top}pt',
     );
+  });
+
+  testWidgets('阅读页-切章有过渡且底栏章节名更新', (tester) async {
+    await _pump(
+      tester,
+      const ReaderPage(args: ReaderArgs(bookId: '1', bookTitle: '剑来')),
+    );
+    // 底栏初始显示第 1 章。
+    expect(find.textContaining('第一章'), findsWidgets);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    final args = const ReaderArgs(bookId: '1', bookTitle: '剑来');
+    await container.read(readerSessionProvider(args).notifier).nextChapter();
+
+    // 过渡中点：正文应该处于"未完成"状态（opacity < 1 或存在横向位移）。
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    final transitions = tester
+        .widgetList<FractionalTranslation>(find.byType(FractionalTranslation))
+        .where((widget) => widget.translation.dx != 0)
+        .toList();
+    expect(transitions, isNotEmpty, reason: '切章应有一段横向过渡动画');
+
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(find.textContaining('第二章'), findsWidgets);
   });
 
   testWidgets('我的页（空书架）', (tester) async {
