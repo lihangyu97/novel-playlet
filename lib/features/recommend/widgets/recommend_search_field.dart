@@ -4,6 +4,11 @@ import 'package:flutter/material.dart';
 ///
 /// 输入文本是纯 UI 状态，留在 TextEditingController；提交/清空/取消都只是
 /// 回调，由页面翻译成 provider 操作。
+///
+/// 结构刻意不用 `InputDecoration` 的 prefix/suffixIcon：
+///   - suffix 的 `IconButton` 有最小触控尺寸，输入后会把整行撑高；
+///   - prefixIcon 在固定高度里不垂直居中（实测文字高 4pt、图标高 6pt）。
+/// 改成 Row 自己排：固定 48pt 高，图标/输入/清空都在同一行里垂直居中。
 class RecommendSearchField extends StatelessWidget {
   const RecommendSearchField({
     super.key,
@@ -22,6 +27,8 @@ class RecommendSearchField extends StatelessWidget {
   final VoidCallback onCancel;
   final bool showCancel;
 
+  static const double _height = 48;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -36,65 +43,62 @@ class RecommendSearchField extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: scheme.surface,
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(_height / 2),
               border: Border.all(
                 color: scheme.outlineVariant.withValues(alpha: 0.5),
               ),
             ),
-            // 高度写死 48（与 IconButton 的最小触控高度一致）：既不会被清空
-            // 按钮撑高，也不会因为内容的内边距比按钮矮而显得文字偏上。
             child: SizedBox(
-              height: 48,
-              child: TextField(
-                controller: controller,
-                focusNode: focusNode,
-                textInputAction: TextInputAction.search,
-                textAlignVertical: TextAlignVertical.center,
-                style: theme.textTheme.bodyMedium,
-                onSubmitted: onSubmitted,
-                decoration: InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  hintText: '搜索书名/作者',
-                  hintStyle: hintStyle,
-                  prefixIcon: Icon(
+              height: _height,
+              child: Row(
+                children: [
+                  const SizedBox(width: 14),
+                  Icon(
                     Icons.search_rounded,
                     size: 20,
                     color: scheme.onSurfaceVariant,
                   ),
-                  prefixIconConstraints: const BoxConstraints(
-                    minWidth: 40,
-                    minHeight: 40,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      textInputAction: TextInputAction.search,
+                      textAlignVertical: TextAlignVertical.center,
+                      style: theme.textTheme.bodyMedium,
+                      onSubmitted: onSubmitted,
+                      // collapsed：去掉 decoration 自带的上下留白，行高由外层
+                      // 48pt 决定，文字自然垂直居中。
+                      decoration: InputDecoration.collapsed(
+                        hintText: '搜索书名/作者',
+                        hintStyle: hintStyle,
+                      ),
+                    ),
                   ),
-                  suffixIconConstraints: const BoxConstraints(
-                    minWidth: 40,
-                    minHeight: 40,
-                  ),
-                  suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                  ValueListenableBuilder<TextEditingValue>(
                     valueListenable: controller,
                     builder: (context, value, _) {
-                      if (value.text.isEmpty) return const SizedBox.shrink();
+                      if (value.text.isEmpty) return const SizedBox(width: 12);
                       return IconButton(
                         tooltip: '清空',
-                        // 40x40 以内：和空态同高，且不吃掉行高。
                         padding: EdgeInsets.zero,
                         visualDensity: VisualDensity.compact,
                         constraints: const BoxConstraints(
-                          minWidth: 40,
-                          minHeight: 40,
+                          minWidth: 36,
+                          minHeight: 36,
                         ),
                         iconSize: 18,
                         icon: Icon(
                           Icons.cancel_rounded,
-                          size: 17,
+                          size: 18,
                           color: scheme.onSurfaceVariant,
                         ),
                         onPressed: onClear,
                       );
                     },
                   ),
-                  contentPadding: EdgeInsets.zero,
-                ),
+                  const SizedBox(width: 8),
+                ],
               ),
             ),
           ),

@@ -294,6 +294,23 @@ void main() {
     );
   });
 
+  testWidgets('推荐页-搜索框内容垂直居中', (tester) async {
+    await _pump(tester, const RecommendPage());
+    final hint = tester.getRect(find.text('搜索书名/作者'));
+    final icon = tester.getRect(find.byIcon(Icons.search_rounded));
+    final field = tester.getRect(find.byType(TextField));
+    expect(
+      (hint.center.dy - icon.center.dy).abs(),
+      lessThan(1.2),
+      reason: '提示文字与放大镜必须同一条水平中线',
+    );
+    expect(
+      (hint.center.dy - field.center.dy).abs(),
+      lessThan(1.2),
+      reason: '提示文字必须在输入区垂直居中',
+    );
+  });
+
   testWidgets('推荐页-搜索框输入前后高度不变', (tester) async {
     await _pump(tester, const RecommendPage());
     final before = tester.getSize(find.byType(TextField)).height;
