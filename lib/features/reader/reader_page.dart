@@ -64,41 +64,44 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       value: _overlayStyle(paper),
       child: Scaffold(
         backgroundColor: paper.background,
-        body: SafeArea(
-          child: Stack(
-            children: [
-              Positioned.fill(
+        // 工具栏不能放在 SafeArea 里：收起时 AnimatedSlide 只平移自身高度，
+        // 会正好停在状态栏/Home 指示条那条里（真机实测"没隐藏干净"）。
+        // 正文留在 SafeArea 内，工具栏贴屏幕边缘、自己内部补安全区 padding。
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: SafeArea(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTapUp: _handleTap,
                   child: _buildBody(session, settings, controller),
                 ),
               ),
-              // 工具栏打开时压暗正文，让浮层上的文字更清楚；本身不接收点击，
-              // 点击穿透到正文的手势识别器，交给 _handleTap 收起工具栏。
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: AnimatedOpacity(
-                    opacity: _toolbarVisible ? 1 : 0,
-                    duration: _toolbarDuration,
-                    child: const ColoredBox(color: Color(0x33000000)),
-                  ),
+            ),
+            // 工具栏打开时压暗正文，让浮层上的文字更清楚；本身不接收点击，
+            // 点击穿透到正文的手势识别器，交给 _handleTap 收起工具栏。
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: _toolbarVisible ? 1 : 0,
+                  duration: _toolbarDuration,
+                  child: const ColoredBox(color: Color(0x33000000)),
                 ),
               ),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: _buildTopBar(session, settings),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: _buildBottomBar(session, settings, controller),
-              ),
-            ],
-          ),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _buildTopBar(session, settings),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _buildBottomBar(session, settings, controller),
+            ),
+          ],
         ),
       ),
     );
@@ -429,6 +432,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         duration: _toolbarDuration,
         curve: Curves.easeOutCubic,
         child: ReaderTopBar(
+          topInset: MediaQuery.paddingOf(context).top,
           title: title,
           subtitle: session.displayedChapter?.title ?? '',
           background: paper.background,
@@ -454,6 +458,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         child: ValueListenableBuilder<int>(
           valueListenable: _pageCount,
           builder: (context, pageCount, _) => ReaderBottomBar(
+          bottomInset: MediaQuery.paddingOf(context).bottom,
           pageLabel: '${_pageIndex + 1}/$pageCount',
           background: paper.background,
           foreground: paper.foreground,

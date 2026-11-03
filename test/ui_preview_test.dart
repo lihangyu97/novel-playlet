@@ -14,6 +14,7 @@ import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
+import 'package:novel_playlet/features/reader/reader_widgets.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -300,6 +301,33 @@ void main() {
       find.byType(ReaderPage),
       matchesGoldenFile('goldens/reader_toolbar.png'),
     );
+  });
+
+  testWidgets('阅读页-工具栏收起后必须完全移出屏幕', (tester) async {
+    // 带刘海/Home 指示条的真机尺寸：工具栏如果在 SafeArea 里，收起时只会
+    // 停在状态栏那条里（真机复现过），这里把它钉死。
+    tester.view.physicalSize = const Size(1206, 2622);
+    tester.view.devicePixelRatio = 3;
+    tester.view.padding = const FakeViewPadding(top: 62 * 3, bottom: 34 * 3);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiClientProvider.overrideWithValue(ApiClient(_FakeTransport()))],
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const ReaderPage(args: ReaderArgs(bookId: '1', bookTitle: '剑来')),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    // 默认收起：顶部栏底边必须 <= 0，底部栏顶边必须 >= 屏幕高度。
+    final topRect = tester.getRect(find.byType(ReaderTopBar));
+    final bottomRect = tester.getRect(find.byType(ReaderBottomBar));
+    expect(topRect.bottom, lessThanOrEqualTo(0.5),
+        reason: '收起后顶部栏仍露出 ${topRect.bottom}pt');
+    expect(bottomRect.top, greaterThanOrEqualTo(873.5),
+        reason: '收起后底部栏仍露出 ${874 - bottomRect.top}pt');
   });
 
   testWidgets('我的页（空书架）', (tester) async {

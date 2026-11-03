@@ -71,6 +71,7 @@ class ReaderPageContent extends StatelessWidget {
 class ReaderTopBar extends StatelessWidget {
   const ReaderTopBar({
     super.key,
+    this.topInset = 0,
     required this.title,
     required this.background,
     required this.foreground,
@@ -78,6 +79,8 @@ class ReaderTopBar extends StatelessWidget {
     this.subtitle = '',
   });
 
+  /// 状态栏高度：工具栏贴屏幕顶，背景要铺到状态栏后面。
+  final double topInset;
   final String title;
 
   /// 当前章节名。正文页不再常驻页眉，章节信息随工具栏一起出现。
@@ -91,7 +94,8 @@ class ReaderTopBar extends StatelessWidget {
     return Material(
       color: background,
       child: Container(
-        height: 52,
+        height: 52 + topInset,
+        padding: EdgeInsets.only(top: topInset),
         decoration: BoxDecoration(
           border: Border(
             bottom: BorderSide(
@@ -152,6 +156,7 @@ class ReaderTopBar extends StatelessWidget {
 class ReaderBottomBar extends StatelessWidget {
   const ReaderBottomBar({
     super.key,
+    this.bottomInset = 0,
     this.pageLabel = '',
     required this.background,
     required this.foreground,
@@ -162,6 +167,9 @@ class ReaderBottomBar extends StatelessWidget {
     required this.onNext,
     required this.onSettings,
   });
+
+  /// Home 指示条高度：工具栏贴屏幕底，背景铺到安全区后面。
+  final double bottomInset;
 
   /// 页码（"3/12"）。工具栏收起时不存在，避免正文上下留常驻条。
   final String pageLabel;
@@ -187,7 +195,7 @@ class ReaderBottomBar extends StatelessWidget {
             ),
           ),
         ),
-        padding: const EdgeInsets.only(bottom: 6),
+        padding: EdgeInsets.only(bottom: 6 + bottomInset),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
