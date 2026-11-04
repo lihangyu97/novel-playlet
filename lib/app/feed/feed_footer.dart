@@ -1,50 +1,10 @@
 import 'package:flutter/material.dart';
 
-/// 区块标题：左侧标题 + 右侧统计，跟着内容一起滚走。
-class RecommendSectionTitle extends StatelessWidget {
-  const RecommendSectionTitle({super.key, required this.title, this.subtitle});
-
-  final String title;
-  final String? subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final subtitle = this.subtitle;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      child: Row(
-        children: [
-          Text(
-            title,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// 列表底部状态：加载下一页 / 失败重试 / 到底了。
+/// 首页流底部状态：加载下一页 / 失败重试 / 到底了。
 ///
 /// 翻页失败不替换整页，只在列表末尾给一次重试，已加载的卡片保持可读。
-class RecommendFooter extends StatelessWidget {
-  const RecommendFooter({
+class FeedFooter extends StatelessWidget {
+  const FeedFooter({
     super.key,
     required this.loadingMore,
     required this.error,

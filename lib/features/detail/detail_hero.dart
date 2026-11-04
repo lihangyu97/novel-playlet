@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
-import '../../app/widgets/novel_cover.dart';
+import '../../app/widgets/detail/detail_common.dart';
 import '../../data/models/book_detail.dart';
 import '../../data/models/novel_item.dart';
-import 'detail_style.dart';
 
-/// 详情页顶部 Hero：大封面 + 书名/作者/分类·状态·字数/评分/更新到。
+/// 小说详情顶部：大封面 + 书名/作者/分类·状态·字数/评分/更新到。
+///
+/// 版式与短剧详情共用 [DetailCoverHeader]，这里只负责把小说字段整理成
+/// 副标题/元信息/评分行。
 ///
 /// [detail] 是接口数据；加载阶段只有 [preview]（列表卡片）。此时用它的
 /// 封面与标题先把版式撑起来，避免整页白屏。
@@ -41,129 +43,69 @@ class DetailHero extends StatelessWidget {
     final lastChapter = _firstNonEmpty([detail?.lastChapterTitle]);
     final showRating = score.isNotEmpty || readers.isNotEmpty;
 
-    // 沉浸式：页面没有导航栏，Hero 自己让出状态栏高度 + 8pt 呼吸位，内容
-    // 从安全区下方开始，渐变背景仍铺到屏幕顶。
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-        detailGutter + 4,
-        MediaQuery.paddingOf(context).top + 8,
-        detailGutter + 4,
-        detailGutter + 4,
-      ),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            scheme.primary.withValues(alpha: 0.12),
-            scheme.primary.withValues(alpha: 0),
-          ],
-        ),
-      ),
-      child: Row(
+    Widget? extra;
+    if (showRating || lastChapter.isNotEmpty) {
+      extra = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          NovelCover(
-            url: cover,
-            width: 96,
-            height: 132,
-            fallbackUrl: coverFallback,
-            fadeInDuration: Duration.zero,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          if (showRating)
+            Row(
               children: [
-                Text(
-                  title,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    height: 1.25,
-                  ),
-                ),
-                if (author.isNotEmpty) ...[
-                  const SizedBox(height: 8),
+                if (score.isNotEmpty) ...[
+                  Icon(Icons.star_rounded, size: 16, color: scheme.primary),
+                  const SizedBox(width: 3),
                   Text(
-                    author,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    score,
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
-                if (meta.isNotEmpty) ...[
-                  const SizedBox(height: 4),
+                if (score.isNotEmpty && readers.isNotEmpty) ...[
+                  const SizedBox(width: 6),
                   Text(
-                    meta,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    '·',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
+                  const SizedBox(width: 6),
                 ],
-                if (showRating) ...[
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      if (score.isNotEmpty) ...[
-                        Icon(
-                          Icons.star_rounded,
-                          size: 16,
-                          color: scheme.primary,
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          score,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                      if (score.isNotEmpty && readers.isNotEmpty) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          '·',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                      ],
-                      if (readers.isNotEmpty)
-                        Flexible(
-                          child: Text(
-                            readers,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-                if (lastChapter.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    '更新至 $lastChapter',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
+                if (readers.isNotEmpty)
+                  Flexible(
+                    child: Text(
+                      readers,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
-                ],
               ],
             ),
-          ),
+          if (lastChapter.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              '更新至 $lastChapter',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
-      ),
+      );
+    }
+
+    return DetailCoverHeader(
+      cover: cover,
+      coverFallback: coverFallback,
+      title: title,
+      subtitle: author,
+      meta: meta,
+      extra: extra,
     );
   }
 

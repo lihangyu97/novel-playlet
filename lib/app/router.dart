@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../data/models/chapter.dart';
 import '../data/models/novel_item.dart';
+import '../data/models/video_series.dart';
 import '../features/detail/detail_page.dart';
 import '../features/reader/reader_page.dart';
+import '../features/video/video_detail_page.dart';
+import '../features/video/video_player_page.dart';
 
 /// 详情页入参。[preview] 是列表里点进来的卡片，用来在详情接口返回前先把
 /// 封面/标题画出来，避免白屏。
@@ -35,9 +39,35 @@ class ReaderArgs {
   final int? blockIndex;
 }
 
+/// 短剧详情入参。[preview] 同样用于接口返回前先画封面/标题。
+class VideoDetailArgs {
+  const VideoDetailArgs({required this.seriesId, this.preview});
+
+  final String seriesId;
+  final VideoSeries? preview;
+}
+
+/// 播放页入参：整份选集 + 起播下标。
+///
+/// 选集由详情页一次拉齐后传入：播放页换集只换 URL，不再回源目录，连续点
+/// 下一集也不会多打目录请求。
+class VideoPlayArgs {
+  const VideoPlayArgs({
+    required this.seriesTitle,
+    required this.episodes,
+    required this.index,
+  });
+
+  final String seriesTitle;
+  final List<Chapter> episodes;
+  final int index;
+}
+
 class AppRoutes {
   static const detail = '/detail';
   static const reader = '/reader';
+  static const videoDetail = '/video/detail';
+  static const videoPlay = '/video/play';
 
   static Route<dynamic>? onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -52,6 +82,19 @@ class AppRoutes {
         return MaterialPageRoute(
           settings: settings,
           builder: (_) => ReaderPage(args: args),
+        );
+      case videoDetail:
+        final args = settings.arguments as VideoDetailArgs;
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (_) =>
+              VideoDetailPage(seriesId: args.seriesId, preview: args.preview),
+        );
+      case videoPlay:
+        final args = settings.arguments as VideoPlayArgs;
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (_) => VideoPlayerPage(args: args),
         );
       default:
         return null;

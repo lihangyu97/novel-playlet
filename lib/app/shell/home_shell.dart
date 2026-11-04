@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../features/mine/mine_page.dart';
 import '../../features/recommend/recommend_page.dart';
+import '../../features/video/video_page.dart';
 
-/// 两 tab 外壳：推荐 / 我的。
+/// 三 tab 外壳：小说 / 短剧 / 我的。
 ///
 /// 用 [IndexedStack] 保留各 tab 的滚动位置与已加载数据；后续加 tab 只需在
 /// [destinations] 与 [pages] 各加一项。
@@ -21,7 +22,12 @@ class _HomeShellState extends State<HomeShell> {
     NavigationDestination(
       icon: Icon(Icons.explore_outlined),
       selectedIcon: Icon(Icons.explore),
-      label: '推荐',
+      label: '小说',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.movie_outlined),
+      selectedIcon: Icon(Icons.movie),
+      label: '短剧',
     ),
     NavigationDestination(
       icon: Icon(Icons.person_outline),
@@ -30,7 +36,7 @@ class _HomeShellState extends State<HomeShell> {
     ),
   ];
 
-  static const _pages = <Widget>[RecommendPage(), MinePage()];
+  static const _pages = <Widget>[RecommendPage(), VideoPage(), MinePage()];
 
   @override
   Widget build(BuildContext context) {

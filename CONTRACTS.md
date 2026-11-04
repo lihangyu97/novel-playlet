@@ -10,6 +10,8 @@
 - 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读）
 - 主题：`lib/app/theme/app_theme.dart`（含 `ReaderPaper` 阅读底色）
 - 共享组件：`lib/app/widgets/`（NovelCover、NovelGridCard、NovelListTile、LoadingView、ErrorView、EmptyView）
+- 列表页通用骨架：`lib/app/feed/`（`FeedState<T>` 分页状态、`FeedView<T>` 滚动/补屏/下拉刷新/底部状态、`FeedGrid<T>` 三列网格、`FeedSearchField`、`FeedSectionTitle`、`FeedFooter`）。新列表页优先复用它，不要各写一套
+- 详情页通用组件：`lib/app/widgets/detail/detail_common.dart`（`DetailCoverHeader` 封面头、`DetailIntroCard` 简介+标签、`ExpandableIntro`、`DetailSectionHeader`、`DetailTagChip`）。小说/短剧详情共用，特殊模块（目录/选集）各自在 feature 内实现
 - 路由：`lib/app/router.dart`（`AppRoutes.detail` / `AppRoutes.reader` + `DetailArgs` / `ReaderArgs`）
 - providers：`lib/app/providers.dart`（`apiClientProvider`、`readingStoreProvider`）
 - ProviderScope 已在 `main.dart` 里，页面直接用 `ConsumerWidget` / `ConsumerStatefulWidget`
@@ -19,7 +21,7 @@
 ## 硬性规则
 
 1. **只改自己 feature 目录里的文件**（见各自任务说明）。共享文件（`lib/app/**`、`lib/data/**`、`lib/core/**`、`lib/src/rust/**`、`rust/`、`ios/`、`pubspec.yaml`）一律不要改。缺共享组件就在自己的目录里写。
-2. **不要新增依赖。** 只用 pubspec 里现有的包（flutter_riverpod、cached_network_image、html、shared_preferences、flutter_secure_storage、path_provider）。
+2. **不要新增依赖。** 只用 pubspec 里现有的包（flutter_riverpod、cached_network_image、html、shared_preferences、flutter_secure_storage、path_provider、video_player）。`video_player` 是视频域专用：只允许 `lib/features/video/` 使用，播放器细节见 `docs/video-playback.md`。
 3. **不要跑 `flutter build` / `flutter run`**（很慢，由 Lead 统一验证）。用 `flutter analyze lib/features/<你的域>` 自检，必须 0 error 0 warning。
 4. UI 文案用中文；注释写"为什么"，不要写"做了什么"。
 5. 只用 Material 3 + `Theme.of(context).colorScheme`，不要硬编码颜色（阅读页底色用 `ReaderPaper`）。

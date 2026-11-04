@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
 
-/// 顶部搜索框：固定在页面顶部，不随列表滚动。
+/// 首页流顶部搜索框（小说推荐 / 短剧推荐共用）。
 ///
 /// 输入文本是纯 UI 状态，留在 TextEditingController；提交/清空/取消都只是
 /// 回调，由页面翻译成 provider 操作。
 ///
 /// 结构刻意不用 `InputDecoration` 的 prefix/suffixIcon：
 ///   - suffix 的 `IconButton` 有最小触控尺寸，输入后会把整行撑高；
-///   - prefixIcon 在固定高度里不垂直居中（实测文字高 4pt、图标高 6pt）。
+///   - prefixIcon 在固定高度里不垂直居中。
 /// 改成 Row 自己排：固定 48pt 高，图标/输入/清空都在同一行里垂直居中。
-class RecommendSearchField extends StatelessWidget {
-  const RecommendSearchField({
+class FeedSearchField extends StatelessWidget {
+  const FeedSearchField({
     super.key,
     required this.controller,
     required this.focusNode,
+    required this.hintText,
     required this.onSubmitted,
     required this.onClear,
     required this.onCancel,
@@ -22,6 +23,7 @@ class RecommendSearchField extends StatelessWidget {
 
   final TextEditingController controller;
   final FocusNode focusNode;
+  final String hintText;
   final ValueChanged<String> onSubmitted;
   final VoidCallback onClear;
   final VoidCallback onCancel;
@@ -41,12 +43,10 @@ class RecommendSearchField extends StatelessWidget {
       children: [
         Expanded(
           child: DecoratedBox(
+            // 只留底色不画描边：iOS 搜索栏观感，避免和列表卡片分隔线叠在一起。
             decoration: BoxDecoration(
-              color: scheme.surface,
+              color: scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(_height / 2),
-              border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.5),
-              ),
             ),
             child: SizedBox(
               height: _height,
@@ -70,7 +70,7 @@ class RecommendSearchField extends StatelessWidget {
                       // collapsed：去掉 decoration 自带的上下留白，行高由外层
                       // 48pt 决定，文字自然垂直居中。
                       decoration: InputDecoration.collapsed(
-                        hintText: '搜索书名/作者',
+                        hintText: hintText,
                         hintStyle: hintStyle,
                       ),
                     ),

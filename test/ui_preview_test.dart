@@ -17,7 +17,6 @@ import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
 import 'package:novel_playlet/features/reader/reader_controller.dart';
-import 'package:novel_playlet/features/reader/reader_page.dart';
 import 'package:novel_playlet/features/reader/reader_widgets.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';

@@ -36,37 +36,34 @@ class MinePage extends ConsumerWidget {
         bottom: false,
         child: LayoutBuilder(
           builder: (context, constraints) {
-            return RefreshIndicator(
-              onRefresh: () => _refresh(ref),
-              child: CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(
-                  parent: BouncingScrollPhysics(),
-                ),
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: _MineHeader(
-                      shelfCount: data?.shelf.length,
-                      recentCount: data?.recent.length,
-                      statusText: async.hasError ? '本地书架暂时读不出来' : null,
-                    ),
+            // 需求：除小说推荐页外都不做下拉刷新、也不做橡皮筋回弹；
+            // 书架数据在本地，进页面读一次即可，返回时由 provider 自动更新。
+            return CustomScrollView(
+              physics: const ClampingScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _MineHeader(
+                    shelfCount: data?.shelf.length,
+                    recentCount: data?.recent.length,
+                    statusText: async.hasError ? '本地书架暂时读不出来' : null,
                   ),
-                  if (data != null)
-                    ..._contentSlivers(context, ref, constraints.maxWidth, data)
-                  else if (async.hasError)
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: ErrorView(
-                        message: '读取本地书架失败，请重试',
-                        onRetry: () => ref.invalidate(mineDataProvider),
-                      ),
-                    )
-                  else
-                    const SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: LoadingView(label: '正在读取书架…'),
+                ),
+                if (data != null)
+                  ..._contentSlivers(context, ref, constraints.maxWidth, data)
+                else if (async.hasError)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: ErrorView(
+                      message: '读取本地书架失败，请重试',
+                      onRetry: () => ref.invalidate(mineDataProvider),
                     ),
-                ],
-              ),
+                  )
+                else
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: LoadingView(label: '正在读取书架…'),
+                  ),
+              ],
             );
           },
         ),
@@ -126,17 +123,6 @@ class MinePage extends ConsumerWidget {
       ),
       const SliverToBoxAdapter(child: SizedBox(height: 28)),
     ];
-  }
-
-  Future<void> _refresh(WidgetRef ref) async {
-    // 先失效再等待新 future：RefreshIndicator 需要的是"结束后收起动画"，
-    // 数据本身已经由 provider 推给页面，不需要命令式地接收返回值。
-    ref.invalidate(mineDataProvider);
-    try {
-      await ref.read(mineDataProvider.future);
-    } catch (_) {
-      // 读取失败由 ErrorView 呈现，这里只负责收起下拉指示器。
-    }
   }
 
   void _openDetail(BuildContext context, NovelItem item) {

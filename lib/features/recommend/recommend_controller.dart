@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/api/api_client.dart';
+import '../../data/models/novel_item.dart';
 import 'recommend_state.dart';
 
 /// 当前搜索关键词；null 表示停留在推荐流。
@@ -46,6 +47,10 @@ class RecommendController extends AsyncNotifier<RecommendState> {
   /// 丢弃过期数据，避免"搜索 A 的结果覆盖搜索 B"。
   int _generation = 0;
 
+  /// 控制器级重入锁：状态里的 loadingMore 是给 UI 看的，这里再加一道，
+  /// 防止同一帧内多次滚动/补屏调用把同一个 offset 并发发出去。
+  bool _loadingMore = false;
+
   ApiClient get _api => ref.read(apiClientProvider);
 
   @override
@@ -83,7 +88,7 @@ class RecommendController extends AsyncNotifier<RecommendState> {
       final page = await _api.search(current.query);
       if (generation != _generation) return;
       state = AsyncData(
-        RecommendState.search(
+        FeedState<NovelItem>.search(
           query: current.query,
           items: page.items,
           nextOffset: page.nextOffset,
@@ -95,7 +100,7 @@ class RecommendController extends AsyncNotifier<RecommendState> {
     // 推荐流刷新从 offset 0 重新开一个 session，不带旧 sessionId。
     final page = await _api.recommend();
     if (generation != _generation) return;
-    final fresh = RecommendState.feed(
+    final fresh = FeedState<NovelItem>.feed(
       items: page.items,
       nextOffset: page.nextOffset,
       sessionId: page.sessionId,
@@ -110,10 +115,16 @@ class RecommendController extends AsyncNotifier<RecommendState> {
   /// 都不发新请求。翻页失败只更新底部提示，不清空已加载的列表。
   Future<void> loadMore() async {
     final current = state.value;
-    if (current == null || current.loadingMore || !current.hasMore) return;
+    if (_loadingMore ||
+        current == null ||
+        current.loadingMore ||
+        !current.hasMore) {
+      return;
+    }
     if (current.loadMoreError != null) return;
 
     final generation = _generation;
+    _loadingMore = true;
     state = AsyncData(current.withLoadingMore(true));
     try {
       final page = current.isSearchMode
@@ -125,7 +136,12 @@ class RecommendController extends AsyncNotifier<RecommendState> {
       if (generation != _generation) return;
       final latest = state.value;
       if (latest == null) return;
-      final next = latest.appendPage(page);
+      final next = latest.appendPage(
+        newItems: page.items,
+        idOf: (item) => item.id,
+        nextOffset: page.nextOffset,
+        sessionId: page.sessionId,
+      );
       state = AsyncData(next);
       if (!next.isSearchMode) _feedSnapshot = next;
     } catch (error) {
@@ -133,6 +149,8 @@ class RecommendController extends AsyncNotifier<RecommendState> {
       final latest = state.value;
       if (latest == null) return;
       state = AsyncData(latest.withLoadMoreError(describeFeedError(error)));
+    } finally {
+      _loadingMore = false;
     }
   }
 
@@ -146,7 +164,7 @@ class RecommendController extends AsyncNotifier<RecommendState> {
 
   Future<RecommendState> _loadFeed() async {
     final page = await _api.recommend();
-    final snapshot = RecommendState.feed(
+    final snapshot = FeedState<NovelItem>.feed(
       items: page.items,
       nextOffset: page.nextOffset,
       sessionId: page.sessionId,
@@ -157,7 +175,7 @@ class RecommendController extends AsyncNotifier<RecommendState> {
 
   Future<RecommendState> _loadSearch(String query) async {
     final page = await _api.search(query);
-    return RecommendState.search(
+    return FeedState<NovelItem>.search(
       query: query,
       items: page.items,
       nextOffset: page.nextOffset,

@@ -6,6 +6,9 @@ import '../models/chapter.dart';
 import '../models/chapter_content.dart';
 import '../models/json_utils.dart';
 import '../models/novel_item.dart';
+import '../models/video_detail.dart';
+import '../models/video_series.dart';
+import '../models/video_source.dart';
 
 /// 业务接口层：路径 + 查询参数 + 解析。
 ///
@@ -57,6 +60,113 @@ class ApiClient {
     return NovelFeedPage(items: items, nextOffset: nextOffset);
   }
 
+  /// 短剧 tab 的推荐流。
+  ///
+  /// 同一套书城首页接口按 `tab_type` 分类，取值见官方 `BookstoreTabType`
+  /// （fqapp 抄的那份在 `lib/models/channel_tab.dart`）：2 推荐/小说、5 听书、
+  /// **8 短剧（看剧）**、9 漫画、16 视频 feed、24 漫剧、25 小说、103 短篇。
+  /// 之前用 16 是「视频 feed」，上游只回 2 张卡且没有游标；8 才是短剧流，
+  /// 实测 6 张/页、`next_offset` 逐页 +1（0→1→2 每页都是新剧），session 稳定。
+  ///
+  /// 与书城推荐同一套信封：游标与 session 挂在被回答的 `tab_item` 上，翻页
+  /// 必须回传 session，否则上游会换设备。
+  Future<VideoFeedPage> videoFeed({int offset = 0, String? sessionId}) async {
+    const tabType = 8;
+    final payload = await _getJson('/api/v1/recommend/homepage', {
+      'tab_type': '$tabType',
+      'offset': '$offset',
+      'tab_index': '0',
+      if (sessionId != null && sessionId.isNotEmpty) 'session_id': sessionId,
+    });
+    final data = unwrapEnvelope(payload);
+    final tab = _answeredRecommendTab(data);
+    // 上游会答非所问：`tab_item` 里只有被回答那项带 cell_data，按 `tab_type`
+    // 认领。类型对不上就是别的分类的流（fqapp 同样会整页拒绝），不能当短剧画。
+    if (tab == null || asInt(tab['tab_type'], -1) != tabType) {
+      throw ApiException('短剧推荐数据异常，下拉刷新试试');
+    }
+    final nextOffset = asInt(tab['next_offset']);
+    return VideoFeedPage(
+      items: parseVideoSeries(data),
+      nextOffset: nextOffset > offset ? nextOffset : null,
+      sessionId: firstString(tab, ['session_id']),
+    );
+  }
+
+  /// 短剧搜索（`tab_type=11` = 上游"视频"tab）。
+  Future<VideoFeedPage> searchVideos(String query, {int offset = 0}) async {
+    final payload = await _getJson('/api/v1/search', {
+      'query': query,
+      'tab_type': '11',
+      'offset': '$offset',
+      'count': '10',
+    });
+    return VideoFeedPage(
+      items: parseVideoSeries(payload),
+      nextOffset: _searchNextOffset(payload, offset: offset, tabTypes: const {11}),
+    );
+  }
+
+  /// 短剧详情（`/api/v1/series/{id}`）。
+  Future<VideoDetail> videoDetail(String seriesId) async {
+    final payload = await _getJson(
+      '/api/v1/series/${Uri.encodeComponent(seriesId)}',
+      const {},
+    );
+    return VideoDetail.fromPayload(payload);
+  }
+
+  /// 短剧选集：与小说目录同一条路由，上游按剧集 id 返回分集列表。
+  Future<List<Chapter>> videoEpisodes(String seriesId) => directory(seriesId);
+
+  /// 一集的可播放地址。
+  ///
+  /// 当前走默认（非 stream）模式：内核把整集下载进加密缓存后返回
+  /// `/src/<id>.mp4`，播放器只需按普通 HTTP 拉明文分片。流式回环（边下边播）
+  /// 见 docs/video-playback.md 的 M1，接入后这里换成 `mode=stream`。
+  Future<VideoSource> videoSource(String episodeId, {bool refresh = false}) async {
+    final payload = await _getJson(
+      '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
+      // refresh=1：内核删掉本地缓存文件后重新下载。播放失败（半截/坏缓存）
+      // 时用它能真正重来，否则重试只会拿回同一份坏文件。
+      {if (refresh) 'refresh': '1'},
+      // 首次播放要等整集下载 + 写密钥 sidecar，默认 20s 不够。
+      timeout: const Duration(seconds: 120),
+    );
+    final source = VideoSource.fromPayload(payload);
+    final url = absoluteUrl(source.url);
+    if (url.isEmpty) {
+      throw ApiException('上游没有返回可播放地址（video_url 为空）');
+    }
+    // 下载失败时内核会退回「远程地址 + key」的流式形态；那种地址是密文，
+    // 播放器不能直接播（流式回环见 M1），这里明确失败而不是让 AVPlayer 黑屏。
+    if (source.keyHex.isNotEmpty && !url.contains('/src/')) {
+      throw ApiException(
+        '整集缓存失败：内核只拿到了远程加密流（${Uri.tryParse(url)?.host ?? 'CDN'}），'
+        'M1 流式回环未接入。',
+      );
+    }
+    return VideoSource(
+      url: url,
+      keyHex: source.keyHex,
+      variants: source.variants,
+    );
+  }
+
+  /// 把内核给的相对资源地址（`/src/xxx.mp4`）拼成播放器能直接拉取的绝对地址。
+  String absoluteUrl(String value) {
+    final raw = value.trim();
+    if (raw.isEmpty) return '';
+    final uri = Uri.tryParse(raw);
+    if (uri != null && uri.hasScheme) {
+      if (uri.scheme != 'http' && uri.scheme != 'https') return '';
+      return uri.host.isEmpty ? '' : raw;
+    }
+    final base = _transport.baseUrl;
+    if (base.isEmpty) return '';
+    return Uri.parse(base).resolve(raw).toString();
+  }
+
   Future<BookDetail> bookDetail(String bookId) async {
     final payload = await _getJson(
       '/api/v1/books/${Uri.encodeComponent(bookId)}/detail',
@@ -95,13 +205,15 @@ class ApiClient {
 
   Future<Map<String, dynamic>> _getJson(
     String path,
-    Map<String, String> query,
-  ) async {
+    Map<String, String> query, {
+    Duration? timeout,
+  }) async {
     final encodedQuery = Uri(queryParameters: query).query;
     final response = await _transport.send(
       'GET',
       path,
       query: encodedQuery.isEmpty ? null : encodedQuery,
+      timeout: timeout ?? BackendTransport.defaultTimeout,
     );
     if (response.statusCode != 200) {
       // 内核把错误也包成 JSON，能读 message 就透出去。
@@ -233,11 +345,15 @@ List<NovelItem> parseSearchNovels(Map<String, dynamic> payload) {
   return items;
 }
 
-int? _searchNextOffset(Map<String, dynamic> payload, {required int offset}) {
+int? _searchNextOffset(
+  Map<String, dynamic> payload, {
+  required int offset,
+  Set<int> tabTypes = const {1, 3},
+}) {
   final data = asMap(payload['data']) ?? payload;
   for (final tab in asList(data['search_tabs']).map(asMap).whereType<Map<String, dynamic>>()) {
     final type = asInt(tab['tab_type']);
-    if (type != 3 && type != 1) continue;
+    if (!tabTypes.contains(type)) continue;
     final next = asInt(tab['next_offset']);
     if (next > offset) return next;
   }

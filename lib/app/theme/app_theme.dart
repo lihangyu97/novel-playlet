@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// 品牌主色，沿用当前 App 的橙红。
-const appSeedColor = Color(0xFFEF5038);
+/// 品牌主色：天蓝。primary/secondary 等都由它派生（Material 3 seed），
+/// 阅读页/播放页等直接用 [AppTheme.accent] 的地方也会一起变。
+const appSeedColor = Color(0xFF4FC3F7);
 
 /// 阅读页底色（影响状态栏与翻页容器，不影响全局主题）。
 enum ReaderPaper {

@@ -26,6 +26,8 @@ dependencies:
   # 正文 HTML → 段落。
   html: 0.15.6
   cupertino_icons: ^1.0.8
+  # 视频播放：底层 AVPlayer（iOS）。方案与边界见 docs/video-playback.md。
+  video_player: ^2.14.1
 
 dev_dependencies:
   flutter_test:
