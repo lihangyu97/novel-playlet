@@ -24,6 +24,7 @@
 4. UI 文案用中文；注释写"为什么"，不要写"做了什么"。
 5. 只用 Material 3 + `Theme.of(context).colorScheme`，不要硬编码颜色（阅读页底色用 `ReaderPaper`）。
 6. 列表图片一律走 `NovelCover`（处理空 URL/失败），不要裸 `Image.network`。
+7. 封面一律取缩略图：解析时用 `json_utils.dart` 的 `coverKeys`（`thumb_url` 优先），不要回退到 `detail_page_thumb_url` / `cover` 之外的大图。全 App 封面位最大 108pt 宽，详情 Hero 也只有 96×132；书架与阅读进度会把 `cover` 落盘，存大图 URL 等于永久多付带宽。
 
 ## 数据层 API（已完成，直接用）
 

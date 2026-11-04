@@ -22,9 +22,10 @@ class DetailHero extends StatelessWidget {
 
     final title = _firstNonEmpty([detail?.title, preview?.title]);
     final cover = _firstNonEmpty([detail?.cover, preview?.cover]);
-    // 列表封面（thumb_url）与详情封面（detail_page_thumb_url）是两张不同 URL
-    // 的图：详情图更大更清晰，但换 URL 必然重新下载。垫着列表那张直接替换，
-    // 不要灰块和淡入，否则从列表点进来会看到封面"刷新"一下。
+    // 列表和详情现在都取同一张缩略图（字段顺序共用 `coverKeys`），正常情况
+    // 下两个 cover 就是同一个 URL，从列表点进来直接命中磁盘缓存、不二次下载。
+    // 只有详情缺 `thumb_url`、退到更大的兜底图时两者才会不同：那时先用列表
+    // 那张垫着（不淡入），大图就绪后直接替换，避免灰块和"刷新"感。
     final coverFallback = preview != null && preview!.cover != cover
         ? preview!.cover
         : '';

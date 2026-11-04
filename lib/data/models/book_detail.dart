@@ -81,11 +81,10 @@ class BookDetail {
     return BookDetail(
       bookId: firstString(data, ['book_id', 'item_id']),
       title: firstString(data, ['book_name', 'title', 'name']),
-      cover: firstString(data, [
-        'detail_page_thumb_url',
-        'thumb_url',
-        'cover',
-      ]),
+      // 封面只取缩略图：Hero 位只有 96×132，再大的图纯属浪费流量。字段顺序
+      // 与 [NovelItem] 共用 [coverKeys]，两处拿到的通常是同一个 URL，从列表
+      // 进详情能直接命中图片缓存、不再二次下载。
+      cover: firstString(data, coverKeys),
       author: author.isNotEmpty ? author : firstString(data, ['author']),
       abstract: firstString(data, ['abstract', 'intro', 'description']),
       category: category.isNotEmpty

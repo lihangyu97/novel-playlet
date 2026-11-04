@@ -40,15 +40,13 @@ class NovelItem {
       'name',
       'raw_book_name',
     ]);
+    // 封面和 id/title 一样要回退到卡片层：有的 card 把 thumb_url 挂在外层、
+    // book_data 里只放书名，只看内层会白丢一张图。
+    final cover = firstString(inner, coverKeys);
     return NovelItem(
       id: id.isEmpty ? firstString(raw, ['book_id', 'item_id', 'id']) : id,
       title: title.isEmpty ? firstString(raw, ['title', 'name']) : title,
-      cover: firstString(inner, [
-        'thumb_url',
-        'cover',
-        'cover_url',
-        'detail_page_thumb_url',
-      ]),
+      cover: cover.isNotEmpty ? cover : firstString(raw, coverKeys),
       author: firstString(inner, ['author', 'author_name']),
       intro: firstString(inner, ['abstract', 'intro', 'description', 'book_abstract']),
       category: firstString(inner, ['category', 'category_name', 'badge']),
