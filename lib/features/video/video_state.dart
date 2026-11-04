@@ -57,6 +57,9 @@ class VideoFeedState {
 
   bool get hasMore => nextOffset != null && nextOffset! > 0;
 
+  // 两个 with* 必须互相保留对方的字段：loadMore 里是链式调用
+  // `withLoadingMore(true).withLoadMoreError(null)`，之前后者把 loadingMore
+  // 重置成 false，导致并发守卫失效、同一 offset 被连发上百次。
   VideoFeedState withLoadingMore(bool value) => VideoFeedState._(
     mode: mode,
     query: query,
@@ -64,6 +67,7 @@ class VideoFeedState {
     nextOffset: nextOffset,
     sessionId: sessionId,
     loadingMore: value,
+    loadMoreError: loadMoreError,
   );
 
   VideoFeedState withLoadMoreError(String? message) => VideoFeedState._(
@@ -72,6 +76,7 @@ class VideoFeedState {
     items: items,
     nextOffset: nextOffset,
     sessionId: sessionId,
+    loadingMore: loadingMore,
     loadMoreError: message,
   );
 

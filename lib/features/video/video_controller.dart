@@ -37,6 +37,10 @@ final videoFeedControllerProvider =
 class VideoFeedController extends AsyncNotifier<VideoFeedState> {
   VideoFeedState? _feedSnapshot;
 
+  /// 控制器级重入锁：状态里的 loadingMore 是给 UI 看的，这里再加一道，
+  /// 防止同一帧内多次滚动/补屏调用把同一个 offset 并发发出去。
+  bool _loadingMore = false;
+
   /// build 每重跑一次 +1：异步结果回来时对不上说明关键词已变，丢弃过期数据。
   int _generation = 0;
 
@@ -78,8 +82,14 @@ class VideoFeedController extends AsyncNotifier<VideoFeedState> {
   /// 滚动到底部时追加下一页；重复调用由 loadingMore/hasMore 挡掉。
   Future<void> loadMore() async {
     final current = state.value;
-    if (current == null || !current.hasMore || current.loadingMore) return;
+    if (_loadingMore ||
+        current == null ||
+        !current.hasMore ||
+        current.loadingMore) {
+      return;
+    }
     final generation = _generation;
+    _loadingMore = true;
     state = AsyncData(current.withLoadingMore(true).withLoadMoreError(null));
     try {
       final page = current.isSearchMode
@@ -92,14 +102,21 @@ class VideoFeedController extends AsyncNotifier<VideoFeedState> {
               sessionId: current.sessionId,
             );
       if (generation != _generation) return;
-      state = AsyncData(current.withLoadingMore(false).appendPage(page));
+      // 用请求返回时的最新状态追加，而不是发请求前的快照：期间就算有别的
+      // 状态更新（刷新/补页），也不会把已有卡片覆盖回旧列表。
+      final latest = state.value ?? current;
+      final next = latest.withLoadingMore(false).appendPage(page);
+      state = AsyncData(next);
     } catch (error) {
       if (generation != _generation) return;
+      final latest = state.value ?? current;
       state = AsyncData(
-        current
+        latest
             .withLoadingMore(false)
             .withLoadMoreError(describeVideoError(error)),
       );
+    } finally {
+      _loadingMore = false;
     }
   }
 

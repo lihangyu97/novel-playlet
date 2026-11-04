@@ -72,6 +72,8 @@ class RecommendState {
 
   bool get isEmpty => items.isEmpty;
 
+  // 同 VideoFeedState：两个 with* 必须保留对方的字段，否则 loadingMore
+  // 会被清掉、并发守卫失效。
   RecommendState withLoadingMore(bool value) => RecommendState._(
     mode: mode,
     query: query,
@@ -79,6 +81,7 @@ class RecommendState {
     nextOffset: nextOffset,
     sessionId: sessionId,
     loadingMore: value,
+    loadMoreError: loadMoreError,
   );
 
   RecommendState withLoadMoreError(String? message) => RecommendState._(
@@ -87,6 +90,7 @@ class RecommendState {
     items: items,
     nextOffset: nextOffset,
     sessionId: sessionId,
+    loadingMore: loadingMore,
     loadMoreError: message,
   );
 

@@ -46,6 +46,10 @@ class RecommendController extends AsyncNotifier<RecommendState> {
   /// 丢弃过期数据，避免"搜索 A 的结果覆盖搜索 B"。
   int _generation = 0;
 
+  /// 控制器级重入锁：状态里的 loadingMore 是给 UI 看的，这里再加一道，
+  /// 防止同一帧内多次滚动/补屏调用把同一个 offset 并发发出去。
+  bool _loadingMore = false;
+
   ApiClient get _api => ref.read(apiClientProvider);
 
   @override
@@ -110,10 +114,16 @@ class RecommendController extends AsyncNotifier<RecommendState> {
   /// 都不发新请求。翻页失败只更新底部提示，不清空已加载的列表。
   Future<void> loadMore() async {
     final current = state.value;
-    if (current == null || current.loadingMore || !current.hasMore) return;
+    if (_loadingMore ||
+        current == null ||
+        current.loadingMore ||
+        !current.hasMore) {
+      return;
+    }
     if (current.loadMoreError != null) return;
 
     final generation = _generation;
+    _loadingMore = true;
     state = AsyncData(current.withLoadingMore(true));
     try {
       final page = current.isSearchMode
@@ -133,6 +143,8 @@ class RecommendController extends AsyncNotifier<RecommendState> {
       final latest = state.value;
       if (latest == null) return;
       state = AsyncData(latest.withLoadMoreError(describeFeedError(error)));
+    } finally {
+      _loadingMore = false;
     }
   }
 

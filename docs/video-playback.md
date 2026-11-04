@@ -133,4 +133,5 @@
 | 2026-11-04 | 播放器走 AVFoundation 系（先 `video_player`），渲染优先 platformView；拒绝 media_kit |
 | 2026-11-04 | M0 真机验证通过：ATS 回环放行、platformView 无遮挡、起播 ~1s；后台不做显式暂停（产品确认可接受）；播放器补控制条自动隐藏/点按显隐、缓冲 spinner、拖动松手才 seek |
 | 2026-11-04 | 短剧流改用 `tab_type=8`（官方 video_episode，fqapp 短剧 tab 同款）：6 部/页、游标翻页；16 是视频 feed（2 部无游标），不再使用；响应按 `tab_type` 认领，答非所问整页拒绝 |
+| 2026-11-04 | 修复翻页请求风暴：`withLoadMoreError` 会把 `loadingMore` 重置导致并发守卫失效，同一 offset 每帧连发（实测 12 秒 220 次），并发响应互相覆盖造成列表闪烁；两个 `with*` 互保字段 + 控制器重入锁 + 用最新状态追加；回归见 `test/feed_concurrency_test.dart` |
 | 2026-11-04 | 方向：App 全局锁竖屏；只有播放页的横屏视频（宽高比 >1.05）给「全屏」按钮，点击才临时开横屏，退出全屏/返回/离开播放页/切到竖屏视频都恢复竖屏 |
