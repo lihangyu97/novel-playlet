@@ -38,6 +38,13 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   /// 播完自动下一集只触发一次（完成事件会重复到达）。
   bool _advancing = false;
 
+  /// 控制条显隐：播放中 3.5s 后自动隐藏，点画面切换。暂停时强制常显。
+  bool _controlsVisible = true;
+  Timer? _hideTimer;
+
+  /// 拖动进度条时的临时位置。松手才 seek，避免每个 tick 都打一次 Range。
+  double? _dragValue;
+
   List<Chapter> get _episodes => widget.args.episodes;
 
   Chapter? get _episode =>
@@ -56,6 +63,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   @override
   void dispose() {
     _generation += 1;
+    _hideTimer?.cancel();
     _disposeController();
     super.dispose();
   }
@@ -73,11 +81,14 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     final episode = _episodes[index];
     final generation = ++_generation;
     _advancing = false;
+    _hideTimer?.cancel();
     _disposeController();
     setState(() {
       _index = index;
       _loading = true;
       _error = null;
+      _controlsVisible = true;
+      _dragValue = null;
     });
 
     try {
@@ -104,6 +115,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       setState(() => _loading = false);
       controller.addListener(_onTick);
       await controller.play();
+      _scheduleHide();
     } catch (error) {
       if (!mounted || generation != _generation) return;
       setState(() {
@@ -143,11 +155,37 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     if (controller == null) return;
     if (controller.value.isPlaying) {
       unawaited(controller.pause());
+      // 暂停时把控制条钉住，否则刚点完就消失，用户看不到自己暂停了。
+      _hideTimer?.cancel();
+      setState(() => _controlsVisible = true);
     } else {
       if (_advancing) {
         _advancing = false;
       }
       unawaited(controller.play());
+      _scheduleHide();
+    }
+  }
+
+  /// 3.5s 后自动隐藏控制条；只在真的在播放时隐藏。
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(milliseconds: 3500), () {
+      if (!mounted) return;
+      final controller = _controller;
+      if (controller == null || !controller.value.isPlaying) return;
+      setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _toggleControls() {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    setState(() => _controlsVisible = !_controlsVisible);
+    if (_controlsVisible) {
+      _scheduleHide();
+    } else {
+      _hideTimer?.cancel();
     }
   }
 
@@ -173,16 +211,49 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     final episodeTitle = _episode?.title.isNotEmpty == true
         ? _episode!.title
         : '第 ${_index + 1} 集';
+    final showChrome = !_loading && _error == null;
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
           children: [
             Positioned.fill(child: _buildVideo()),
-            if (!_loading && _error == null) _buildTopBar(episodeTitle),
-            if (!_loading && _error == null) _buildBottomBar(),
+            // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
+            if (showChrome)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _toggleControls,
+                ),
+              ),
+            if (showChrome)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: _chrome(_buildTopBar(episodeTitle)),
+              ),
+            if (showChrome)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _chrome(_buildBottomBar()),
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 控制条的淡入淡出 + 隐藏时不接收点击。
+  Widget _chrome(Widget child) {
+    return IgnorePointer(
+      ignoring: !_controlsVisible,
+      child: AnimatedOpacity(
+        opacity: _controlsVisible ? 1 : 0,
+        duration: const Duration(milliseconds: 180),
+        child: child,
       ),
     );
   }
@@ -212,63 +283,74 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         ),
       );
     }
-    return Center(
-      child: AspectRatio(
-        aspectRatio: controller.value.aspectRatio == 0
-            ? 16 / 9
-            : controller.value.aspectRatio,
-        child: VideoPlayer(controller),
+    return ValueListenableBuilder<VideoPlayerValue>(
+      valueListenable: controller,
+      builder: (context, value, _) => Stack(
+        alignment: Alignment.center,
+        children: [
+          Center(
+            child: AspectRatio(
+              aspectRatio: value.aspectRatio == 0 ? 16 / 9 : value.aspectRatio,
+              child: VideoPlayer(controller),
+            ),
+          ),
+          // seek / 弱网时画面会停住，没有反馈会以为卡死。
+          if (value.isBuffering)
+            const SizedBox(
+              width: 34,
+              height: 34,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: Colors.white,
+              ),
+            ),
+        ],
       ),
     );
   }
 
   Widget _buildTopBar(String episodeTitle) {
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(4, 4, 12, 24),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0x99000000), Color(0x00000000)],
+    return Container(
+      padding: const EdgeInsets.fromLTRB(4, 4, 12, 24),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0x99000000), Color(0x00000000)],
+        ),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: () => Navigator.of(context).maybePop(),
+            icon: const Icon(Icons.arrow_back_ios_new_rounded),
+            color: Colors.white,
           ),
-        ),
-        child: Row(
-          children: [
-            IconButton(
-              onPressed: () => Navigator.of(context).maybePop(),
-              icon: const Icon(Icons.arrow_back_ios_new_rounded),
-              color: Colors.white,
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.args.seriesTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.args.seriesTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    episodeTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  episodeTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -276,105 +358,115 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   Widget _buildBottomBar() {
     final controller = _controller;
     if (controller == null) return const SizedBox.shrink();
-    return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 30, 12, 12),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [Color(0xB3000000), Color(0x00000000)],
-          ),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 30, 12, 12),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [Color(0xB3000000), Color(0x00000000)],
         ),
-        child: ValueListenableBuilder<VideoPlayerValue>(
-          valueListenable: controller,
-          builder: (context, value, _) {
-            final duration = value.duration;
-            final position = value.position > duration ? duration : value.position;
-            final maxMs = duration.inMilliseconds.toDouble();
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 2,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 6,
-                    ),
-                    overlayShape: const RoundSliderOverlayShape(
-                      overlayRadius: 14,
-                    ),
+      ),
+      child: ValueListenableBuilder<VideoPlayerValue>(
+        valueListenable: controller,
+        builder: (context, value, _) {
+          final duration = value.duration;
+          final position = value.position > duration
+              ? duration
+              : value.position;
+          final maxMs = duration.inMilliseconds.toDouble();
+          final shown = _dragValue == null
+              ? position
+              : Duration(milliseconds: _dragValue!.round());
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 6,
                   ),
-                  child: Slider(
-                    min: 0,
-                    max: maxMs <= 0 ? 1 : maxMs,
-                    value: position.inMilliseconds
-                        .toDouble()
-                        .clamp(0, maxMs <= 0 ? 1 : maxMs),
-                    onChanged: (ms) =>
-                        _seekTo(Duration(milliseconds: ms.round())),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 14,
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Row(
-                    children: [
-                      Text(
-                        _formatDuration(position),
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        _formatDuration(duration),
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
+                child: Slider(
+                  min: 0,
+                  max: maxMs <= 0 ? 1 : maxMs,
+                  value: shown.inMilliseconds.toDouble().clamp(
+                    0,
+                    maxMs <= 0 ? 1 : maxMs,
                   ),
+                  // 拖动中只改显示值，松手才真正 seek：每 tick 都 seek 会
+                  // 对回环连发 Range 请求，真机会卡。
+                  onChanged: (ms) {
+                    _hideTimer?.cancel();
+                    setState(() => _dragValue = ms);
+                  },
+                  onChangeEnd: (ms) {
+                    setState(() => _dragValue = null);
+                    _seekTo(Duration(milliseconds: ms.round()));
+                    _scheduleHide();
+                  },
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Row(
                   children: [
-                    IconButton(
-                      onPressed: _openPrevious,
-                      icon: const Icon(Icons.skip_previous_rounded),
-                      color: _index > 0 ? Colors.white : Colors.white38,
-                      iconSize: 30,
-                    ),
-                    const SizedBox(width: 12),
-                    IconButton.filled(
-                      onPressed: _togglePlay,
-                      icon: Icon(
-                        value.isPlaying
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
+                    Text(
+                      _formatDuration(shown),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
                       ),
-                      iconSize: 30,
                     ),
-                    const SizedBox(width: 12),
-                    IconButton(
-                      onPressed: _openNext,
-                      icon: const Icon(Icons.skip_next_rounded),
-                      color: _index + 1 < _episodes.length
-                          ? Colors.white
-                          : Colors.white38,
-                      iconSize: 30,
+                    const Spacer(),
+                    Text(
+                      _formatDuration(duration),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
-              ],
-            );
-          },
-        ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    onPressed: _openPrevious,
+                    icon: const Icon(Icons.skip_previous_rounded),
+                    color: _index > 0 ? Colors.white : Colors.white38,
+                    iconSize: 30,
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton.filled(
+                    onPressed: _togglePlay,
+                    icon: Icon(
+                      value.isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                    ),
+                    iconSize: 30,
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    onPressed: _openNext,
+                    icon: const Icon(Icons.skip_next_rounded),
+                    color: _index + 1 < _episodes.length
+                        ? Colors.white
+                        : Colors.white38,
+                    iconSize: 30,
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
