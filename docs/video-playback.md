@@ -1,7 +1,8 @@
 # 视频播放：方案决策与待定问题
 
 > 分支：`feat/lhy/video-playback`（从 `main` 切出）
-> 状态：方案已定，实现未开始。本文只记录决策与待确认项，不含代码。
+> 状态：M0 骨架已实现（视频 tab / 短剧详情 / 播放页 / 下载后播放链路），待真机验证。
+> 本文只记录决策与待确认项，不含代码。
 > 背景：参考同级 `fqapp`（Android ExoPlayer + Windows media_kit，iOS 未实现）补 iOS 视频播放能力。
 
 ## 1. 已定决策
@@ -46,22 +47,22 @@
 
 ## 3. 实施路径
 
-- **M0（链路验证）**：Dart 补资源 URL 拼接 → 调 `/api/v1/videos/<id>`（非 stream）拿 `/src/<id>.mp4` → `video_player` 起播；同时验证 ATS、Range/seek、texture vs platformView 的首帧/发热对比。
-- **M1（流式回环）**：把流式解密回环扩到 iOS，起播不再等整集下载。实现选型见 4.1。
-- **M2（功能闭环）**：视频 tab（搜索 + 列表）+ 详情页 + 选集 + 播放页 + 缓存后离线播放。
+- **M0（已实现，待真机验证）**：视频 tab（搜索 + 短剧推荐流）、短剧详情页（简介 + 选集）、播放页（`video_player`，播放/暂停/拖动/上下集/播完自动下一集）；取流走非 stream 模式，播放内核 `/src/<id>.mp4` 的按 Range 解密结果；`ios/Runner/Info.plist` 已加 127.0.0.1 的 ATS 例外。
+- **M1（未开始）**：把流式解密回环保留到 iOS，起播不再等整集下载。实现选型见 4.1。
+- **M2（部分完成）**：视频 tab / 详情 / 选集 / 播放页已闭环；缓存后离线播放复用 `/src` 缓存，暂未做缓存管理 UI。
 - **M3**：待定（缓存清理、错误重试等按 4.2 后续再定）。
 
 ## 4. 待定问题
 
 ### 4.1 P0：真机条件恢复后必须验证
 
-1. **ATS**：iOS 17 起 IP 地址不再默认放行，`NSExceptionDomains["127.0.0.1"]` 是否够、`NSAllowsLocalNetworking` 是否必需、iOS 15 最低版本下是否一致。
+1. **ATS**：已按 iOS 17 规则写 `NSExceptionDomains["127.0.0.1"]` + `NSAllowsLocalNetworking`，但 iOS 15 最低版本下的行为仍需真机确认。
 2. **AVPlayer 能否直接消费现有 `/src` 回环**：`video/mp4`、`Accept-Ranges`、206/416、无 `Origin`、`Host` 带端口均符合预期，但 AVPlayer 会并发/乱序/重复发小 Range，起播与拖动 seek 必须真机实测。
 3. **流式回环的技术选型**（建议先做 C 流移植）：
    - 方案 A：把 `fqapp/rust/src/desktop_media.rs` 的 cfg 从 Windows 扩到 iOS，给 Apple 目标编 `native/crypto_core`（纯 C11），从 fqapp 拷入 `native/`；改动小、与 Windows 行为一致。
    - 方案 B：不引入 C，在现有 axum 回环上新开一条 `/media/<session>.mp4`，用纯 Rust `apply_cenc_index` + 远程 Range 抓取；无 C 依赖，但要重写 moov 拉取与远程 Range 缓存。
    - 决定依据：M0/M1 的构建成本与首播延迟实测。
-4. **视频 tab 的命名与位置**：暂定样式与小说 tab 一致，具体名称/图标/是否放第二个 tab 待定。
+4. **渲染通路**：当前用 `VideoViewType.platformView`（底层 AVPlayerLayer，性能更好）。真机需确认播放页的 Flutter 浮层（上下控制条）没有被原生视图遮挡；有遮挡就退回 `textureView`。
 
 ### 4.2 P1：实现过程中定
 

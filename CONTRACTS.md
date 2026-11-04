@@ -19,7 +19,7 @@
 ## 硬性规则
 
 1. **只改自己 feature 目录里的文件**（见各自任务说明）。共享文件（`lib/app/**`、`lib/data/**`、`lib/core/**`、`lib/src/rust/**`、`rust/`、`ios/`、`pubspec.yaml`）一律不要改。缺共享组件就在自己的目录里写。
-2. **不要新增依赖。** 只用 pubspec 里现有的包（flutter_riverpod、cached_network_image、html、shared_preferences、flutter_secure_storage、path_provider）。
+2. **不要新增依赖。** 只用 pubspec 里现有的包（flutter_riverpod、cached_network_image、html、shared_preferences、flutter_secure_storage、path_provider、video_player）。`video_player` 是视频域专用：只允许 `lib/features/video/` 使用，播放器细节见 `docs/video-playback.md`。
 3. **不要跑 `flutter build` / `flutter run`**（很慢，由 Lead 统一验证）。用 `flutter analyze lib/features/<你的域>` 自检，必须 0 error 0 warning。
 4. UI 文案用中文；注释写"为什么"，不要写"做了什么"。
 5. 只用 Material 3 + `Theme.of(context).colorScheme`，不要硬编码颜色（阅读页底色用 `ReaderPaper`）。
