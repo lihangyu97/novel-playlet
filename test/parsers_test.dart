@@ -42,6 +42,26 @@ void main() {
       expect(item.title, '直挂标题');
       expect(item.cover, 'https://example.com/b.jpg');
     });
+
+    test('封面取最小那张：thumb_url 优先于详情图与原图', () {
+      final item = NovelItem.fromRaw({
+        'book_id': 'b3',
+        'book_name': '书C',
+        'thumb_url': 'https://example.com/thumb.jpg',
+        'detail_page_thumb_url': 'https://example.com/detail.jpg',
+        'cover_url': 'https://example.com/original.jpg',
+      });
+      expect(item.cover, 'https://example.com/thumb.jpg');
+    });
+
+    test('封面挂在卡片层、book_data 里没有时也能取到', () {
+      final item = NovelItem.fromRaw({
+        'thumb_url': 'https://example.com/outer.jpg',
+        'book_data': {'book_id': 'b4', 'book_name': '书D'},
+      });
+      expect(item.id, 'b4');
+      expect(item.cover, 'https://example.com/outer.jpg');
+    });
   });
 
   group('parseNovelItems', () {
@@ -159,6 +179,32 @@ void main() {
       expect(detail.serialCount, 120);
       expect(detail.tags, ['玄幻', '热血']);
       expect(detail.metaParts.length, 3);
+    });
+
+    test('详情封面同样取缩略图，不用 detail_page_thumb_url 的大图', () {
+      final detail = BookDetail.fromPayload({
+        'code': 0,
+        'data': {
+          'book_id': 'b1',
+          'book_name': '测试书',
+          'thumb_url': 'https://example.com/thumb.jpg',
+          'detail_page_thumb_url': 'https://example.com/detail.jpg',
+          'cover': 'https://example.com/original.jpg',
+        },
+      });
+      expect(detail.cover, 'https://example.com/thumb.jpg');
+    });
+
+    test('没有 thumb_url 时退回详情图兜底', () {
+      final detail = BookDetail.fromPayload({
+        'code': 0,
+        'data': {
+          'book_id': 'b1',
+          'book_name': '测试书',
+          'detail_page_thumb_url': 'https://example.com/detail.jpg',
+        },
+      });
+      expect(detail.cover, 'https://example.com/detail.jpg');
     });
   });
 

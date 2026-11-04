@@ -8,9 +8,9 @@ import '../../core/cache/app_image_cache.dart';
 /// 上游封面 URL 可能是 http、可能为空、可能 403，所以不能直接用
 /// `Image.network`：失败时给灰色占位而不是红色报错块。
 ///
-/// [fallbackUrl] 是"上一张已经在缓存里的图"（例如列表卡片用的 `thumb_url`）：
-/// 详情接口会换成更高清的 `detail_page_thumb_url`，URL 不同就必然重新下载。
-/// 有 fallback 时先垫着旧图，新图就绪后**直接替换**（配合
+/// [fallbackUrl] 是"上一张已经在缓存里的图"：正常情况下列表与详情取的是同一张
+/// 缩略图（见 `coverKeys`），两者相等时不会出现两个图层；只有详情退到更大的
+/// 兜底图、URL 确实不同时，才先用旧图垫着，新图就绪后**直接替换**（配合
 /// `fadeInDuration: Duration.zero`），避免"灰块 → 淡入"的刷新感。
 class NovelCover extends StatelessWidget {
   const NovelCover({

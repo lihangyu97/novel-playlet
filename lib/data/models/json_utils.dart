@@ -45,6 +45,18 @@ List<dynamic> asList(Object? value) {
   return [value];
 }
 
+/// 封面字段优先级：缩略图 > 详情页缩略图 > 疑似原图。
+///
+/// 上游同一本书会同时给 `thumb_url`（列表小图）、`detail_page_thumb_url`
+/// （详情页图，尺寸大得多）和 `cover`/`cover_url`（原图，1080~1440 宽、
+/// 单张 1~3 MB）。全 App 的封面位最大也就 108pt 宽，一律取最小的那张。
+const coverKeys = [
+  'thumb_url',
+  'detail_page_thumb_url',
+  'cover_url',
+  'cover',
+];
+
 /// 取第一个非空字符串字段。
 String firstString(Map<String, dynamic> map, List<String> keys) {
   for (final key in keys) {
