@@ -296,34 +296,38 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: SafeArea(
-          child: Stack(
-            children: [
-              Positioned.fill(child: _buildVideo()),
-              // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
-              if (showChrome)
-                Positioned.fill(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: _toggleControls,
-                  ),
+        body: Stack(
+          children: [
+            // 视频铺满整屏：全屏横屏时也要盖住底部安全区（Home 指示条那一条），
+            // 否则画面下方会留一道黑边。避让交给各自的 SafeArea 处理：
+            // 视频不避让、控制条避让。
+            Positioned.fill(child: _buildVideo()),
+            // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
+            if (showChrome)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _toggleControls,
                 ),
-              if (showChrome)
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
+              ),
+            if (showChrome)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: SafeArea(
+                  bottom: false,
                   child: _chrome(_buildTopBar(episodeTitle)),
                 ),
-              if (showChrome)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: _chrome(_buildBottomBar()),
-                ),
-            ],
-          ),
+              ),
+            if (showChrome)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: SafeArea(top: false, child: _chrome(_buildBottomBar())),
+              ),
+          ],
         ),
       ),
     );

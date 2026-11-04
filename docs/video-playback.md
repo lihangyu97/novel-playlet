@@ -40,6 +40,7 @@
 - **App 全局锁竖屏**（`main.dart` 启动时 `SystemChrome.setPreferredOrientations([portraitUp])`）：阅读器是横向分页、列表也是竖排布局，转横屏只会挤坏布局。
 - **只有播放页、且只有横屏视频**（`controller.value.aspectRatio > 1.05`）才显示「全屏」按钮；点了才 `setPreferredOrientations([landscapeLeft, landscapeRight])` 进横屏，同时用 `SystemUiMode.manual + overlays: []` 隐藏状态栏（iOS 上 leanBack/immersive 无效）。
 - **退出路径都要恢复竖屏**：退出全屏、系统返回手势（全屏时先退全屏，`PopScope` 拦一层）、离开播放页（`dispose`）、以及全屏中切到竖屏视频（自动退全屏）。
+- **全屏时视频铺满整屏**：播放层不吃 SafeArea（横屏底部 Home 指示条那一条也盖住，避免画面下方黑边），只有顶部/底部控制条各自套 SafeArea 避让；16:9 视频在 19.5:9 横屏上左右留黑边是正常的（保持完整画面，不裁切）。
 - 竖屏视频没有全屏入口：竖屏内容全屏只会更小。
 
 ## 2. 可复用的现成资产
