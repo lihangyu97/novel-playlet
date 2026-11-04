@@ -34,7 +34,7 @@ class FeedView<T> extends StatefulWidget {
   final Future<void> Function() onLoadMore;
   final VoidCallback onRetryLoadMore;
 
-  /// null = 这个页面没有下拉刷新（本项目只保留小说推荐页的下拉刷新）。
+  /// null = 这个页面没有下拉刷新。两个推荐页都传；详情/我的等页面不传。
   final Future<void> Function()? onRefresh;
 
   final String emptyMessage;

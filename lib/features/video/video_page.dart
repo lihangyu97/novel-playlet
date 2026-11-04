@@ -70,6 +70,17 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     ref.read(videoSearchQueryProvider.notifier).cancel();
   }
 
+  Future<void> _refresh() async {
+    try {
+      await ref.read(videoFeedControllerProvider.notifier).refresh();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(describeVideoError(error))));
+    }
+  }
+
   void _retry() => ref.invalidate(videoFeedControllerProvider);
 
   void _retryLoadMore() =>
@@ -139,13 +150,14 @@ class _VideoPageState extends ConsumerState<VideoPage> {
       state: data,
       title: isSearch ? '搜索结果' : '短剧推荐',
       subtitle: isSearch ? '${data.query} · ${data.items.length} 部' : null,
-      // 需求：只有小说推荐页保留下拉刷新，短剧页去掉。
-      onRefresh: null,
+      // 两个推荐页都保留下拉刷新；搜索框在 FeedView 外面固定不动，
+      // 只有下面的内容区随手下滑、松开刷新。
+      onRefresh: _refresh,
       onLoadMore: () => ref.read(videoFeedControllerProvider.notifier).loadMore(),
       onRetryLoadMore: _retryLoadMore,
       emptyMessage: isSearch
           ? '没有找到「${data.query}」\n换个剧名再试试'
-          : '暂时没有短剧推荐',
+          : '暂时没有短剧推荐\n下拉刷新试试',
       emptyIcon: isSearch ? Icons.search_off_rounded : Icons.movie_outlined,
       sliverBuilder: (context, state) {
         final metrics = FeedGridMetrics.of(context, coverAspect: 4 / 3);
