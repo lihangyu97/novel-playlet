@@ -60,24 +60,36 @@ class ApiClient {
     return NovelFeedPage(items: items, nextOffset: nextOffset);
   }
 
-  /// 视频 tab 的短剧推荐流（`tab_type=16` = 短剧推荐；8=看剧、24=漫剧）。
+  /// 短剧 tab 的推荐流。
+  ///
+  /// 同一套书城首页接口按 `tab_type` 分类，取值见官方 `BookstoreTabType`
+  /// （fqapp 抄的那份在 `lib/models/channel_tab.dart`）：2 推荐/小说、5 听书、
+  /// **8 短剧（看剧）**、9 漫画、16 视频 feed、24 漫剧、25 小说、103 短篇。
+  /// 之前用 16 是「视频 feed」，上游只回 2 张卡且没有游标；8 才是短剧流，
+  /// 实测 6 张/页、`next_offset` 逐页 +1（0→1→2 每页都是新剧），session 稳定。
   ///
   /// 与书城推荐同一套信封：游标与 session 挂在被回答的 `tab_item` 上，翻页
   /// 必须回传 session，否则上游会换设备。
   Future<VideoFeedPage> videoFeed({int offset = 0, String? sessionId}) async {
+    const tabType = 8;
     final payload = await _getJson('/api/v1/recommend/homepage', {
-      'tab_type': '16',
+      'tab_type': '$tabType',
       'offset': '$offset',
       'tab_index': '0',
       if (sessionId != null && sessionId.isNotEmpty) 'session_id': sessionId,
     });
     final data = unwrapEnvelope(payload);
     final tab = _answeredRecommendTab(data);
-    final nextOffset = tab == null ? 0 : asInt(tab['next_offset']);
+    // 上游会答非所问：`tab_item` 里只有被回答那项带 cell_data，按 `tab_type`
+    // 认领。类型对不上就是别的分类的流（fqapp 同样会整页拒绝），不能当短剧画。
+    if (tab == null || asInt(tab['tab_type'], -1) != tabType) {
+      throw ApiException('短剧推荐数据异常，下拉刷新试试');
+    }
+    final nextOffset = asInt(tab['next_offset']);
     return VideoFeedPage(
       items: parseVideoSeries(data),
       nextOffset: nextOffset > offset ? nextOffset : null,
-      sessionId: tab == null ? null : firstString(tab, ['session_id']),
+      sessionId: firstString(tab, ['session_id']),
     );
   }
 
