@@ -26,8 +26,13 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
 
-  /// 距底部多远开始预取：滚动中提前请求，避免用户滚到底再干等。
-  static const double _loadMoreThreshold = 480;
+  /// 用来判断"一屏还没填满"：内容比视口短时不会出现滚动，用户就得在空白上
+  /// 硬拖一下才能触发下一页。这里在数据变化后主动补页，直到填满或没有下一页。
+  final _scrollController = ScrollController();
+
+  /// 距底部多远开始预取。别放大：内容只有一页半时 480 会让一次拖动连翻
+  /// 好几页，新卡片连环插入的观感很像"列表在跳动"。
+  static const double _loadMoreThreshold = 200;
 
   /// 列表底部留白，避免最后一行贴着底部导航。
   static const double _bottomInset = 24;
@@ -45,7 +50,34 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
   void dispose() {
     _searchController.dispose();
     _searchFocus.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 上次做"补屏检查"时的条目数。
+  ///
+  /// 只在条目数变化后检查一次：否则 loadingMore 之类的状态变化会反复排队，
+  /// 上游若返回重复页（去重后 0 新增）就会空转不停请求。
+  int _lastFillCheckCount = -1;
+
+  /// 首屏 / 翻页完成后检查一次：内容比视口还短就继续要下一页。
+  void _scheduleViewportFill() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final data = ref.read(recommendControllerProvider).value;
+      if (data == null ||
+          !data.hasMore ||
+          data.loadingMore ||
+          data.loadMoreError != null) {
+        return;
+      }
+      if (data.items.length == _lastFillCheckCount) return;
+      _lastFillCheckCount = data.items.length;
+      // maxScrollExtent == 0 才是"一屏都没填满"：这时页面根本滚不动，
+      // 用户只能在空白处硬拖才能触发下一页。
+      if (_scrollController.position.maxScrollExtent > 0) return;
+      ref.read(recommendControllerProvider.notifier).loadMore();
+    });
   }
 
   void _submitSearch(String raw) {
@@ -116,6 +148,8 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 每次数据变化都试一次补页：内容不足一屏时不应该等用户"硬拖"。
+    _scheduleViewportFill();
     final async = ref.watch(recommendControllerProvider);
     final activeQuery = ref.watch(searchQueryProvider);
 
@@ -180,6 +214,7 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
 
     return _buildScrollable(
       CustomScrollView(
+        controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           const SliverToBoxAdapter(
@@ -207,6 +242,7 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
 
     return _buildScrollable(
       CustomScrollView(
+        controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(
@@ -247,6 +283,7 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
   }) {
     return _buildScrollable(
       CustomScrollView(
+        controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverFillRemaining(

@@ -23,8 +23,12 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
 
-  /// 距底部多远开始预取下一页。
-  static const double _loadMoreThreshold = 480;
+  /// 同小说推荐页：一页只有 6 部，屏幕下沿会留白，用户得硬拖才触发下一页。
+  /// 数据变化后主动补页，直到填满视口或没有下一页。
+  final _scrollController = ScrollController();
+
+  /// 距底部多远开始预取下一页。和小说页一样保持保守，避免一次拖动连翻多页。
+  static const double _loadMoreThreshold = 200;
   static const double _bottomInset = 24;
 
   @override
@@ -40,7 +44,27 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   void dispose() {
     _searchController.dispose();
     _searchFocus.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  int _lastFillCheckCount = -1;
+
+  void _scheduleViewportFill() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final data = ref.read(videoFeedControllerProvider).value;
+      if (data == null ||
+          !data.hasMore ||
+          data.loadingMore ||
+          data.loadMoreError != null) {
+        return;
+      }
+      if (data.items.length == _lastFillCheckCount) return;
+      _lastFillCheckCount = data.items.length;
+      if (_scrollController.position.maxScrollExtent > 0) return;
+      ref.read(videoFeedControllerProvider.notifier).loadMore();
+    });
   }
 
   void _submitSearch(String raw) {
@@ -107,6 +131,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
 
   @override
   Widget build(BuildContext context) {
+    _scheduleViewportFill();
     final async = ref.watch(videoFeedControllerProvider);
     final activeQuery = ref.watch(videoSearchQueryProvider);
 
@@ -168,6 +193,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     }
     return _buildScrollable(
       CustomScrollView(
+        controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(
@@ -190,6 +216,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     }
     return _buildScrollable(
       CustomScrollView(
+        controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(
@@ -234,6 +261,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
           (context, index) {
             final item = items[index];
             return VideoCard(
+              key: ValueKey(item.id),
               item: item,
               width: cellWidth,
               onTap: () => _openDetail(item),
@@ -295,6 +323,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   Widget _buildEmptyScroll({required String message, required IconData icon}) {
     return _buildScrollable(
       CustomScrollView(
+        controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverFillRemaining(

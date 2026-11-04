@@ -49,20 +49,19 @@ class NovelCover extends StatelessWidget {
       ),
     );
 
-    Widget image(String imageUrl, {required bool isFallback}) =>
+    // `asFallbackLayer` 指"垫在另一张图下面"的旧图：那层不能淡入，否则
+    // 换图时会闪一下。列表封面没有垫图层，走正常短淡入，图片就绪时不是
+    // 灰块硬切，观感更稳。
+    Widget image(String imageUrl, {required bool asFallbackLayer}) =>
         CachedNetworkImage(
           imageUrl: imageUrl,
           cacheManager: AppImageCache.manager,
           fit: BoxFit.cover,
           width: width,
           height: height,
-          // 主图加载时不要盖住垫图：透明占位 + 零淡入，就绪即替换。
-          placeholder: (_, _) =>
-              isFallback ? placeholder : const SizedBox.shrink(),
-          errorWidget: (_, _, _) => isFallback
-              ? placeholder
-              : const SizedBox.shrink(),
-          fadeInDuration: isFallback ? Duration.zero : fadeInDuration,
+          placeholder: (_, _) => placeholder,
+          errorWidget: (_, _, _) => placeholder,
+          fadeInDuration: asFallbackLayer ? Duration.zero : fadeInDuration,
         );
 
     final hasFallback = fallbackUrl.isNotEmpty && fallbackUrl != url;
@@ -78,11 +77,11 @@ class NovelCover extends StatelessWidget {
             ? Stack(
                 fit: StackFit.expand,
                 children: [
-                  image(fallbackUrl, isFallback: true),
-                  image(url, isFallback: false),
+                  image(fallbackUrl, asFallbackLayer: true),
+                  image(url, asFallbackLayer: false),
                 ],
               )
-            : image(url, isFallback: true),
+            : image(url, asFallbackLayer: false),
       ),
     );
   }

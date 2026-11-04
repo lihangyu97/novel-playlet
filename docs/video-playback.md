@@ -119,6 +119,7 @@
 
 ## 6. 参考
 
+- `docs/bookmall-tabs.md`：书城首页流 `tab_type` 分类对照（小说/短剧/漫剧/漫画/听书…），本轮短剧流选型的依据
 - `fqapp/IOS.md`：iOS 现状与"要补需接 media_kit 或 AVPlayer 插件"的说明
 - `fqapp/rust/src/desktop_media.rs`：回环流式解密参考实现（Windows）
 - `fqapp/lib/services/native_player.dart` / `episode_source_cache.dart`：播放器契约与数据模型参考

@@ -77,6 +77,8 @@ class RecommendGridSliver extends StatelessWidget {
           (context, index) {
             final item = items[index];
             return NovelGridCard(
+              // 用书 id 而不是下标：翻页追加时已有卡片不会因为重建而丢状态。
+              key: ValueKey(item.id),
               item: item,
               width: metrics.cellWidth,
               onTap: () => onTap(item),
