@@ -81,6 +81,35 @@ void main() {
     expect(videoDir.existsSync(), isTrue, reason: '目录本身保留，内核还要往里写');
   });
 
+  test('iOS 上临时目录就是 Library/Caches：图片缓存不能算两遍', () async {
+    final root = Directory.systemTemp.createTempSync('app_cache_ios_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+
+    // iOS 的布局：<container>/Library/Application Support 与 <container>/Library/Caches，
+    // path_provider 的 getTemporaryDirectory() 返回后者。
+    final library = Directory('${root.path}/Library')..createSync();
+    final support = Directory('${library.path}/Application Support')..createSync();
+    final caches = Directory('${library.path}/Caches')..createSync();
+    final docs = Directory('${root.path}/Documents')..createSync();
+
+    final imageDir = Directory('${caches.path}/libCachedImageData')
+      ..createSync();
+    File('${imageDir.path}/img').writeAsBytesSync(List.filled(400, 1));
+
+    final cache = AppCache(
+      supportDirectory: () async => support,
+      temporaryDirectory: () async => caches,
+      documentsDirectory: () async => docs,
+      clearImageCache: () async {},
+    );
+
+    expect(
+      (await cache.measure()).image,
+      400,
+      reason: '两个候选目录在 iOS 上指向同一处，必须去重',
+    );
+  });
+
   test('formatBytes 展示口径', () {
     expect(formatBytes(0), '0 B');
     expect(formatBytes(1023), '1023 B');

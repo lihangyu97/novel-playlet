@@ -77,31 +77,42 @@ class AppCache {
   Future<Directory> _chapterDir() async =>
       Directory('${(await _supportDirectory()).path}/$_chapterDirName');
 
-  /// 封面缓存目录：不同 iOS 版本 path_provider 指向 tmp 或 Library/Caches，
-  /// 两个位置都查（与 [AppImageCache.trimOnStart] 保持一致）。
+  /// 封面缓存目录：不同 iOS 版本 path_provider 把"临时目录"指到 tmp 或
+  /// Library/Caches，两个位置都查，按绝对路径去重——iOS 上 `getTemporaryDirectory()`
+  /// 就是 `Library/Caches`，不去重会把同一份图片统计两遍（真机上曾显示
+  /// 「封面 69 MB」，实际只有 26 MB）。
   Future<List<Directory>> _imageDirs() async {
+    final seen = <String>{};
     final dirs = <Directory>[];
+    Future<void> add(Directory dir) async {
+      final path = dir.absolute.path;
+      if (seen.add(path)) dirs.add(dir);
+    }
+
     try {
-      final temp = await _temporaryDirectory();
-      dirs.add(Directory('${temp.path}/$_imageCacheKey'));
+      await add(Directory('${(await _temporaryDirectory()).path}/$_imageCacheKey'));
     } catch (_) {}
     try {
       final support = await _supportDirectory();
-      dirs.add(Directory('${support.parent.path}/Caches/$_imageCacheKey'));
+      await add(Directory('${support.parent.path}/Caches/$_imageCacheKey'));
     } catch (_) {}
     return dirs;
   }
 
   /// 封面缓存索引：`flutter_cache_manager` 把 sqflite 库放在 App Support。
+  /// 同样按路径去重。
   Future<List<File>> _imageIndexFiles() async {
+    final seen = <String>{};
     final files = <File>[];
+    void add(File file) {
+      if (seen.add(file.absolute.path)) files.add(file);
+    }
+
     try {
-      final support = await _supportDirectory();
-      files.add(File('${support.path}/$_imageIndexName'));
+      add(File('${(await _supportDirectory()).path}/$_imageIndexName'));
     } catch (_) {}
     try {
-      final temp = await _temporaryDirectory();
-      files.add(File('${temp.path}/$_imageIndexName'));
+      add(File('${(await _temporaryDirectory()).path}/$_imageIndexName'));
     } catch (_) {}
     return files;
   }
