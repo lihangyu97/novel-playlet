@@ -7,8 +7,8 @@ import 'package:video_player/video_player.dart';
 
 import '../../app/providers.dart';
 import '../../app/router.dart';
-import '../../app/widgets/states.dart';
 import '../../data/models/chapter.dart';
+import '../../data/models/json_utils.dart';
 
 /// 播放页：AVPlayer（`video_player`）播放内核解密后的本地 HTTP 流。
 ///
@@ -35,7 +35,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
 
   VideoPlayerController? _controller;
   bool _loading = true;
-  String? _error;
+
+  /// 播放失败的原因 + 可复制的技术详情。播放页的失败原因不止"网络"，也可能是
+  /// 缓存文件半截、编码不支持、ATS 拦截，所以不能只给一句"请重试"。
+  _PlaybackFailure? _error;
 
   /// 异步换集的结果校验：用户连续点下一集时，旧请求回来必须丢弃。
   int _generation = 0;
@@ -89,13 +92,14 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     }
   }
 
-  Future<void> _open(int index) async {
+  Future<void> _open(int index, {bool refresh = false}) async {
     if (_episodes.isEmpty) return;
     final episode = _episodes[index];
     final generation = ++_generation;
     _advancing = false;
     _hideTimer?.cancel();
     _disposeController();
+    String sourceUrl = '';
     setState(() {
       _index = index;
       _loading = true;
@@ -108,7 +112,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       final api = ref.read(apiClientProvider);
       // 默认（非 stream）模式：内核先把整集下载进加密缓存再返回 /src 地址，
       // 所以这里会等一会儿；流式回环（M1）接入后这一步会变成秒开。
-      final source = await api.videoSource(episode.id);
+      final source = await api.videoSource(episode.id, refresh: refresh);
+      sourceUrl = source.url;
       if (!mounted || generation != _generation) return;
 
       final controller = VideoPlayerController.networkUrl(
@@ -133,11 +138,17 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       controller.addListener(_onTick);
       await controller.play();
       _scheduleHide();
-    } catch (error) {
+    } catch (error, stack) {
       if (!mounted || generation != _generation) return;
       setState(() {
         _loading = false;
-        _error = _describePlaybackError(error);
+        _error = _describePlaybackError(
+          error,
+          stack: stack,
+          episode: episode,
+          sourceUrl: sourceUrl,
+          refreshed: refresh,
+        );
       });
     }
   }
@@ -159,12 +170,94 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     }
   }
 
-  String _describePlaybackError(Object error) {
-    final text = '$error';
-    if (text.contains('403') || text.contains('404')) {
-      return '视频地址已过期，请返回重新进入';
+  /// 把播放异常翻译成"人话原因 + 可复制的技术详情"。
+  ///
+  /// 失败发生在两段：`videoSource`（内核取流/整集下载，抛 ApiException /
+  /// TimeoutException）和 `controller.initialize()`（AVPlayer，抛
+  /// PlatformException，msg 里带 AVFoundation 的 `Code=-xxxxx`）。
+  _PlaybackFailure _describePlaybackError(
+    Object error, {
+    required StackTrace stack,
+    required Chapter episode,
+    required String sourceUrl,
+    required bool refreshed,
+  }) {
+    final raw = error.toString();
+    final rawLower = raw.toLowerCase();
+    String title;
+    String reason;
+
+    if (error is TimeoutException) {
+      title = '取流超时';
+      reason = '等内核下载/解密这一集超过 120 秒。常见于网络慢、上游限速，或这一集体积过大。';
+    } else if (error is ApiException) {
+      title = '取流失败';
+      reason = error.message;
+    } else if (error is PlatformException) {
+      final text = [
+        error.code,
+        error.message ?? '',
+        error.details?.toString() ?? '',
+      ].join(' | ');
+      if (RegExp(r'-1022|App Transport Security').hasMatch(text)) {
+        title = '本地视频流被 ATS 拦截';
+        reason = 'iOS 拒绝了 http://127.0.0.1 的回环请求（Info.plist 的 ATS 例外没生效）。';
+      } else if (RegExp(
+        r'-1001|-1005|-1009|-1011|-1012|-1200|-1202',
+      ).hasMatch(text)) {
+        title = '本地视频流连接中断';
+        reason =
+            'AVPlayer 读本地回环流时断开了：常见于内核下载被中断（App 切后台）、'
+            '或回环服务被系统回收。点「重新下载这一集」重试。';
+      } else if (RegExp(
+        r'-1102|-11800|-11828|-11829|avfoundationerrordomain|decode|format',
+        caseSensitive: false,
+      ).hasMatch(text)) {
+        title = '视频解码失败';
+        reason =
+            '这一集的文件可能损坏（半截缓存）或编码不受支持。'
+            '可以点「重新下载这一集」清掉缓存重取。';
+      } else if (RegExp(r'403|404|410').hasMatch(text)) {
+        title = '本地视频地址失效';
+        reason = '回环服务对 /src 返回了 4xx，多半是缓存被清理或内核重启过。重新下载这一集即可。';
+      } else {
+        title = 'AVPlayer 播放失败';
+        reason = '播放器内部错误，具体信息见下方。';
+      }
+      // 兜底：有些插件版本把网络类错误包在 message 的英文描述里。
+      if (title == 'AVPlayer 播放失败' && rawLower.contains('network')) {
+        title = '本地视频流连接中断';
+        reason = '播放器报告网络类错误，详情见下方。';
+      }
+    } else {
+      title = '视频播放失败';
+      reason = '未归类的错误，详情见下方。';
     }
-    return '视频播放失败，请重试';
+
+    final frames = stack.toString().split('\n').take(4).join('\n');
+    final detail = [
+      '《${widget.args.seriesTitle}》第 ${_index + 1} 集 ${episode.title}（id=${episode.id}）',
+      if (sourceUrl.isNotEmpty) '播放地址: $sourceUrl',
+      if (refreshed) '本次为「重新下载这一集」后的结果',
+      '错误类型: ${error.runtimeType}',
+      '原始错误: $raw',
+      if (frames.isNotEmpty) '堆栈(前 4 行):\n$frames',
+    ].join('\n');
+    return _PlaybackFailure(title: title, reason: reason, detail: detail);
+  }
+
+  Future<void> _copyError() async {
+    final error = _error;
+    if (error == null) return;
+    await Clipboard.setData(
+      ClipboardData(
+        text: '${error.title}\n${error.reason}\n${error.detail}',
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('错误信息已复制')));
   }
 
   void _togglePlay() {
@@ -347,14 +440,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
 
   Widget _buildVideo() {
     final controller = _controller;
-    if (_error != null) {
-      return Center(
-        child: ErrorView(
-          message: _error!,
-          onRetry: () => unawaited(_open(_index)),
-        ),
-      );
-    }
+    if (_error != null) return _buildErrorView();
     if (_loading || controller == null || !controller.value.isInitialized) {
       return const Center(
         child: Column(
@@ -392,6 +478,90 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildErrorView() {
+    final failure = _error!;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.error_outline_rounded,
+              color: Colors.white70,
+              size: 40,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              failure.title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              failure.reason,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.all(10),
+              constraints: const BoxConstraints(maxHeight: 180),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  failure.detail,
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 11,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [
+                FilledButton(
+                  onPressed: () => unawaited(_open(_index)),
+                  child: const Text('重试'),
+                ),
+                OutlinedButton(
+                  onPressed: () => unawaited(_open(_index, refresh: true)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white38),
+                  ),
+                  child: const Text('重新下载这一集'),
+                ),
+                TextButton.icon(
+                  onPressed: () => unawaited(_copyError()),
+                  style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                  icon: const Icon(Icons.copy_rounded, size: 16),
+                  label: const Text('复制错误信息'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -588,4 +758,22 @@ String _formatDuration(Duration value) {
   final minutes = (seconds ~/ 60).toString().padLeft(2, '0');
   final rest = (seconds % 60).toString().padLeft(2, '0');
   return '$minutes:$rest';
+}
+
+/// 一次播放失败的可展示信息。
+class _PlaybackFailure {
+  const _PlaybackFailure({
+    required this.title,
+    required this.reason,
+    required this.detail,
+  });
+
+  /// 一句话标题（如「视频解码失败」）。
+  final String title;
+
+  /// 可能原因与建议动作。
+  final String reason;
+
+  /// 可复制的技术详情（集 id、地址、原始异常、堆栈前几行）。
+  final String detail;
 }

@@ -103,6 +103,8 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         }
 
         let stream_mode = params.get_str("mode") == "stream";
+        // 显式重新下载：客户端播放失败（缓存文件损坏/半截）时用它绕过缓存。
+        let force_refresh = params.get_str("refresh") == "1";
         // 短剧 stream 仍以 shortplay 模型选流，但清晰度列表要合并两条接口：
         // 顶档（1080p）只出现在 phoenix 模型的 `fallback_api` 列表里，而两条
         // 接口的编码分布并不相同——shortplay 各档是 h265，phoenix 的低档是解不
@@ -192,7 +194,7 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             return Ok(source);
         }
 
-        match download_and_save(ctx, &video_id, &video_url, &content_key).await {
+        match download_and_save(ctx, &video_id, &video_url, &content_key, force_refresh).await {
             Ok(local_path) => {
                 let main_url = local_path.clone();
                 Ok(json!({
@@ -1361,6 +1363,7 @@ async fn download_and_save(
     video_id: &str,
     video_url: &str,
     content_key: &[u8],
+    force_refresh: bool,
 ) -> Result<String, String> {
     let src_dir = if ctx.src_dir.is_empty() {
         "src".to_string()
@@ -1386,6 +1389,14 @@ async fn download_and_save(
     let filename = format!("{video_id}{ext}");
     let fp = Path::new(&src_dir).join(&filename);
     let guard = cache_entry_lock(&fp).lock_owned().await;
+
+    if force_refresh {
+        // 客户端判定本集放不出来（多半是缓存半截/损坏）时要求重新下载：
+        // 先删文件和密钥 sidecar，否则下面的缓存命中会原样把坏文件再发一次，
+        // 「重试」永远修不好。
+        let _ = tokio::fs::remove_file(&fp).await;
+        let _ = tokio::fs::remove_file(key_sidecar_path(&fp)).await;
+    }
 
     if let Ok(info) = tokio::fs::metadata(&fp).await {
         if info.len() > 0 {

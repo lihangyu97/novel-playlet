@@ -124,22 +124,27 @@ class ApiClient {
   /// 当前走默认（非 stream）模式：内核把整集下载进加密缓存后返回
   /// `/src/<id>.mp4`，播放器只需按普通 HTTP 拉明文分片。流式回环（边下边播）
   /// 见 docs/video-playback.md 的 M1，接入后这里换成 `mode=stream`。
-  Future<VideoSource> videoSource(String episodeId) async {
+  Future<VideoSource> videoSource(String episodeId, {bool refresh = false}) async {
     final payload = await _getJson(
       '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
-      const {},
+      // refresh=1：内核删掉本地缓存文件后重新下载。播放失败（半截/坏缓存）
+      // 时用它能真正重来，否则重试只会拿回同一份坏文件。
+      {if (refresh) 'refresh': '1'},
       // 首次播放要等整集下载 + 写密钥 sidecar，默认 20s 不够。
       timeout: const Duration(seconds: 120),
     );
     final source = VideoSource.fromPayload(payload);
     final url = absoluteUrl(source.url);
     if (url.isEmpty) {
-      throw ApiException('视频地址不可用，请重试');
+      throw ApiException('上游没有返回可播放地址（video_url 为空）');
     }
     // 下载失败时内核会退回「远程地址 + key」的流式形态；那种地址是密文，
     // 播放器不能直接播（流式回环见 M1），这里明确失败而不是让 AVPlayer 黑屏。
     if (source.keyHex.isNotEmpty && !url.contains('/src/')) {
-      throw ApiException('视频缓存失败，请重试');
+      throw ApiException(
+        '整集缓存失败：内核只拿到了远程加密流（${Uri.tryParse(url)?.host ?? 'CDN'}），'
+        'M1 流式回环未接入。',
+      );
     }
     return VideoSource(
       url: url,
