@@ -10,6 +10,8 @@
 - 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读）
 - 主题：`lib/app/theme/app_theme.dart`（含 `ReaderPaper` 阅读底色）
 - 共享组件：`lib/app/widgets/`（NovelCover、NovelGridCard、NovelListTile、LoadingView、ErrorView、EmptyView）
+- 列表页通用骨架：`lib/app/feed/`（`FeedState<T>` 分页状态、`FeedView<T>` 滚动/补屏/下拉刷新/底部状态、`FeedGrid<T>` 三列网格、`FeedSearchField`、`FeedSectionTitle`、`FeedFooter`）。新列表页优先复用它，不要各写一套
+- 详情页通用组件：`lib/app/widgets/detail/detail_common.dart`（`DetailCoverHeader` 封面头、`DetailIntroCard` 简介+标签、`ExpandableIntro`、`DetailSectionHeader`、`DetailTagChip`）。小说/短剧详情共用，特殊模块（目录/选集）各自在 feature 内实现
 - 路由：`lib/app/router.dart`（`AppRoutes.detail` / `AppRoutes.reader` + `DetailArgs` / `ReaderArgs`）
 - providers：`lib/app/providers.dart`（`apiClientProvider`、`readingStoreProvider`）
 - ProviderScope 已在 `main.dart` 里，页面直接用 `ConsumerWidget` / `ConsumerStatefulWidget`

@@ -181,6 +181,30 @@ void main() {
       expect(detail.metaParts.length, 3);
     });
 
+    test('tags 是逗号串时拆成独立标签（上游实测 "传统玄幻,玄幻,武侠"）', () {
+      final detail = BookDetail.fromPayload({
+        'code': 0,
+        'data': {
+          'book_id': 'b1',
+          'book_name': '测试书',
+          'tags': '传统玄幻,玄幻,武侠、女帝',
+        },
+      });
+      expect(detail.tags, ['传统玄幻', '玄幻', '武侠', '女帝']);
+    });
+
+    test('tags 是数组时同样保留并去重', () {
+      final detail = BookDetail.fromPayload({
+        'code': 0,
+        'data': {
+          'book_id': 'b1',
+          'book_name': '测试书',
+          'tags': ['玄幻', '热血', '玄幻'],
+        },
+      });
+      expect(detail.tags, ['玄幻', '热血']);
+    });
+
     test('详情封面同样取缩略图，不用 detail_page_thumb_url 的大图', () {
       final detail = BookDetail.fromPayload({
         'code': 0,

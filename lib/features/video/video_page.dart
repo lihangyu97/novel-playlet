@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/feed/feed_grid.dart';
+import '../../app/feed/feed_search_field.dart';
+import '../../app/feed/feed_view.dart';
 import '../../app/router.dart';
 import '../../app/widgets/states.dart';
 import '../../data/models/video_series.dart';
@@ -8,10 +11,10 @@ import 'video_controller.dart';
 import 'video_state.dart';
 import 'widgets/video_card.dart';
 
-/// 视频 tab：顶部搜索框 + 短剧推荐流；提交搜索后同页切成结果列表。
+/// 短剧 tab：顶部搜索框 + 短剧推荐流；提交搜索后同页切成结果列表。
 ///
-/// 结构照搬推荐页（搜索/列表共用一个 controller），但内容域不同：卡片是
-/// 短剧（`series_id`），点进去是短剧详情再选集播放，不是小说阅读器。
+/// 结构与小说推荐页一致（搜索/列表共用一个 controller），卡片与业务不同；
+/// 滚动/翻页/空态等通用行为交给 [FeedView]。短剧页按需求**没有下拉刷新**。
 class VideoPage extends ConsumerStatefulWidget {
   const VideoPage({super.key});
 
@@ -22,14 +25,6 @@ class VideoPage extends ConsumerStatefulWidget {
 class _VideoPageState extends ConsumerState<VideoPage> {
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
-
-  /// 同小说推荐页：一页只有 6 部，屏幕下沿会留白，用户得硬拖才触发下一页。
-  /// 数据变化后主动补页，直到填满视口或没有下一页。
-  final _scrollController = ScrollController();
-
-  /// 距底部多远开始预取下一页。和小说页一样保持保守，避免一次拖动连翻多页。
-  static const double _loadMoreThreshold = 200;
-  static const double _bottomInset = 24;
 
   @override
   void initState() {
@@ -44,27 +39,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   void dispose() {
     _searchController.dispose();
     _searchFocus.dispose();
-    _scrollController.dispose();
     super.dispose();
-  }
-
-  int _lastFillCheckCount = -1;
-
-  void _scheduleViewportFill() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      final data = ref.read(videoFeedControllerProvider).value;
-      if (data == null ||
-          !data.hasMore ||
-          data.loadingMore ||
-          data.loadMoreError != null) {
-        return;
-      }
-      if (data.items.length == _lastFillCheckCount) return;
-      _lastFillCheckCount = data.items.length;
-      if (_scrollController.position.maxScrollExtent > 0) return;
-      ref.read(videoFeedControllerProvider.notifier).loadMore();
-    });
   }
 
   void _submitSearch(String raw) {
@@ -95,17 +70,6 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     ref.read(videoSearchQueryProvider.notifier).cancel();
   }
 
-  Future<void> _refresh() async {
-    try {
-      await ref.read(videoFeedControllerProvider.notifier).refresh();
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(describeVideoError(error))));
-    }
-  }
-
   void _retry() => ref.invalidate(videoFeedControllerProvider);
 
   void _retryLoadMore() =>
@@ -118,20 +82,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     );
   }
 
-  bool _handleScroll(ScrollNotification notification) {
-    if (notification.metrics.axis != Axis.vertical) return false;
-    if (notification is! ScrollUpdateNotification &&
-        notification is! ScrollEndNotification) {
-      return false;
-    }
-    if (notification.metrics.extentAfter > _loadMoreThreshold) return false;
-    ref.read(videoFeedControllerProvider.notifier).loadMore();
-    return false;
-  }
-
   @override
   Widget build(BuildContext context) {
-    _scheduleViewportFill();
     final async = ref.watch(videoFeedControllerProvider);
     final activeQuery = ref.watch(videoSearchQueryProvider);
 
@@ -141,9 +93,10 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-            child: _VideoSearchField(
+            child: FeedSearchField(
               controller: _searchController,
               focusNode: _searchFocus,
+              hintText: '搜短剧',
               onSubmitted: _submitSearch,
               onClear: _clearSearchInput,
               onCancel: _cancelSearch,
@@ -181,288 +134,32 @@ class _VideoPageState extends ConsumerState<VideoPage> {
       return const LoadingView(label: '正在加载短剧');
     }
 
-    return data.isSearchMode ? _buildSearchResults(data) : _buildFeed(data);
-  }
-
-  Widget _buildFeed(VideoFeedState data) {
-    if (data.items.isEmpty) {
-      return _buildEmptyScroll(
-        message: '暂时没有短剧推荐\n下拉刷新试试',
-        icon: Icons.movie_outlined,
-      );
-    }
-    return _buildScrollable(
-      CustomScrollView(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverToBoxAdapter(
-            child: const _SectionTitle(title: '短剧推荐'),
+    final isSearch = data.isSearchMode;
+    return FeedView<VideoSeries>(
+      state: data,
+      title: isSearch ? '搜索结果' : '短剧推荐',
+      subtitle: isSearch ? '${data.query} · ${data.items.length} 部' : null,
+      // 需求：只有小说推荐页保留下拉刷新，短剧页去掉。
+      onRefresh: null,
+      onLoadMore: () => ref.read(videoFeedControllerProvider.notifier).loadMore(),
+      onRetryLoadMore: _retryLoadMore,
+      emptyMessage: isSearch
+          ? '没有找到「${data.query}」\n换个剧名再试试'
+          : '暂时没有短剧推荐',
+      emptyIcon: isSearch ? Icons.search_off_rounded : Icons.movie_outlined,
+      sliverBuilder: (context, state) {
+        final metrics = FeedGridMetrics.of(context, coverAspect: 4 / 3);
+        return FeedGrid<VideoSeries>(
+          items: state.items,
+          metrics: metrics,
+          itemBuilder: (context, item, width) => VideoCard(
+            key: ValueKey(item.id),
+            item: item,
+            width: width,
+            onTap: () => _openDetail(item),
           ),
-          _buildGrid(data.items),
-          _buildFooter(data),
-          const SliverToBoxAdapter(child: SizedBox(height: _bottomInset)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchResults(VideoFeedState data) {
-    if (data.items.isEmpty) {
-      return _buildEmptyScroll(
-        message: '没有找到「${data.query}」\n换个剧名再试试',
-        icon: Icons.search_off_rounded,
-      );
-    }
-    return _buildScrollable(
-      CustomScrollView(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverToBoxAdapter(
-            child: _SectionTitle(
-              title: '搜索结果',
-              subtitle: '${data.query} · ${data.items.length} 部',
-            ),
-          ),
-          _buildGrid(data.items),
-          _buildFooter(data),
-          const SliverToBoxAdapter(child: SizedBox(height: _bottomInset)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGrid(List<VideoSeries> items) {
-    final width = MediaQuery.sizeOf(context).width;
-    const columns = 3;
-    const horizontal = 16.0;
-    const spacing = 12.0;
-    final cellWidth = (width - horizontal * 2 - spacing * 2) / columns;
-    final textScaler = MediaQuery.textScalerOf(context);
-    final titleLine =
-        textScaler.scale(Theme.of(context).textTheme.bodyMedium?.fontSize ?? 14) *
-        1.25;
-    final metaLine =
-        textScaler.scale(Theme.of(context).textTheme.bodySmall?.fontSize ?? 12) *
-        1.4;
-    final cellHeight = cellWidth * 4 / 3 + 8 + titleLine * 2 + 3 + metaLine + 6;
-
-    return SliverPadding(
-      padding: const EdgeInsets.symmetric(horizontal: horizontal),
-      sliver: SliverGrid(
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: columns,
-          crossAxisSpacing: spacing,
-          mainAxisSpacing: 16,
-          mainAxisExtent: cellHeight,
-        ),
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            final item = items[index];
-            return VideoCard(
-              key: ValueKey(item.id),
-              item: item,
-              width: cellWidth,
-              onTap: () => _openDetail(item),
-            );
-          },
-          childCount: items.length,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFooter(VideoFeedState data) {
-    if (data.loadingMore) {
-      return const SliverToBoxAdapter(
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 18),
-          child: Center(
-            child: SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          ),
-        ),
-      );
-    }
-    final error = data.loadMoreError;
-    if (error != null) {
-      return SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Column(
-            children: [
-              Text(error, style: Theme.of(context).textTheme.bodySmall),
-              TextButton(onPressed: _retryLoadMore, child: const Text('重试')),
-            ],
-          ),
-        ),
-      );
-    }
-    if (!data.hasMore && data.items.isNotEmpty) {
-      return SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 18),
-          child: Center(
-            child: Text(
-              '没有更多了',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    return const SliverToBoxAdapter(child: SizedBox.shrink());
-  }
-
-  Widget _buildEmptyScroll({required String message, required IconData icon}) {
-    return _buildScrollable(
-      CustomScrollView(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: EmptyView(message: message, icon: icon),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildScrollable(Widget child) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: _handleScroll,
-      child: RefreshIndicator(onRefresh: _refresh, child: child),
-    );
-  }
-}
-
-/// 顶部搜索框。结构与推荐页一致（固定 48 高，图标/输入/清空同行居中），
-/// 但留在视频 feature 内，避免跨 feature 依赖。
-class _VideoSearchField extends StatelessWidget {
-  const _VideoSearchField({
-    required this.controller,
-    required this.focusNode,
-    required this.onSubmitted,
-    required this.onClear,
-    required this.onCancel,
-    required this.showCancel,
-  });
-
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final ValueChanged<String> onSubmitted;
-  final VoidCallback onClear;
-  final VoidCallback onCancel;
-  final bool showCancel;
-
-  static const double _height = 48;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    // 清空按钮跟随输入内容出现/消失，所以自己监听 controller，不能等父级重建。
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: controller,
-      builder: (context, value, _) => Row(
-        children: [
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(_height / 2),
-              ),
-              child: SizedBox(
-                height: _height,
-                child: Row(
-                  children: [
-                    const SizedBox(width: 14),
-                    Icon(
-                      Icons.search_rounded,
-                      size: 20,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: controller,
-                        focusNode: focusNode,
-                        textInputAction: TextInputAction.search,
-                        onSubmitted: onSubmitted,
-                        style: theme.textTheme.bodyMedium,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          border: InputBorder.none,
-                          hintText: '搜短剧',
-                          hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (value.text.isNotEmpty)
-                      IconButton(
-                        onPressed: onClear,
-                        icon: const Icon(Icons.cancel_rounded, size: 18),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          if (showCancel)
-            TextButton(onPressed: onCancel, child: const Text('取消')),
-        ],
-      ),
-    );
-  }
-}
-
-/// 区块标题。间距/字重必须和小说推荐页的 [RecommendSectionTitle] 完全一致：
-/// 两个 tab 共用顶部搜索框，标题只要差 1~2pt，来回切 tab 时就会看到文字上下跳。
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.title, this.subtitle});
-
-  final String title;
-  final String? subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final subtitle = this.subtitle;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      child: Row(
-        children: [
-          Text(
-            title,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
+        );
+      },
     );
   }
 }

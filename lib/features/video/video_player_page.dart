@@ -9,6 +9,7 @@ import '../../app/providers.dart';
 import '../../app/router.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
+import 'widgets/episode_picker_sheet.dart';
 
 /// 播放页：AVPlayer（`video_player`）播放内核解密后的本地 HTTP 流。
 ///
@@ -362,6 +363,17 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     if (controller == null) return;
     _advancing = false;
     unawaited(controller.seekTo(position));
+  }
+
+  Future<void> _openEpisodePicker() async {
+    final picked = await showEpisodePickerSheet(
+      context,
+      episodes: _episodes,
+      currentIndex: _index,
+      seriesTitle: widget.args.seriesTitle,
+    );
+    if (!mounted || picked == null || picked == _index) return;
+    await _open(picked);
   }
 
   void _openPrevious() {
@@ -725,6 +737,21 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                           iconSize: 30,
                         ),
                       ],
+                    ),
+                    // 左侧「选集」：像阅读器目录弹层一样快速跳集。
+                    Positioned(
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: IconButton(
+                          onPressed: () => unawaited(_openEpisodePicker()),
+                          icon: const Icon(Icons.video_library_outlined),
+                          color: Colors.white,
+                          iconSize: 26,
+                          tooltip: '选集',
+                        ),
+                      ),
                     ),
                     // 只有横屏视频才给全屏入口：竖屏内容全屏只会更小。
                     if (_isLandscapeVideo(value))

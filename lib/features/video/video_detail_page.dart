@@ -3,14 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/router.dart';
-import '../../app/widgets/novel_cover.dart';
+import '../../app/widgets/detail/detail_common.dart';
 import '../../app/widgets/states.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/video_detail.dart';
 import '../../data/models/video_series.dart';
 
-/// 短剧详情：封面 + 简介 + 选集。
+/// 短剧详情：与小说详情共用同一套版式（沉浸渐变 + 封面/标题/元信息 +
+/// 简介/标签卡片），差异只在「选集」这个特殊模块。
 ///
 /// 详情与选集是两个上游接口（`/series/{id}` 与 `/books/{id}/directory`），
 /// 互不依赖所以并发拉；任一失败都落到整页重试——没有选集就无法播放，详情
@@ -50,11 +51,7 @@ class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
 
   void _retry() => setState(_load);
 
-  void _openEpisode(
-    VideoDetail detail,
-    List<Chapter> episodes,
-    int index,
-  ) {
+  void _openEpisode(VideoDetail detail, List<Chapter> episodes, int index) {
     Navigator.of(context).pushNamed(
       AppRoutes.videoPlay,
       arguments: VideoPlayArgs(
@@ -69,24 +66,37 @@ class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.preview?.title ?? '短剧')),
-      body: FutureBuilder<({VideoDetail detail, List<Chapter> episodes})>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const LoadingView(label: '正在加载剧集');
-          }
-          if (snapshot.hasError || !snapshot.hasData) {
-            final error = snapshot.error;
-            return ErrorView(
-              message: error is ApiException ? error.message : '剧集加载失败，请重试',
-              onRetry: _retry,
-            );
-          }
-          final data = snapshot.data!;
-          return _buildContent(data.detail, data.episodes);
-        },
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              scheme.primary.withValues(alpha: 0.10),
+              scheme.primary.withValues(alpha: 0),
+            ],
+            stops: const [0, 0.32],
+          ),
+        ),
+        child: FutureBuilder<({VideoDetail detail, List<Chapter> episodes})>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const LoadingView(label: '正在加载剧集');
+            }
+            if (snapshot.hasError || !snapshot.hasData) {
+              final error = snapshot.error;
+              return ErrorView(
+                message: error is ApiException ? error.message : '剧集加载失败，请重试',
+                onRetry: _retry,
+              );
+            }
+            final data = snapshot.data!;
+            return _buildContent(data.detail, data.episodes);
+          },
+        ),
       ),
     );
   }
@@ -106,89 +116,31 @@ class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
     final count = detail.episodeCount > 0
         ? detail.episodeCount
         : episodes.length;
+    final meta = [
+      if (detail.categories.isNotEmpty) detail.categories.join(' · '),
+      if (detail.playCount > 0) '${_formatCount(detail.playCount)} 次播放',
+    ].join(' · ');
 
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                NovelCover(url: cover, width: 104, height: 138, radius: 12),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      if (count > 0)
-                        Text(
-                          '全 $count 集',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      if (detail.categories.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            for (final category in detail.categories.take(4))
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: scheme.surfaceContainerHighest,
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  category,
-                                  style: theme.textTheme.labelSmall,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                      if (detail.playCount > 0) ...[
-                        const SizedBox(height: 10),
-                        Text(
-                          '${_formatCount(detail.playCount)} 次播放',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          child: DetailCoverHeader(
+            cover: cover,
+            title: title,
+            subtitle: count > 0 ? '全 $count 集' : '',
+            meta: meta,
           ),
         ),
-        if (intro.isNotEmpty)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-              child: _ExpandableIntro(text: intro),
-            ),
-          ),
         SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 22, 16, 10),
-            child: Text(
-              episodes.isEmpty ? '暂无选集' : '选集',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
+          child: DetailIntroCard(intro: intro, tags: detail.categories),
+        ),
+        SliverToBoxAdapter(
+          child: DetailSectionHeader(
+            title: '选集',
+            trailing: Text(
+              '共 ${episodes.length} 集',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -205,7 +157,12 @@ class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
           )
         else
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            padding: const EdgeInsets.fromLTRB(
+              detailGutter,
+              0,
+              detailGutter,
+              24,
+            ),
             sliver: SliverGrid(
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 4,
@@ -233,47 +190,6 @@ class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
             ),
           ),
       ],
-    );
-  }
-}
-
-/// 简介折叠：默认 3 行，点「展开」看全文。
-class _ExpandableIntro extends StatefulWidget {
-  const _ExpandableIntro({required this.text});
-
-  final String text;
-
-  @override
-  State<_ExpandableIntro> createState() => _ExpandableIntroState();
-}
-
-class _ExpandableIntroState extends State<_ExpandableIntro> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return GestureDetector(
-      onTap: () => setState(() => _expanded = !_expanded),
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.text,
-            maxLines: _expanded ? null : 3,
-            overflow: _expanded ? null : TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _expanded ? '收起' : '展开',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.primary,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

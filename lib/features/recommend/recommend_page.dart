@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/feed/feed_grid.dart';
+import '../../app/feed/feed_search_field.dart';
+import '../../app/feed/feed_view.dart';
 import '../../app/router.dart';
+import '../../app/widgets/novel_card.dart';
 import '../../app/widgets/states.dart';
 import '../../data/models/novel_item.dart';
 import 'recommend_controller.dart';
 import 'recommend_state.dart';
-import 'widgets/recommend_footer.dart';
-import 'widgets/recommend_grid.dart';
 import 'widgets/recommend_results_sliver.dart';
-import 'widgets/recommend_search_field.dart';
 
-/// 推荐页：顶部搜索框 + 三列推荐流；提交搜索后同一页切成结果列表。
+/// 小说推荐页：顶部搜索框 + 三列推荐流；提交搜索后同一页切成结果列表。
 ///
-/// 页面自己只保留输入框/焦点这类 UI 状态，列表数据全部在
-/// [recommendControllerProvider] 里，切 tab、搜索往返都不会丢已加载的内容。
+/// 页面只保留输入框/焦点这类 UI 状态；列表数据全部在
+/// [recommendControllerProvider] 里，切 tab、搜索往返都不丢已加载的内容。
+/// 滚动/翻页/下拉刷新/空态这些通用行为交给 [FeedView]。
 class RecommendPage extends ConsumerStatefulWidget {
   const RecommendPage({super.key});
 
@@ -25,17 +27,6 @@ class RecommendPage extends ConsumerStatefulWidget {
 class _RecommendPageState extends ConsumerState<RecommendPage> {
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
-
-  /// 用来判断"一屏还没填满"：内容比视口短时不会出现滚动，用户就得在空白上
-  /// 硬拖一下才能触发下一页。这里在数据变化后主动补页，直到填满或没有下一页。
-  final _scrollController = ScrollController();
-
-  /// 距底部多远开始预取。别放大：内容只有一页半时 480 会让一次拖动连翻
-  /// 好几页，新卡片连环插入的观感很像"列表在跳动"。
-  static const double _loadMoreThreshold = 200;
-
-  /// 列表底部留白，避免最后一行贴着底部导航。
-  static const double _bottomInset = 24;
 
   @override
   void initState() {
@@ -50,34 +41,7 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
   void dispose() {
     _searchController.dispose();
     _searchFocus.dispose();
-    _scrollController.dispose();
     super.dispose();
-  }
-
-  /// 上次做"补屏检查"时的条目数。
-  ///
-  /// 只在条目数变化后检查一次：否则 loadingMore 之类的状态变化会反复排队，
-  /// 上游若返回重复页（去重后 0 新增）就会空转不停请求。
-  int _lastFillCheckCount = -1;
-
-  /// 首屏 / 翻页完成后检查一次：内容比视口还短就继续要下一页。
-  void _scheduleViewportFill() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      final data = ref.read(recommendControllerProvider).value;
-      if (data == null ||
-          !data.hasMore ||
-          data.loadingMore ||
-          data.loadMoreError != null) {
-        return;
-      }
-      if (data.items.length == _lastFillCheckCount) return;
-      _lastFillCheckCount = data.items.length;
-      // maxScrollExtent == 0 才是"一屏都没填满"：这时页面根本滚不动，
-      // 用户只能在空白处硬拖才能触发下一页。
-      if (_scrollController.position.maxScrollExtent > 0) return;
-      ref.read(recommendControllerProvider.notifier).loadMore();
-    });
   }
 
   void _submitSearch(String raw) {
@@ -133,23 +97,8 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
     );
   }
 
-  /// 滚动接近底部时追加下一页；重复请求由 controller 的 loadingMore/hasMore
-  /// 挡掉，这里不用再防抖。
-  bool _handleScroll(ScrollNotification notification) {
-    if (notification.metrics.axis != Axis.vertical) return false;
-    if (notification is! ScrollUpdateNotification &&
-        notification is! ScrollEndNotification) {
-      return false;
-    }
-    if (notification.metrics.extentAfter > _loadMoreThreshold) return false;
-    ref.read(recommendControllerProvider.notifier).loadMore();
-    return false;
-  }
-
   @override
   Widget build(BuildContext context) {
-    // 每次数据变化都试一次补页：内容不足一屏时不应该等用户"硬拖"。
-    _scheduleViewportFill();
     final async = ref.watch(recommendControllerProvider);
     final activeQuery = ref.watch(searchQueryProvider);
 
@@ -159,9 +108,10 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-            child: RecommendSearchField(
+            child: FeedSearchField(
               controller: _searchController,
               focusNode: _searchFocus,
+              hintText: '搜索书名/作者',
               onSubmitted: _submitSearch,
               onClear: _clearSearchInput,
               onCancel: _cancelSearch,
@@ -201,61 +151,36 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
       return const LoadingView(label: '正在加载推荐');
     }
 
-    return data.isSearchMode ? _buildSearchResults(data) : _buildFeed(data);
-  }
-
-  Widget _buildFeed(RecommendState data) {
-    if (data.items.isEmpty) {
-      return _buildEmptyScroll(
-        message: '暂时没有推荐内容\n下拉刷新试试',
-        icon: Icons.auto_stories_outlined,
-      );
-    }
-
-    return _buildScrollable(
-      CustomScrollView(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          const SliverToBoxAdapter(
-            child: RecommendSectionTitle(title: '为你推荐'),
+    final isSearch = data.isSearchMode;
+    return FeedView<NovelItem>(
+      state: data,
+      title: isSearch ? '搜索结果' : '为你推荐',
+      subtitle: isSearch ? '${data.query} · ${_countLabel(data)}' : null,
+      onRefresh: _refresh,
+      onLoadMore: () => ref.read(recommendControllerProvider.notifier).loadMore(),
+      onRetryLoadMore: _retryLoadMore,
+      emptyMessage: isSearch
+          ? '没有找到「${data.query}」\n换个书名或作者再试试'
+          : '暂时没有推荐内容\n下拉刷新试试',
+      emptyIcon: isSearch
+          ? Icons.search_off_rounded
+          : Icons.auto_stories_outlined,
+      sliverBuilder: (context, state) {
+        if (state.isSearchMode) {
+          return RecommendResultsSliver(items: state.items, onTap: _openDetail);
+        }
+        final metrics = FeedGridMetrics.of(context, coverAspect: 1.38);
+        return FeedGrid<NovelItem>(
+          items: state.items,
+          metrics: metrics,
+          itemBuilder: (context, item, width) => NovelGridCard(
+            key: ValueKey(item.id),
+            item: item,
+            width: width,
+            onTap: () => _openDetail(item),
           ),
-          RecommendGridSliver(
-            items: data.items,
-            metrics: RecommendGridMetrics.of(context),
-            onTap: _openDetail,
-          ),
-          _buildFooterSliver(data),
-          const SliverToBoxAdapter(child: SizedBox(height: _bottomInset)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchResults(RecommendState data) {
-    if (data.items.isEmpty) {
-      return _buildEmptyScroll(
-        message: '没有找到「${data.query}」\n换个书名或作者再试试',
-        icon: Icons.search_off_rounded,
-      );
-    }
-
-    return _buildScrollable(
-      CustomScrollView(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverToBoxAdapter(
-            child: RecommendSectionTitle(
-              title: '搜索结果',
-              subtitle: '${data.query} · ${_countLabel(data)}',
-            ),
-          ),
-          RecommendResultsSliver(items: data.items, onTap: _openDetail),
-          _buildFooterSliver(data),
-          const SliverToBoxAdapter(child: SizedBox(height: _bottomInset)),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -263,42 +188,5 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
   String _countLabel(RecommendState data) {
     final count = data.items.length;
     return data.hasMore ? '已加载 $count 本' : '共 $count 本';
-  }
-
-  Widget _buildFooterSliver(RecommendState data) {
-    return SliverToBoxAdapter(
-      child: RecommendFooter(
-        loadingMore: data.loadingMore,
-        error: data.loadMoreError,
-        hasMore: data.hasMore,
-        onRetry: _retryLoadMore,
-      ),
-    );
-  }
-
-  /// 空态也要能下拉刷新，所以塞进可滚动容器里而不是裸 Center。
-  Widget _buildEmptyScroll({
-    required String message,
-    required IconData icon,
-  }) {
-    return _buildScrollable(
-      CustomScrollView(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: EmptyView(message: message, icon: icon),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildScrollable(Widget child) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: _handleScroll,
-      child: RefreshIndicator(onRefresh: _refresh, child: child),
-    );
   }
 }

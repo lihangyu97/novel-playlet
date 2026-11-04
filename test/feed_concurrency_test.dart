@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
+import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/recommend/recommend_controller.dart';
 import 'package:novel_playlet/features/recommend/recommend_state.dart';
@@ -103,7 +104,7 @@ class _SlowFake extends BackendTransport {
 void main() {
   group('asLoadMore 状态字段', () {
     test('VideoFeedState.withLoadMoreError 保留 loadingMore', () {
-      final state = VideoFeedState.feed(items: const <VideoSeries>[])
+      final state = FeedState<VideoSeries>.feed(items: const <VideoSeries>[])
           .withLoadingMore(true)
           .withLoadMoreError('boom');
       expect(state.loadingMore, isTrue, reason: '清错误不能把 loadingMore 清掉');
@@ -111,7 +112,7 @@ void main() {
     });
 
     test('RecommendState.withLoadMoreError 保留 loadingMore', () {
-      final state = RecommendState.feed(
+      final state = FeedState<NovelItem>.feed(
         items: const [],
       ).withLoadingMore(true).withLoadMoreError('boom');
       expect(state.loadingMore, isTrue);

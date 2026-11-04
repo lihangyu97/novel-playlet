@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/api/api_client.dart';
+import '../../data/models/video_series.dart';
 import 'video_state.dart';
 
 /// 当前视频搜索关键词；null 表示停留在推荐流。
@@ -105,7 +106,12 @@ class VideoFeedController extends AsyncNotifier<VideoFeedState> {
       // 用请求返回时的最新状态追加，而不是发请求前的快照：期间就算有别的
       // 状态更新（刷新/补页），也不会把已有卡片覆盖回旧列表。
       final latest = state.value ?? current;
-      final next = latest.withLoadingMore(false).appendPage(page);
+      final next = latest.withLoadingMore(false).appendPage(
+        newItems: page.items,
+        idOf: (item) => item.id,
+        nextOffset: page.nextOffset,
+        sessionId: page.sessionId,
+      );
       state = AsyncData(next);
     } catch (error) {
       if (generation != _generation) return;
@@ -129,7 +135,7 @@ class VideoFeedController extends AsyncNotifier<VideoFeedState> {
 
   Future<VideoFeedState> _loadFeed() async {
     final page = await _api.videoFeed();
-    final snapshot = VideoFeedState.feed(
+    final snapshot = FeedState<VideoSeries>.feed(
       items: page.items,
       nextOffset: page.nextOffset,
       sessionId: page.sessionId,
@@ -140,7 +146,7 @@ class VideoFeedController extends AsyncNotifier<VideoFeedState> {
 
   Future<VideoFeedState> _loadSearch(String query) async {
     final page = await _api.searchVideos(query);
-    return VideoFeedState.search(
+    return FeedState<VideoSeries>.search(
       query: query,
       items: page.items,
       nextOffset: page.nextOffset,

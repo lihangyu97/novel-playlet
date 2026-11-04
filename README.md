@@ -48,6 +48,8 @@ UI (features/*)  ──►  Riverpod controller  ──►  ApiClient (data/api)
 ```
 lib/
   app/          主题、路由、三 tab 外壳、启动闸门、共享组件
+  app/feed/     列表页通用骨架（FeedState/FeedView：分页、补屏、下拉刷新、底部状态）
+  app/widgets/detail/  详情页通用组件（封面头/简介卡/标签/区块标题）
   core/         后端传输/启动/密钥、书架与进度存储
   data/         接口客户端 + 模型与解析（含 video_series / video_detail / video_source）
   features/     recommend / video / detail / reader / mine

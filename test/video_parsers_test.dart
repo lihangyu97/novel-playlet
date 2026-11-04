@@ -143,13 +143,12 @@ void main() {
         nextOffset: 10,
       );
       final next = initial.appendPage(
-        const VideoFeedPage(
-          items: [
-            VideoSeries(id: 's1', title: 'A'),
-            VideoSeries(id: 's2', title: 'B'),
-          ],
-          nextOffset: 10,
-        ),
+        newItems: const [
+          VideoSeries(id: 's1', title: 'A'),
+          VideoSeries(id: 's2', title: 'B'),
+        ],
+        idOf: (item) => item.id,
+        nextOffset: 10,
       );
       expect(next.items.map((item) => item.id), ['s1', 's2']);
       expect(next.hasMore, isFalse);

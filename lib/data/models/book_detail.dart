@@ -70,10 +70,16 @@ class BookDetail {
 
   factory BookDetail.fromPayload(Map<String, dynamic> payload) {
     final data = unwrapEnvelope(payload);
-    final tags = asList(data['tags'])
-        .map((tag) => asString(tag).trim())
-        .where((tag) => tag.isNotEmpty)
-        .toList();
+    // 上游 `tags` 实测是逗号串（"传统玄幻,玄幻,武侠,女帝,…"），不是数组；
+    // 以前整串塞进一个 chip，详情页看起来像一行逗号文本。这里统一拆成独立
+    // 标签，并兼容数组、中文逗号/顿号/斜杠分隔。
+    final tags = <String>[];
+    for (final entry in asList(data['tags'])) {
+      for (final piece in asString(entry).split(RegExp(r'[,，、/|]'))) {
+        final tag = piece.trim();
+        if (tag.isNotEmpty && !tags.contains(tag)) tags.add(tag);
+      }
+    }
     final authorInfo = asMap(data['author_info']);
     // 上游 author_info 里显示名是 user_name（不是 name）。
     final author = firstString(authorInfo ?? const {}, ['user_name', 'name']);
