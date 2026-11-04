@@ -127,7 +127,7 @@ List<VideoSeries> parseVideoSeries(Map<String, dynamic> payload) {
         final detail = asMap(childMap['video_detail']);
         add({
           ...map,
-          if (detail != null) ...detail,
+          ...?detail,
           ...childMap,
         });
       }
