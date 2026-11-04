@@ -8,7 +8,8 @@ const double detailGutter = 16;
 /// 详情页顶部：封面 + 标题/副标题/元信息 + 自定义附加行。
 ///
 /// 小说详情与短剧详情共用同一套版式（沉浸式渐变、96×132 封面、同一套字号
-/// 与间距），差异只通过 [subtitle]/[meta]/[extra] 传进来。
+/// 与间距），差异只通过 [subtitle]/[meta]/[extra] 传进来。封面高度默认按
+/// [kCoverAspect] 从宽度算出（96×132），与列表封面保持同一个比例。
 class DetailCoverHeader extends StatelessWidget {
   const DetailCoverHeader({
     super.key,
@@ -19,8 +20,8 @@ class DetailCoverHeader extends StatelessWidget {
     this.meta = '',
     this.extra,
     this.coverWidth = 96,
-    this.coverHeight = 132,
-  });
+    double? coverHeight,
+  }) : coverHeight = coverHeight ?? coverWidth * kCoverAspect;
 
   final String cover;
   final String coverFallback;

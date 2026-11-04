@@ -169,7 +169,7 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
         if (state.isSearchMode) {
           return RecommendResultsSliver(items: state.items, onTap: _openDetail);
         }
-        final metrics = FeedGridMetrics.of(context, coverAspect: 1.38);
+        final metrics = FeedGridMetrics.of(context);
         return FeedGrid<NovelItem>(
           items: state.items,
           metrics: metrics,

@@ -23,6 +23,7 @@ class NovelGridCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final coverHeight = width * kCoverAspect;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppTheme.cardRadius),
@@ -31,7 +32,7 @@ class NovelGridCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            NovelCover(url: item.cover, width: width, height: width * 1.38),
+            NovelCover(url: item.cover, width: width, height: coverHeight),
             const SizedBox(height: 8),
             Text(
               item.title,

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/router.dart';
+import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/novel_item.dart';
@@ -86,11 +87,11 @@ class MinePage extends ConsumerWidget {
       0.0,
       (available - _gridSpacing * (columns - 1)) / columns,
     );
-    // 与 NovelGridCard 的内部排版对齐（封面 1.38 比例 + 标题两行 + 作者一行），
-    // 再按系统字体缩放留出高度，避免网格单元格比卡片矮造成溢出。
+    // 与 NovelGridCard 的内部排版对齐（封面 kCoverAspect 比例 + 标题两行 +
+    // 作者一行），再按系统字体缩放留出高度，避免网格单元格比卡片矮造成溢出。
     final textScaler = MediaQuery.textScalerOf(context);
     final itemHeight =
-        itemWidth * 1.38 +
+        itemWidth * kCoverAspect +
         8 +
         textScaler.scale(14) * 1.25 * 2 +
         3 +

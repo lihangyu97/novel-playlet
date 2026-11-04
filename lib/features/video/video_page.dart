@@ -160,7 +160,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
           : '暂时没有短剧推荐\n下拉刷新试试',
       emptyIcon: isSearch ? Icons.search_off_rounded : Icons.movie_outlined,
       sliverBuilder: (context, state) {
-        final metrics = FeedGridMetrics.of(context, coverAspect: 4 / 3);
+        final metrics = FeedGridMetrics.of(context);
         return FeedGrid<VideoSeries>(
           items: state.items,
           metrics: metrics,
