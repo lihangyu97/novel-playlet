@@ -94,10 +94,24 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推
 - `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`），并断言两条推荐流/搜索结果的封面尺寸一致。
 - `test/live_probe_test.dart`：默认跳过；需要先 `cargo build` 出 host dylib，且网络能访问设备注册域名。
 
+## 本地数据与缓存
+
+App 沙盒里会落盘的东西（iPhone 13 调试期实测：文稿与数据 400 MB，其中视频缓存 339 MB）：
+
+| 位置（相对 App 沙盒） | 内容 | 上限 / 清理 |
+|---|---|---|
+| `Application Support/backend/src/` | 播放时下载的剧集（密文 mp4 + 密钥 sidecar）、漫画图 | 内核 `MAX_VIDEO_CACHE_BYTES` = **128 MB**，每次下载后按最旧优先淘汰；重看被淘汰的集会重新下载 |
+| `Library/Caches/libCachedImageData/` + `libCachedImageData.db` | 封面图磁盘缓存（500–800px 大图也会落到这里） | 120 个对象 / 7 天；启动时体积 >40 MB 裁到 25 MB |
+| `Application Support/reader_chapters/` | 章节正文 JSON | 最多 300 个文件 / 7 天 |
+| `Application Support/backend/config/` | 上游设备注册池、过滤配置 | **不是缓存**：删了要重新注册设备 |
+| `Library/Preferences/*.plist` | 书架、阅读进度 | **用户数据**：不清理 |
+
+「我的 → 存储」会显示当前缓存占用（视频/封面明细）并提供「清理」：只清上面三类可重建缓存，书架与进度不动。统计/清理逻辑在 `lib/core/cache/app_cache.dart`。
+
 ## 已知限制
 
 1. **首次打开必须联网完成设备注册**（`log.snssdk.com`）。若本机代理/网络拦截该域名，会一直停在「阅读环境启动失败」，可点重试。
-2. 没有离线缓存：正文每次实时拉取（缓存是后续功能，`data/` 层已留出扩展位）。
+2. 没有整本离线下载：正文只有 7 天章节缓存（最多 300 章），视频缓存也只是「播放时下载」的缓存（上限 128 MB），不能当离线片库；离线缓存的 M0 方案见 `feat/lhy/novel-cache` 分支的文档。
 3. 无评论/段评/听书/漫画；阅读器只有横向分页，没有滚动跨章。
 4. 阅读进度记录到「章」级别，未记录页内偏移。
 5. 视频是骨架：起播要等整集下载进内核缓存（流式回环见 `docs/video-playback.md` M1）；不做画中画/HDR/后台播放/AirPlay/锁屏/清晰度切换/弹幕；视频进度暂不落盘。退后台不会主动暂停（快速切回继续播，长时间后台由系统挂起）。短剧流走书城首页的 `tab_type=8`（6 部/页、`next_offset` 游标翻页），翻完游标后暂时不会像 fqapp 那样回退到搜索兜底，见 `docs/video-playback.md` 4.1-5。

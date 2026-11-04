@@ -7,6 +7,7 @@ import '../../app/providers.dart';
 import '../../app/router.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
+import '../../core/cache/app_cache.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/novel_item.dart';
 import 'mine_providers.dart';
@@ -32,6 +33,8 @@ class MinePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineDataProvider);
     final data = async.value;
+    // 缓存占用单独一个 provider：它跟书架/进度无关，清理后单独 invalidate。
+    final cacheUsage = ref.watch(cacheUsageProvider).value;
     return Scaffold(
       body: SafeArea(
         bottom: false,
@@ -50,7 +53,13 @@ class MinePage extends ConsumerWidget {
                   ),
                 ),
                 if (data != null)
-                  ..._contentSlivers(context, ref, constraints.maxWidth, data)
+                  ..._contentSlivers(
+                    context,
+                    ref,
+                    constraints.maxWidth,
+                    data,
+                    cacheUsage,
+                  )
                 else if (async.hasError)
                   SliverFillRemaining(
                     hasScrollBody: false,
@@ -77,6 +86,7 @@ class MinePage extends ConsumerWidget {
     WidgetRef ref,
     double maxWidth,
     MineData data,
+    CacheUsage? cacheUsage,
   ) {
     final available = math.max(0.0, maxWidth - _gutter * 2);
     final columns = math.max(
@@ -122,8 +132,28 @@ class MinePage extends ConsumerWidget {
         onOpen: (item) => _openDetail(context, item),
         onLongPress: (item) => _showShelfMenu(context, ref, item),
       ),
+      // 缓存放在最下面：演示/调试期间最容易堆的是它，用户来这里清一次。
+      const SliverToBoxAdapter(child: _SectionHeader(title: '存储')),
+      SliverToBoxAdapter(
+        child: _CacheTile(
+          usage: cacheUsage,
+          onClear: () => _clearCache(context, ref),
+        ),
+      ),
       const SliverToBoxAdapter(child: SizedBox(height: 28)),
     ];
+  }
+
+  /// 清空可重建缓存（视频/封面/章节），书架与进度不动。
+  Future<void> _clearCache(BuildContext context, WidgetRef ref) async {
+    final freed = await AppCache.instance.clear();
+    ref.invalidate(cacheUsageProvider);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(freed > 0 ? '已清理 ${formatBytes(freed)} 缓存' : '没有可清理的缓存'),
+      ),
+    );
   }
 
   void _openDetail(BuildContext context, NovelItem item) {
@@ -273,6 +303,81 @@ class _MineHeader extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// 缓存占用行：图标 + 明细（视频/封面/章节）+「清理」。
+///
+/// 数字是「某一刻的快照」：视频缓存只有播放时才会变，所以进页面/清理后各算
+/// 一次，不做实时轮询。
+class _CacheTile extends StatelessWidget {
+  const _CacheTile({required this.usage, required this.onClear});
+
+  final CacheUsage? usage;
+  final Future<void> Function() onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final current = usage;
+    final detail = current == null
+        ? '正在统计…'
+        : current.isEmpty
+        ? '暂无缓存'
+        : _detailOf(current);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+      child: Row(
+        children: [
+          Icon(
+            Icons.cleaning_services_outlined,
+            size: 19,
+            color: scheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '缓存占用',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  detail,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: current == null || current.isEmpty ? null : onClear,
+            child: const Text('清理'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 明细：总量放最前（万一被省略号截断，用户仍能看到总数），再列 ≥1 MB 的
+  /// 大头；章节/日志这类零碎项不值得占一行。
+  static String _detailOf(CacheUsage usage) {
+    const mb = 1024 * 1024;
+    final parts = [
+      if (usage.video >= mb) '视频 ${formatBytes(usage.video)}',
+      if (usage.image >= mb) '封面 ${formatBytes(usage.image)}',
+      if (usage.chapter >= mb) '章节 ${formatBytes(usage.chapter)}',
+    ];
+    final total = '共 ${formatBytes(usage.total)}';
+    return parts.isEmpty ? total : '$total · ${parts.join(' · ')}';
   }
 }
 

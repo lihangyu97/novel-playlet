@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/cache/app_cache.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/novel_item.dart';
 
@@ -51,3 +52,9 @@ final mineDataProvider = FutureProvider<MineData>((ref) async {
   final recent = await store.recent(limit: mineRecentLimit);
   return MineData(shelf: shelf, recent: recent);
 });
+
+/// 缓存占用（视频/封面/章节）。切到「我的」页时 invalidate 重算一次——
+/// 视频缓存只有播放时才会增长，不重算就会一直停在进 App 时的数字。
+final cacheUsageProvider = FutureProvider<CacheUsage>(
+  (ref) => AppCache.instance.measure(),
+);

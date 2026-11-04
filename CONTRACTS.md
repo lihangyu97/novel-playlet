@@ -7,7 +7,7 @@
 - 启动链：`lib/main.dart → BootstrapGate → BackendService.start() → Rust init`
 - 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / detail / directory / chapter）
 - 模型：`lib/data/models/`（NovelItem、BookDetail、Chapter、ChapterContent、json_utils）
-- 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读）
+- 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读）；缓存：`lib/core/cache/`（封面缓存 `AppImageCache`、占用统计与清理 `AppCache`，入口在「我的 → 存储」）
 - 主题：`lib/app/theme/app_theme.dart`（含 `ReaderPaper` 阅读底色）
 - 共享组件：`lib/app/widgets/`（NovelCover、NovelGridCard、LoadingView、ErrorView、EmptyView）
 - 列表页通用骨架：`lib/app/feed/`（`FeedState<T>` 分页状态、`FeedView<T>` 滚动/补屏/下拉刷新/底部状态、`FeedGrid<T>` 三列网格、`FeedResultsSliver<T>` + `FeedResultTile` 搜索结果横向列表（小说/短剧共用）、`FeedSearchField`、`FeedSectionTitle`、`FeedFooter`）。新列表页优先复用它，不要各写一套

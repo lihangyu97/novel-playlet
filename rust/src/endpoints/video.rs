@@ -1502,7 +1502,16 @@ async fn download_and_save(
     Ok(format!("/src/{filename}"))
 }
 
-const MAX_VIDEO_CACHE_BYTES: i64 = 512 * 1024 * 1024;
+/// Overall budget for the on-device `src/` cache (downloaded episodes and
+/// manga images share the directory).
+///
+/// A short-drama episode is 10–30 MB, so 128 MB keeps roughly the last 5–10
+/// episodes: enough to continue a series without re-downloading, while keeping
+/// the app sandbox small on a 64/128 GB phone. The budget is enforced after
+/// every download (oldest-files-first eviction); a re-watch of an evicted
+/// episode simply downloads it again. Measured on device before this change:
+/// 27 episodes already took 339 MB with the old 512 MB budget.
+const MAX_VIDEO_CACHE_BYTES: i64 = 128 * 1024 * 1024;
 
 struct CacheEntry {
     path: PathBuf,

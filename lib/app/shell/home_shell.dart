@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/mine/mine_page.dart';
+import '../../features/mine/mine_providers.dart';
 import '../../features/recommend/recommend_page.dart';
 import '../../features/video/video_page.dart';
 
@@ -8,14 +10,14 @@ import '../../features/video/video_page.dart';
 ///
 /// 用 [IndexedStack] 保留各 tab 的滚动位置与已加载数据；后续加 tab 只需在
 /// [destinations] 与 [pages] 各加一项。
-class HomeShell extends StatefulWidget {
+class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
   @override
-  State<HomeShell> createState() => _HomeShellState();
+  ConsumerState<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends ConsumerState<HomeShell> {
   int _index = 0;
 
   static const _destinations = <NavigationDestination>[
@@ -44,7 +46,12 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(index: _index, children: _pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (value) => setState(() => _index = value),
+        onDestinationSelected: (value) {
+          // IndexedStack 的页面不会因切 tab 重建，缓存数字会停在进 App 那一刻；
+          // 切到「我的」时重算一次（视频缓存只有播放时才变）。
+          if (value == 2) ref.invalidate(cacheUsageProvider);
+          setState(() => _index = value);
+        },
         destinations: _destinations,
       ),
     );

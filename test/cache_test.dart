@@ -1,0 +1,93 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/core/cache/app_cache.dart';
+
+/// 缓存统计/清理的回归：只删「可重建」的缓存，用户数据和设备注册池必须留着。
+///
+/// 用临时目录注入（AppCache 的三个目录都可替换），不依赖 path_provider 插件，
+/// 所以能在 host 上直接跑。真机实测（iPhone 13）清理前：视频 339 MB + 封面
+/// 40 MB + 章节 16 KB + 遗留日志 116 KB = 395 MB，正是这个入口要解决的问题。
+void main() {
+  test('measure 统计各缓存目录，clear 只删缓存不动用户数据', () async {
+    final root = Directory.systemTemp.createTempSync('app_cache_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+
+    final support = Directory('${root.path}/support')..createSync();
+    final tmp = Directory('${root.path}/tmp')..createSync();
+    final docs = Directory('${root.path}/docs')..createSync();
+
+    // 内核 src/：剧集 + 密钥 sidecar + 半截下载。
+    final videoDir = Directory('${support.path}/backend/src')
+      ..createSync(recursive: true);
+    File('${videoDir.path}/a.mp4').writeAsBytesSync(List.filled(1000, 1));
+    File('${videoDir.path}/a.key').writeAsBytesSync(List.filled(100, 2));
+    File('${videoDir.path}/b.part').writeAsBytesSync(List.filled(500, 3));
+
+    // 不能删的：设备池 / 过滤配置。
+    final configDir = Directory('${support.path}/backend/config')
+      ..createSync(recursive: true);
+    File('${configDir.path}/device_pool.json').writeAsStringSync('{"dev":1}');
+    File('${configDir.path}/filter.json').writeAsStringSync('{}');
+
+    // 章节正文缓存。
+    final chapterDir = Directory('${support.path}/reader_chapters')
+      ..createSync(recursive: true);
+    File('${chapterDir.path}/c1.json').writeAsStringSync('{}');
+
+    // 封面缓存：tmp 下的文件目录、Caches 下的文件目录、Support 里的索引库。
+    final tmpImage = Directory('${tmp.path}/libCachedImageData')
+      ..createSync(recursive: true);
+    File('${tmpImage.path}/img-a').writeAsBytesSync(List.filled(300, 4));
+    final cachesImage = Directory('${root.path}/Caches/libCachedImageData')
+      ..createSync(recursive: true);
+    File('${cachesImage.path}/img-b').writeAsBytesSync(List.filled(200, 5));
+    final imageIndex = File('${support.path}/libCachedImageData.db')
+      ..writeAsBytesSync(List.filled(10, 6));
+
+    // 早期调试探针遗留的日志。
+    File('${docs.path}/diag.log').writeAsStringSync('x');
+
+    final cache = AppCache(
+      supportDirectory: () async => support,
+      temporaryDirectory: () async => tmp,
+      documentsDirectory: () async => docs,
+      clearImageCache: () async {},
+    );
+
+    final usage = await cache.measure();
+    expect(usage.video, 1600, reason: 'mp4 + key + part 都要算进视频缓存');
+    expect(usage.image, 510, reason: '两个图片目录 + sqflite 索引');
+    expect(usage.chapter, 2);
+    expect(usage.legacyLog, 1);
+    expect(usage.total, 2113);
+
+    final freed = await cache.clear();
+    expect(freed, usage.total, reason: 'clear 返回值应为实际释放的字节数');
+    expect((await cache.measure()).total, 0, reason: '清完应统计为 0');
+
+    // 缓存全没了。
+    expect(File('${videoDir.path}/a.mp4').existsSync(), isFalse);
+    expect(File('${videoDir.path}/a.key').existsSync(), isFalse);
+    expect(File('${chapterDir.path}/c1.json').existsSync(), isFalse);
+    expect(File('${tmpImage.path}/img-a').existsSync(), isFalse);
+    expect(File('${cachesImage.path}/img-b').existsSync(), isFalse);
+    expect(imageIndex.existsSync(), isFalse);
+    expect(File('${docs.path}/diag.log').existsSync(), isFalse);
+
+    // 用户数据/设备池必须还在（否则要重新注册设备、丢书架）。
+    expect(File('${configDir.path}/device_pool.json').existsSync(), isTrue);
+    expect(File('${configDir.path}/filter.json').existsSync(), isTrue);
+    expect(videoDir.existsSync(), isTrue, reason: '目录本身保留，内核还要往里写');
+  });
+
+  test('formatBytes 展示口径', () {
+    expect(formatBytes(0), '0 B');
+    expect(formatBytes(1023), '1023 B');
+    expect(formatBytes(1024), '1.0 KB');
+    expect(formatBytes(16 * 1024), '16 KB');
+    expect(formatBytes(40 * 1024 * 1024), '40 MB');
+    expect(formatBytes(339 * 1024 * 1024), '339 MB');
+    expect(formatBytes(2 * 1024 * 1024 * 1024), '2.0 GB');
+  });
+}

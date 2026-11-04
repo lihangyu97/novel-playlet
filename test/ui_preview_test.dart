@@ -11,10 +11,12 @@ import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
+import 'package:novel_playlet/core/cache/app_cache.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
+import 'package:novel_playlet/features/mine/mine_providers.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
@@ -326,6 +328,15 @@ ThemeData _previewTheme() {
   );
 }
 
+/// 预览用缓存占用：iPhone 13 上实测量级（视频 339 MB + 封面 41 MB + 章节 16 KB
+/// + 遗留日志 116 KB），让「存储」区块的 golden 更接近真机。
+const _previewCacheUsage = CacheUsage(
+  video: 339 * 1024 * 1024,
+  image: 41 * 1024 * 1024,
+  chapter: 16 * 1024,
+  legacyLog: 116 * 1024,
+);
+
 Future<void> _pump(
   WidgetTester tester,
   Widget page, {
@@ -340,6 +351,9 @@ Future<void> _pump(
       overrides: [
         apiClientProvider.overrideWithValue(api),
         readerChapterCacheProvider.overrideWithValue(_PreviewChapterCache()),
+        cacheUsageProvider.overrideWith(
+          (ref) async => _previewCacheUsage,
+        ),
         if (store != null) readingStoreProvider.overrideWithValue(store),
       ],
       child: MaterialApp(
