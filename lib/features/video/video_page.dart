@@ -397,6 +397,8 @@ class _VideoSearchField extends StatelessWidget {
   }
 }
 
+/// 区块标题。间距/字重必须和小说推荐页的 [RecommendSectionTitle] 完全一致：
+/// 两个 tab 共用顶部搜索框，标题只要差 1~2pt，来回切 tab 时就会看到文字上下跳。
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle({required this.title, this.subtitle});
 
@@ -408,14 +410,13 @@ class _SectionTitle extends StatelessWidget {
     final theme = Theme.of(context);
     final subtitle = this.subtitle;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Text(
             title,
             style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
             ),
           ),
           if (subtitle != null) ...[
