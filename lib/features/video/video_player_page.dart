@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
 
@@ -14,8 +15,12 @@ import '../../data/models/chapter.dart';
 /// 一集一个 controller：切集就换 controller（换档/换集都走同一条路），
 /// 播放中的 controller 不跨集复用——AVPlayer 对同一 item 换源不如重建稳。
 ///
-/// 后台/画中画/HDR 本轮不做（见 docs/video-playback.md）：退后台由
-/// `video_player` 的默认行为暂停，回前台不自动恢复，用户点播放继续。
+/// 后台/画中画/HDR 本轮不做（见 docs/video-playback.md）：退后台不做显式
+/// 暂停，回前台仍在播放就继续。
+///
+/// 方向：App 全局竖屏（`main.dart` 锁定），只有横屏视频（宽高比 > 1.05）才在
+/// 播放页给出「全屏」按钮，点了才临时放开横屏；退出全屏或离开播放页立刻恢复
+/// 竖屏，避免横屏状态漏到其它页面。
 class VideoPlayerPage extends ConsumerStatefulWidget {
   const VideoPlayerPage({super.key, required this.args});
 
@@ -45,6 +50,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   /// 拖动进度条时的临时位置。松手才 seek，避免每个 tick 都打一次 Range。
   double? _dragValue;
 
+  /// 是否处于横屏全屏。只有横屏内容才给入口：竖屏视频全屏只会更小。
+  bool _fullscreen = false;
+
+  /// 横屏判定：接近 1 的方图不算，避免给错按钮。
+  static const double _landscapeAspect = 1.05;
+
   List<Chapter> get _episodes => widget.args.episodes;
 
   Chapter? get _episode =>
@@ -65,6 +76,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _generation += 1;
     _hideTimer?.cancel();
     _disposeController();
+    // 带着全屏状态退出播放页时，下一次进别的页面还在横屏就糟了。
+    if (_fullscreen) unawaited(_restorePortrait());
     super.dispose();
   }
 
@@ -113,6 +126,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       await controller.setLooping(false);
       _controller = controller;
       setState(() => _loading = false);
+      // 换集后方向可能变：全屏中切到竖屏视频要退回竖屏，否则画面缩成一条。
+      if (_fullscreen && !_isLandscapeVideo(controller.value)) {
+        unawaited(_exitFullscreen());
+      }
       controller.addListener(_onTick);
       await controller.play();
       _scheduleHide();
@@ -189,6 +206,64 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     }
   }
 
+  bool _isLandscapeVideo(VideoPlayerValue value) =>
+      value.isInitialized && value.aspectRatio > _landscapeAspect;
+
+  /// 全屏入口只在横屏视频上出现；尺寸信息来自 AVPlayer 的 presentationSize。
+  bool get _canFullscreen {
+    final controller = _controller;
+    if (controller == null) return false;
+    return _isLandscapeVideo(controller.value);
+  }
+
+  Future<void> _toggleFullscreen() async {
+    if (_fullscreen) {
+      await _exitFullscreen();
+    } else {
+      await _enterFullscreen();
+    }
+  }
+
+  Future<void> _enterFullscreen() async {
+    if (!_canFullscreen) return;
+    setState(() => _fullscreen = true);
+    _hideTimer?.cancel();
+    // 只在横屏视频、且用户主动点按钮时放开横屏；App 其余时间都是竖屏。
+    await SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    // iOS 只认 manual + overlays 的方式隐藏状态栏（leanBack/immersive 是
+    // Android 语义，在 iOS 上不会生效）。
+    await SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: const <SystemUiOverlay>[],
+    );
+    if (!mounted) return;
+    setState(() => _controlsVisible = true);
+    _scheduleHide();
+  }
+
+  Future<void> _exitFullscreen() async {
+    if (!mounted) return;
+    setState(() => _fullscreen = false);
+    await _restorePortrait();
+    if (!mounted) return;
+    setState(() => _controlsVisible = true);
+    _scheduleHide();
+  }
+
+  /// 恢复全局竖屏 + 正常状态栏。dispose 里也走这里。
+  Future<void> _restorePortrait() async {
+    await SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
+    await SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.portraitUp,
+    ]);
+  }
+
   void _seekTo(Duration position) {
     final controller = _controller;
     if (controller == null) return;
@@ -212,35 +287,43 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         ? _episode!.title
         : '第 ${_index + 1} 集';
     final showChrome = !_loading && _error == null;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Positioned.fill(child: _buildVideo()),
-            // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
-            if (showChrome)
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _toggleControls,
+    return PopScope(
+      // 全屏时系统返回手势/返回键先退全屏，再返回才是离开播放页。
+      canPop: !_fullscreen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        unawaited(_exitFullscreen());
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Stack(
+            children: [
+              Positioned.fill(child: _buildVideo()),
+              // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
+              if (showChrome)
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _toggleControls,
+                  ),
                 ),
-              ),
-            if (showChrome)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: _chrome(_buildTopBar(episodeTitle)),
-              ),
-            if (showChrome)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: _chrome(_buildBottomBar()),
-              ),
-          ],
+              if (showChrome)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: _chrome(_buildTopBar(episodeTitle)),
+                ),
+              if (showChrome)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _chrome(_buildBottomBar()),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -434,35 +517,59 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                 ),
               ),
               const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    onPressed: _openPrevious,
-                    icon: const Icon(Icons.skip_previous_rounded),
-                    color: _index > 0 ? Colors.white : Colors.white38,
-                    iconSize: 30,
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton.filled(
-                    onPressed: _togglePlay,
-                    icon: Icon(
-                      value.isPlaying
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
+              SizedBox(
+                width: double.infinity,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          onPressed: _openPrevious,
+                          icon: const Icon(Icons.skip_previous_rounded),
+                          color: _index > 0 ? Colors.white : Colors.white38,
+                          iconSize: 30,
+                        ),
+                        const SizedBox(width: 12),
+                        IconButton.filled(
+                          onPressed: _togglePlay,
+                          icon: Icon(
+                            value.isPlaying
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                          ),
+                          iconSize: 30,
+                        ),
+                        const SizedBox(width: 12),
+                        IconButton(
+                          onPressed: _openNext,
+                          icon: const Icon(Icons.skip_next_rounded),
+                          color: _index + 1 < _episodes.length
+                              ? Colors.white
+                              : Colors.white38,
+                          iconSize: 30,
+                        ),
+                      ],
                     ),
-                    iconSize: 30,
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    onPressed: _openNext,
-                    icon: const Icon(Icons.skip_next_rounded),
-                    color: _index + 1 < _episodes.length
-                        ? Colors.white
-                        : Colors.white38,
-                    iconSize: 30,
-                  ),
-                ],
+                    // 只有横屏视频才给全屏入口：竖屏内容全屏只会更小。
+                    if (_isLandscapeVideo(value))
+                      Positioned(
+                        right: 0,
+                        child: IconButton(
+                          onPressed: () => unawaited(_toggleFullscreen()),
+                          icon: Icon(
+                            _fullscreen
+                                ? Icons.fullscreen_exit_rounded
+                                : Icons.fullscreen_rounded,
+                          ),
+                          color: Colors.white,
+                          iconSize: 28,
+                          tooltip: _fullscreen ? '退出全屏' : '全屏',
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ],
           );
