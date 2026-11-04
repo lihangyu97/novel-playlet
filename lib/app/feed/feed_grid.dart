@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/novel_cover.dart';
+
 /// 三列卡片的尺寸。
 ///
 /// 用 `SliverGridDelegateWithFixedCrossAxisCount.mainAxisExtent` 给固定高度，
@@ -11,10 +13,11 @@ class FeedGridMetrics {
     required this.cellHeight,
   });
 
-  /// [coverAspect] 是封面高 / 宽：小说卡 1.38，短剧卡 4/3。
+  /// [coverAspect] 是封面高 / 宽，默认 [kCoverAspect]：小说流与短剧流共用
+  /// 同一个比例，两个 tab 的封面才会一样大。
   factory FeedGridMetrics.of(
     BuildContext context, {
-    required double coverAspect,
+    double coverAspect = kCoverAspect,
   }) {
     final width = MediaQuery.sizeOf(context).width;
     final cellWidth =

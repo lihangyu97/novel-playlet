@@ -20,13 +20,11 @@ class FeedView<T> extends StatefulWidget {
     required this.onRetryLoadMore,
     required this.emptyMessage,
     required this.emptyIcon,
-    this.subtitle,
     this.onRefresh,
   });
 
   final FeedState<T> state;
   final String title;
-  final String? subtitle;
 
   /// 列表主体（网格 / 列表），由页面按内容域决定。
   final Widget Function(BuildContext context, FeedState<T> state) sliverBuilder;
@@ -137,7 +135,6 @@ class _FeedViewState<T> extends State<FeedView<T>> {
           SliverToBoxAdapter(
             child: FeedSectionTitle(
               title: widget.title,
-              subtitle: widget.subtitle,
             ),
           ),
           widget.sliverBuilder(context, data),

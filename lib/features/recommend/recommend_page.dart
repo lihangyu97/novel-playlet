@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/feed/feed_grid.dart';
+import '../../app/feed/feed_results.dart';
 import '../../app/feed/feed_search_field.dart';
 import '../../app/feed/feed_view.dart';
 import '../../app/router.dart';
@@ -10,7 +11,6 @@ import '../../app/widgets/states.dart';
 import '../../data/models/novel_item.dart';
 import 'recommend_controller.dart';
 import 'recommend_state.dart';
-import 'widgets/recommend_results_sliver.dart';
 
 /// 小说推荐页：顶部搜索框 + 三列推荐流；提交搜索后同一页切成结果列表。
 ///
@@ -155,7 +155,6 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
     return FeedView<NovelItem>(
       state: data,
       title: isSearch ? '搜索结果' : '为你推荐',
-      subtitle: isSearch ? '${data.query} · ${_countLabel(data)}' : null,
       onRefresh: _refresh,
       onLoadMore: () => ref.read(recommendControllerProvider.notifier).loadMore(),
       onRetryLoadMore: _retryLoadMore,
@@ -167,9 +166,16 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
           : Icons.auto_stories_outlined,
       sliverBuilder: (context, state) {
         if (state.isSearchMode) {
-          return RecommendResultsSliver(items: state.items, onTap: _openDetail);
+          return FeedResultsSliver<NovelItem>(
+            items: state.items,
+            coverOf: (item) => item.cover,
+            titleOf: (item) => item.title,
+            metaOf: _novelMeta,
+            introOf: (item) => item.intro,
+            onTap: _openDetail,
+          );
         }
-        final metrics = FeedGridMetrics.of(context, coverAspect: 1.38);
+        final metrics = FeedGridMetrics.of(context);
         return FeedGrid<NovelItem>(
           items: state.items,
           metrics: metrics,
@@ -184,9 +190,9 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
     );
   }
 
-  /// 还没到底时说"已加载"，到底了才说"共"：避免用户把已加载数当成总数。
-  String _countLabel(RecommendState data) {
-    final count = data.items.length;
-    return data.hasMore ? '已加载 $count 本' : '共 $count 本';
-  }
+  /// 搜索结果第二行：作者 · 分类，缺哪个就少哪个，都不缺才用「·」连。
+  static String _novelMeta(NovelItem item) => [
+    if (item.author.isNotEmpty) item.author,
+    if (item.category.isNotEmpty) item.category,
+  ].join(' · ');
 }

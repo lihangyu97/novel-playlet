@@ -7,10 +7,10 @@
 - 启动链：`lib/main.dart → BootstrapGate → BackendService.start() → Rust init`
 - 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / detail / directory / chapter）
 - 模型：`lib/data/models/`（NovelItem、BookDetail、Chapter、ChapterContent、json_utils）
-- 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读）
+- 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读）；缓存：`lib/core/cache/`（封面缓存 `AppImageCache`、占用统计与清理 `AppCache`，入口在「我的 → 存储」）
 - 主题：`lib/app/theme/app_theme.dart`（含 `ReaderPaper` 阅读底色）
-- 共享组件：`lib/app/widgets/`（NovelCover、NovelGridCard、NovelListTile、LoadingView、ErrorView、EmptyView）
-- 列表页通用骨架：`lib/app/feed/`（`FeedState<T>` 分页状态、`FeedView<T>` 滚动/补屏/下拉刷新/底部状态、`FeedGrid<T>` 三列网格、`FeedSearchField`、`FeedSectionTitle`、`FeedFooter`）。新列表页优先复用它，不要各写一套
+- 共享组件：`lib/app/widgets/`（NovelCover、NovelGridCard、LoadingView、ErrorView、EmptyView）
+- 列表页通用骨架：`lib/app/feed/`（`FeedState<T>` 分页状态、`FeedView<T>` 滚动/补屏/下拉刷新/底部状态、`FeedGrid<T>` 三列网格、`FeedResultsSliver<T>` + `FeedResultTile` 搜索结果横向列表（小说/短剧共用）、`FeedSearchField`、`FeedSectionTitle`、`FeedFooter`）。新列表页优先复用它，不要各写一套
 - 详情页通用组件：`lib/app/widgets/detail/detail_common.dart`（`DetailCoverHeader` 封面头、`DetailIntroCard` 简介+标签、`ExpandableIntro`、`DetailSectionHeader`、`DetailTagChip`）。小说/短剧详情共用，特殊模块（目录/选集）各自在 feature 内实现
 - 路由：`lib/app/router.dart`（`AppRoutes.detail` / `AppRoutes.reader` + `DetailArgs` / `ReaderArgs`）
 - providers：`lib/app/providers.dart`（`apiClientProvider`、`readingStoreProvider`）
@@ -27,6 +27,7 @@
 5. 只用 Material 3 + `Theme.of(context).colorScheme`，不要硬编码颜色（阅读页底色用 `ReaderPaper`）。
 6. 列表图片一律走 `NovelCover`（处理空 URL/失败），不要裸 `Image.network`。
 7. 封面一律取缩略图：解析时用 `json_utils.dart` 的 `coverKeys`（`thumb_url` 优先），不要回退到 `detail_page_thumb_url` / `cover` 之外的大图。全 App 封面位最大 108pt 宽，详情 Hero 也只有 96×132；书架与阅读进度会把 `cover` 落盘，存大图 URL 等于永久多付带宽。
+8. 封面像素比例统一走 `kCoverAspect`（`app/widgets/novel_cover.dart`，11:8）：推荐网格、搜索结果、书架、最近阅读、详情封面全部用它，不要各写 `1.38` / `4/3` 这类字面量——上游小说 240×320 与短剧 400×571 原生比例不同，各写一套会让两个 tab 的封面一高一矮。
 
 ## 数据层 API（已完成，直接用）
 

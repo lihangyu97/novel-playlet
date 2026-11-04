@@ -50,16 +50,22 @@ class AppImageCache {
   }
 
   /// 缓存目录在临时目录下；不同 iOS 版本 path_provider 指向 tmp 或
-  /// Library/Caches，两个位置都查一遍。
+  /// Library/Caches，两个位置都查一遍。iOS 上 `getTemporaryDirectory()` 本身
+  /// 就是 `Library/Caches`，所以要按绝对路径去重，否则同一个目录被裁两遍。
   static Future<List<Directory>> _candidateDirs() async {
+    final seen = <String>{};
     final dirs = <Directory>[];
+    void add(Directory dir) {
+      if (seen.add(dir.absolute.path)) dirs.add(dir);
+    }
+
     try {
       final temp = await getTemporaryDirectory();
-      dirs.add(Directory('${temp.path}/$cacheKey'));
+      add(Directory('${temp.path}/$cacheKey'));
     } catch (_) {}
     try {
       final support = await getApplicationSupportDirectory();
-      dirs.add(Directory('${support.parent.path}/Caches/$cacheKey'));
+      add(Directory('${support.parent.path}/Caches/$cacheKey'));
     } catch (_) {}
     return dirs.where((dir) => dir.existsSync()).toList();
   }

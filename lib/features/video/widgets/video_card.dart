@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/theme/app_theme.dart';
 import '../../../app/widgets/novel_cover.dart';
 import '../../../data/models/video_series.dart';
 
 /// 视频列表的卡片：竖版封面 + 标题 + 集数。
 ///
 /// 与小说卡片的区别只在元信息：短剧没有作者，展示「全 N 集」，缺集数时
-/// 不硬凑一行（避免出现空字符串占位）。
+/// 不硬凑一行（避免出现空字符串占位）。封面比例、圆角、字号与小说卡
+/// 完全一致（都走 [kCoverAspect] / [AppTheme.cardRadius]），两条推荐流
+/// 切 tab 时卡片尺寸不变。
 class VideoCard extends StatelessWidget {
   const VideoCard({
     super.key,
@@ -22,10 +25,10 @@ class VideoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final coverHeight = width * 4 / 3;
+    final coverHeight = width * kCoverAspect;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppTheme.cardRadius),
       child: SizedBox(
         width: width,
         child: Column(

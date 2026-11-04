@@ -5,20 +5,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/feed/feed_results.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
+import 'package:novel_playlet/core/cache/app_cache.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
+import 'package:novel_playlet/features/mine/mine_providers.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
 import 'package:novel_playlet/features/reader/reader_controller.dart';
 import 'package:novel_playlet/features/reader/reader_widgets.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
+import 'package:novel_playlet/features/video/video_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// UI 预览：用假 transport 注入固定上游数据，把四个页面真实渲染成 PNG。
@@ -40,13 +45,51 @@ class _FakeTransport extends BackendTransport {
   }) async {
     return BackendResponse(
       200,
-      Uint8List.fromList(utf8.encode(jsonEncode(_payloadFor(path)))),
+      Uint8List.fromList(utf8.encode(jsonEncode(_payloadFor(path, query)))),
       'application/json',
     );
   }
 
-  Map<String, dynamic> _payloadFor(String path) {
+  Map<String, dynamic> _payloadFor(String path, String? query) {
     if (path.startsWith('/api/v1/recommend/homepage')) {
+      // 同一路由按 `tab_type` 分流：8 = 短剧推荐（对齐 api_client 的 tab 映射）。
+      if (query != null && query.contains('tab_type=8')) {
+        return {
+          'code': 0,
+          'data': {
+            'tab_index': 0,
+            'tab_item': [
+              {
+                'tab_type': 8,
+                'title': '短剧',
+                'next_offset': 6,
+                'has_more': true,
+                'session_id': 'sess-video',
+                'cell_data': [
+                  {
+                    'show_type': 384,
+                    'cell_name': '短剧推荐',
+                    'cell_data': [
+                      {
+                        'video_data': [
+                          for (var i = 1; i <= 9; i++)
+                            {
+                              'series_id_str': 'v$i',
+                              'series_title':
+                                  _dramaTitles[(i - 1) % _dramaTitles.length],
+                              'series_cover': '',
+                              'episode_cnt': '${40 + i}',
+                            },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      }
       // 与真实响应同形：游标/session 挂在被回答的 tab_item 上，
       // 卡片藏在 tab.cell_data[].cell_data[].book_data[] 里。
       return {
@@ -87,6 +130,35 @@ class _FakeTransport extends BackendTransport {
       };
     }
     if (path.startsWith('/api/v1/search')) {
+      // 短剧搜索走 tab_type=11，返回短剧卡片；其余按书籍搜索。
+      if (query != null && query.contains('tab_type=11')) {
+        return {
+          'code': 0,
+          'data': {
+            'search_tabs': [
+              {
+                'tab_type': 11,
+                'title': '短剧',
+                'next_offset': 10,
+                'data': [
+                  for (var i = 1; i <= 6; i++)
+                    {
+                      'video_data': {
+                        'series_id_str': 'vs$i',
+                        'series_title':
+                            '搜索结果 ${_dramaTitles[(i - 1) % _dramaTitles.length]}',
+                        'series_intro':
+                            '这是第 $i 条短剧搜索结果的简介，用来验证横向列表两行省略与排版是否和小说搜索一致。',
+                        'episode_cnt': '${40 + i}',
+                        'series_cover': '',
+                      },
+                    },
+                ],
+              },
+            ],
+          },
+        };
+      }
       return {
         'code': 0,
         'data': {
@@ -177,6 +249,14 @@ class _FakeTransport extends BackendTransport {
     '完美世界',
   ];
   static const _authors = ['烽火戏诸侯', '爱潜水的乌贼', '卖报小郎君', '会说话的肘子', '情何以甚'];
+  static const _dramaTitles = [
+    '十八岁太奶奶驾到，重整家族荣耀',
+    '父皇，您别再逼我做皇帝了',
+    '退役归来，这个保镖不好惹',
+    '二婚嫁对人，前夫悔破防',
+    '急诊室摸鱼，全院科室疯狂求我出手',
+    '一念沉沦，霍总心动了',
+  ];
   static const _chapterNames = ['山中有剑', '少年游', '问心', '风雪夜归人', '青衫仗剑'];
   static const _paragraphs = [
     '大千世界，无奇不有。',
@@ -248,6 +328,15 @@ ThemeData _previewTheme() {
   );
 }
 
+/// 预览用缓存占用：iPhone 13 上实测量级（视频 339 MB + 封面 41 MB + 章节 16 KB
+/// + 遗留日志 116 KB），让「存储」区块的 golden 更接近真机。
+const _previewCacheUsage = CacheUsage(
+  video: 339 * 1024 * 1024,
+  image: 41 * 1024 * 1024,
+  chapter: 16 * 1024,
+  legacyLog: 116 * 1024,
+);
+
 Future<void> _pump(
   WidgetTester tester,
   Widget page, {
@@ -262,6 +351,9 @@ Future<void> _pump(
       overrides: [
         apiClientProvider.overrideWithValue(api),
         readerChapterCacheProvider.overrideWithValue(_PreviewChapterCache()),
+        cacheUsageProvider.overrideWith(
+          (ref) async => _previewCacheUsage,
+        ),
         if (store != null) readingStoreProvider.overrideWithValue(store),
       ],
       child: MaterialApp(
@@ -274,6 +366,34 @@ Future<void> _pump(
     ),
   );
   await tester.pumpAndSettle(const Duration(milliseconds: 100));
+}
+
+/// 同一页所有封面必须同一尺寸（防止某条流又私自换了 coverAspect）。
+void _expectUniformCoverSize(WidgetTester tester, String label) {
+  final sizes = tester
+      .widgetList<NovelCover>(find.byType(NovelCover))
+      .map(
+        (cover) =>
+            '${cover.width.toStringAsFixed(2)}×${cover.height.toStringAsFixed(2)}',
+      )
+      .toSet();
+  expect(sizes.length, 1, reason: '$label 里封面尺寸必须一致，实际 $sizes');
+}
+
+/// 这一页所有封面的高宽比都必须 = [kCoverAspect]（11:8）。
+void _expectCoverAspect(WidgetTester tester, String label) {
+  final bad = tester
+      .widgetList<NovelCover>(find.byType(NovelCover))
+      .where(
+        (cover) => (cover.height / cover.width - kCoverAspect).abs() > 0.002,
+      )
+      .map(
+        (cover) =>
+            '${cover.width.toStringAsFixed(1)}×${cover.height.toStringAsFixed(1)}'
+            '(h/w=${(cover.height / cover.width).toStringAsFixed(3)})',
+      )
+      .toSet();
+  expect(bad, isEmpty, reason: '$label 有封面比例不是 11:8：$bad');
 }
 
 void main() {
@@ -290,6 +410,88 @@ void main() {
     await expectLater(
       find.byType(RecommendPage),
       matchesGoldenFile('goldens/recommend.png'),
+    );
+  });
+
+  testWidgets('短剧页', (tester) async {
+    await _pump(tester, const VideoPage());
+    await expectLater(
+      find.byType(VideoPage),
+      matchesGoldenFile('goldens/video.png'),
+    );
+  });
+
+  /// 封面尺寸回归：两条推荐流的封面必须同宽同高。
+  ///
+  /// 上游给的原生比例不同（小说 240×320 = 3:4，短剧 400×571 ≈ 1.427），以前
+  /// 两条流各用各的 `coverAspect`，切 tab 能看出短剧封面矮一截。现在统一走
+  /// [kCoverAspect]，这里把「一样大」钉死。
+  testWidgets('封面尺寸-小说流与短剧流一致', (tester) async {
+    await _pump(tester, const RecommendPage());
+    _expectUniformCoverSize(tester, '小说流');
+    final novel = tester.getSize(find.byType(NovelCover).first);
+    expect(
+      novel.height / novel.width,
+      closeTo(kCoverAspect, 0.001),
+      reason: '小说封面高宽比应等于统一比例',
+    );
+
+    await _pump(tester, const VideoPage());
+    _expectUniformCoverSize(tester, '短剧流');
+    final drama = tester.getSize(find.byType(NovelCover).first);
+    expect(
+      drama.height / drama.width,
+      closeTo(kCoverAspect, 0.001),
+      reason: '短剧封面高宽比应等于统一比例',
+    );
+
+    expect(drama.width, closeTo(novel.width, 0.01), reason: '两条流封面宽度必须一致');
+    expect(drama.height, closeTo(novel.height, 0.01), reason: '两条流封面高度必须一致');
+  });
+
+  /// 搜索态也统一：两个 tab 都是横向列表 + 同一套条目，封面同宽同高。
+  ///
+  /// 以前小说搜索是横向列表、短剧搜索还是三列网格，同一个 app 两套形态。
+  testWidgets('封面尺寸-搜索结果两个 tab 一致', (tester) async {
+    await _pump(tester, const RecommendPage());
+    await tester.enterText(find.byType(TextField), '剑来');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    _expectCoverAspect(tester, '小说搜索结果');
+    final novelSearch = tester.getSize(find.byType(NovelCover).first);
+
+    await _pump(tester, const VideoPage());
+    await tester.enterText(find.byType(TextField), '太奶奶');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    _expectCoverAspect(tester, '短剧搜索结果');
+    final dramaSearch = tester.getSize(find.byType(NovelCover).first);
+
+    expect(
+      novelSearch.width,
+      FeedResultTile.coverWidth,
+      reason: '搜索结果封面宽度应走 FeedResultTile.coverWidth',
+    );
+    expect(
+      dramaSearch.width,
+      novelSearch.width,
+      reason: '两个 tab 搜索结果的封面宽度必须一致',
+    );
+    expect(
+      dramaSearch.height,
+      novelSearch.height,
+      reason: '两个 tab 搜索结果的封面高度必须一致',
+    );
+  });
+
+  testWidgets('短剧页-搜索态', (tester) async {
+    await _pump(tester, const VideoPage());
+    await tester.enterText(find.byType(TextField), '太奶奶');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await expectLater(
+      find.byType(VideoPage),
+      matchesGoldenFile('goldens/video_search.png'),
     );
   });
 
@@ -435,7 +637,9 @@ void main() {
   testWidgets('阅读页-切章有过渡且底栏章节名更新', (tester) async {
     await _pump(
       tester,
-      const ReaderPage(args: ReaderArgs(bookId: '1', bookTitle: '剑来')),
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
     );
     // 底栏初始显示第 1 章。
     expect(find.textContaining('第一章'), findsWidgets);
@@ -490,6 +694,8 @@ void main() {
       }),
     });
     await _pump(tester, const MinePage());
+    // 最近阅读（44 宽）和书架卡（_maxCardWidth 内）封面比例也必须统一。
+    _expectCoverAspect(tester, '我的页');
     await expectLater(
       find.byType(MinePage),
       matchesGoldenFile('goldens/mine_shelf.png'),
