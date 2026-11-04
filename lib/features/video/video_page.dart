@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/feed/feed_grid.dart';
 import '../../app/feed/feed_results.dart';
 import '../../app/feed/feed_search_field.dart';
-import '../../app/feed/feed_state.dart';
 import '../../app/feed/feed_view.dart';
 import '../../app/router.dart';
 import '../../app/widgets/states.dart';
@@ -152,10 +151,6 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     return FeedView<VideoSeries>(
       state: data,
       title: isSearch ? '搜索结果' : '短剧推荐',
-      subtitle: isSearch
-          ? '${data.query} · '
-                '${feedCountLabel(data.items.length, hasMore: data.hasMore, unit: '部')}'
-          : null,
       // 两个推荐页都保留下拉刷新；搜索框在 FeedView 外面固定不动，
       // 只有下面的内容区随手下滑、松开刷新。
       onRefresh: _refresh,

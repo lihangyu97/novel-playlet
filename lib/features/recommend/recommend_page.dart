@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/feed/feed_grid.dart';
 import '../../app/feed/feed_results.dart';
 import '../../app/feed/feed_search_field.dart';
-import '../../app/feed/feed_state.dart';
 import '../../app/feed/feed_view.dart';
 import '../../app/router.dart';
 import '../../app/widgets/novel_card.dart';
@@ -156,10 +155,6 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
     return FeedView<NovelItem>(
       state: data,
       title: isSearch ? '搜索结果' : '为你推荐',
-      subtitle: isSearch
-          ? '${data.query} · '
-                '${feedCountLabel(data.items.length, hasMore: data.hasMore, unit: '本')}'
-          : null,
       onRefresh: _refresh,
       onLoadMore: () => ref.read(recommendControllerProvider.notifier).loadMore(),
       onRetryLoadMore: _retryLoadMore,
