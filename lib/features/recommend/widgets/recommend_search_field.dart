@@ -41,12 +41,11 @@ class RecommendSearchField extends StatelessWidget {
       children: [
         Expanded(
           child: DecoratedBox(
+            // 只留底色不画描边：iOS 搜索栏的观感，避免和列表卡片的分隔线
+            // 叠在一起显得脏。
             decoration: BoxDecoration(
-              color: scheme.surface,
+              color: scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(_height / 2),
-              border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.5),
-              ),
             ),
             child: SizedBox(
               height: _height,

@@ -182,11 +182,8 @@ class _RecommendPageState extends ConsumerState<RecommendPage> {
       CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          SliverToBoxAdapter(
-            child: RecommendSectionTitle(
-              title: '为你推荐',
-              subtitle: _countLabel(data),
-            ),
+          const SliverToBoxAdapter(
+            child: RecommendSectionTitle(title: '为你推荐'),
           ),
           RecommendGridSliver(
             items: data.items,

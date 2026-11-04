@@ -171,12 +171,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(
-            child: _SectionTitle(
-              title: '短剧推荐',
-              subtitle: data.hasMore
-                  ? '已加载 ${data.items.length} 部'
-                  : '共 ${data.items.length} 部',
-            ),
+            child: const _SectionTitle(title: '短剧推荐'),
           ),
           _buildGrid(data.items),
           _buildFooter(data),
@@ -352,11 +347,8 @@ class _VideoSearchField extends StatelessWidget {
           Expanded(
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: scheme.surface,
+                color: scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(_height / 2),
-                border: Border.all(
-                  color: scheme.outlineVariant.withValues(alpha: 0.5),
-                ),
               ),
               child: SizedBox(
                 height: _height,
@@ -406,14 +398,15 @@ class _VideoSearchField extends StatelessWidget {
 }
 
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.title, required this.subtitle});
+  const _SectionTitle({required this.title, this.subtitle});
 
   final String title;
-  final String subtitle;
+  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final subtitle = this.subtitle;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
       child: Row(
@@ -425,17 +418,19 @@ class _SectionTitle extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+          if (subtitle != null) ...[
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
