@@ -15,7 +15,7 @@
 | 推荐页：顶部搜索框 + 推荐流（3 列网格、下拉刷新、滚动分页）+ 搜索结果 | ✅ |
 | 详情页：封面/书名/作者/分类·状态·字数/评分、简介折叠、标签、目录（前 10 章 + 全部弹层）、开始/继续阅读、加入书架 | ✅ |
 | 阅读页：TextPainter 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、目录跳章、进度保存 | ✅ |
-| 短剧页：搜索 + 短剧推荐流（下拉刷新、滚动分页） | ✅ 骨架 |
+| 短剧页：搜索（与小说搜索同一套横向列表）+ 短剧推荐流（下拉刷新、滚动分页） | ✅ 骨架 |
 | 短剧详情页：封面/标题/简介/分类/播放量 + 选集网格 | ✅ 骨架 |
 | 播放页：AVPlayer 播放（播放/暂停、进度拖动、上下集、播完自动下一集、横屏视频可全屏），密文由内核 `/src` 按 Range 解密 | ✅ 骨架（先整集缓存后播） |
 | 我的页：书架（长按移除）、最近阅读（带章节直达阅读页） | ✅ |
@@ -48,7 +48,7 @@ UI (features/*)  ──►  Riverpod controller  ──►  ApiClient (data/api)
 ```
 lib/
   app/          主题、路由、三 tab 外壳、启动闸门、共享组件
-  app/feed/     列表页通用骨架（FeedState/FeedView：分页、补屏、下拉刷新、底部状态）
+  app/feed/     列表页通用骨架（FeedState/FeedView：分页、补屏、下拉刷新、底部状态；FeedResultsSliver：搜索结果横向列表）
   app/widgets/detail/  详情页通用组件（封面头/简介卡/标签/区块标题）
   core/         后端传输/启动/密钥、书架与进度存储
   data/         接口客户端 + 模型与解析（含 video_series / video_detail / video_source）
@@ -91,7 +91,7 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推
 
 - `test/parsers_test.dart`：字段类型不稳定（数值是字符串、列表是单对象、id 截断）的兼容逻辑。
 - `test/video_parsers_test.dart`：短剧卡片/详情/取流的字段兼容与去重。
-- `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染四个页面成 PNG（`test/goldens/`）。
+- `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`），并断言两条推荐流/搜索结果的封面尺寸一致。
 - `test/live_probe_test.dart`：默认跳过；需要先 `cargo build` 出 host dylib，且网络能访问设备注册域名。
 
 ## 已知限制

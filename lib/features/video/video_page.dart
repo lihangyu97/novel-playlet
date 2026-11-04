@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/feed/feed_grid.dart';
+import '../../app/feed/feed_results.dart';
 import '../../app/feed/feed_search_field.dart';
+import '../../app/feed/feed_state.dart';
 import '../../app/feed/feed_view.dart';
 import '../../app/router.dart';
 import '../../app/widgets/states.dart';
@@ -13,8 +15,9 @@ import 'widgets/video_card.dart';
 
 /// 短剧 tab：顶部搜索框 + 短剧推荐流；提交搜索后同页切成结果列表。
 ///
-/// 结构与小说推荐页一致（搜索/列表共用一个 controller），卡片与业务不同；
-/// 滚动/翻页/空态等通用行为交给 [FeedView]。短剧页按需求**没有下拉刷新**。
+/// 结构与小说推荐页一致（搜索/列表共用一个 controller，搜索态都走
+/// [FeedResultsSliver] 横向列表），卡片与业务不同；滚动/翻页/空态等通用行为
+/// 交给 [FeedView]。两个推荐页都保留下拉刷新。
 class VideoPage extends ConsumerStatefulWidget {
   const VideoPage({super.key});
 
@@ -149,7 +152,10 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     return FeedView<VideoSeries>(
       state: data,
       title: isSearch ? '搜索结果' : '短剧推荐',
-      subtitle: isSearch ? '${data.query} · ${data.items.length} 部' : null,
+      subtitle: isSearch
+          ? '${data.query} · '
+                '${feedCountLabel(data.items.length, hasMore: data.hasMore, unit: '部')}'
+          : null,
       // 两个推荐页都保留下拉刷新；搜索框在 FeedView 外面固定不动，
       // 只有下面的内容区随手下滑、松开刷新。
       onRefresh: _refresh,
@@ -160,6 +166,18 @@ class _VideoPageState extends ConsumerState<VideoPage> {
           : '暂时没有短剧推荐\n下拉刷新试试',
       emptyIcon: isSearch ? Icons.search_off_rounded : Icons.movie_outlined,
       sliverBuilder: (context, state) {
+        // 搜索态与小说 tab 同形态（横向列表 + 简介两行），推荐态才用三列网格。
+        if (state.isSearchMode) {
+          return FeedResultsSliver<VideoSeries>(
+            items: state.items,
+            coverOf: (item) => item.cover,
+            titleOf: (item) => item.title,
+            metaOf: (item) =>
+                item.episodeCount > 0 ? '全 ${item.episodeCount} 集' : '',
+            introOf: (item) => item.intro,
+            onTap: _openDetail,
+          );
+        }
         final metrics = FeedGridMetrics.of(context);
         return FeedGrid<VideoSeries>(
           items: state.items,

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/feed/feed_results.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
@@ -127,6 +128,35 @@ class _FakeTransport extends BackendTransport {
       };
     }
     if (path.startsWith('/api/v1/search')) {
+      // 短剧搜索走 tab_type=11，返回短剧卡片；其余按书籍搜索。
+      if (query != null && query.contains('tab_type=11')) {
+        return {
+          'code': 0,
+          'data': {
+            'search_tabs': [
+              {
+                'tab_type': 11,
+                'title': '短剧',
+                'next_offset': 10,
+                'data': [
+                  for (var i = 1; i <= 6; i++)
+                    {
+                      'video_data': {
+                        'series_id_str': 'vs$i',
+                        'series_title':
+                            '搜索结果 ${_dramaTitles[(i - 1) % _dramaTitles.length]}',
+                        'series_intro':
+                            '这是第 $i 条短剧搜索结果的简介，用来验证横向列表两行省略与排版是否和小说搜索一致。',
+                        'episode_cnt': '${40 + i}',
+                        'series_cover': '',
+                      },
+                    },
+                ],
+              },
+            ],
+          },
+        };
+      }
       return {
         'code': 0,
         'data': {
@@ -336,6 +366,22 @@ void _expectUniformCoverSize(WidgetTester tester, String label) {
   expect(sizes.length, 1, reason: '$label 里封面尺寸必须一致，实际 $sizes');
 }
 
+/// 这一页所有封面的高宽比都必须 = [kCoverAspect]（11:8）。
+void _expectCoverAspect(WidgetTester tester, String label) {
+  final bad = tester
+      .widgetList<NovelCover>(find.byType(NovelCover))
+      .where(
+        (cover) => (cover.height / cover.width - kCoverAspect).abs() > 0.002,
+      )
+      .map(
+        (cover) =>
+            '${cover.width.toStringAsFixed(1)}×${cover.height.toStringAsFixed(1)}'
+            '(h/w=${(cover.height / cover.width).toStringAsFixed(3)})',
+      )
+      .toSet();
+  expect(bad, isEmpty, reason: '$label 有封面比例不是 11:8：$bad');
+}
+
 void main() {
   setUpAll(() async {
     await _loadPreviewFont();
@@ -387,6 +433,52 @@ void main() {
 
     expect(drama.width, closeTo(novel.width, 0.01), reason: '两条流封面宽度必须一致');
     expect(drama.height, closeTo(novel.height, 0.01), reason: '两条流封面高度必须一致');
+  });
+
+  /// 搜索态也统一：两个 tab 都是横向列表 + 同一套条目，封面同宽同高。
+  ///
+  /// 以前小说搜索是横向列表、短剧搜索还是三列网格，同一个 app 两套形态。
+  testWidgets('封面尺寸-搜索结果两个 tab 一致', (tester) async {
+    await _pump(tester, const RecommendPage());
+    await tester.enterText(find.byType(TextField), '剑来');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    _expectCoverAspect(tester, '小说搜索结果');
+    final novelSearch = tester.getSize(find.byType(NovelCover).first);
+
+    await _pump(tester, const VideoPage());
+    await tester.enterText(find.byType(TextField), '太奶奶');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    _expectCoverAspect(tester, '短剧搜索结果');
+    final dramaSearch = tester.getSize(find.byType(NovelCover).first);
+
+    expect(
+      novelSearch.width,
+      FeedResultTile.coverWidth,
+      reason: '搜索结果封面宽度应走 FeedResultTile.coverWidth',
+    );
+    expect(
+      dramaSearch.width,
+      novelSearch.width,
+      reason: '两个 tab 搜索结果的封面宽度必须一致',
+    );
+    expect(
+      dramaSearch.height,
+      novelSearch.height,
+      reason: '两个 tab 搜索结果的封面高度必须一致',
+    );
+  });
+
+  testWidgets('短剧页-搜索态', (tester) async {
+    await _pump(tester, const VideoPage());
+    await tester.enterText(find.byType(TextField), '太奶奶');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await expectLater(
+      find.byType(VideoPage),
+      matchesGoldenFile('goldens/video_search.png'),
+    );
   });
 
   testWidgets('推荐页-搜索框内容垂直居中', (tester) async {
@@ -588,6 +680,8 @@ void main() {
       }),
     });
     await _pump(tester, const MinePage());
+    // 最近阅读（44 宽）和书架卡（_maxCardWidth 内）封面比例也必须统一。
+    _expectCoverAspect(tester, '我的页');
     await expectLater(
       find.byType(MinePage),
       matchesGoldenFile('goldens/mine_shelf.png'),

@@ -115,6 +115,16 @@ class FeedState<T> {
   }
 }
 
+/// 结果条数的文案：还没到底时说「已加载」，到底了才说「共」。
+///
+/// 两条推荐流（小说 / 短剧）的搜索态共用，避免一边写「共 N 本」、另一边只写
+/// 「N 部」这种同一位置两套口径。
+String feedCountLabel(
+  int count, {
+  required bool hasMore,
+  required String unit,
+}) => '${hasMore ? '已加载' : '共'} $count $unit';
+
 /// 把异常变成可直接展示的一句话；[ApiException] 的 message 已经是人话。
 String describeFeedError(Object error) {
   if (error is ApiException) return error.message;

@@ -58,7 +58,12 @@ class _RecentReadingTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
-            NovelCover(url: progress.cover, width: 44, height: 60, radius: 8),
+            NovelCover(
+              url: progress.cover,
+              width: 44,
+              height: 44 * kCoverAspect,
+              radius: 8,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
