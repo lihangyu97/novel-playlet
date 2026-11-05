@@ -1609,6 +1609,176 @@ void main() {
     );
   });
 
+  /// 首页里切到「我的」：验证悬浮切换按钮与悬浮底栏胶囊的相对位置（真机
+  /// 是同一个 Scaffold 里叠加，单独 pump MinePage 看不到胶囊）。
+  testWidgets('首页-我的（双面板与悬浮按钮）', (tester) async {
+    await _pump(tester, const HomeShell());
+    await tester.tap(find.text('我的'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(find.text('小说'), findsWidgets);
+    expect(find.byKey(MinePage.switchButtonKey), findsOneWidget);
+    await expectLater(
+      find.byType(HomeShell),
+      matchesGoldenFile('goldens/home_mine.png'),
+    );
+  });
+
+  /// 悬浮按钮切换：小说面板滑出、短剧滑入，按钮图标同时换成另一侧。
+  testWidgets('我的页-悬浮按钮切到短剧', (tester) async {
+    await _pump(tester, const MinePage());
+
+    // 初始：小说在屏幕内，按钮显示「短剧」图标（点它去看短剧）。
+    expect(find.text('小说'), findsWidgets);
+    expect(
+      find.descendant(
+        of: find.byKey(MinePage.switchButtonKey),
+        matching: find.byIcon(Icons.theaters_rounded),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(MinePage.switchButtonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+
+    expect(find.text('短剧'), findsWidgets);
+    expect(find.text('最近观看'), findsOneWidget);
+    expect(find.text('我的收藏'), findsOneWidget);
+    // 短剧标题块（延迟 0）已就位；小说标题整块滑到屏幕左侧外。
+    expect(
+      tester.getTopRight(find.text('短剧')).dx,
+      closeTo(330, 1),
+      reason: '短剧标题应停在镜像位置',
+    );
+    expect(tester.getTopLeft(find.text('小说')).dx, lessThan(-300));
+    // 按钮换成「小说」图标。
+    expect(
+      find.descendant(
+        of: find.byKey(MinePage.switchButtonKey),
+        matching: find.byIcon(Icons.auto_stories_rounded),
+      ),
+      findsOneWidget,
+    );
+
+    // 再点回小说。
+    await tester.tap(find.byKey(MinePage.switchButtonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(60, 1));
+    expect(find.text('我的书架'), findsOneWidget);
+  });
+
+  /// 左右滑动也能切换（类似阅读器翻页），不依赖悬浮按钮。
+  testWidgets('我的页-左右滑动切换面板', (tester) async {
+    await _pump(tester, const MinePage());
+
+    // 往左滑 → 短剧。
+    await tester.drag(find.byType(MinePage), const Offset(-300, 0));
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+    expect(tester.getTopRight(find.text('短剧')).dx, closeTo(330, 1));
+    expect(
+      find.descendant(
+        of: find.byKey(MinePage.switchButtonKey),
+        matching: find.byIcon(Icons.auto_stories_rounded),
+      ),
+      findsOneWidget,
+    );
+
+    // 往右滑 → 回小说。
+    await tester.drag(find.byType(MinePage), const Offset(300, 0));
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(60, 1));
+  });
+
+  /// 过渡不是整页一起动：标题块 0ms 先走，最近阅读块晚 100ms，书架块晚 200ms。
+  testWidgets('我的页-三块阶梯延迟切换', (tester) async {
+    await _pump(tester, const MinePage());
+    final headerBefore = tester.getTopLeft(find.text('小说')).dx;
+    final shelfBefore = tester.getTopLeft(find.text('我的书架')).dx;
+
+    final gesture = await tester.startGesture(const Offset(200, 500));
+    // 吃掉触摸 slop 后再精确拖 100px：时间轴走到 100/390 ≈ 0.26，
+    // 标题块已滑走约 170px、最近阅读块刚起步、书架块还没动。
+    await gesture.moveBy(const Offset(-20, 0));
+    await tester.pump();
+    await gesture.moveBy(const Offset(-100, 0));
+    await tester.pump();
+
+    final headerAfter = tester.getTopLeft(find.text('小说')).dx;
+    final shelfAfter = tester.getTopLeft(find.text('我的书架')).dx;
+    expect(headerAfter, lessThan(headerBefore - 120), reason: '标题块（0ms）应该先滑');
+    expect(shelfAfter, closeTo(shelfBefore, 0.5), reason: '书架块（200ms）此时不应移动');
+
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+    expect(find.text('短剧'), findsWidgets);
+  });
+
+  /// 短剧是镜像版式：标题/图标靠右、设置按钮靠左，与小说侧对称。
+  testWidgets('我的页-短剧标题与设置按钮左右镜像', (tester) async {
+    await _pump(tester, const MinePage());
+    const pageWidth = 390.0;
+    const gutter = 16.0;
+    const iconBox = 34.0;
+    const iconGap = 10.0;
+
+    expect(
+      tester.getTopLeft(find.text('小说')).dx,
+      closeTo(gutter + iconBox + iconGap, 1),
+    );
+    final novelSettings = find.descendant(
+      of: find.byKey(MinePage.novelPanelKey),
+      matching: find.byIcon(Icons.settings_outlined),
+    );
+    expect(
+      tester.getTopLeft(novelSettings).dx,
+      greaterThan(pageWidth / 2),
+      reason: '小说的设置按钮在右侧',
+    );
+
+    await tester.tap(find.byKey(MinePage.switchButtonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+
+    expect(
+      tester.getTopRight(find.text('短剧')).dx,
+      closeTo(pageWidth - (gutter + iconBox + iconGap), 1),
+      reason: '短剧标题应与小说标题左右对称',
+    );
+    final dramaSettings = find.descendant(
+      of: find.byKey(MinePage.dramaPanelKey),
+      matching: find.byIcon(Icons.settings_outlined),
+    );
+    expect(
+      tester.getTopLeft(dramaSettings).dx,
+      lessThan(pageWidth / 2),
+      reason: '短剧的设置按钮应过渡到左侧',
+    );
+  });
+
+  testWidgets('我的页（短剧）', (tester) async {
+    await _pump(tester, const MinePage());
+    await tester.tap(find.byKey(MinePage.switchButtonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+    await expectLater(
+      find.byType(MinePage),
+      matchesGoldenFile('goldens/mine_drama_empty.png'),
+    );
+  });
+
+  /// 过渡中：标题块已滑走大半、最近阅读块刚起步、书架块还没动（三块阶梯）。
+  testWidgets('我的页-面板切换过程中', (tester) async {
+    await _pump(tester, const MinePage());
+    final gesture = await tester.startGesture(const Offset(200, 500));
+    await gesture.moveBy(const Offset(-20, 0));
+    await tester.pump();
+    await gesture.moveBy(const Offset(-100, 0));
+    await tester.pump();
+    await expectLater(
+      find.byType(MinePage),
+      matchesGoldenFile('goldens/mine_switch_mid.png'),
+    );
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+  });
+
   testWidgets('设置页', (tester) async {
     await _pump(tester, const SettingsPage());
     await expectLater(

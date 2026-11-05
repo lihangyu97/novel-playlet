@@ -8,6 +8,9 @@ import '../../../core/storage/reading_store.dart';
 ///
 /// 与书架不同，这里的每一条都是可续读的进度记录，所以点击目标是阅读页
 /// 而不是详情页（省掉"进详情再找章"的一步）。
+///
+/// 返回普通 Box 而不是 sliver：我的页把内容拆成「头部 / 最近阅读 / 书架」三块，
+/// 每块要独立做横向延迟动画，sliver 没法单独平移。
 class MineRecentReading extends StatelessWidget {
   const MineRecentReading({
     super.key,
@@ -20,18 +23,18 @@ class MineRecentReading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SliverPadding(
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      sliver: SliverList.separated(
-        itemCount: items.length,
-        itemBuilder: (context, index) {
-          final progress = items[index];
-          return _RecentReadingTile(
-            progress: progress,
-            onTap: () => onOpen(progress),
-          );
-        },
-        separatorBuilder: (_, _) => const SizedBox(height: 2),
+      child: Column(
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0) const SizedBox(height: 2),
+            _RecentReadingTile(
+              progress: items[i],
+              onTap: () => onOpen(items[i]),
+            ),
+          ],
+        ],
       ),
     );
   }

@@ -6,8 +6,9 @@ import '../../../data/models/novel_item.dart';
 
 /// 书架区：网格展示 + 空态，长按交给父级弹管理菜单。
 ///
-/// 单独抽成 sliver 组件，是为了让书架网格跟着整页的 [CustomScrollView]
-/// 一起滚动并享受懒加载，而不是嵌在 ListView 里再套一层 GridView。
+/// 返回普通 Box 而不是 sliver：我的页把内容拆成三块做独立的横向延迟动画，
+/// sliver 没法单独平移。书架是个人数据、量级不大，`shrinkWrap` 的 GridView
+/// 一次性布局足够，换来的「能按块做动画」更重要。
 class MineShelfGrid extends StatelessWidget {
   const MineShelfGrid({
     super.key,
@@ -35,29 +36,31 @@ class MineShelfGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (shelf.isEmpty) {
-      return SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: SizedBox(
-            height: 200,
-            child: EmptyView(
-              message: '书架还是空的，去推荐页看看',
-              icon: Icons.collections_bookmark_outlined,
-            ),
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: SizedBox(
+          height: 200,
+          child: EmptyView(
+            message: '书架还是空的，去推荐页看看',
+            icon: Icons.collections_bookmark_outlined,
           ),
         ),
       );
     }
-    return SliverPadding(
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      sliver: SliverGrid(
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
           crossAxisSpacing: spacing,
           mainAxisSpacing: 18,
           mainAxisExtent: itemHeight,
         ),
-        delegate: SliverChildBuilderDelegate((context, index) {
+        itemCount: shelf.length,
+        itemBuilder: (context, index) {
           final item = shelf[index];
           // NovelGridCard 只接了 onTap，长按手势包在外层；两者在手势竞技场
           // 里分别是 tap / long-press，不会互相吞掉。
@@ -70,7 +73,7 @@ class MineShelfGrid extends StatelessWidget {
               heroTag: heroTagOf?.call(item),
             ),
           );
-        }, childCount: shelf.length),
+        },
       ),
     );
   }
