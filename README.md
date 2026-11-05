@@ -25,6 +25,8 @@
 
 > 视频方案与边界见 [docs/video-playback.md](docs/video-playback.md)：本轮不做画中画/HDR/后台播放/AirPlay/锁屏/清晰度切换/弹幕。
 >
+> M1 流式起播（边下边播）的技术方案见 [docs/streaming-media-m1.md](docs/streaming-media-m1.md)。
+>
 > 书城首页流按 `tab_type` 分类的实测对照见 [docs/bookmall-tabs.md](docs/bookmall-tabs.md)；小说离线缓存方案（未实现）在 `feat/lhy/novel-cache` 分支的 `docs/novel-cache.md`。
 
 ## 架构
