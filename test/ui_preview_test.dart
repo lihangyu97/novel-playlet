@@ -43,6 +43,9 @@ class _FakeTransport extends BackendTransport {
   /// 命中这些关键词的搜索返回 500（验证失败后换关键词/重试的 loading 态）。
   final failingQueries = <String>{};
 
+  /// 推荐流首页请求全部返回 500（验证首屏失败立即出错误页）。
+  bool failRecommend = false;
+
   /// 每次请求的延迟；只有需要观察中间 loading 态的单测才设置。
   Duration responseDelay = Duration.zero;
 
@@ -63,8 +66,10 @@ class _FakeTransport extends BackendTransport {
       await Future<void>.delayed(responseDelay);
     }
     final keyword = params['query'] ?? '';
-    if (path.startsWith('/api/v1/search') &&
-        failingQueries.any(keyword.contains)) {
+    final failed =
+        (failRecommend && path.startsWith('/api/v1/recommend/homepage')) ||
+        (path.startsWith('/api/v1/search') && failingQueries.any(keyword.contains));
+    if (failed) {
       return BackendResponse(
         500,
         Uint8List.fromList(utf8.encode(jsonEncode({'message': 'boom'}))),
@@ -438,6 +443,7 @@ Future<void> _pump(
   Widget page, {
   ReadingStore? store,
   _FakeTransport? transport,
+  bool settle = true,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
@@ -462,6 +468,7 @@ Future<void> _pump(
       ),
     ),
   );
+  if (!settle) return;
   await tester.pumpAndSettle(const Duration(milliseconds: 100));
 }
 
@@ -772,6 +779,24 @@ void main() {
 
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(find.text('搜索结果 剑来'), findsOneWidget);
+  });
+
+  testWidgets('推荐页-首屏失败立即显示错误页（不等待自动重试）', (tester) async {
+    // Riverpod 3 默认对异常自动重试 10 次（约 38 秒），期间状态一直是 loading，
+    // 错误页会被推迟。这里不用 pumpAndSettle（会把自动重试跑完），固定时长
+    // 观察：首请求失败后必须马上出现 ErrorView，且只发过一次请求。
+    final fake = _FakeTransport()..failRecommend = true;
+    await _pump(tester, const RecommendPage(), transport: fake, settle: false);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(find.text('boom'), findsOneWidget);
+    expect(
+      fake.calls
+          .where((call) => call.startsWith('/api/v1/recommend/homepage'))
+          .length,
+      1,
+      reason: '关闭自动重试后，失败应立即交给用户手动重试',
+    );
   });
 
   testWidgets('详情页', (tester) async {

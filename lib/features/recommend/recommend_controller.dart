@@ -43,7 +43,13 @@ final recommendFeedProvider = AsyncNotifierProvider.family<
   RecommendFeedController,
   RecommendState,
   RecommendCategory
->(RecommendFeedController.new);
+>(
+  RecommendFeedController.new,
+  // 关闭 Riverpod 3 的默认自动重试（10 次、约 38 秒）。重试期间状态是
+  // 「isLoading=true + 上一次的 error」，页面会一直转圈、既看不到错误也点不到
+  // 重试按钮；首屏/搜索失败应当立即给 ErrorView，由用户手动重试。
+  retry: (retryCount, error) => null,
+);
 
 class RecommendFeedController extends AsyncNotifier<RecommendState> {
   RecommendFeedController(this.category);

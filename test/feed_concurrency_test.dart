@@ -208,7 +208,7 @@ Future<(ProviderContainer, RecommendFeedController, _SlowFake)> _feedFor(
 }
 
 void main() {
-  group('asLoadMore 状态字段', () {
+  group('分页状态字段', () {
     test('RecommendState.withLoadMoreError 保留 loadingMore', () {
       final state = FeedState<RecommendItem>.feed(items: const <RecommendItem>[])
           .withLoadingMore(true)

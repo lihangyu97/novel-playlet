@@ -6,7 +6,7 @@ import '../../data/models/video_series.dart';
 /// 三个分类共用同一套分页/网格/搜索骨架，但小说与短剧/漫剧的模型字段不同，
 /// 详情页也不同。这里只做一层薄包装：保留原始模型给卡片和详情页用（[novel]
 /// / [video] 二选一），把两边不一致的展示字段（作者、集数）收敛成
-/// [meta] / [searchMeta]。
+/// [searchMeta]。
 class RecommendItem {
   const RecommendItem._({this.novel, this.video});
 

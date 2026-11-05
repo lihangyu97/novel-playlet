@@ -157,28 +157,36 @@ List<VideoSeries> parseVideoSeries(Map<String, dynamic> payload) {
   return out;
 }
 
-
 /// 从搜索响应里只取 `tab_type` 匹配的那个 tab 的短剧/漫剧卡片。
 ///
 /// 搜索接口会一次回多个 `search_tabs`（综合/书籍/漫画/短剧…），直接递归整个
-/// 响应会把别的分类的卡片当成本分类（串台）。找不到匹配 tab 时返回空列表，
-/// 页面按「没有搜索结果」处理。
+/// 响应会把别的分类的卡片当成本分类（串台）。响应带 `tab_type` 元信息时严格
+/// 按分类过滤，没有匹配 tab 就返回空列表（页面按「没有搜索结果」处理）；
+/// 老/异形响应完全没有 `tab_type` 时退回整包解析，避免把原本能用的搜索变成
+/// 空结果。
 List<VideoSeries> parseSearchVideoSeries(
   Map<String, dynamic> payload, {
   required int tabType,
 }) {
   final data = asMap(payload['data']) ?? payload;
-  final matched = asList(data['search_tabs'])
+  final tabs = asList(data['search_tabs'])
       .map(asMap)
       .whereType<Map<String, dynamic>>()
+      .toList();
+  if (tabs.isEmpty) return const <VideoSeries>[];
+  final matched = tabs
       .where((tab) => asInt(tab['tab_type']) == tabType)
       .toList();
-  if (matched.isEmpty) return const <VideoSeries>[];
-  return parseVideoSeries({
-    'data': {
-      'search_tabs': matched,
-    },
-  });
+  if (matched.isNotEmpty) {
+    return parseVideoSeries({
+      'data': {
+        'search_tabs': matched,
+      },
+    });
+  }
+  final hasTypeInfo = tabs.any((tab) => asInt(tab['tab_type'], 0) > 0);
+  if (hasTypeInfo) return const <VideoSeries>[];
+  return parseVideoSeries(payload);
 }
 
 int _firstInt(Map<String, dynamic> map, List<String> keys) {

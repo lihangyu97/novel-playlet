@@ -115,9 +115,9 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推
 
 - `test/parsers_test.dart`：字段类型不稳定（数值是字符串、列表是单对象、id 截断）的兼容逻辑。
 - `test/video_parsers_test.dart`：短剧卡片/详情/取流的字段兼容与去重。
-- `test/feed_concurrency_test.dart`：翻页请求必须串行（真机曾出现同一 offset 每帧连发、并发响应互相覆盖导致列表闪烁），同时锁住状态 copy 不丢字段。
+- `test/feed_concurrency_test.dart`：翻页请求必须串行（真机曾出现同一 offset 每帧连发、并发响应互相覆盖导致列表闪烁），同时锁住状态 copy 不丢字段；另覆盖分类契约（`tab_type` 认领失败、漫剧无游标不翻页）与「搜索 A 未回就提交 B 时丢弃 A」。
 - `test/cache_test.dart`：缓存统计/清理只动可重建缓存，书架、进度与设备池不动。
-- `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`，10 张），并断言三个分类的推荐流/搜索结果封面尺寸与比例一致、分类 tabs 可横向滚动且没有「为你推荐/短剧推荐」旧标题、搜索框不因清空按钮被撑高、带 `blockIndex` 进入阅读页不落在第一页。
+- `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`，10 张），并断言三个分类的推荐流/搜索结果封面尺寸与比例一致、分类 tabs 可横向滚动且没有「为你推荐/短剧推荐」旧标题、手势滑切分类、切分类回来保留滚动位置、取消搜索回显快照且不重发请求、失败后换关键词先显示 loading、首屏失败立即显示错误页、搜索框不因清空按钮被撑高、带 `blockIndex` 进入阅读页不落在第一页。
 - `test/live_probe_test.dart`：默认跳过；需要先 `cargo build` 出 host dylib，且网络能访问设备注册域名。
 
 > golden 依赖 macOS 系统字体（Arial Unicode / STHeiti），换机器或换系统版本可能不一致。

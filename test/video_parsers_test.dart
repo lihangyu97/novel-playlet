@@ -136,6 +136,83 @@ void main() {
     });
   });
 
+  group('parseSearchVideoSeries', () {
+    Map<String, dynamic> multiTabPayload() => {
+      'code': 0,
+      'data': {
+        'search_tabs': [
+          {
+            'tab_type': 3,
+            'data': [
+              {
+                'book_data': {'book_id': 'n1', 'book_name': '书'},
+              },
+            ],
+          },
+          {
+            'tab_type': 8,
+            'data': [
+              {
+                'video_data': {
+                  'pseries_id': 'p1',
+                  'series_name': '漫剧1',
+                },
+              },
+            ],
+          },
+          {
+            'tab_type': 11,
+            'data': [
+              {
+                'video_data': {
+                  'series_id_str': 'v1',
+                  'series_title': '短剧1',
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    test('多 tab 混排时只取 tab_type 匹配的那一个', () {
+      expect(
+        parseSearchVideoSeries(multiTabPayload(), tabType: 8).map((i) => i.id),
+        ['p1'],
+      );
+      expect(
+        parseSearchVideoSeries(multiTabPayload(), tabType: 11).map((i) => i.id),
+        ['v1'],
+      );
+    });
+
+    test('没有匹配 tab 时返回空，不把别的分类当本分类', () {
+      expect(parseSearchVideoSeries(multiTabPayload(), tabType: 24), isEmpty);
+    });
+
+    test('响应完全没有 tab_type 元信息时退回整包解析', () {
+      final legacy = {
+        'code': 0,
+        'data': {
+          'search_tabs': [
+            {
+              'data': [
+                {
+                  'video_data': {
+                    'series_id_str': 'x1',
+                    'series_title': '旧短剧',
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      };
+      final items = parseSearchVideoSeries(legacy, tabType: 11);
+      expect(items.single.id, 'x1');
+    });
+  });
+
   group('FeedState<VideoSeries>', () {
     test('追加分页时按 id 去重，游标不前进视为到底', () {
       final initial = FeedState<VideoSeries>.feed(
