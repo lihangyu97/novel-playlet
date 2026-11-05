@@ -5,6 +5,7 @@ import '../data/models/novel_item.dart';
 import '../data/models/video_series.dart';
 import '../features/detail/detail_page.dart';
 import '../features/reader/reader_page.dart';
+import '../features/settings/settings_page.dart';
 import '../features/video/video_detail_page.dart';
 import '../features/video/video_player_page.dart';
 
@@ -68,14 +69,21 @@ class AppRoutes {
   static const reader = '/reader';
   static const videoDetail = '/video/detail';
   static const videoPlay = '/video/play';
+  static const settings = '/settings';
 
   static Route<dynamic>? onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
+      case AppRoutes.settings:
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (_) => const SettingsPage(),
+        );
       case detail:
         final args = settings.arguments as DetailArgs;
         return MaterialPageRoute(
           settings: settings,
-          builder: (_) => DetailPage(bookId: args.bookId, preview: args.preview),
+          builder: (_) =>
+              DetailPage(bookId: args.bookId, preview: args.preview),
         );
       case reader:
         final args = settings.arguments as ReaderArgs;

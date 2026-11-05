@@ -19,8 +19,9 @@
 | 短剧详情页：同一套封面头/简介卡（分类 · 播放量、全 N 集），目录换成选集网格，点集直接进播放页 | ✅ |
 | 阅读页：TextPainter 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、目录跳章、邻章预取、正文本地缓存（300 章上限、7 天后后台刷新）、章节 + 页首段落进度保存 | ✅ |
 | 播放页：`video_player`（AVPlayer）播放，控制条 3.5s 自动隐藏、缓冲 spinner、拖动松手才 seek、上下集/播完自动下一集、选集弹层、横屏视频全屏；密文交给内核 `/src` 按 Range 解密；失败给「原因 + 可复制详情 + 重新下载这一集」 | ✅ 骨架（先整集缓存后播） |
-| 我的页：书架（长按管理）、最近阅读 3 条（带段落级续读）、存储占用与清理 | ✅ |
-| 流式起播（边下边播）、整本离线下载、听书、漫画、评论、段评、登录、设置页 | ⬜ 后续 |
+| 我的页：书架（长按管理）、最近阅读 3 条（带段落级续读）、右上角「设置」入口 | ✅ |
+| 设置页：主题色（8 个预设 + HSV 自定义取色，全站即时生效并持久化）、存储占用（视频/封面/章节明细）与清理 | ✅ |
+| 流式起播（边下边播）、整本离线下载、听书、漫画、评论、段评、登录 | ⬜ 后续 |
 
 > 视频方案与边界见 [docs/video-playback.md](docs/video-playback.md)：本轮不做画中画/HDR/后台播放/AirPlay/锁屏/清晰度切换/弹幕。
 >
@@ -46,7 +47,7 @@ UI (features/*)  ──►  Riverpod controller  ──►  ApiClient (data/api)
 - 内核随 `init` 起一个 loopback HTTP adapter（`rust/src/server.rs`，默认端口 18931），给播放器提供 `/src/<video_id><ext>`（ext 由上游地址推断，按 Range 解密；capability 只约束会改设备状态的写接口，读接口不校验）。
 - 上游返回的是**原始 JSON**（Rust 只做正文解密），字段兼容集中在 `lib/data/models/`，列表/搜索的信封与游标解析在 `lib/data/api/api_client.dart`，页面只消费模型。
 - 视频同样由内核解密：`/api/v1/videos/{id}` 把整集下载进本地缓存（CENC 源保留密文 + key sidecar，播放时按 Range 解密），返回上面的 `/src/...` 地址，播放器只拉明文 HTTP。
-- 本地状态只有书架/阅读进度/最近阅读/阅读设置（`shared_preferences`），设备池密钥在 Keychain（`flutter_secure_storage`），池文件在 App 私有目录（加密）。
+- 本地状态只有书架/阅读进度/最近阅读/阅读设置/主题色（`shared_preferences`），设备池密钥在 Keychain（`flutter_secure_storage`），池文件在 App 私有目录（加密）。
 
 ### 目录
 
@@ -55,20 +56,20 @@ lib/
   main.dart       入口：锁竖屏、启动前裁剪封面缓存、ProviderScope
   app/            MaterialApp（主题 / 中文本地化 / 路由）、启动闸门、三 tab 外壳
   app/feed/       列表页通用骨架（FeedState/FeedView：分页、补屏、下拉刷新、底部状态；FeedResultsSliver：搜索结果横向列表）
-  app/theme/      Material 3 明暗主题（seed 天蓝）、统一滚动行为
+  app/theme/      Material 3 明暗主题（seed 可自定义、默认天蓝）、主题色偏好、统一滚动行为
   app/widgets/    共享组件（NovelCover 用 kCoverAspect 11:8、NovelGridCard、Loading/Error/Empty）
   app/widgets/detail/  详情页共用组件（封面头/简介卡/标签/区块标题）
   core/backend/   FRB 传输、内核启动与运行时文件部署
   core/cache/     封面图磁盘缓存、缓存占用统计与清理
   core/storage/   书架与进度存储、设备池密钥
   data/           接口客户端 + 模型与解析（含 video_series / video_detail / video_source）
-  features/       recommend / video / detail / reader / mine（章节缓存在 reader/reader_chapter_cache.dart）
+  features/       recommend / video / detail / reader / mine / settings（章节缓存在 reader/reader_chapter_cache.dart）
   src/rust/       flutter_rust_bridge 生成绑定（勿手改）
 rust/             Rust 内核（从 fqapp 整体拷入）
 assets/config/    config.json / filter.json / device_pool.example.json
 docs/             视频播放方案、书城 tab_type 对照
 scripts/          build_rust_ios.sh
-test/             6 个测试文件 + goldens/（10 张）
+test/             7 个测试文件 + goldens/（15 张）
 CONTRACTS.md      页面开发约定（页面清单/数据层 API 已滞后，待同步）
 ```
 
@@ -108,7 +109,7 @@ BUNDLE_ID=com.lihangyu.novelPlaylet IPA=/Users/lihangyu/workspace/novel-playlet/
 
 ```bash
 flutter test                       # 数据解析 + 缓存 + 并发回归 + UI golden 预览（不需要网络/内核/模拟器）
-flutter test --update-goldens      # 重新生成 test/goldens/*.png（当前 10 张）
+flutter test --update-goldens      # 重新生成 test/goldens/*.png（当前 15 张）
 cargo build --manifest-path rust/Cargo.toml   # live probe 需要 host dylib
 LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推荐/详情/目录/正文原始 JSON
 ```
@@ -117,7 +118,8 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推
 - `test/video_parsers_test.dart`：短剧卡片/详情/取流的字段兼容与去重。
 - `test/feed_concurrency_test.dart`：翻页请求必须串行（真机曾出现同一 offset 每帧连发、并发响应互相覆盖导致列表闪烁），同时锁住状态 copy 不丢字段；另覆盖分类契约（`tab_type` 认领失败、漫剧首页无游标时改用搜索兜底翻页）与「搜索 A 未回就提交 B 时丢弃 A」。
 - `test/cache_test.dart`：缓存统计/清理只动可重建缓存，书架、进度与设备池不动。
-- `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`，10 张），并断言三个分类的推荐流/搜索结果封面尺寸与比例一致、分类 tabs 可横向滚动且没有「为你推荐/短剧推荐」旧标题、手势滑切分类、切分类回来保留滚动位置、取消搜索回显快照且不重发请求、失败后换关键词先显示 loading、首屏失败立即显示错误页、搜索框不因清空按钮被撑高、带 `blockIndex` 进入阅读页不落在第一页。
+- `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`，15 张：含设置页默认/取色弹层/绯红主题/深色、阅读页设置弹层），并断言三个分类的推荐流/搜索结果封面尺寸与比例一致、分类 tabs 可横向滚动且没有「为你推荐/短剧推荐」旧标题、手势滑切分类、切分类回来保留滚动位置、取消搜索回显快照且不重发请求、失败后换关键词先显示 loading、首屏失败立即显示错误页、搜索框不因清空按钮被撑高、带 `blockIndex` 进入阅读页不落在第一页。
+- `test/settings_test.dart`：主题色落盘与恢复（启动预读首帧即生效、旧值不覆盖用户新选择）、`AppAccent` 注入、白/灰/黑中性色不被染成彩色、阅读弹层主色 × 各纸色对比度 ≥ 4.5、真实 `NovelPlayletApp` 跟着主题色重建、预设换色、取色弹层纵向/横向拖动都能改色、清理缓存二次确认/进行中禁用/失败可恢复/清理后占用归零、「我的」右上角能打开设置页。
 - `test/live_probe_test.dart`：默认跳过；需要先 `cargo build` 出 host dylib，且网络能访问设备注册域名。
 
 > golden 依赖 macOS 系统字体（Arial Unicode / STHeiti），换机器或换系统版本可能不一致。
@@ -133,9 +135,11 @@ App 沙盒里会落盘的东西（iPhone 13 调试期实测：文稿与数据 40
 | `Application Support/reader_chapters/` | 章节正文 JSON（内存再叠 8 章 LRU） | 最多 300 个文件，超出按最旧淘汰；超过 7 天只算过期，仍先展示并后台刷新 |
 | `Documents/diag.log` | 早期调试探针遗留日志（当前代码不再写入） | 清理时一并删除 |
 | `Application Support/backend/config/` | 上游设备注册池、过滤配置 | **不是缓存**：删了要重新注册设备 |
-| `Library/Preferences/*.plist` | 书架、阅读进度（含页首段落下标）、最近阅读、阅读设置 | **用户数据**：不清理 |
+| `Library/Preferences/*.plist` | 书架、阅读进度（含页首段落下标）、最近阅读、阅读设置、主题色 | **用户数据**：不清理 |
 
-「我的 → 存储」会显示当前缓存占用（视频/封面/章节明细）并提供「清理」：只清上面四类可重建缓存，书架与进度不动。统计/清理逻辑在 `lib/core/cache/app_cache.dart`。
+「设置 → 存储」会显示当前缓存占用（视频/封面/章节明细）并提供「清理」：只清上面四类可重建缓存，书架与进度不动。统计/清理逻辑在 `lib/core/cache/app_cache.dart`。
+
+「设置 → 主题色」改的是 Material 3 的 seed：primary/secondary/选中态全部跟着派生，阅读页工具栏与目录高亮也会一起变（阅读弹层按纸色明暗单独派生 scheme，避免暗色 App + 浅色纸底时文字看不清）。近中性色（白/灰/黑）走单色方案，不会把白色染成青色、黑色染成粉色。选择落盘在 `shared_preferences`（`app_seed_color_v1`），`main.dart` 在建 MaterialApp 之前先读盘（最多等 300ms），首帧就是用户选的颜色；读盘失败/超时就按默认色走。主题色只负责配色，不提供深色模式开关（跟随系统）。
 
 清理后 App 自身缓存≈0；某次真机观察沙盒里还剩 ~20 MB，是 iOS 自己生成的启动快照（`Library/SplashBoard`）与 Metal 着色器缓存，不归本 App 管理，重装/系统回收时会自动消化。
 
