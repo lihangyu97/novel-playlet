@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/models/json_utils.dart';
 import '../../data/models/novel_item.dart';
+import '../../data/models/video_series.dart';
 
 /// 一本书的阅读进度。
 class ReadingProgress {
@@ -56,6 +57,49 @@ class ReadingProgress {
   }
 }
 
+/// 一部短剧的观看进度。
+///
+/// 与小说 [ReadingProgress] 对齐：只记「看到第几集 + 时间」，点进去直接续播。
+class VideoWatchProgress {
+  const VideoWatchProgress({
+    required this.seriesId,
+    required this.title,
+    this.cover = '',
+    this.episodeIndex = 0,
+    required this.updatedAt,
+  });
+
+  final String seriesId;
+  final String title;
+  final String cover;
+
+  /// 看到第几集（0-based）。
+  final int episodeIndex;
+  final DateTime updatedAt;
+
+  Map<String, dynamic> toJson() => {
+    'seriesId': seriesId,
+    'title': title,
+    'cover': cover,
+    'episodeIndex': episodeIndex,
+    'updatedAt': updatedAt.millisecondsSinceEpoch,
+  };
+
+  static VideoWatchProgress? fromJson(Map<String, dynamic> json) {
+    final seriesId = asString(json['seriesId']);
+    if (seriesId.isEmpty) return null;
+    return VideoWatchProgress(
+      seriesId: seriesId,
+      title: asString(json['title']),
+      cover: asString(json['cover']),
+      episodeIndex: asInt(json['episodeIndex']),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(
+        asInt(json['updatedAt']),
+      ),
+    );
+  }
+}
+
 /// 书架与阅读进度的本地存储。
 ///
 /// 只用 shared_preferences 存"小而重要"的状态；正文不落盘（离线缓存是后续
@@ -68,6 +112,15 @@ class ReadingStore {
   static const _shelfKey = 'shelf_books_v1';
   static const _progressKey = 'reading_progress_v1';
 
+  /// 短剧收藏（对应小说书架）。
+  static const _videoShelfKey = 'video_shelf_v1';
+
+  /// 短剧每部剧看到第几集（对应小说进度表）。
+  static const _videoProgressKey = 'video_progress_v1';
+
+  /// 短剧最近观看（对应最近阅读，只留 [videoHistoryLimit] 条）。
+  static const _videoHistoryKey = 'video_history_v1';
+
   /// 最近阅读：独立列表，只保留 [recentLimit] 本。
   ///
   /// 和 [_progressKey] 分开存是刻意的：进度表是"每本书读到哪"（第几本都要能
@@ -77,6 +130,9 @@ class ReadingStore {
 
   /// 最近阅读的存储/展示条数。
   static const int recentLimit = 3;
+
+  /// 短剧最近观看的存储/展示条数（与小说最近阅读一致，最多 3 条）。
+  static const int videoHistoryLimit = 3;
   static const _lastReadKey = 'last_read_book_v1';
 
   Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
@@ -106,6 +162,98 @@ class ReadingStore {
     books.removeWhere((book) => book.id == bookId);
     await _writeShelf(books);
     revision.value++;
+  }
+
+  // ---------------------------------------------------------------------
+  // 短剧：收藏 / 观看进度 / 最近观看
+  // ---------------------------------------------------------------------
+
+  Future<List<VideoSeries>> videoShelf() async {
+    final prefs = await _prefs;
+    return _decodeVideoShelf(prefs.getString(_videoShelfKey));
+  }
+
+  Future<bool> isVideoOnShelf(String seriesId) async {
+    final books = await videoShelf();
+    return books.any((item) => item.id == seriesId);
+  }
+
+  /// 加入收藏；已收藏则不重复写入。
+  Future<void> addVideoToShelf(VideoSeries item) async {
+    if (item.id.isEmpty) return;
+    final items = await videoShelf();
+    if (items.any((entry) => entry.id == item.id)) return;
+    items.insert(0, item);
+    await _writeVideoShelf(items);
+    revision.value++;
+  }
+
+  Future<void> removeVideoFromShelf(String seriesId) async {
+    final items = await videoShelf();
+    items.removeWhere((item) => item.id == seriesId);
+    await _writeVideoShelf(items);
+    revision.value++;
+  }
+
+  /// 记一次观看进度；顺带刷新最近观看（最多 [videoHistoryLimit] 条）。
+  Future<void> saveVideoProgress({
+    required String seriesId,
+    required String title,
+    String cover = '',
+    required int episodeIndex,
+  }) async {
+    if (seriesId.isEmpty) return;
+    final prefs = await _prefs;
+    final entry = VideoWatchProgress(
+      seriesId: seriesId,
+      title: title,
+      cover: cover,
+      episodeIndex: episodeIndex,
+      updatedAt: DateTime.now(),
+    );
+    final map = _decodeVideoProgress(prefs.getString(_videoProgressKey))
+      ..[seriesId] = entry.toJson();
+    await prefs.setString(_videoProgressKey, jsonEncode(map));
+
+    final history = _decodeVideoHistory(prefs.getString(_videoHistoryKey))
+      ..removeWhere((item) => asString(item['seriesId']) == seriesId)
+      ..insert(0, entry.toJson());
+    if (history.length > videoHistoryLimit) {
+      history.removeRange(videoHistoryLimit, history.length);
+    }
+    await prefs.setString(_videoHistoryKey, jsonEncode(history));
+    revision.value++;
+  }
+
+  Future<VideoWatchProgress?> videoProgress(String seriesId) async {
+    final prefs = await _prefs;
+    final raw = _decodeVideoProgress(prefs.getString(_videoProgressKey))[seriesId];
+    return raw == null ? null : VideoWatchProgress.fromJson(raw);
+  }
+
+  /// 最近观看（按观看时间倒序，最多 [videoHistoryLimit] 条）。
+  Future<List<VideoWatchProgress>> videoHistory({
+    int limit = videoHistoryLimit,
+  }) async {
+    final prefs = await _prefs;
+    var entries = _decodeVideoHistory(prefs.getString(_videoHistoryKey));
+    if (entries.isEmpty) {
+      // 老版本可能只有进度表：按更新时间补出最近几条。
+      final progress = _decodeVideoProgress(
+        prefs.getString(_videoProgressKey),
+      );
+      final derived = progress.values.toList()
+        ..sort((a, b) => asInt(b['updatedAt']).compareTo(asInt(a['updatedAt'])));
+      entries = derived.take(limit).toList();
+      if (entries.isNotEmpty) {
+        await prefs.setString(_videoHistoryKey, jsonEncode(entries));
+      }
+    }
+    return entries
+        .map(VideoWatchProgress.fromJson)
+        .whereType<VideoWatchProgress>()
+        .take(limit)
+        .toList();
   }
 
   Future<void> saveProgress({
@@ -180,7 +328,39 @@ class ReadingStore {
         .toList();
   }
 
-  List<Map<String, dynamic>> _decodeRecent(String? raw) {
+  List<VideoSeries> _decodeVideoShelf(String? raw) {
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = jsonDecode(raw);
+      if (list is! List) return [];
+      return list
+          .map(asMap)
+          .whereType<Map<String, dynamic>>()
+          .map(VideoSeries.fromStorageJson)
+          .where((item) => item.isValid)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _writeVideoShelf(List<VideoSeries> items) async {
+    final prefs = await _prefs;
+    await prefs.setString(
+      _videoShelfKey,
+      jsonEncode(items.map((item) => item.toStorageJson()).toList()),
+    );
+  }
+
+  List<Map<String, dynamic>> _decodeVideoHistory(String? raw) =>
+      _decodeMapList(raw);
+
+  Map<String, Map<String, dynamic>> _decodeVideoProgress(String? raw) =>
+      _decodeKeyedMap(raw);
+
+  List<Map<String, dynamic>> _decodeRecent(String? raw) => _decodeMapList(raw);
+
+  List<Map<String, dynamic>> _decodeMapList(String? raw) {
     if (raw == null || raw.isEmpty) return [];
     try {
       final list = jsonDecode(raw);
@@ -210,7 +390,10 @@ class ReadingStore {
     }
   }
 
-  Map<String, Map<String, dynamic>> _decodeProgress(String? raw) {
+  Map<String, Map<String, dynamic>> _decodeProgress(String? raw) =>
+      _decodeKeyedMap(raw);
+
+  Map<String, Map<String, dynamic>> _decodeKeyedMap(String? raw) {
     if (raw == null || raw.isEmpty) return {};
     try {
       final decoded = jsonDecode(raw);

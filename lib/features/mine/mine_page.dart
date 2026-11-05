@@ -9,14 +9,19 @@ import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
+import '../../data/models/json_utils.dart';
 import '../../data/models/novel_item.dart';
+import '../../data/models/video_series.dart';
 import 'mine_drama_providers.dart';
 import 'mine_providers.dart';
+import 'widgets/mine_drama_shelf_grid.dart';
 import 'widgets/mine_recent_reading.dart';
+import 'widgets/mine_recent_watching.dart';
 import 'widgets/mine_shelf_grid.dart';
 
-/// 面板切换的时间轴：标题块 0ms 起步、第二块 100ms、第三块 200ms，
-/// 每块自己滑 300ms，所以总时间轴 500ms（见 [_StaggeredBlock] 的窗口换算）。
+/// 面板切换的时间轴：最近阅读/观看块 0ms 起步、标题块 100ms、书架/收藏块
+/// 200ms，每块自己滑 300ms，所以总时间轴 500ms（见 [_StaggeredBlock] 的
+/// 窗口换算）。
 const _panelTimeline = Duration(milliseconds: 500);
 
 /// 每块在时间轴上占 60%（300ms），相邻块错开 20%（100ms）。
@@ -29,8 +34,8 @@ const _panelSwipeVelocity = 300.0;
 /// 我的：小说 / 短剧 两块面板，右下角悬浮按钮或左右滑动切换。
 ///
 /// 两个面板是同一套版式的镜像：小说的标题/图标在左、设置按钮在右；短剧反过来
-/// （标题/图标在右、设置在左）。切换时不是整页一起平移，而是从上到下分三块
-/// 依次滑出/滑入（标题 0ms、最近阅读/观看 100ms、书架/收藏 200ms 延迟）。
+/// （标题/图标在右、设置在左）。切换时不是整页一起平移，而是分三块穿插着
+/// 滑出/滑入（最近阅读/观看 0ms、标题 100ms、书架/收藏 200ms 延迟）。
 ///
 /// 小说侧数据全部在本地（书架 + 阅读进度）；短剧侧的收藏/观看记录还没做，
 /// 先用 [mineDramaDataProvider] 的空列表占位，页面结构与交互按最终形态搭好。
@@ -144,7 +149,6 @@ class _MinePageState extends ConsumerState<MinePage>
                       key: MinePage.novelPanelKey,
                       bottomInset: widget.bottomInset,
                       progress: _controller,
-                      onOpenSettings: _openSettings,
                     ),
                   ),
                   _panelSurface(
@@ -153,10 +157,34 @@ class _MinePageState extends ConsumerState<MinePage>
                       key: MinePage.dramaPanelKey,
                       bottomInset: widget.bottomInset,
                       progress: _controller,
-                      onOpenSettings: _openSettings,
                     ),
                   ),
                 ],
+              ),
+            ),
+            // 唯一一个设置按钮：小说面板时在右、短剧面板时在左，切换过程中
+            // 跟着 _controller 在屏幕内左右移动（不会被滑出屏幕）。
+            Positioned(
+              top: 20,
+              left: 16,
+              right: 16,
+              height: 40,
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  return Align(
+                    alignment: Alignment(1 - 2 * _controller.value, 0),
+                    child: child,
+                  );
+                },
+                child: IconButton(
+                  onPressed: _openSettings,
+                  tooltip: '设置',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 22,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  icon: const Icon(Icons.settings_outlined),
+                ),
               ),
             ),
             // 右下角悬浮切换按钮：贴在悬浮底栏上方，不遮胶囊。
@@ -193,8 +221,8 @@ class _MinePageState extends ConsumerState<MinePage>
 /// 单块内容的阶梯位移动画。
 ///
 /// 时间轴 0..1 表示「小说 → 短剧」的进度：
-/// - 第 [index] 块从 `index * 0.2` 开始、耗时 `0.6`（= 300ms），
-///   所以三块分别是 0ms / 100ms / 200ms 起步；
+/// - 第 [index] 块从 `index * 0.2` 开始、耗时 `0.6`（= 300ms）；
+/// - 最近块 index=0（0ms）、标题 index=1（100ms）、书架/收藏 index=2（200ms）；
 /// - 出场的块往左滑出，入场的块从右侧滑入。
 class _StaggeredBlock extends StatelessWidget {
   const _StaggeredBlock({
@@ -294,12 +322,10 @@ class _NovelPanel extends ConsumerWidget {
     super.key,
     required this.bottomInset,
     required this.progress,
-    required this.onOpenSettings,
   });
 
   final double bottomInset;
   final Animation<double> progress;
-  final VoidCallback onOpenSettings;
 
   static const _gutter = 16.0;
   static const _gridSpacing = 12.0;
@@ -317,13 +343,13 @@ class _NovelPanel extends ConsumerWidget {
         SliverToBoxAdapter(
           child: _StaggeredBlock(
             progress: progress,
-            index: 0,
+            // 顶栏第二拍入场（最近阅读先走）。
+            index: 1,
             incoming: false,
             child: _MineHeader(
               title: '小说',
               icon: Icons.auto_stories_rounded,
               stats: _statsOf(async, data),
-              onOpenSettings: onOpenSettings,
             ),
           ),
         ),
@@ -332,7 +358,8 @@ class _NovelPanel extends ConsumerWidget {
             SliverToBoxAdapter(
               child: _StaggeredBlock(
                 progress: progress,
-                index: 1,
+                // 最近阅读 0 延迟，最先动。
+                index: 0,
                 incoming: false,
                 child: Column(
                   children: [
@@ -375,7 +402,7 @@ class _NovelPanel extends ConsumerWidget {
           SliverToBoxAdapter(
             child: _StaggeredBlock(
               progress: progress,
-              index: 1,
+              index: 0,
               incoming: false,
               child: SizedBox(
                 height: 220,
@@ -529,12 +556,13 @@ class _DramaPanel extends ConsumerWidget {
     super.key,
     required this.bottomInset,
     required this.progress,
-    required this.onOpenSettings,
   });
 
   final double bottomInset;
   final Animation<double> progress;
-  final VoidCallback onOpenSettings;
+
+  static const _gridSpacing = 12.0;
+  static const _maxCardWidth = 128.0;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -546,14 +574,14 @@ class _DramaPanel extends ConsumerWidget {
         SliverToBoxAdapter(
           child: _StaggeredBlock(
             progress: progress,
-            index: 0,
+            // 顶栏第二拍入场（最近观看先走）。
+            index: 1,
             incoming: true,
             child: _MineHeader(
               title: '短剧',
               icon: Icons.theaters_rounded,
               stats: _statsOf(async, data),
               mirrored: true,
-              onOpenSettings: onOpenSettings,
             ),
           ),
         ),
@@ -561,22 +589,25 @@ class _DramaPanel extends ConsumerWidget {
           SliverToBoxAdapter(
             child: _StaggeredBlock(
               progress: progress,
-              index: 1,
+              // 最近观看 0 延迟，最先动。
+              index: 0,
               incoming: true,
               child: Column(
                 children: [
                   const _SectionHeader(title: '最近观看', mirrored: true),
-                  SizedBox(
-                    height: 180,
-                    // TODO(短剧历史): 接上本地观看记录后换成与小说侧
-                    // MineRecentReading 对应的列表。
-                    child: data.history.isEmpty
-                        ? const EmptyView(
-                            message: '还没有观看记录，去推荐页看看短剧',
-                            icon: Icons.history_rounded,
-                          )
-                        : const SizedBox.shrink(),
-                  ),
+                  if (data.history.isEmpty)
+                    const SizedBox(
+                      height: 140,
+                      child: EmptyView(
+                        message: '还没有观看记录，去推荐页看看短剧',
+                        icon: Icons.history_rounded,
+                      ),
+                    )
+                  else
+                    MineRecentWatching(
+                      items: data.history,
+                      onOpen: (progress) => _resume(context, ref, progress),
+                    ),
                 ],
               ),
             ),
@@ -593,16 +624,17 @@ class _DramaPanel extends ConsumerWidget {
                     mirrored: true,
                     hint: data.collections.isEmpty ? null : '长按管理',
                   ),
-                  SizedBox(
-                    height: 180,
-                    // TODO(短剧收藏): 接上本地收藏后换成与小说侧
-                    // MineShelfGrid 对应的网格。
-                    child: data.collections.isEmpty
-                        ? const EmptyView(
-                            message: '还没有收藏的短剧',
-                            icon: Icons.video_collection_outlined,
-                          )
-                        : const SizedBox.shrink(),
+                  MineDramaShelfGrid(
+                    items: data.collections,
+                    crossAxisCount: _columnsOf(context),
+                    itemWidth: _itemWidthOf(context),
+                    itemHeight: _itemHeightOf(context),
+                    spacing: _gridSpacing,
+                    heroTagOf: (item) =>
+                        CoverHeroTag.video('mine-drama-shelf', item.id),
+                    onOpen: (item) => _openDetail(context, item),
+                    onLongPress: (item) =>
+                        _showCollectionMenu(context, ref, item),
                   ),
                 ],
               ),
@@ -612,7 +644,7 @@ class _DramaPanel extends ConsumerWidget {
           SliverToBoxAdapter(
             child: _StaggeredBlock(
               progress: progress,
-              index: 1,
+              index: 0,
               incoming: true,
               child: SizedBox(
                 height: 220,
@@ -636,6 +668,146 @@ class _DramaPanel extends ConsumerWidget {
     }
     return async.hasError ? '本地短剧数据暂时读不出来' : '正在读取短剧数据…';
   }
+
+  double _availableWidth(BuildContext context) =>
+      math.max(0.0, MediaQuery.sizeOf(context).width - 32);
+
+  int _columnsOf(BuildContext context) => math.max(
+    2,
+    math.min(6, (_availableWidth(context) / _maxCardWidth).ceil()),
+  );
+
+  double _itemWidthOf(BuildContext context) {
+    final columns = _columnsOf(context);
+    return math.max(
+      0.0,
+      (_availableWidth(context) - _gridSpacing * (columns - 1)) / columns,
+    );
+  }
+
+  /// 与 VideoCard 的内部排版对齐（封面 kCoverAspect + 标题两行 + 集数一行）。
+  double _itemHeightOf(BuildContext context) {
+    final itemWidth = _itemWidthOf(context);
+    final textScaler = MediaQuery.textScalerOf(context);
+    return itemWidth * kCoverAspect +
+        8 +
+        textScaler.scale(14) * 1.25 * 2 +
+        3 +
+        textScaler.scale(12) * 1.35 +
+        6;
+  }
+
+  void _openDetail(BuildContext context, VideoSeries item) {
+    Navigator.of(context).pushNamed(
+      AppRoutes.videoDetail,
+      arguments: VideoDetailArgs(
+        seriesId: item.id,
+        preview: item,
+        heroTag: CoverHeroTag.video('mine-drama-shelf', item.id),
+      ),
+    );
+  }
+
+  /// 最近观看点击续播：先拉分集列表，再直接进播放页对应集。
+  Future<void> _resume(
+    BuildContext context,
+    WidgetRef ref,
+    VideoWatchProgress progress,
+  ) async {
+    try {
+      final api = ref.read(apiClientProvider);
+      final episodes = await api.videoEpisodes(progress.seriesId);
+      if (episodes.isEmpty) {
+        throw ApiException('这部剧暂时没有可播放的集数');
+      }
+      if (!context.mounted) return;
+      final index = progress.episodeIndex < episodes.length
+          ? progress.episodeIndex
+          : 0;
+      Navigator.of(context).pushNamed(
+        AppRoutes.videoPlay,
+        arguments: VideoPlayArgs(
+          seriesTitle: progress.title,
+          episodes: episodes,
+          index: index,
+          seriesId: progress.seriesId,
+          cover: progress.cover,
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error is ApiException ? error.message : '打开播放失败，请重试',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _showCollectionMenu(
+    BuildContext context,
+    WidgetRef ref,
+    VideoSeries item,
+  ) async {
+    final action = await showModalBottomSheet<_ShelfMenuAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final scheme = theme.colorScheme;
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                child: Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.info_outline_rounded),
+                title: const Text('查看详情'),
+                onTap: () =>
+                    Navigator.of(sheetContext).pop(_ShelfMenuAction.openDetail),
+              ),
+              ListTile(
+                leading: Icon(
+                  Icons.bookmark_remove_outlined,
+                  color: scheme.error,
+                ),
+                title: Text('移出收藏', style: TextStyle(color: scheme.error)),
+                onTap: () =>
+                    Navigator.of(sheetContext).pop(_ShelfMenuAction.remove),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (action == null || !context.mounted) return;
+    switch (action) {
+      case _ShelfMenuAction.openDetail:
+        _openDetail(context, item);
+      case _ShelfMenuAction.remove:
+        final store = ref.read(readingStoreProvider);
+        await store.removeVideoFromShelf(item.id);
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已取消收藏《${item.title}》')),
+        );
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -651,14 +823,12 @@ class _MineHeader extends StatelessWidget {
     required this.title,
     required this.icon,
     required this.stats,
-    required this.onOpenSettings,
     this.mirrored = false,
   });
 
   final String title;
   final IconData icon;
   final String stats;
-  final VoidCallback onOpenSettings;
   final bool mirrored;
 
   @override
@@ -681,14 +851,9 @@ class _MineHeader extends StatelessWidget {
       ),
       child: Icon(icon, size: 19, color: scheme.primary),
     );
-    final settings = IconButton(
-      onPressed: onOpenSettings,
-      tooltip: '设置',
-      visualDensity: VisualDensity.compact,
-      iconSize: 22,
-      color: scheme.onSurfaceVariant,
-      icon: const Icon(Icons.settings_outlined),
-    );
+    // 设置按钮由页面统一画在 Stack 顶层（切换时在屏幕内左右滑动），这里只留
+    // 同宽的占位，保证两侧页头高度与文字位置不因移除按钮而变化。
+    const settingsPlaceholder = SizedBox(width: 40, height: 40);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
       child: Column(
@@ -699,7 +864,7 @@ class _MineHeader extends StatelessWidget {
           Row(
             children: mirrored
                 ? [
-                    settings,
+                    settingsPlaceholder,
                     const Spacer(),
                     titleText,
                     const SizedBox(width: 10),
@@ -710,7 +875,7 @@ class _MineHeader extends StatelessWidget {
                     const SizedBox(width: 10),
                     titleText,
                     const Spacer(),
-                    settings,
+                    settingsPlaceholder,
                   ],
           ),
           const SizedBox(height: 8),

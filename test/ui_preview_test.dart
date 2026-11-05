@@ -32,7 +32,9 @@ import 'package:novel_playlet/features/settings/settings_page.dart';
 import 'package:novel_playlet/features/settings/settings_providers.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/video/video_detail_page.dart';
+import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
+import 'package:novel_playlet/features/video/widgets/episode_picker.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -1365,6 +1367,130 @@ void main() {
     );
   });
 
+  testWidgets('短剧详情-底部收藏与播放栏', (tester) async {
+    const preview = VideoSeries(
+      id: 'v1',
+      title: '测试短剧',
+      episodeCount: 40,
+    );
+    await _pump(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: _FakeTransport(),
+    );
+    expect(find.text('收藏'), findsOneWidget);
+    expect(find.text('播放'), findsOneWidget);
+
+    await tester.tap(find.text('收藏'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    final favoriteButton = find.descendant(
+      of: find.byType(OutlinedButton),
+      matching: find.text('已收藏'),
+    );
+    expect(favoriteButton, findsOneWidget, reason: '底部收藏按钮应变成「已收藏」');
+    final store = ReadingStore();
+    expect(await store.isVideoOnShelf('v1'), isTrue);
+
+    // 等「已收藏」snackbar 消失，避免它挡住底部按钮。
+    await tester.pumpAndSettle(const Duration(seconds: 5));
+    await tester.tap(favoriteButton);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(
+      find.descendant(
+        of: find.byType(OutlinedButton),
+        matching: find.text('收藏'),
+      ),
+      findsOneWidget,
+    );
+    expect(await store.isVideoOnShelf('v1'), isFalse);
+  });
+
+  testWidgets('短剧详情-有观看进度时显示继续观看', (tester) async {
+    final progress = VideoWatchProgress(
+      seriesId: 'v1',
+      title: '测试短剧',
+      episodeIndex: 2,
+      updatedAt: DateTime.now(),
+    );
+    SharedPreferences.setMockInitialValues({
+      'video_progress_v1': jsonEncode({'v1': progress.toJson()}),
+      'video_history_v1': jsonEncode([progress.toJson()]),
+    });
+    const preview = VideoSeries(
+      id: 'v1',
+      title: '测试短剧',
+      episodeCount: 40,
+    );
+    await _pump(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: _FakeTransport(),
+    );
+    expect(find.text('继续观看 · 第 3 集'), findsOneWidget);
+  });
+
+  testWidgets('我的页-短剧最近观看点击后进播放页', (tester) async {
+    final progress = VideoWatchProgress(
+      seriesId: 'v1',
+      title: '太奶奶的短剧',
+      episodeIndex: 4,
+      updatedAt: DateTime.now(),
+    );
+    SharedPreferences.setMockInitialValues({
+      'video_progress_v1': jsonEncode({'v1': progress.toJson()}),
+      'video_history_v1': jsonEncode([progress.toJson()]),
+    });
+    await _pump(tester, const MinePage());
+    await tester.tap(find.byKey(MinePage.switchButtonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+
+    await tester.tap(find.text('看到第 5 集'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.byType(VideoPlayerPage), findsOneWidget);
+  });
+
+  testWidgets('我的页（短剧收藏与历史）', (tester) async {
+    final progress = VideoWatchProgress(
+      seriesId: 'v1',
+      title: '太奶奶的短剧',
+      cover: '',
+      episodeIndex: 4,
+      updatedAt: DateTime.now(),
+    );
+    SharedPreferences.setMockInitialValues({
+      'video_shelf_v1': jsonEncode([
+        VideoSeries(
+          id: 'v1',
+          title: '太奶奶的短剧',
+          episodeCount: 40,
+        ).toStorageJson(),
+        const VideoSeries(
+          id: 'v2',
+          title: '另一部短剧',
+          episodeCount: 12,
+        ).toStorageJson(),
+      ]),
+      'video_progress_v1': jsonEncode({'v1': progress.toJson()}),
+      'video_history_v1': jsonEncode([progress.toJson()]),
+    });
+
+    await _pump(tester, const MinePage());
+    await tester.tap(find.byKey(MinePage.switchButtonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+
+    expect(find.text('最近观看 1 条 · 收藏 2 部'), findsOneWidget);
+    expect(find.text('太奶奶的短剧'), findsWidgets);
+    expect(find.text('看到第 5 集'), findsOneWidget);
+    expect(find.text('另一部短剧'), findsOneWidget);
+    // 最近观看和最近阅读同一版式：封面在左、箭头在右。
+    expect(find.byIcon(Icons.chevron_left_rounded), findsNothing);
+    expect(find.byIcon(Icons.chevron_right_rounded), findsWidgets);
+    await expectLater(
+      find.byType(MinePage),
+      matchesGoldenFile('goldens/mine_drama.png'),
+    );
+  });
+
   group('短剧选集', () {
     testWidgets('默认折叠，展开后 36 集一个 tab、每行 6 个、只显示集数', (tester) async {
       final fake = _FakeTransport()..directoryChapterCount = 80;
@@ -1379,10 +1505,14 @@ void main() {
         transport: fake,
       );
 
+      final episodeButtons = find.descendant(
+        of: find.byType(EpisodePicker),
+        matching: find.byType(OutlinedButton),
+      );
       // 默认展开：直接看到选集和集数按钮。
       expect(find.text('选集'), findsOneWidget);
       expect(find.text('共 80 集'), findsOneWidget);
-      expect(find.byType(OutlinedButton), findsWidgets);
+      expect(episodeButtons, findsWidgets);
 
       // 36 集一个 tab，自动分组。
       expect(find.text('1-36'), findsOneWidget);
@@ -1414,10 +1544,10 @@ void main() {
       // 点标题可以收起，再点可以重新展开。
       await tester.tap(find.text('选集'));
       await tester.pumpAndSettle(const Duration(milliseconds: 300));
-      expect(find.byType(OutlinedButton), findsNothing);
+      expect(episodeButtons, findsNothing);
       await tester.tap(find.text('选集'));
       await tester.pumpAndSettle(const Duration(milliseconds: 300));
-      expect(find.byType(OutlinedButton), findsWidgets);
+      expect(episodeButtons, findsWidgets);
     });
   });
 
@@ -1690,21 +1820,45 @@ void main() {
 
   /// 过渡不是整页一起动：标题块 0ms 先走，最近阅读块晚 100ms，书架块晚 200ms。
   testWidgets('我的页-三块阶梯延迟切换', (tester) async {
+    // 需要有最近阅读内容，才能观察中间块（0ms）比标题块（100ms）先动。
+    SharedPreferences.setMockInitialValues({
+      'recent_reading_v1': jsonEncode([
+        {
+          'bookId': '1',
+          'bookTitle': '剑来',
+          'cover': '',
+          'chapterId': 'c3',
+          'chapterIndex': 2,
+          'blockIndex': 0,
+          'updatedAt': DateTime.now().millisecondsSinceEpoch,
+        },
+      ]),
+    });
     await _pump(tester, const MinePage());
     final headerBefore = tester.getTopLeft(find.text('小说')).dx;
+    final recentBefore = tester.getTopLeft(find.text('最近阅读')).dx;
     final shelfBefore = tester.getTopLeft(find.text('我的书架')).dx;
 
     final gesture = await tester.startGesture(const Offset(200, 500));
-    // 吃掉触摸 slop 后再精确拖 100px：时间轴走到 100/390 ≈ 0.26，
-    // 标题块已滑走约 170px、最近阅读块刚起步、书架块还没动。
+    // 吃掉触摸 slop 后再精确拖 100px：时间轴走到约 0.26，
+    // 最近阅读块（0ms）已滑走大半、标题块（100ms）刚起步、书架块（200ms）还没动。
     await gesture.moveBy(const Offset(-20, 0));
     await tester.pump();
     await gesture.moveBy(const Offset(-100, 0));
     await tester.pump();
 
-    final headerAfter = tester.getTopLeft(find.text('小说')).dx;
+    final headerDelta =
+        tester.getTopLeft(find.text('小说')).dx - headerBefore;
+    final recentDelta =
+        tester.getTopLeft(find.text('最近阅读')).dx - recentBefore;
     final shelfAfter = tester.getTopLeft(find.text('我的书架')).dx;
-    expect(headerAfter, lessThan(headerBefore - 120), reason: '标题块（0ms）应该先滑');
+    expect(recentDelta, lessThan(-120), reason: '最近阅读块（0ms）应该先滑');
+    expect(headerDelta, lessThan(0), reason: '标题块（100ms）随后开始');
+    expect(
+      headerDelta.abs(),
+      lessThan(recentDelta.abs()),
+      reason: '标题块应落后于最近阅读块',
+    );
     expect(shelfAfter, closeTo(shelfBefore, 0.5), reason: '书架块（200ms）此时不应移动');
 
     await gesture.up();
@@ -1712,7 +1866,8 @@ void main() {
     expect(find.text('短剧'), findsWidgets);
   });
 
-  /// 短剧是镜像版式：标题/图标靠右、设置按钮靠左，与小说侧对称。
+  /// 短剧是镜像版式：标题/图标靠右；设置按钮只有一枚，随面板在屏幕内
+  /// 从右侧滑到左侧，不再由两个面板各画一个。
   testWidgets('我的页-短剧标题与设置按钮左右镜像', (tester) async {
     await _pump(tester, const MinePage());
     const pageWidth = 390.0;
@@ -1724,12 +1879,10 @@ void main() {
       tester.getTopLeft(find.text('小说')).dx,
       closeTo(gutter + iconBox + iconGap, 1),
     );
-    final novelSettings = find.descendant(
-      of: find.byKey(MinePage.novelPanelKey),
-      matching: find.byIcon(Icons.settings_outlined),
-    );
+    final settingsIcon = find.byIcon(Icons.settings_outlined);
+    expect(settingsIcon, findsOneWidget, reason: '小说/短剧共用同一个设置按钮');
     expect(
-      tester.getTopLeft(novelSettings).dx,
+      tester.getTopLeft(settingsIcon).dx,
       greaterThan(pageWidth / 2),
       reason: '小说的设置按钮在右侧',
     );
@@ -1742,14 +1895,11 @@ void main() {
       closeTo(pageWidth - (gutter + iconBox + iconGap), 1),
       reason: '短剧标题应与小说标题左右对称',
     );
-    final dramaSettings = find.descendant(
-      of: find.byKey(MinePage.dramaPanelKey),
-      matching: find.byIcon(Icons.settings_outlined),
-    );
+    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
     expect(
-      tester.getTopLeft(dramaSettings).dx,
+      tester.getTopLeft(settingsIcon).dx,
       lessThan(pageWidth / 2),
-      reason: '短剧的设置按钮应过渡到左侧',
+      reason: '同一个设置按钮应过渡到左侧',
     );
   });
 
@@ -1771,6 +1921,9 @@ void main() {
     await tester.pump();
     await gesture.moveBy(const Offset(-100, 0));
     await tester.pump();
+    final settings = tester.getRect(find.byIcon(Icons.settings_outlined));
+    expect(settings.left, greaterThanOrEqualTo(0), reason: '设置按钮不能被滑出屏幕');
+    expect(settings.right, lessThanOrEqualTo(390), reason: '设置按钮不能被滑出屏幕');
     await expectLater(
       find.byType(MinePage),
       matchesGoldenFile('goldens/mine_switch_mid.png'),

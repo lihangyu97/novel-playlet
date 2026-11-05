@@ -139,6 +139,20 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       controller.addListener(_onTick);
       await controller.play();
       _scheduleHide();
+      // 真正播起来才记历史：取流失败/初始化失败的那一集不应该进最近观看。
+      final args = widget.args;
+      if (args.seriesId.isNotEmpty) {
+        unawaited(
+          ref
+              .read(readingStoreProvider)
+              .saveVideoProgress(
+                seriesId: args.seriesId,
+                title: args.seriesTitle,
+                cover: args.cover,
+                episodeIndex: index,
+              ),
+        );
+      }
     } catch (error, stack) {
       if (!mounted || generation != _generation) return;
       setState(() {

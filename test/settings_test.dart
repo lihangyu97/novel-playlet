@@ -432,20 +432,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 两个面板都常驻在树里，按钮要按面板圈定。
-    final novelSettings = find.descendant(
-      of: find.byKey(MinePage.novelPanelKey),
-      matching: find.byIcon(Icons.settings_outlined),
-    );
-    expect(novelSettings, findsOneWidget);
-    await tester.tap(novelSettings);
+    // 小说/短剧共用同一枚设置按钮（不再每个面板各画一个）。
+    final settings = find.byIcon(Icons.settings_outlined);
+    expect(settings, findsOneWidget);
+    await tester.tap(settings);
     await tester.pumpAndSettle();
 
     expect(find.byType(SettingsPage), findsOneWidget);
     expect(find.text('设置'), findsWidgets);
   });
 
-  /// 短剧是镜像面板：设置按钮挪到左侧，但打开的仍是同一个设置页。
+  /// 短剧是镜像面板：同一枚设置按钮滑到左侧，点它打开的仍是同一个设置页。
   testWidgets('我的页-短剧左侧设置按钮也能打开设置页', (tester) async {
     await tester.pumpWidget(
       _wrap(
@@ -458,10 +455,7 @@ void main() {
     await tester.tap(find.byKey(MinePage.switchButtonKey));
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
 
-    final dramaSettings = find.descendant(
-      of: find.byKey(MinePage.dramaPanelKey),
-      matching: find.byIcon(Icons.settings_outlined),
-    );
+    final dramaSettings = find.byIcon(Icons.settings_outlined);
     expect(dramaSettings, findsOneWidget);
     await tester.tap(dramaSettings);
     await tester.pumpAndSettle();
