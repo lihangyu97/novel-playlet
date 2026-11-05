@@ -12,6 +12,7 @@ class VideoSeries {
     this.cover = '',
     this.intro = '',
     this.episodeCount = 0,
+    this.isManju = false,
   });
 
   /// 剧集 id（`series_id_str` 优先：数字型 `series_id` 会被上游截断）。
@@ -20,6 +21,11 @@ class VideoSeries {
   final String cover;
   final String intro;
   final int episodeCount;
+
+  /// 卡片元数据是否标明这是漫剧（`genre=205` / 「漫剧、动态漫画」标签）。
+  /// 漫剧首页流 `tab_type=24` 整条都是漫剧，不依赖这个字段；只有混在短剧
+  /// 搜索流里的卡片要靠它区分。
+  final bool isManju;
 
   bool get isValid => id.isNotEmpty && title.isNotEmpty;
 }
@@ -102,6 +108,7 @@ List<VideoSeries> parseVideoSeries(Map<String, dynamic> payload) {
         cover: firstString(raw, _seriesCoverKeys),
         intro: firstString(raw, _seriesIntroKeys),
         episodeCount: _firstInt(raw, _seriesEpisodeKeys),
+        isManju: _isManjuCard(raw),
       ),
     );
   }
@@ -188,6 +195,108 @@ List<VideoSeries> parseSearchVideoSeries(
   if (hasTypeInfo) return const <VideoSeries>[];
   return parseVideoSeries(payload);
 }
+
+/// 卡片是否带「漫剧」分类元数据。
+///
+/// 上游把漫剧混在短剧流/短剧搜索里，只有结构化元数据能证明它是漫剧：
+/// `genre=205`，或 `tag_info` / `cover_tag_info_list` / `book_type_name` /
+/// `type` 里有「漫剧 / 动态漫 / 动态漫画」。标题、简介里出现「漫剧」只是
+/// 提及（比如「漫剧原著」），不能当证据。
+bool _isManjuCard(Map<String, dynamic> raw) {
+  final book = asMap(raw['book_data']);
+  bool matches(Map<String, dynamic>? map) {
+    if (map == null) return false;
+    if (asInt(map['genre'], -1) == 205) return true;
+    for (final key in const [
+      'tag_info',
+      'cover_tag_info_list',
+      'book_type_name',
+      'type',
+    ]) {
+      if (_hasManjuTag(map[key])) return true;
+    }
+    return false;
+  }
+
+  return matches(raw) || matches(book);
+}
+
+bool _hasManjuTag(Object? value) {
+  if (value is Map) return _hasManjuTag(value['text']);
+  if (value is Iterable) return value.any(_hasManjuTag);
+  return value is String &&
+      const {'漫剧', '动态漫', '动态漫画'}.contains(value.trim());
+}
+
+/// 漫剧搜索兜底的一页。
+class ManjuSearchPage {
+  const ManjuSearchPage({required this.items, this.nextOffset});
+
+  final List<VideoSeries> items;
+
+  /// 下一页游标；null 表示兜底流也到底了。
+  final int? nextOffset;
+}
+
+/// 解析漫剧搜索/翻页兜底的一页。
+///
+/// 上游没有独立的漫剧搜索 tab：漫剧卡片混在短剧搜索 tab（`tab_type=11`）
+/// 里，必须按卡片的漫剧元数据过滤，否则会把普通短剧画进漫剧分类。游标挂在
+/// 短剧 tab 的 `next_offset` / `has_more` 上（漫剧首页流 `tab_type=24` 没有
+/// 游标，后续页只能走这里）。
+ManjuSearchPage parseManjuSearchPage(
+  Map<String, dynamic> payload, {
+  required int offset,
+}) {
+  final data = asMap(payload['data']) ?? payload;
+  final tabs = asList(data['search_tabs'])
+      .map(asMap)
+      .whereType<Map<String, dynamic>>()
+      .toList();
+  final sources = tabs.where((tab) {
+    final type = asInt(tab['tab_type'], 0);
+    if (type == 11) return true;
+    // 老/异形响应没有 tab_type：短剧搜索桶的标题是「短剧」。
+    if (type == 0) {
+      final title = asString(tab['title']);
+      return title.contains('短剧') || title.contains('漫剧');
+    }
+    return false;
+  }).toList();
+
+  final items = <VideoSeries>[];
+  final seen = <String>{};
+  for (final tab in sources) {
+    for (final item in parseVideoSeries({
+      'data': {
+        'search_tabs': [tab],
+      },
+    })) {
+      if (!item.isManju) continue;
+      if (seen.add(item.id)) items.add(item);
+    }
+  }
+
+  int? nextOffset;
+  for (final tab in sources) {
+    final next = asInt(tab['next_offset'], -1);
+    if (next > offset && _allowsMore(tab['has_more'])) {
+      nextOffset = next;
+      break;
+    }
+  }
+  // 上游没给游标却声明还有更多：按每页 10 条推进（fqapp 的同款兼容，
+  // 漫剧/漫画的搜索游标偶尔缺失）。
+  if (nextOffset == null &&
+      items.isNotEmpty &&
+      sources.any((tab) => tab['has_more'] == true)) {
+    nextOffset = offset + 10;
+  }
+  return ManjuSearchPage(items: items, nextOffset: nextOffset);
+}
+
+bool _allowsMore(Object? hasMore) =>
+    hasMore != false && hasMore != 'false' && hasMore != 0;
 
 int _firstInt(Map<String, dynamic> map, List<String> keys) {
   for (final key in keys) {

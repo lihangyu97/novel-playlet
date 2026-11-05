@@ -115,7 +115,12 @@ class _RecommendPageState extends ConsumerState<RecommendPage>
               ),
             ),
           ),
-          _buildCategoryTabs(context),
+          // tabs 与列表之间留一段呼吸空间：选中态的蓝色下划线紧贴卡片时
+          // 视觉上会和第一行封面挤在一起。
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _buildCategoryTabs(context),
+          ),
           Expanded(
             child: TabBarView(
               controller: _tabController,

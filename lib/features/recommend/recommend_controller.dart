@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/api/api_client.dart';
+import '../../data/models/video_series.dart';
 import 'recommend_category.dart';
 import 'recommend_item.dart';
 import 'recommend_state.dart';
@@ -129,6 +130,9 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
       final offset = current.nextOffset!;
       final page = current.isSearchMode
           ? await _fetchSearch(current.query, offset: offset)
+          : category.usesManjuSearch
+          // 漫剧流没有游标，翻页游标来自搜索兜底（见 [_fetchManjuFeed]）。
+          ? await _fetchManjuFeedPage(offset: offset)
           : await _fetchFeed(offset: offset, sessionId: current.sessionId);
       if (generation != _generation) return;
       final latest = state.value;
@@ -178,6 +182,7 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
         sessionId: page.sessionId,
       );
     }
+    if (category.usesManjuSearch) return _fetchManjuFeed();
     final page = await _api.videoFeed(
       tabType: category.tabType,
       offset: offset,
@@ -190,6 +195,51 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
     );
   }
 
+  /// 漫剧首屏：首页流（`tab_type=24`）只有一屏、没有游标，所以同时取一页
+  /// 搜索兜底并把它的游标当作下一页游标，列表一上来就能继续翻页。
+  ///
+  /// 两个请求都失败才报错；只挂一个（比如搜索兜底偶发失败）时先展示拿到的
+  /// 内容，滚动到底部的「重试」还能继续走兜底。
+  Future<RecommendState> _fetchManjuFeed() async {
+    VideoFeedPage? feed;
+    Object? feedError;
+    try {
+      feed = await _api.videoFeed(tabType: category.tabType);
+    } catch (error) {
+      feedError = error;
+    }
+    VideoFeedPage? search;
+    try {
+      search = await _fetchManjuPage(offset: 0);
+    } catch (_) {
+      // 兜底失败只意味着暂时没有更多，不影响已拿到的首页流。
+    }
+    if (feed == null && search == null) throw feedError!;
+
+    final items = <RecommendItem>[];
+    final seen = <String>{};
+    for (final series in [...?feed?.items, ...?search?.items]) {
+      if (!series.isValid || !seen.add(series.id)) continue;
+      items.add(RecommendItem.video(series));
+    }
+    return FeedState<RecommendItem>.feed(
+      items: items,
+      nextOffset: search?.nextOffset,
+    );
+  }
+
+  Future<VideoFeedPage> _fetchManjuPage({required int offset}) =>
+      _api.manjuSearch(category.fallbackQuery!, offset: offset);
+
+  /// 漫剧搜索兜底的一页，转换成列表状态供 [loadMore] 追加。
+  Future<RecommendState> _fetchManjuFeedPage({required int offset}) async {
+    final page = await _fetchManjuPage(offset: offset);
+    return FeedState<RecommendItem>.feed(
+      items: [for (final item in page.items) RecommendItem.video(item)],
+      nextOffset: page.nextOffset,
+    );
+  }
+
   Future<RecommendState> _fetchSearch(String query, {int offset = 0}) async {
     if (category.isNovel) {
       final page = await _api.search(query, offset: offset);
@@ -199,11 +249,13 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
         nextOffset: page.nextOffset,
       );
     }
-    final page = await _api.searchVideos(
-      query,
-      tabType: category.searchTabType,
-      offset: offset,
-    );
+    final page = category.usesManjuSearch
+        ? await _api.manjuSearch(query, offset: offset)
+        : await _api.searchVideos(
+            query,
+            tabType: category.searchTabType,
+            offset: offset,
+          );
     return FeedState<RecommendItem>.search(
       query: query,
       items: [for (final item in page.items) RecommendItem.video(item)],

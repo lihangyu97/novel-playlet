@@ -84,6 +84,31 @@ class _SlowFake extends BackendTransport {
     };
   }
 
+  /// 漫剧翻页兜底：短剧搜索 tab 里的漫剧卡片 + 游标。
+  Map<String, dynamic> _searchPayload(int tabType, int offset) => {
+    'code': 0,
+    'data': {
+      'search_tabs': [
+        {
+          'tab_type': tabType,
+          'title': '短剧',
+          'has_more': true,
+          'next_offset': offset + 1,
+          'data': [
+            for (var i = 0; i < 6; i++)
+              {
+                'video_data': {
+                  'series_id_str': 'm${offset}_$i',
+                  'series_title': '漫剧$offset-$i',
+                  'tag_info': {'text': '漫剧'},
+                },
+              },
+          ],
+        },
+      ],
+    },
+  };
+
   @override
   Future<BackendResponse> send(
     String method,
@@ -95,9 +120,17 @@ class _SlowFake extends BackendTransport {
     final q = Uri.splitQueryString(query ?? '');
     final tabType = int.tryParse(q['tab_type'] ?? '2') ?? 2;
     final offset = int.tryParse(q['offset'] ?? '0') ?? 0;
-    calls.add('$tabType@$offset');
     // 给并发留出窗口：真实网络下这个间隙足够第二次调用挤进来。
     await Future<void>.delayed(const Duration(milliseconds: 50));
+    if (path.startsWith('/api/v1/search')) {
+      calls.add('search$tabType@$offset');
+      return BackendResponse(
+        200,
+        Uint8List.fromList(utf8.encode(jsonEncode(_searchPayload(tabType, offset)))),
+        'application/json',
+      );
+    }
+    calls.add('$tabType@$offset');
     return BackendResponse(
       200,
       Uint8List.fromList(utf8.encode(jsonEncode(_payload(tabType, offset)))),
@@ -234,19 +267,22 @@ void main() {
     expect(fake.calls, ['8@0', '8@1'], reason: '第二次并发调用必须被重入锁挡掉');
   });
 
-  test('漫剧分类：真实上游没有游标，loadMore 不再发请求', () async {
-    // 漫剧（tab_type=24）实测只回首页一屏、next_offset 恒为 0：不能像短剧那样
-    // 造一个可翻页的假数据，否则测试会掩盖「漫剧翻不动」这个事实。
+  test('漫剧分类：首页流无游标时改走搜索兜底翻页', () async {
+    // 漫剧首页流（tab_type=24）没有游标，后续页靠短剧搜索 tab 里的漫剧卡片
+    // （query=漫剧 + tab_type=11）接力；游标挂在搜索 tab 的 next_offset 上。
     final fake = _SlowFake(cursorlessTab: 24);
     final container = ProviderContainer(
       overrides: [apiClientProvider.overrideWithValue(ApiClient(fake))],
     );
     addTearDown(container.dispose);
     final provider = recommendFeedProvider(RecommendCategory.anime);
+    final notifier = container.read(provider.notifier);
     final state = await container.read(provider.future);
-    expect(state.hasMore, isFalse);
-    await container.read(provider.notifier).loadMore();
-    expect(fake.calls, ['24@0'], reason: '没有游标就不该再翻页');
+    expect(state.hasMore, isTrue, reason: '首页流没有游标，但搜索兜底还有下一页');
+
+    await Future.wait<void>([notifier.loadMore(), notifier.loadMore()]);
+    expect(fake.calls, ['24@0', 'search11@0', 'search11@1'],
+        reason: '翻页走搜索兜底，且并发调用只发一次');
   });
 
   group('ApiClient 分类契约', () {

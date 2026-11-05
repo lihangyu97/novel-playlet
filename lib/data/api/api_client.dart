@@ -119,6 +119,23 @@ class ApiClient {
     );
   }
 
+  /// 漫剧的搜索 / 翻页兜底。
+  ///
+  /// 漫剧首页流（`tab_type=24`）只有一屏、没有游标，后续页只能走搜索：
+  /// 上游把漫剧混在短剧搜索 tab（`tab_type=11`）里，卡片靠 `genre=205` /
+  /// 「漫剧」标签区分（见 [parseManjuSearchPage]）。[query] 传分类名「漫剧」
+  /// 就是翻页兜底，传用户输入就是搜索。
+  Future<VideoFeedPage> manjuSearch(String query, {int offset = 0}) async {
+    final payload = await _getJson('/api/v1/search', {
+      'query': query,
+      'tab_type': '11',
+      'offset': '$offset',
+      'count': '10',
+    });
+    final page = parseManjuSearchPage(payload, offset: offset);
+    return VideoFeedPage(items: page.items, nextOffset: page.nextOffset);
+  }
+
   /// 短剧详情（`/api/v1/series/{id}`）。
   Future<VideoDetail> videoDetail(String seriesId) async {
     final payload = await _getJson(

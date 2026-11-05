@@ -201,7 +201,23 @@ class _FakeTransport extends BackendTransport {
       }
     }
     if (path.startsWith('/api/v1/search')) {
-      // 搜索接口的 tab_type 与首页流不同：3 = 书籍、11 = 短剧、8 = 漫画。
+      // 漫剧的搜索与翻页兜底：上游没有漫剧搜索 tab，卡片混在短剧搜索 tab
+      // 里，靠 genre=205 / 「漫剧」标签区分（对齐 ApiClient.manjuSearch）。
+      if (params['query'] == '漫剧') {
+        return _videoSearchPayload(11, [
+          for (var i = 1; i <= 6; i++)
+            {
+              'pseries_id': 'p$i',
+              'series_name': _animeTitles[(i - 1) % _animeTitles.length],
+              'series_intro':
+                  '这是第 $i 条漫剧搜索结果的简介，用来验证翻页兜底与横向列表排版。',
+              'episode_cnt': '${12 + i * 2}',
+              'series_cover': '',
+              'genre': 205,
+            },
+        ]);
+      }
+      // 搜索接口的 tab_type 与首页流不同：3 = 书籍、11 = 短剧。
       switch (params['tab_type']) {
         case '11':
           return _videoSearchPayload(11, [
@@ -213,19 +229,6 @@ class _FakeTransport extends BackendTransport {
                 'series_intro':
                     '这是第 $i 条短剧搜索结果的简介，用来验证横向列表两行省略与排版是否和小说搜索一致。',
                 'episode_cnt': '${40 + i}',
-                'series_cover': '',
-              },
-          ]);
-        case '8':
-          return _videoSearchPayload(8, [
-            for (var i = 1; i <= 6; i++)
-              {
-                'pseries_id': 'as$i',
-                'series_name':
-                    '漫剧搜索 ${_animeTitles[(i - 1) % _animeTitles.length]}',
-                'series_intro':
-                    '这是第 $i 条漫剧搜索结果的简介，用来验证横向列表两行省略与排版。',
-                'episode_cnt': '${12 + i * 2}',
                 'series_cover': '',
               },
           ]);

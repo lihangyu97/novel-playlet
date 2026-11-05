@@ -77,13 +77,13 @@ fqapp 的做法：`HomeNotifier._answersTab()` / `homePageAffinity()`，不匹�
 | 8 | 漫画 |
 | 11 | **短剧** |
 
-本项目：`search()` 用 3（小说），`searchVideos(tabType:)` 短剧用 11、漫剧暂用 8（漫画，上游没有「漫剧」搜索 tab）。
+本项目：`search()` 用 3（小说），`searchVideos(tabType:)` 短剧用 11；漫剧没有独立搜索 tab，走 `manjuSearch()`——请求短剧 tab（11）后按 `genre=205` /「漫剧」标签过滤卡片（与 fqapp 的 `separateManjuSearchTabs` 同口径）。
 
 ## 5. 翻页与兜底（fqapp 的做法，本项目可选补）
 
 - 推荐流游标耗尽后，fqapp 回退到**同分类搜索流**继续翻页（`_searchByType`），避免「只有首页那几屏」。短剧这类推荐池小的分类尤其明显。
 - 漫剧（24）没有游标：fqapp 首页用推荐流，后续页全用搜索兜底。
-- 本项目现状：短剧游标翻完显示「没有更多了」，漫剧只展示首页一屏；三个分类都尚未接搜索兜底（`docs/video-playback.md` 4.1-5 有记录）。
+- 本项目现状：短剧推荐流自带游标，游标翻完显示「没有更多了」；漫剧首页流没有游标，首屏同时取一页搜索兜底当下一页游标，滚到底后继续用搜索兜底翻页（`ApiClient.manjuSearch`），兜底也到底才显示「没有更多了」。小说/短剧尚未接搜索兜底（`docs/video-playback.md` 4.1-5 有记录）。
 
 ## 6. 怎么复核
 
