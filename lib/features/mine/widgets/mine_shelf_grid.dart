@@ -18,6 +18,7 @@ class MineShelfGrid extends StatelessWidget {
     required this.spacing,
     required this.onOpen,
     required this.onLongPress,
+    this.heroTagOf,
   });
 
   final List<NovelItem> shelf;
@@ -27,6 +28,9 @@ class MineShelfGrid extends StatelessWidget {
   final double spacing;
   final ValueChanged<NovelItem> onOpen;
   final ValueChanged<NovelItem> onLongPress;
+
+  /// 封面 Hero tag；null = 不参与飞入动画。
+  final String Function(NovelItem item)? heroTagOf;
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +67,7 @@ class MineShelfGrid extends StatelessWidget {
               item: item,
               width: itemWidth,
               onTap: () => onOpen(item),
+              heroTag: heroTagOf?.call(item),
             ),
           );
         }, childCount: shelf.length),

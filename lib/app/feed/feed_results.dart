@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/cover_hero.dart';
 import '../widgets/novel_cover.dart';
 
 /// 搜索结果的条目形态：封面 + 标题 + 元信息 + 简介两行。
@@ -14,6 +15,7 @@ class FeedResultTile extends StatelessWidget {
     required this.meta,
     required this.intro,
     required this.onTap,
+    this.heroTag,
   });
 
   /// 封面宽度。高度由 [kCoverAspect] 算出（64×88，正好 11:8）。
@@ -31,6 +33,9 @@ class FeedResultTile extends StatelessWidget {
   final String intro;
   final VoidCallback onTap;
 
+  /// 封面 Hero tag；null = 不参与飞入动画。
+  final String? heroTag;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -44,10 +49,13 @@ class FeedResultTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            NovelCover(
-              url: cover,
-              width: coverWidth,
-              height: coverWidth * kCoverAspect,
+            CoverHero(
+              tag: heroTag,
+              child: NovelCover(
+                url: cover,
+                width: coverWidth,
+                height: coverWidth * kCoverAspect,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -107,6 +115,7 @@ class FeedResultsSliver<T> extends StatelessWidget {
     required this.metaOf,
     required this.introOf,
     required this.onTap,
+    this.heroTagOf,
   });
 
   final List<T> items;
@@ -117,6 +126,9 @@ class FeedResultsSliver<T> extends StatelessWidget {
   final String Function(T item) metaOf;
   final String Function(T item) introOf;
   final ValueChanged<T> onTap;
+
+  /// 封面 Hero tag；null = 这一页不参与飞入动画。
+  final String Function(T item)? heroTagOf;
 
   @override
   Widget build(BuildContext context) {
@@ -130,6 +142,7 @@ class FeedResultsSliver<T> extends StatelessWidget {
           meta: metaOf(item),
           intro: introOf(item),
           onTap: () => onTap(item),
+          heroTag: heroTagOf?.call(item),
         );
       },
       separatorBuilder: (context, index) =>

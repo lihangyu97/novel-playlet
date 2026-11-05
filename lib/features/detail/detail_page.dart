@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/router.dart';
+import '../../app/widgets/detail/detail_common.dart';
 import '../../app/widgets/states.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
@@ -20,10 +21,18 @@ import 'detail_providers.dart';
 /// 构造函数与 router.dart 里的 `DetailArgs` 对应，[preview] 用来在接口返回
 /// 前先画封面/标题，避免白屏。
 class DetailPage extends ConsumerStatefulWidget {
-  const DetailPage({super.key, required this.bookId, this.preview});
+  const DetailPage({
+    super.key,
+    required this.bookId,
+    this.preview,
+    this.heroTag,
+  });
 
   final String bookId;
   final NovelItem? preview;
+
+  /// 封面 Hero tag（列表点进来时由 [DetailArgs] 带下来）；null = 不飞入。
+  final String? heroTag;
 
   @override
   ConsumerState<DetailPage> createState() => _DetailPageState();
@@ -89,28 +98,48 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         resumeChapterId != null || firstChapter != null || preview != null;
 
     final slivers = <Widget>[
+      // 背景只跟封面走、固定高度：接口回来内容变高也不会牵动它。
       SliverToBoxAdapter(
-        child: DetailHero(detail: detail, preview: preview),
+        child: DetailHeroBackdrop(
+          detail: detail,
+          preview: preview,
+          heroTag: widget.heroTag,
+        ),
       ),
       if (bundle != null) ...[
+        // 内容就绪后从下方淡入，避免接口回来的瞬间文字凭空跳出。
         SliverToBoxAdapter(
-          child: DetailIntroSection(intro: detail!.abstract, tags: detail.tags),
+          child: DetailFadeIn(
+            child: DetailHeroInfo(detail: detail, preview: preview),
+          ),
         ),
         SliverToBoxAdapter(
-          child: DetailDirectorySection(
-            chapters: chapters,
-            currentIndex: progress?.chapterIndex,
-            onOpenChapter: (chapter) => _openReader(
-              context,
-              ref,
-              chapterId: chapter.id,
-              chapterIndex: chapter.index,
+          child: DetailFadeIn(
+            delay: const Duration(milliseconds: 60),
+            child: DetailIntroSection(
+              intro: detail!.abstract,
+              tags: detail.tags,
             ),
-            onOpenAll: () => _openDirectory(
-              context,
-              ref,
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: DetailFadeIn(
+            delay: const Duration(milliseconds: 120),
+            child: DetailDirectorySection(
               chapters: chapters,
               currentIndex: progress?.chapterIndex,
+              onOpenChapter: (chapter) => _openReader(
+                context,
+                ref,
+                chapterId: chapter.id,
+                chapterIndex: chapter.index,
+              ),
+              onOpenAll: () => _openDirectory(
+                context,
+                ref,
+                chapters: chapters,
+                currentIndex: progress?.chapterIndex,
+              ),
             ),
           ),
         ),
@@ -122,12 +151,8 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             message: _errorMessage(bundleAsync.error!),
             onRetry: () => ref.invalidate(detailBundleProvider(bookId)),
           ),
-        )
-      else
-        const SliverFillRemaining(
-          hasScrollBody: false,
-          child: LoadingView(label: '正在加载详情…'),
         ),
+      // 加载阶段只保留封面背景：不再转圈，内容就绪后直接淡入。
     ];
 
     final scheme = Theme.of(context).colorScheme;

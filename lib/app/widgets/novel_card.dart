@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/novel_item.dart';
 import '../theme/app_theme.dart';
+import 'cover_hero.dart';
 import 'novel_cover.dart';
 
 /// 推荐页小说分类的卡片：大封面 + 标题 + 作者/分类。
@@ -14,11 +15,15 @@ class NovelGridCard extends StatelessWidget {
     required this.item,
     required this.onTap,
     this.width = 108,
+    this.heroTag,
   });
 
   final NovelItem item;
   final VoidCallback onTap;
   final double width;
+
+  /// 封面 Hero tag；null = 不参与飞入动画（例如深链/无列表来源）。
+  final String? heroTag;
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +37,14 @@ class NovelGridCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            NovelCover(url: item.cover, width: width, height: coverHeight),
+            CoverHero(
+              tag: heroTag,
+              child: NovelCover(
+                url: item.cover,
+                width: width,
+                height: coverHeight,
+              ),
+            ),
             const SizedBox(height: 8),
             Text(
               item.title,

@@ -13,6 +13,7 @@ import 'package:novel_playlet/app/shell/floating_navigation_bar.dart';
 import 'package:novel_playlet/app/shell/home_shell.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
+import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
@@ -29,6 +30,9 @@ import 'package:novel_playlet/features/reader/reader_widgets.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/features/settings/settings_page.dart';
 import 'package:novel_playlet/features/settings/settings_providers.dart';
+import 'package:novel_playlet/data/models/video_series.dart';
+import 'package:novel_playlet/features/video/video_detail_page.dart';
+import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -49,6 +53,19 @@ class _FakeTransport extends BackendTransport {
 
   /// 推荐流首页请求全部返回 500（验证首屏失败立即出错误页）。
   bool failRecommend = false;
+
+  /// 详情接口返回的封面；非空时与列表封面不同，用来验证详情页不换图。
+  String detailCoverUrl = '';
+
+  /// 短剧详情接口返回的封面。
+  String detailSeriesCoverUrl = '';
+
+  /// 目录接口返回的章节/集数（短剧选集分组测试用）。
+  int directoryChapterCount = 24;
+
+  /// 列表封面 URL：默认空（golden 里用占位块），Hero 飞行测试才给真实 URL。
+  String bookCoverUrl = '';
+  String videoCoverUrl = '';
 
   /// 每次请求的延迟；只有需要观察中间 loading 态的单测才设置。
   Duration responseDelay = Duration.zero;
@@ -122,7 +139,7 @@ class _FakeTransport extends BackendTransport {
                                 'series_id_str': 'v$i',
                                 'series_title':
                                     _dramaTitles[(i - 1) % _dramaTitles.length],
-                                'series_cover': '',
+                                'series_cover': videoCoverUrl,
                                 'episode_cnt': '${40 + i}',
                               },
                           ],
@@ -196,7 +213,7 @@ class _FakeTransport extends BackendTransport {
                                 'author': _authors[(i - 1) % _authors.length],
                                 'category': i.isEven ? '玄幻' : '都市',
                                 'word_number': '${i * 180000}',
-                                'thumb_url': '',
+                                'thumb_url': bookCoverUrl,
                               },
                           ],
                         },
@@ -267,6 +284,22 @@ class _FakeTransport extends BackendTransport {
           };
       }
     }
+    if (path.startsWith('/api/v1/series/')) {
+      return {
+        'code': 0,
+        'data': {
+          'video_data': {
+            'series_id_str': 'v1',
+            'series_title': '详情标题',
+            'series_cover': detailSeriesCoverUrl,
+            'series_intro': '',
+            'episode_cnt': '40',
+            'category_schema': '[{"name":"都市"}]',
+            'series_play_cnt': '12345',
+          },
+        },
+      };
+    }
     if (path.endsWith('/detail')) {
       return {
         'code': 0,
@@ -285,6 +318,7 @@ class _FakeTransport extends BackendTransport {
           'tags': ['玄幻', '仙侠', '热血', '连载'],
           'category': '玄幻',
           'last_chapter_title': '第一千零二十四章 开天',
+          if (detailCoverUrl.isNotEmpty) 'thumb_url': detailCoverUrl,
         },
       };
     }
@@ -293,7 +327,7 @@ class _FakeTransport extends BackendTransport {
         'code': 0,
         'data': {
           'item_data_list': [
-            for (var i = 1; i <= 24; i++)
+            for (var i = 1; i <= directoryChapterCount; i++)
               {
                 'item_id': 'c$i',
                 'title':
@@ -460,7 +494,9 @@ class _PreviewApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       // 页面本身依赖外层 Scaffold 提供 Material（HomeShell 里有），
       // 预览时补一个，保证 InkWell / 文本选择等祖先齐全。
+      // 命名路由用于验证「列表点进详情」的 Hero 飞入。
       home: Scaffold(body: home),
+      onGenerateRoute: AppRoutes.onGenerateRoute,
     );
   }
 }
@@ -774,6 +810,323 @@ void main() {
     expect(anime, novel, reason: '漫剧与小说搜索结果封面尺寸必须一致');
   });
 
+  group('封面 Hero 飞入', () {
+    testWidgets('推荐页-卡片封面都带唯一 Hero tag', (tester) async {
+      await _pump(tester, const RecommendPage());
+      final cards = tester
+          .widgetList<NovelGridCard>(find.byType(NovelGridCard))
+          .toList();
+      expect(cards, isNotEmpty);
+      final tags = cards.map((card) => card.heroTag).toList();
+      expect(tags.every((tag) => tag != null), isTrue);
+      expect(tags.toSet().length, tags.length, reason: '同一屏封面 Hero tag 必须唯一');
+      expect(tags.first, 'cover-novel-recommend-novel-1');
+    });
+
+    testWidgets('小说列表点进详情：封面飞入并在返回时飞回', (tester) async {
+      final fake = _FakeTransport()
+        ..bookCoverUrl = 'https://example.com/cover-1.jpg';
+      await _pump(tester, const RecommendPage(), transport: fake);
+      final card = tester
+          .widget<NovelGridCard>(find.byType(NovelGridCard).first);
+      final tag = card.heroTag!;
+
+      await tester.tap(find.byType(NovelGridCard).first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(find.byType(DetailPage), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('cover-hero-flight')),
+        findsOneWidget,
+        reason: '进详情时应在飞行',
+      );
+      final detailHero = tester.widget<Hero>(
+        find
+            .descendant(of: find.byType(DetailPage), matching: find.byType(Hero))
+            .first,
+      );
+      expect(detailHero.tag, tag, reason: '详情页封面必须用同一个 tag 接住 Hero');
+
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.byType(DetailPage), findsOneWidget);
+      expect(find.text(card.item.title), findsWidgets);
+
+      // 返回时 Hero 反向飞回列表卡片。
+      Navigator.of(tester.element(find.byType(DetailPage))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(
+        find.byKey(const ValueKey('cover-hero-flight')),
+        findsOneWidget,
+        reason: '从详情返回时应执行反向封面飞行',
+      );
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.byType(DetailPage), findsNothing);
+      expect(find.byType(NovelGridCard), findsWidgets);
+    });
+
+    testWidgets('短剧列表点进详情：封面飞入并在返回时飞回', (tester) async {
+      final fake = _FakeTransport()
+        ..videoCoverUrl = 'https://example.com/drama-1.jpg';
+      await _pump(tester, const RecommendPage(), transport: fake);
+      await tester.tap(find.text('短剧'));
+      await tester.pumpAndSettle();
+      final card = tester.widget<VideoCard>(find.byType(VideoCard).first);
+      final tag = card.heroTag!;
+      expect(tag, startsWith('cover-video-recommend-drama-'));
+
+      await tester.tap(find.byType(VideoCard).first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(find.byType(VideoDetailPage), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('cover-hero-flight')),
+        findsOneWidget,
+        reason: '进详情时应在飞行',
+      );
+      final detailHero = tester.widget<Hero>(
+        find
+            .descendant(
+              of: find.byType(VideoDetailPage),
+              matching: find.byType(Hero),
+            )
+            .first,
+      );
+      expect(detailHero.tag, tag, reason: '短剧详情封面必须用同一个 tag 接住 Hero');
+
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.byType(VideoDetailPage), findsOneWidget);
+
+      Navigator.of(tester.element(find.byType(VideoDetailPage))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(
+        find.byKey(const ValueKey('cover-hero-flight')),
+        findsOneWidget,
+        reason: '从短剧详情返回时应执行反向封面飞行',
+      );
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.byType(VideoDetailPage), findsNothing);
+    });
+
+    testWidgets('短剧详情-加载中也先画封面（Hero 目标从第一帧就存在）', (tester) async {
+      final fake = _FakeTransport()
+        ..responseDelay = const Duration(milliseconds: 80);
+      const preview = VideoSeries(
+        id: 'v1',
+        title: '测试短剧',
+        cover: 'https://example.com/list-drama.jpg',
+        episodeCount: 40,
+      );
+      await _pump(
+        tester,
+        const VideoDetailPage(
+          seriesId: 'v1',
+          preview: preview,
+          heroTag: 'cover-video-test-v1',
+        ),
+        transport: fake,
+        settle: false,
+      );
+      await tester.pump(const Duration(milliseconds: 30));
+      // 背景/Hero 目标从第一帧就在；文字信息等接口回来再淡入，不再转圈。
+      expect(find.byType(Hero), findsOneWidget);
+      expect(find.text('测试短剧'), findsNothing, reason: '文字信息等数据回来再淡入');
+      expect(
+        find.byType(CircularProgressIndicator),
+        findsNothing,
+        reason: '详情加载不再显示转圈 loading',
+      );
+      final heightBefore = tester
+          .getSize(find.byType(DetailCoverBackdrop))
+          .height;
+
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.text('详情标题'), findsOneWidget);
+      expect(find.text('选集'), findsOneWidget);
+      expect(
+        tester.getSize(find.byType(DetailCoverBackdrop)).height,
+        heightBefore,
+        reason: '接口回来后背景高度不能变',
+      );
+    });
+
+    testWidgets('小说详情-接口回来后不替换列表封面（不闪）', (tester) async {
+      const preview = NovelItem(
+        id: '1',
+        title: '剑来',
+        cover: 'https://example.com/list.jpg',
+        author: '作者',
+      );
+      final fake = _FakeTransport()
+        ..detailCoverUrl = 'https://example.com/detail.jpg';
+      await _pump(
+        tester,
+        const DetailPage(bookId: '1', preview: preview),
+        transport: fake,
+      );
+      final backdrop = tester.widget<DetailCoverBackdrop>(
+        find.byType(DetailCoverBackdrop),
+      );
+      expect(
+        backdrop.cover,
+        preview.cover,
+        reason: '详情接口回来不应把封面换成 detail.jpg（会让 Hero 落位后再加载一次）',
+      );
+      expect(find.byType(NovelCover), findsNothing, reason: '详情页不再单独画小封面');
+    });
+
+    testWidgets('封面 Hero 支持 iOS 手势返回（侧滑也能飞回去）', (tester) async {
+      final fake = _FakeTransport()
+        ..bookCoverUrl = 'https://example.com/cover-1.jpg';
+      await _pump(tester, const RecommendPage(), transport: fake);
+      final listHeroes = tester.widgetList<Hero>(find.byType(Hero)).toList();
+      expect(listHeroes, isNotEmpty);
+      expect(
+        listHeroes.every((hero) => hero.transitionOnUserGestures),
+        isTrue,
+        reason: '列表封面 Hero 必须支持手势转场，否则 iOS 侧滑返回不飞',
+      );
+
+      final card = tester.widget<NovelGridCard>(
+        find.byType(NovelGridCard).first,
+      );
+      await tester.tap(find.byType(NovelGridCard).first);
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      final detailHero = tester.widget<Hero>(
+        find
+            .descendant(of: find.byType(DetailPage), matching: find.byType(Hero))
+            .first,
+      );
+      expect(detailHero.tag, card.heroTag);
+      expect(detailHero.transitionOnUserGestures, isTrue);
+    });
+
+    testWidgets('小说详情-加载中不转圈', (tester) async {
+      final fake = _FakeTransport()
+        ..responseDelay = const Duration(milliseconds: 80);
+      await _pump(
+        tester,
+        const DetailPage(bookId: '1'),
+        transport: fake,
+        settle: false,
+      );
+      await tester.pump(const Duration(milliseconds: 30));
+      expect(
+        find.byType(CircularProgressIndicator),
+        findsNothing,
+        reason: '详情加载阶段只保留封面背景，不再显示转圈',
+      );
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.text('剑来'), findsWidgets);
+    });
+
+    testWidgets('小说详情-作者行带状态字数，评分/在读/更新至合并一行', (tester) async {
+      const preview = NovelItem(id: '1', title: '剑来', author: '作者');
+      await _pump(
+        tester,
+        const DetailPage(bookId: '1', preview: preview),
+        transport: _FakeTransport(),
+      );
+
+      // 作者 · 状态 · 字数 在同一行；分类不再出现（简介里已有标签）。
+      expect(find.text('烽火戏诸侯 · 连载中 · 132.8万字'), findsOneWidget);
+      expect(find.textContaining('玄幻 ·'), findsNothing);
+
+      // 评分 / 在读 / 更新至 合并成一行：三者的中线应一致。
+      final score = tester.getCenter(find.text('9.3')).dy;
+      final readers = tester.getCenter(find.text('1.2万人在读')).dy;
+      final updated = tester
+          .getCenter(find.text('更新至 第一千零二十四章 开天'))
+          .dy;
+      expect(readers, closeTo(score, 0.5));
+      expect(updated, closeTo(score, 0.5));
+    });
+
+    testWidgets('短剧详情-接口回来后不替换列表封面（不闪）', (tester) async {
+      const preview = VideoSeries(
+        id: 'v1',
+        title: '测试短剧',
+        cover: 'https://example.com/list-drama.jpg',
+        episodeCount: 40,
+      );
+      final fake = _FakeTransport()
+        ..detailSeriesCoverUrl = 'https://example.com/detail-drama.jpg';
+      await _pump(
+        tester,
+        const VideoDetailPage(seriesId: 'v1', preview: preview),
+        transport: fake,
+      );
+      final backdrop = tester.widget<DetailCoverBackdrop>(
+        find.byType(DetailCoverBackdrop),
+      );
+      expect(
+        backdrop.cover,
+        preview.cover,
+        reason: '短剧详情接口回来不应换图',
+      );
+    });
+
+    testWidgets('详情页-封面同时作为顶部背景（顶部不透明到底部透明）', (tester) async {
+      const preview = NovelItem(
+        id: '1',
+        title: '剑来',
+        cover: 'https://example.com/list.jpg',
+      );
+      await _pump(
+        tester,
+        const DetailPage(bookId: '1', preview: preview),
+        transport: _FakeTransport(),
+      );
+      final backdrop = find.byWidgetPredicate(
+        (widget) => widget is ShaderMask && widget.blendMode == BlendMode.dstIn,
+      );
+      expect(backdrop, findsOneWidget, reason: '封面应作为背景并做透明度渐变');
+    });
+
+    testWidgets('短剧详情-分类只在简介标签里出现一次', (tester) async {
+      const preview = VideoSeries(
+        id: 'v1',
+        title: '测试短剧',
+        episodeCount: 40,
+      );
+      await _pump(
+        tester,
+        const VideoDetailPage(seriesId: 'v1', preview: preview),
+        transport: _FakeTransport(),
+      );
+      expect(find.text('全 40 集 · 1.2 万 次播放'), findsOneWidget);
+      expect(find.text('全 40 集'), findsNothing, reason: '集数和播放量应在同一行');
+      expect(find.text('都市'), findsOneWidget, reason: '分类只作为简介标签出现一次');
+      expect(
+        find.textContaining('都市 ·'),
+        findsNothing,
+        reason: '信息行不应再出现点拼接的分类',
+      );
+    });
+
+    testWidgets('推荐页与书架同书共存时 Hero tag 不冲突', (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'shelf_books_v1': jsonEncode([
+          {'id': '1', 'title': '剑来', 'cover': '', 'author': '作者1'},
+        ]),
+      });
+      await _pump(tester, const HomeShell());
+      await tester.tap(find.text('我的'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+      // 两个保活页面里同一本书各有一张封面，tag 必须带来源维度，否则跳转时
+      // Hero 会抛「multiple heroes share the same tag」。
+      final tags = tester
+          .widgetList<Hero>(find.byType(Hero, skipOffstage: false))
+          .map((hero) => hero.tag)
+          .toList();
+      expect(tags.toSet().length, tags.length, reason: '保活页面之间 Hero tag 不能重复');
+      expect(tags, contains('cover-novel-recommend-novel-1'));
+      expect(tags, contains('cover-novel-mine-shelf-1'));
+    });
+  });
+
   testWidgets('推荐页-搜索框内容垂直居中', (tester) async {
     await _pump(tester, const RecommendPage());
     final hint = tester.getRect(find.text('搜索书名/作者'));
@@ -1009,6 +1362,80 @@ void main() {
           .length,
       1,
       reason: '关闭自动重试后，失败应立即交给用户手动重试',
+    );
+  });
+
+  group('短剧选集', () {
+    testWidgets('默认折叠，展开后 36 集一个 tab、每行 6 个、只显示集数', (tester) async {
+      final fake = _FakeTransport()..directoryChapterCount = 80;
+      const preview = VideoSeries(
+        id: 'v1',
+        title: '测试短剧',
+        episodeCount: 80,
+      );
+      await _pump(
+        tester,
+        const VideoDetailPage(seriesId: 'v1', preview: preview),
+        transport: fake,
+      );
+
+      // 默认展开：直接看到选集和集数按钮。
+      expect(find.text('选集'), findsOneWidget);
+      expect(find.text('共 80 集'), findsOneWidget);
+      expect(find.byType(OutlinedButton), findsWidgets);
+
+      // 36 集一个 tab，自动分组。
+      expect(find.text('1-36'), findsOneWidget);
+      expect(find.text('37-72'), findsOneWidget);
+      expect(find.text('73-80'), findsOneWidget);
+      // 只显示集数，没有「第 x 集」。
+      expect(find.text('第 1 集'), findsNothing);
+      expect(find.text('1'), findsOneWidget);
+
+      // 一行 6 个：前 6 个的 y 相同，第 7 个换行。
+      final firstRow = [
+        for (var i = 1; i <= 6; i++) tester.getTopLeft(find.text('$i')),
+      ];
+      for (final position in firstRow) {
+        expect(position.dy, closeTo(firstRow.first.dy, 0.5));
+      }
+      expect(
+        tester.getTopLeft(find.text('7')).dy,
+        greaterThan(firstRow.first.dy),
+        reason: '一行应放 6 个，第 7 个换行',
+      );
+
+      // 切到第二个 tab，看到第 37 集。
+      await tester.tap(find.text('37-72'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 300));
+      expect(find.text('37'), findsOneWidget);
+      expect(find.text('36'), findsNothing);
+
+      // 点标题可以收起，再点可以重新展开。
+      await tester.tap(find.text('选集'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 300));
+      expect(find.byType(OutlinedButton), findsNothing);
+      await tester.tap(find.text('选集'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 300));
+      expect(find.byType(OutlinedButton), findsWidgets);
+    });
+  });
+
+  testWidgets('短剧详情-选集展开（36 集一个 tab、一行 6 个）', (tester) async {
+    final fake = _FakeTransport()..directoryChapterCount = 80;
+    const preview = VideoSeries(
+      id: 'v1',
+      title: '测试短剧',
+      episodeCount: 80,
+    );
+    await _pump(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: fake,
+    );
+    await expectLater(
+      find.byType(VideoDetailPage),
+      matchesGoldenFile('goldens/video_detail_episodes.png'),
     );
   });
 

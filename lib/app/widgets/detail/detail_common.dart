@@ -1,57 +1,45 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../widgets/novel_cover.dart';
+import '../../../core/cache/app_image_cache.dart';
+import '../cover_hero.dart';
 
 /// 详情页左右留白。卡片、目录行、底部操作栏共用，保证竖线对齐。
 const double detailGutter = 16;
 
-/// 详情页顶部：封面 + 标题/副标题/元信息 + 自定义附加行。
+/// 详情页顶部封面背景。
 ///
-/// 小说详情与短剧详情共用同一套版式（沉浸式渐变、96×132 封面、同一套字号
-/// 与间距），差异只通过 [subtitle]/[meta]/[extra] 传进来。封面高度默认按
-/// [kCoverAspect] 从宽度算出（96×132），与列表封面保持同一个比例。
-class DetailCoverHeader extends StatelessWidget {
-  const DetailCoverHeader({
+/// 用列表带进来的封面铺满顶部固定高度：自上而下做透明度渐变（顶部
+/// opacity 1、底部 0）并轻微模糊，图片经 Hero 从列表卡片飞进来后直接成为
+/// 背景。高度只由本组件决定，和下方标题/简介/选集的内容高度无关，所以
+/// 详情接口回来、内容变高时背景不会跟着动一下。
+class DetailCoverBackdrop extends StatelessWidget {
+  const DetailCoverBackdrop({
     super.key,
     required this.cover,
-    required this.title,
-    this.coverFallback = '',
-    this.subtitle = '',
-    this.meta = '',
-    this.extra,
-    this.coverWidth = 96,
-    double? coverHeight,
-  }) : coverHeight = coverHeight ?? coverWidth * kCoverAspect;
+    this.heroTag,
+    this.height = 230,
+  });
 
   final String cover;
-  final String coverFallback;
-  final String title;
 
-  /// 副标题：小说是作者、短剧是「全 N 集」。
-  final String subtitle;
+  /// 封面 Hero tag：列表点进来时由导航参数带下来，null = 不飞入。
+  final String? heroTag;
 
-  /// 元信息一行：小说是「分类 · 状态 · 字数」，短剧是「分类 · 播放量」。
-  final String meta;
+  /// 状态栏以下可见的背景高度。
+  final double height;
 
-  /// 附加区域：小说放评分/在读/更新至，短剧可为空。
-  final Widget? extra;
-
-  final double coverWidth;
-  final double coverHeight;
+  /// 背景的固定模糊程度；飞行过程中由 [_coverFlightShuttle] 从 0 渐变到这里。
+  static const double blurSigma = 3;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    const gutter = detailGutter;
-
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-        gutter + 4,
-        MediaQuery.paddingOf(context).top + 8,
-        gutter + 4,
-        gutter + 4,
-      ),
+    final scheme = Theme.of(context).colorScheme;
+    final topInset = MediaQuery.paddingOf(context).top;
+    final fallback = DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -62,61 +50,232 @@ class DetailCoverHeader extends StatelessWidget {
           ],
         ),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          NovelCover(
-            url: cover,
-            width: coverWidth,
-            height: coverHeight,
-            fallbackUrl: coverFallback,
-            fadeInDuration: Duration.zero,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    height: 1.25,
+    );
+
+    return SizedBox(
+      width: double.infinity,
+      height: topInset + height,
+      child: ClipRect(
+        child: ShaderMask(
+          // dstIn：白色渐变只保留图片对应的不透明度。顶部全白 = 完全不透明，
+          // 底部全透明 = 完全露出页面底色。
+          shaderCallback: (bounds) => const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.white, Color(0x00FFFFFF)],
+          ).createShader(bounds),
+          blendMode: BlendMode.dstIn,
+          child: cover.isEmpty
+              ? fallback
+              : ImageFiltered(
+                  imageFilter: ui.ImageFilter.blur(
+                    sigmaX: blurSigma,
+                    sigmaY: blurSigma,
+                  ),
+                  child: CoverHero(
+                    tag: heroTag,
+                    flightShuttleBuilder: _coverFlightShuttle,
+                    child: SizedBox.expand(
+                      child: CachedNetworkImage(
+                        imageUrl: cover,
+                        cacheManager: AppImageCache.manager,
+                        fit: BoxFit.cover,
+                        placeholder: (_, _) => fallback,
+                        errorWidget: (_, _, _) => fallback,
+                      ),
+                    ),
                   ),
                 ),
-                if (subtitle.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                if (meta.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    meta,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                if (extra != null) ...[
-                  const SizedBox(height: 8),
-                  extra!,
-                ],
-              ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 封面 Hero 的飞行过程：从清晰的小圆角卡片逐渐放大、模糊、削圆角，
+/// 落位时正好与背景的固定模糊/直角衔接，不会"啪"一下换形。
+Widget _coverFlightShuttle(
+  BuildContext flightContext,
+  Animation<double> animation,
+  HeroFlightDirection direction,
+  BuildContext fromHeroContext,
+  BuildContext toHeroContext,
+) {
+  final hero =
+      (direction == HeroFlightDirection.push
+              ? toHeroContext.widget
+              : fromHeroContext.widget)
+          as Hero;
+  final child = hero.child;
+  return AnimatedBuilder(
+    animation: animation,
+    builder: (context, _) {
+      // push 时动画跑 0→1（卡片 → 背景），pop 时被弹出路由的动画本来就跑
+      // 1→0（背景 → 卡片），所以两个方向都用 animation.value 当"背景化"
+      // 的进度即可；不要再按方向取反，否则返回时会先变清晰再变模糊。
+      final progress = animation.value;
+      return ClipRRect(
+        // 飞行中的 shuttle 单独打 key，方便测试断言「进/出详情都有飞行动画」。
+        key: const ValueKey('cover-hero-flight'),
+        borderRadius: BorderRadius.circular(12 * (1 - progress)),
+        child: ShaderMask(
+          // 透明渐变也随飞行进度渐入：起飞时整张图都在，落位时正好和背景
+          // 底部的全透明渐变对齐，不会在落地瞬间"啪"地切一下。
+          shaderCallback: (bounds) => LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.white,
+              Color.lerp(Colors.white, Colors.transparent, progress)!,
+            ],
+          ).createShader(bounds),
+          blendMode: BlendMode.dstIn,
+          child: ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(
+              sigmaX: DetailCoverBackdrop.blurSigma * progress,
+              sigmaY: DetailCoverBackdrop.blurSigma * progress,
+            ),
+            child: child,
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// 书名/作者/分类·字数/评分等文字区。
+///
+/// 单独从背景里拆出来，是为了让它在详情接口就绪后再从下方淡入；背景和
+/// Hero 落位不依赖这段内容，接口回来时页面不会整体跳一下。
+class DetailTitleSection extends StatelessWidget {
+  const DetailTitleSection({
+    super.key,
+    required this.title,
+    this.subtitle = '',
+    this.extra,
+  });
+
+  final String title;
+
+  /// 副标题：小说是「作者 · 状态 · 字数」，短剧是「全 N 集 · 播放量」。
+  final String subtitle;
+
+  /// 附加区域：小说放「评分 · 在读 · 更新至」，短剧可为空。
+  final Widget? extra;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(detailGutter + 4, 6, detailGutter + 4, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+              height: 1.25,
             ),
           ),
+          if (subtitle.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (extra != null) ...[
+            const SizedBox(height: 8),
+            extra!,
+          ],
         ],
       ),
+    );
+  }
+}
+
+/// 内容就绪后的淡入 + 上移。
+///
+/// 配合「封面先飞进来当背景、文字信息后出现」的节奏；[delay] 用来让相邻
+/// 区块错开出现（标题 → 简介 → 目录/选集），比统一淡入更有层次。
+class DetailFadeIn extends StatefulWidget {
+  const DetailFadeIn({
+    super.key,
+    required this.child,
+    this.delay = Duration.zero,
+  });
+
+  final Widget child;
+  final Duration delay;
+
+  static const Duration duration = Duration(milliseconds: 420);
+  static const double _slideDistance = 28;
+
+  @override
+  State<DetailFadeIn> createState() => _DetailFadeInState();
+}
+
+class _DetailFadeInState extends State<DetailFadeIn>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: DetailFadeIn.duration,
+  );
+  late final Animation<double> _animation = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeOutCubic,
+  );
+  Timer? _delayTimer;
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.value = 1;
+      return;
+    }
+    if (widget.delay == Duration.zero) {
+      _controller.forward();
+    } else {
+      _delayTimer = Timer(widget.delay, () {
+        if (mounted) _controller.forward();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _delayTimer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      child: widget.child,
+      builder: (context, child) {
+        final value = _animation.value;
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, DetailFadeIn._slideDistance * (1 - value)),
+            child: child,
+          ),
+        );
+      },
     );
   }
 }

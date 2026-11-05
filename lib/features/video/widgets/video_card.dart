@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
+import '../../../app/widgets/cover_hero.dart';
 import '../../../app/widgets/novel_cover.dart';
 import '../../../data/models/video_series.dart';
 
@@ -16,11 +17,15 @@ class VideoCard extends StatelessWidget {
     required this.item,
     required this.width,
     required this.onTap,
+    this.heroTag,
   });
 
   final VideoSeries item;
   final double width;
   final VoidCallback onTap;
+
+  /// 封面 Hero tag；null = 不参与飞入动画。
+  final String? heroTag;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +39,14 @@ class VideoCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            NovelCover(url: item.cover, width: width, height: coverHeight),
+            CoverHero(
+              tag: heroTag,
+              child: NovelCover(
+                url: item.cover,
+                width: width,
+                height: coverHeight,
+              ),
+            ),
             const SizedBox(height: 8),
             Text(
               item.title,

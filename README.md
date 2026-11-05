@@ -15,8 +15,8 @@
 | 页面 | 状态 |
 |---|---|
 | 推荐页：搜索框 + 分类 tabs（小说/短剧/漫剧）+ 各分类三列推荐流（下拉刷新、滚动分页、首屏不足自动补页）+ 搜索结果为横向列表；搜索框 40pt 高、继续往下浏览时整条收起（分类 tabs 吸顶）、往回滚的第一下就展开（不必滚回顶部）、收起后切分类保持收起；小说 `tab_type=2`、短剧 `8`（6 部/页、游标翻页）、漫剧 `24`（首页一屏无游标，滑到底走搜索兜底翻页） | ✅ |
-| 小说详情页：封面头/书名/作者/分类·状态·字数/评分、简介折叠、标签、目录（前 10 章 + 全部弹层）、底部「开始/继续阅读 + 加入书架」 | ✅ |
-| 短剧详情页：同一套封面头/简介卡（分类 · 播放量、全 N 集），目录换成选集网格，点集直接进播放页 | ✅ |
+| 小说详情页：封面直接作为顶部背景（Hero 从列表飞入后落成背景，顶部不透明、向下渐隐到透明，高度固定不随内容跳动）、书名/作者/评分、简介折叠、标签、目录（前 10 章 + 全部弹层）、底部「开始/继续阅读 + 加入书架」；文字信息等接口就绪后从下方淡入（`app/widgets/cover_hero.dart` / `detail_common.dart`） | ✅ |
+| 短剧详情页：同一套封面背景/简介卡（全 N 集、播放量），选集默认展开、36 集自动分一个 tab、一行 6 个、只显示集数（1000+ 集也不撑爆页面），点集直接进播放页；列表封面同样 Hero 飞入并直接落成背景，正文内容等接口就绪后淡入 | ✅ |
 | 阅读页：TextPainter 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、目录跳章、邻章预取、正文本地缓存（300 章上限、7 天后后台刷新）、章节 + 页首段落进度保存 | ✅ |
 | 播放页：`video_player`（AVPlayer）播放，控制条 3.5s 自动隐藏、缓冲 spinner、拖动松手才 seek、上下集/播完自动下一集、选集弹层、横屏视频全屏；密文交给内核 `/src` 按 Range 解密；失败给「原因 + 可复制详情 + 重新下载这一集」 | ✅ 骨架（先整集缓存后播） |
 | 我的页：书架（长按管理）、最近阅读 3 条（带段落级续读）、右上角「设置」入口 | ✅ |
@@ -69,7 +69,7 @@ rust/             Rust 内核（从 fqapp 整体拷入）
 assets/config/    config.json / filter.json / device_pool.example.json
 docs/             视频播放方案、书城 tab_type 对照
 scripts/          build_rust_ios.sh
-test/             7 个测试文件 + goldens/（16 张）
+test/             7 个测试文件 + goldens/（17 张）
 CONTRACTS.md      页面开发约定（页面清单/数据层 API 已滞后，待同步）
 ```
 
@@ -109,7 +109,7 @@ BUNDLE_ID=com.lihangyu.novelPlaylet IPA=/Users/lihangyu/workspace/novel-playlet/
 
 ```bash
 flutter test                       # 数据解析 + 缓存 + 并发回归 + UI golden 预览（不需要网络/内核/模拟器）
-flutter test --update-goldens      # 重新生成 test/goldens/*.png（当前 16 张）
+flutter test --update-goldens      # 重新生成 test/goldens/*.png（当前 17 张）
 cargo build --manifest-path rust/Cargo.toml   # live probe 需要 host dylib
 LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推荐/详情/目录/正文原始 JSON
 ```
@@ -118,7 +118,7 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推
 - `test/video_parsers_test.dart`：短剧卡片/详情/取流的字段兼容与去重。
 - `test/feed_concurrency_test.dart`：翻页请求必须串行（真机曾出现同一 offset 每帧连发、并发响应互相覆盖导致列表闪烁），同时锁住状态 copy 不丢字段；另覆盖分类契约（`tab_type` 认领失败、漫剧首页无游标时改用搜索兜底翻页）与「搜索 A 未回就提交 B 时丢弃 A」。
 - `test/cache_test.dart`：缓存统计/清理只动可重建缓存，书架、进度与设备池不动。
-- `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`，16 张：含设置页默认/取色弹层/绯红主题/深色、阅读页设置弹层、首页滚动收起态），并断言三个分类的推荐流/搜索结果封面尺寸与比例一致、分类 tabs 可横向滚动且没有「为你推荐/短剧推荐」旧标题、手势滑切分类、切分类回来保留滚动位置、顶部高度收紧（搜索 40 / tabs 36 / 顶栏 ≤100）、往下浏览收起搜索框且 tabs 保留、回顶自动展开、深滚动时往回滚立即展开、收起后切分类保持收起、搜索态滚动不收起、取消搜索回显快照且不重发请求、失败后换关键词先显示 loading、首屏失败立即显示错误页、搜索框不因清空按钮被撑高、带 `blockIndex` 进入阅读页不落在第一页。
+- `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`，17 张：含设置页默认/取色弹层/绯红主题/深色、阅读页设置弹层、首页滚动收起态、短剧选集展开），并断言三个分类的推荐流/搜索结果封面尺寸与比例一致、分类 tabs 可横向滚动且没有「为你推荐/短剧推荐」旧标题、手势滑切分类、切分类回来保留滚动位置、顶部高度收紧（搜索 40 / tabs 36 / 顶栏 ≤100）、往下浏览收起搜索框且 tabs 保留、回顶自动展开、深滚动时往回滚立即展开、收起后切分类保持收起、搜索态滚动不收起、取消搜索回显快照且不重发请求、失败后换关键词先显示 loading、首屏失败立即显示错误页、搜索框不因清空按钮被撑高、带 `blockIndex` 进入阅读页不落在第一页；另断言封面 Hero 进出详情正反向飞行（含 iOS 手势返回）、详情加载不转圈、信息行合并、短剧选集 36 集一个 tab。
 - `test/settings_test.dart`：主题色落盘与恢复（启动预读首帧即生效、旧值不覆盖用户新选择）、`AppAccent` 注入、白/灰/黑中性色不被染成彩色、阅读弹层主色 × 各纸色对比度 ≥ 4.5、真实 `NovelPlayletApp` 跟着主题色重建、预设换色、取色弹层纵向/横向拖动都能改色、清理缓存二次确认/进行中禁用/失败可恢复/清理后占用归零、「我的」右上角能打开设置页。
 - `test/live_probe_test.dart`：默认跳过；需要先 `cargo build` 出 host dylib，且网络能访问设备注册域名。
 
