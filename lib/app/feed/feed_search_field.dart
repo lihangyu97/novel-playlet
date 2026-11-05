@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// 首页流顶部搜索框（小说推荐 / 短剧推荐共用）。
+/// 推荐页顶部搜索框（小说/短剧/漫剧分类共用）。
 ///
 /// 输入文本是纯 UI 状态，留在 TextEditingController；提交/清空/取消都只是
 /// 回调，由页面翻译成 provider 操作。

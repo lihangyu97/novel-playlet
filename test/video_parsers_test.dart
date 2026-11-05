@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/data/models/video_detail.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
-import 'package:novel_playlet/features/video/video_state.dart';
+import 'package:novel_playlet/app/feed/feed_state.dart';
 
 /// 视频域解析测试：只用 JSON，不联网、不启内核。
 ///
@@ -136,9 +136,282 @@ void main() {
     });
   });
 
-  group('VideoFeedState', () {
+  group('漫剧元数据', () {
+    test('tag_info / genre 标记的卡片识别为漫剧，普通短剧不是', () {
+      final items = parseVideoSeries({
+        'data': {
+          'cell_data': [
+            {
+              'video_data': [
+                {
+                  'series_id_str': 'm1',
+                  'series_title': '漫剧A',
+                  'tag_info': {'text': '漫剧'},
+                },
+              ],
+            },
+            {
+              'video_data': [
+                {
+                  'series_id_str': 'v1',
+                  'series_title': '短剧B',
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(items.map((item) => (item.id, item.isManju)), [
+        ('m1', true),
+        ('v1', false),
+      ]);
+    });
+
+    test('标题/简介里提到漫剧不算证据', () {
+      final items = parseVideoSeries({
+        'data': {
+          'cell_data': [
+            {
+              'video_data': [
+                {
+                  'series_id_str': 'x1',
+                  'series_title': '漫剧原著改编',
+                  'series_intro': '已改编为动态漫画',
+                  'tag_info': {'text': '漫剧原著'},
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(items.single.isManju, isFalse);
+    });
+
+    test('book_data.genre=205 也能识别', () {
+      final items = parseVideoSeries({
+        'data': {
+          'cell_data': [
+            {
+              'book_data': {
+                'series_id_str': 'g1',
+                'series_name': '漫剧G',
+                'genre': '205',
+              },
+            },
+          ],
+        },
+      });
+      expect(items.single.isManju, isTrue);
+    });
+  });
+
+  group('parseManjuSearchPage', () {
+    Map<String, dynamic> payload({required int nextOffset, Object? hasMore}) => {
+      'code': 0,
+      'data': {
+        'search_tabs': [
+          {
+            'tab_type': 3,
+            'title': '书籍',
+            'data': [
+              {
+                'book_data': {'book_id': 'b1', 'book_name': '书'},
+              },
+            ],
+          },
+          {
+            'tab_type': 11,
+            'title': '短剧',
+            'next_offset': nextOffset,
+            'has_more': hasMore ?? true,
+            'data': [
+              {
+                'video_data': {
+                  'series_id_str': 'v1',
+                  'series_title': '短剧1',
+                },
+              },
+              {
+                'video_data': {
+                  'series_id_str': 'm1',
+                  'series_title': '漫剧1',
+                  'tag_info': {'text': '漫剧'},
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    test('只保留漫剧卡片，游标挂在短剧 tab 上', () {
+      final page = parseManjuSearchPage(payload(nextOffset: 10), offset: 0);
+      expect(page.items.single.id, 'm1');
+      expect(page.nextOffset, 10);
+    });
+
+    test('过滤后为空也暴露游标（避免把整条流误判到底）', () {
+      final page = parseManjuSearchPage(
+        {
+          'data': {
+            'search_tabs': [
+              {
+                'tab_type': 11,
+                'title': '短剧',
+                'has_more': true,
+                'next_offset': 23,
+                'data': [
+                  {
+                    'video_data': {
+                      'series_id_str': 'v1',
+                      'series_title': '短剧1',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        offset: 0,
+      );
+      expect(page.items, isEmpty);
+      expect(page.nextOffset, 23);
+    });
+
+    test('has_more 但上游没给游标时按每页 10 条推进', () {
+      final page = parseManjuSearchPage(
+        {
+          'data': {
+            'search_tabs': [
+              {
+                'tab_type': 11,
+                'title': '短剧',
+                'has_more': true,
+                'data': [
+                  {
+                    'video_data': {
+                      'series_id_str': 'm1',
+                      'series_title': '漫剧1',
+                      'genre': 205,
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        offset: 10,
+      );
+      expect(page.nextOffset, 20);
+    });
+
+    test('没有漫剧元数据时返回空，不把普通短剧当漫剧', () {
+      final page = parseManjuSearchPage(
+        {
+          'data': {
+            'search_tabs': [
+              {
+                'tab_type': 11,
+                'title': '短剧',
+                'data': [
+                  {
+                    'video_data': {
+                      'series_id_str': 'v1',
+                      'series_title': '短剧1',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        offset: 0,
+      );
+      expect(page.items, isEmpty);
+      expect(page.nextOffset, isNull);
+    });
+  });
+
+  group('parseSearchVideoSeries', () {
+    Map<String, dynamic> multiTabPayload() => {
+      'code': 0,
+      'data': {
+        'search_tabs': [
+          {
+            'tab_type': 3,
+            'data': [
+              {
+                'book_data': {'book_id': 'n1', 'book_name': '书'},
+              },
+            ],
+          },
+          {
+            'tab_type': 8,
+            'data': [
+              {
+                'video_data': {
+                  'pseries_id': 'p1',
+                  'series_name': '漫剧1',
+                },
+              },
+            ],
+          },
+          {
+            'tab_type': 11,
+            'data': [
+              {
+                'video_data': {
+                  'series_id_str': 'v1',
+                  'series_title': '短剧1',
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    test('多 tab 混排时只取 tab_type 匹配的那一个', () {
+      expect(
+        parseSearchVideoSeries(multiTabPayload(), tabType: 8).map((i) => i.id),
+        ['p1'],
+      );
+      expect(
+        parseSearchVideoSeries(multiTabPayload(), tabType: 11).map((i) => i.id),
+        ['v1'],
+      );
+    });
+
+    test('没有匹配 tab 时返回空，不把别的分类当本分类', () {
+      expect(parseSearchVideoSeries(multiTabPayload(), tabType: 24), isEmpty);
+    });
+
+    test('响应完全没有 tab_type 元信息时退回整包解析', () {
+      final legacy = {
+        'code': 0,
+        'data': {
+          'search_tabs': [
+            {
+              'data': [
+                {
+                  'video_data': {
+                    'series_id_str': 'x1',
+                    'series_title': '旧短剧',
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      };
+      final items = parseSearchVideoSeries(legacy, tabType: 11);
+      expect(items.single.id, 'x1');
+    });
+  });
+
+  group('FeedState<VideoSeries>', () {
     test('追加分页时按 id 去重，游标不前进视为到底', () {
-      final initial = VideoFeedState.feed(
+      final initial = FeedState<VideoSeries>.feed(
         items: const [VideoSeries(id: 's1', title: 'A')],
         nextOffset: 10,
       );

@@ -5,16 +5,16 @@ import 'feed_footer.dart';
 import 'feed_section_title.dart';
 import 'feed_state.dart';
 
-/// 首页流的通用骨架：搜索框槽位 + 区块标题 + 列表 sliver + 底部状态。
+/// 首页流的通用骨架：可选区块标题 + 列表 sliver + 底部状态。
 ///
-/// 小说推荐 / 短剧推荐两个 tab 的页面逻辑几乎一样，差别只在卡片和 sliver
-/// （网格 vs 列表、卡片字段）。把"滚动控制、下拉刷新、滚动到底加载下一页、
+/// 合并推荐页里小说/短剧/漫剧三个分类的页面逻辑几乎一样，差别只在卡片和
+/// sliver（网格 vs 列表、卡片字段）。把"滚动控制、下拉刷新、滚动到底加载下一页、
 /// 首屏补页、空态/加载/错误"都收在这里，页面只关心自己的数据和卡片。
 class FeedView<T> extends StatefulWidget {
   const FeedView({
     super.key,
     required this.state,
-    required this.title,
+    this.title,
     required this.sliverBuilder,
     required this.onLoadMore,
     required this.onRetryLoadMore,
@@ -24,7 +24,9 @@ class FeedView<T> extends StatefulWidget {
   });
 
   final FeedState<T> state;
-  final String title;
+
+  /// 区块标题；null = 不画标题（合并推荐页的分类本身已经是标题）。
+  final String? title;
 
   /// 列表主体（网格 / 列表），由页面按内容域决定。
   final Widget Function(BuildContext context, FeedState<T> state) sliverBuilder;
@@ -32,7 +34,7 @@ class FeedView<T> extends StatefulWidget {
   final Future<void> Function() onLoadMore;
   final VoidCallback onRetryLoadMore;
 
-  /// null = 这个页面没有下拉刷新。两个推荐页都传；详情/我的等页面不传。
+  /// null = 这个页面没有下拉刷新。推荐页各分类都传；详情/我的等页面不传。
   final Future<void> Function()? onRefresh;
 
   final String emptyMessage;
@@ -132,11 +134,10 @@ class _FeedViewState<T> extends State<FeedView<T>> {
         controller: _scrollController,
         physics: _physics,
         slivers: [
-          SliverToBoxAdapter(
-            child: FeedSectionTitle(
-              title: widget.title,
+          if (widget.title != null)
+            SliverToBoxAdapter(
+              child: FeedSectionTitle(title: widget.title!),
             ),
-          ),
           widget.sliverBuilder(context, data),
           SliverToBoxAdapter(
             child: FeedFooter(

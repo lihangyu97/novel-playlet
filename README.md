@@ -10,12 +10,11 @@
 
 ## 现在能做什么
 
-三个 tab：**小说** / **短剧** / **我的**（`IndexedStack`，切 tab 不丢滚动位置与已加载数据）
+两个 tab：**推荐** / **我的**（`IndexedStack`，切 tab 不丢滚动位置与已加载数据）。推荐页搜索框下方是可左右滑动的分类 tabs：**小说**（`tab_type=2`）/ **短剧**（8）/ **漫剧**（24），三个分类各自保留列表与滚动位置，内容区也能左右滑动切换。
 
 | 页面 | 状态 |
 |---|---|
-| 小说页：搜索框 + 三列推荐流（`tab_type=2`，下拉刷新、滚动分页、首屏不足自动补页）+ 搜索结果为横向列表 | ✅ |
-| 短剧页：同一套骨架，推荐流走 `tab_type=8`（6 部/页、游标翻页），搜索走 `tab_type=11` | ✅ |
+| 推荐页：搜索框 + 分类 tabs（小说/短剧/漫剧）+ 各分类三列推荐流（下拉刷新、滚动分页、首屏不足自动补页）+ 搜索结果为横向列表；小说 `tab_type=2`、短剧 `8`（6 部/页、游标翻页）、漫剧 `24`（首页一屏无游标，滑到底走搜索兜底翻页） | ✅ |
 | 小说详情页：封面头/书名/作者/分类·状态·字数/评分、简介折叠、标签、目录（前 10 章 + 全部弹层）、底部「开始/继续阅读 + 加入书架」 | ✅ |
 | 短剧详情页：同一套封面头/简介卡（分类 · 播放量、全 N 集），目录换成选集网格，点集直接进播放页 | ✅ |
 | 阅读页：TextPainter 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、目录跳章、邻章预取、正文本地缓存（300 章上限、7 天后后台刷新）、章节 + 页首段落进度保存 | ✅ |
@@ -69,7 +68,7 @@ rust/             Rust 内核（从 fqapp 整体拷入）
 assets/config/    config.json / filter.json / device_pool.example.json
 docs/             视频播放方案、书城 tab_type 对照
 scripts/          build_rust_ios.sh
-test/             6 个测试文件 + goldens/（9 张）
+test/             6 个测试文件 + goldens/（10 张）
 CONTRACTS.md      页面开发约定（页面清单/数据层 API 已滞后，待同步）
 ```
 
@@ -109,16 +108,16 @@ BUNDLE_ID=com.lihangyu.novelPlaylet IPA=/Users/lihangyu/workspace/novel-playlet/
 
 ```bash
 flutter test                       # 数据解析 + 缓存 + 并发回归 + UI golden 预览（不需要网络/内核/模拟器）
-flutter test --update-goldens      # 重新生成 test/goldens/*.png（当前 9 张）
+flutter test --update-goldens      # 重新生成 test/goldens/*.png（当前 10 张）
 cargo build --manifest-path rust/Cargo.toml   # live probe 需要 host dylib
 LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推荐/详情/目录/正文原始 JSON
 ```
 
 - `test/parsers_test.dart`：字段类型不稳定（数值是字符串、列表是单对象、id 截断）的兼容逻辑。
 - `test/video_parsers_test.dart`：短剧卡片/详情/取流的字段兼容与去重。
-- `test/feed_concurrency_test.dart`：翻页请求必须串行（真机曾出现同一 offset 每帧连发、并发响应互相覆盖导致列表闪烁），同时锁住状态 copy 不丢字段。
+- `test/feed_concurrency_test.dart`：翻页请求必须串行（真机曾出现同一 offset 每帧连发、并发响应互相覆盖导致列表闪烁），同时锁住状态 copy 不丢字段；另覆盖分类契约（`tab_type` 认领失败、漫剧首页无游标时改用搜索兜底翻页）与「搜索 A 未回就提交 B 时丢弃 A」。
 - `test/cache_test.dart`：缓存统计/清理只动可重建缓存，书架、进度与设备池不动。
-- `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`，9 张），并断言两条推荐流/搜索结果的封面尺寸与比例一致、搜索框不因清空按钮被撑高、带 `blockIndex` 进入阅读页不落在第一页。
+- `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`，10 张），并断言三个分类的推荐流/搜索结果封面尺寸与比例一致、分类 tabs 可横向滚动且没有「为你推荐/短剧推荐」旧标题、手势滑切分类、切分类回来保留滚动位置、取消搜索回显快照且不重发请求、失败后换关键词先显示 loading、首屏失败立即显示错误页、搜索框不因清空按钮被撑高、带 `blockIndex` 进入阅读页不落在第一页。
 - `test/live_probe_test.dart`：默认跳过；需要先 `cargo build` 出 host dylib，且网络能访问设备注册域名。
 
 > golden 依赖 macOS 系统字体（Arial Unicode / STHeiti），换机器或换系统版本可能不一致。
@@ -147,8 +146,9 @@ App 沙盒里会落盘的东西（iPhone 13 调试期实测：文稿与数据 40
 3. 无评论/段评/听书/漫画；阅读器只有横向分页，没有滚动跨章。
 4. 阅读进度记录到「章 + 页首段落下标」：换字号/换设备重新分页后能回到读到的那一段，但没有精确到页（页号本身随字号变化）。
 5. 视频是骨架：起播要等整集下载进内核缓存（流式回环见 [docs/video-playback.md](docs/video-playback.md) M1）；不做画中画/HDR/后台播放/AirPlay/锁屏/清晰度切换/弹幕；视频进度只记到「集」、不落盘。退后台不会主动暂停（快速切回继续播，长时间后台由系统挂起）。短剧流走书城首页的 `tab_type=8`（6 部/页、`next_offset` 游标翻页），翻完游标后暂时不会像 fqapp 那样回退到搜索兜底，见 [docs/video-playback.md](docs/video-playback.md) 4.1-5。
-6. App 全局锁竖屏（阅读器是横向分页、列表也是竖屏布局）；只有播放页的横屏视频才给「全屏」按钮，退出全屏/返回/离开播放页都会恢复竖屏。
-7. iOS 上架需处理 GPLv3 与内容授权，不建议按上架排期；当前定位自用/自签。
+6. 漫剧分类的首页流 `tab_type=24` 只有一屏、没有游标，滑到底后的翻页与搜索都借短剧搜索接口（`query=漫剧` / 用户关键词 + `tab_type=11`，按 `genre=205` /「漫剧」标签过滤，见 `ApiClient.manjuSearch`）；兜底流的卡片元数据可能不如首页流完整。漫剧点进详情走的是短剧详情路由 `/api/v1/series/{id}`，真实上游尚未验证，失败时详情页会展示错误态。
+7. App 全局锁竖屏（阅读器是横向分页、列表也是竖屏布局）；只有播放页的横屏视频才给「全屏」按钮，退出全屏/返回/离开播放页都会恢复竖屏。
+8. iOS 上架需处理 GPLv3 与内容授权，不建议按上架排期；当前定位自用/自签。
 
 ## 后续扩展点
 
