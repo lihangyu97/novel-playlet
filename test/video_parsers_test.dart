@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/data/models/video_detail.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
-import 'package:novel_playlet/features/video/video_state.dart';
+import 'package:novel_playlet/app/feed/feed_state.dart';
 
 /// 视频域解析测试：只用 JSON，不联网、不启内核。
 ///
@@ -136,9 +136,9 @@ void main() {
     });
   });
 
-  group('VideoFeedState', () {
+  group('FeedState<VideoSeries>', () {
     test('追加分页时按 id 去重，游标不前进视为到底', () {
-      final initial = VideoFeedState.feed(
+      final initial = FeedState<VideoSeries>.feed(
         items: const [VideoSeries(id: 's1', title: 'A')],
         nextOffset: 10,
       );

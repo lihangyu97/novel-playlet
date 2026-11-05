@@ -2,7 +2,8 @@ export '../../app/feed/feed_state.dart'
     show FeedMode, FeedState, describeFeedError;
 
 import '../../app/feed/feed_state.dart';
-import '../../data/models/novel_item.dart';
+import 'recommend_item.dart';
 
-/// 小说推荐列表状态。分页/去重逻辑在通用 [FeedState]，这里只固定元素类型。
-typedef RecommendState = FeedState<NovelItem>;
+/// 合并推荐页的列表状态。三类卡片统一成 [RecommendItem]，分页/去重逻辑在
+/// 通用 [FeedState] 里。
+typedef RecommendState = FeedState<RecommendItem>;

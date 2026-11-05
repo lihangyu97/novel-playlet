@@ -8,7 +8,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/feed/feed_results.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
+import 'package:novel_playlet/app/shell/home_shell.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/core/cache/app_cache.dart';
@@ -23,10 +25,10 @@ import 'package:novel_playlet/features/reader/reader_page.dart';
 import 'package:novel_playlet/features/reader/reader_controller.dart';
 import 'package:novel_playlet/features/reader/reader_widgets.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
-import 'package:novel_playlet/features/video/video_page.dart';
+import 'package:novel_playlet/features/video/widgets/video_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// UI 预览：用假 transport 注入固定上游数据，把四个页面真实渲染成 PNG。
+/// UI 预览：用假 transport 注入固定上游数据，把各页面真实渲染成 PNG。
 ///
 /// 目的不是断言像素，而是让 Lead 在没有模拟器/真机的环境里也能看到真实
 /// 布局。更新基线：`flutter test --update-goldens test/ui_preview_test.dart`
@@ -34,6 +36,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 顺带说明：封面 URL 故意留空，避免 widget 测试里真的发网络请求。
 class _FakeTransport extends BackendTransport {
   _FakeTransport() : super(port: 0);
+
+  /// 请求记录（`path?query`），用于断言取消搜索不会重新发请求。
+  final calls = <String>[];
+
+  /// 命中这些关键词的搜索返回 500（验证失败后换关键词/重试的 loading 态）。
+  final failingQueries = <String>{};
+
+  /// 每次请求的延迟；只有需要观察中间 loading 态的单测才设置。
+  Duration responseDelay = Duration.zero;
+
+  /// 小说推荐流的卡片数；滚动保活测试需要多屏内容。
+  int novelItemCount = 9;
 
   @override
   Future<BackendResponse> send(
@@ -43,6 +57,20 @@ class _FakeTransport extends BackendTransport {
     Uint8List? body,
     Duration timeout = BackendTransport.defaultTimeout,
   }) async {
+    final params = Uri.splitQueryString(query ?? '');
+    calls.add('$path?${query ?? ''}');
+    if (responseDelay > Duration.zero) {
+      await Future<void>.delayed(responseDelay);
+    }
+    final keyword = params['query'] ?? '';
+    if (path.startsWith('/api/v1/search') &&
+        failingQueries.any(keyword.contains)) {
+      return BackendResponse(
+        500,
+        Uint8List.fromList(utf8.encode(jsonEncode({'message': 'boom'}))),
+        'application/json',
+      );
+    }
     return BackendResponse(
       200,
       Uint8List.fromList(utf8.encode(jsonEncode(_payloadFor(path, query)))),
@@ -51,138 +79,179 @@ class _FakeTransport extends BackendTransport {
   }
 
   Map<String, dynamic> _payloadFor(String path, String? query) {
+    final params = Uri.splitQueryString(query ?? '');
     if (path.startsWith('/api/v1/recommend/homepage')) {
-      // 同一路由按 `tab_type` 分流：8 = 短剧推荐（对齐 api_client 的 tab 映射）。
-      if (query != null && query.contains('tab_type=8')) {
-        return {
-          'code': 0,
-          'data': {
-            'tab_index': 0,
-            'tab_item': [
-              {
-                'tab_type': 8,
-                'title': '短剧',
-                'next_offset': 6,
-                'has_more': true,
-                'session_id': 'sess-video',
-                'cell_data': [
-                  {
-                    'show_type': 384,
-                    'cell_name': '短剧推荐',
-                    'cell_data': [
-                      {
-                        'video_data': [
-                          for (var i = 1; i <= 9; i++)
-                            {
-                              'series_id_str': 'v$i',
-                              'series_title':
-                                  _dramaTitles[(i - 1) % _dramaTitles.length],
-                              'series_cover': '',
-                              'episode_cnt': '${40 + i}',
-                            },
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-        };
-      }
-      // 与真实响应同形：游标/session 挂在被回答的 tab_item 上，
-      // 卡片藏在 tab.cell_data[].cell_data[].book_data[] 里。
-      return {
-        'code': 0,
-        'data': {
-          'tab_index': 0,
-          'tab_item': [
-            {
-              'tab_type': 2,
-              'title': '推荐',
-              'next_offset': 10,
-              'has_more': false,
-              'session_id': 'sess-preview',
-              'cell_data': [
+      // 同一路由按 `tab_type` 分流：2 = 小说、8 = 短剧、24 = 漫剧
+      // （对齐 api_client 的 tab 映射）。与真实响应同形：游标/session 挂在
+      // 被回答的 tab_item 上，卡片藏在 tab.cell_data[].cell_data[] 里。
+      switch (params['tab_type']) {
+        case '8':
+          return {
+            'code': 0,
+            'data': {
+              'tab_index': 0,
+              'tab_item': [
                 {
-                  'show_type': 384,
-                  'cell_name': '猜你喜欢',
+                  'tab_type': 8,
+                  'title': '看剧',
+                  'next_offset': 6,
+                  'has_more': true,
+                  'session_id': 'sess-drama',
                   'cell_data': [
                     {
-                      'book_data': [
-                        for (var i = 1; i <= 9; i++)
-                          {
-                            'book_id': '$i',
-                            'book_name': _titles[(i - 1) % _titles.length],
-                            'author': _authors[(i - 1) % _authors.length],
-                            'category': i.isEven ? '玄幻' : '都市',
-                            'word_number': '${i * 180000}',
-                            'thumb_url': '',
-                          },
+                      'show_type': 384,
+                      'cell_name': '短剧',
+                      'cell_data': [
+                        {
+                          'video_data': [
+                            for (var i = 1; i <= 9; i++)
+                              {
+                                'series_id_str': 'v$i',
+                                'series_title': _dramaTitles[(i - 1) % _dramaTitles.length],
+                                'series_cover': '',
+                                'episode_cnt': '${40 + i}',
+                              },
+                          ],
+                        },
                       ],
                     },
                   ],
                 },
               ],
             },
-          ],
-        },
-      };
-    }
-    if (path.startsWith('/api/v1/search')) {
-      // 短剧搜索走 tab_type=11，返回短剧卡片；其余按书籍搜索。
-      if (query != null && query.contains('tab_type=11')) {
-        return {
-          'code': 0,
-          'data': {
-            'search_tabs': [
-              {
-                'tab_type': 11,
-                'title': '短剧',
-                'next_offset': 10,
-                'data': [
-                  for (var i = 1; i <= 6; i++)
+          };
+        case '24':
+          return {
+            'code': 0,
+            'data': {
+              'tab_index': 0,
+              'tab_item': [
+                {
+                  'tab_type': 24,
+                  'title': '漫剧',
+                  // 漫剧实测没有游标：只回首页一屏，这里也模拟到底。
+                  'next_offset': 0,
+                  'has_more': false,
+                  'cell_data': [
                     {
-                      'video_data': {
-                        'series_id_str': 'vs$i',
-                        'series_title':
-                            '搜索结果 ${_dramaTitles[(i - 1) % _dramaTitles.length]}',
-                        'series_intro':
-                            '这是第 $i 条短剧搜索结果的简介，用来验证横向列表两行省略与排版是否和小说搜索一致。',
-                        'episode_cnt': '${40 + i}',
-                        'series_cover': '',
-                      },
+                      'show_type': 384,
+                      'cell_name': '漫剧',
+                      'cell_data': [
+                        {
+                          'video_data': [
+                            for (var i = 1; i <= 12; i++)
+                              {
+                                'pseries_id': 'a$i',
+                                'series_name':
+                                    _animeTitles[(i - 1) % _animeTitles.length],
+                                'series_cover': '',
+                                'episode_cnt': '${12 + i * 2}',
+                              },
+                          ],
+                        },
+                      ],
                     },
-                ],
-              },
-            ],
-          },
-        };
-      }
-      return {
-        'code': 0,
-        'data': {
-          'search_tabs': [
-            {
-              'tab_type': 3,
-              'title': '书籍',
-              'next_offset': 10,
-              'data': [
-                for (var i = 1; i <= 6; i++)
-                  {
-                    'book_data': {
-                      'book_id': 's$i',
-                      'book_name': '搜索结果 ${_titles[(i - 1) % _titles.length]}',
-                      'author': '作者$i',
-                      'abstract': '这是第 $i 条搜索结果的简介，用来验证两行省略与排版。',
-                      'thumb_url': '',
-                    },
-                  },
+                  ],
+                },
               ],
             },
-          ],
-        },
-      };
+          };
+        default:
+          return {
+            'code': 0,
+            'data': {
+              'tab_index': 0,
+              'tab_item': [
+                {
+                  'tab_type': 2,
+                  'title': '推荐',
+                  'next_offset': 10,
+                  'has_more': false,
+                  'session_id': 'sess-preview',
+                  'cell_data': [
+                    {
+                      'show_type': 384,
+                      'cell_name': '猜你喜欢',
+                      'cell_data': [
+                        {
+                          'book_data': [
+                            for (var i = 1; i <= novelItemCount; i++)
+                              {
+                                'book_id': '$i',
+                                'book_name': _titles[(i - 1) % _titles.length],
+                                'author': _authors[(i - 1) % _authors.length],
+                                'category': i.isEven ? '玄幻' : '都市',
+                                'word_number': '${i * 180000}',
+                                'thumb_url': '',
+                              },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          };
+      }
+    }
+    if (path.startsWith('/api/v1/search')) {
+      // 搜索接口的 tab_type 与首页流不同：3 = 书籍、11 = 短剧、8 = 漫画。
+      switch (params['tab_type']) {
+        case '11':
+          return _videoSearchPayload(11, [
+            for (var i = 1; i <= 6; i++)
+              {
+                'series_id_str': 'vs$i',
+                'series_title':
+                    '搜索结果 ${_dramaTitles[(i - 1) % _dramaTitles.length]}',
+                'series_intro':
+                    '这是第 $i 条短剧搜索结果的简介，用来验证横向列表两行省略与排版是否和小说搜索一致。',
+                'episode_cnt': '${40 + i}',
+                'series_cover': '',
+              },
+          ]);
+        case '8':
+          return _videoSearchPayload(8, [
+            for (var i = 1; i <= 6; i++)
+              {
+                'pseries_id': 'as$i',
+                'series_name':
+                    '漫剧搜索 ${_animeTitles[(i - 1) % _animeTitles.length]}',
+                'series_intro':
+                    '这是第 $i 条漫剧搜索结果的简介，用来验证横向列表两行省略与排版。',
+                'episode_cnt': '${12 + i * 2}',
+                'series_cover': '',
+              },
+          ]);
+        default:
+          return {
+            'code': 0,
+            'data': {
+              'search_tabs': [
+                {
+                  'tab_type': 3,
+                  'title': '书籍',
+                  'next_offset': 10,
+                  'data': [
+                    for (var i = 1; i <= 6; i++)
+                      {
+                        'book_data': {
+                          'book_id': 's$i',
+                          'book_name':
+                              '搜索结果 ${_titles[(i - 1) % _titles.length]}',
+                          'author': '作者$i',
+                          'abstract':
+                              '这是第 $i 条搜索结果的简介，用来验证两行省略与排版。',
+                          'thumb_url': '',
+                        },
+                      },
+                  ],
+                },
+              ],
+            },
+          };
+      }
     }
     if (path.endsWith('/detail')) {
       return {
@@ -257,12 +326,39 @@ class _FakeTransport extends BackendTransport {
     '急诊室摸鱼，全院科室疯狂求我出手',
     '一念沉沦，霍总心动了',
   ];
+  static const _animeTitles = [
+    '开局签到荒古圣体',
+    '我在精神病院学斩神',
+    '斗破苍穹·动态漫',
+    '完美世界·漫剧',
+    '吞噬星空·动态漫',
+    '武王伐纣·漫剧',
+  ];
   static const _chapterNames = ['山中有剑', '少年游', '问心', '风雪夜归人', '青衫仗剑'];
   static const _paragraphs = [
     '大千世界，无奇不有。',
     '陈平安抬头看了一眼天色，背起竹篓往山上走。',
     '山风穿过松林，带着一股凉意。',
   ];
+
+  Map<String, dynamic> _videoSearchPayload(
+    int tabType,
+    List<Map<String, dynamic>> cards,
+  ) => {
+    'code': 0,
+    'data': {
+      'search_tabs': [
+        {
+          'tab_type': tabType,
+          'title': tabType == 11 ? '短剧' : '漫画',
+          'next_offset': 10,
+          'data': [
+            for (final card in cards) {'video_data': card},
+          ],
+        },
+      ],
+    },
+  };
 
   static String _cn(int n) {
     const digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
@@ -341,11 +437,12 @@ Future<void> _pump(
   WidgetTester tester,
   Widget page, {
   ReadingStore? store,
+  _FakeTransport? transport,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final api = ApiClient(_FakeTransport());
+  final api = ApiClient(transport ?? _FakeTransport());
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -368,16 +465,28 @@ Future<void> _pump(
   await tester.pumpAndSettle(const Duration(milliseconds: 100));
 }
 
-/// 同一页所有封面必须同一尺寸（防止某条流又私自换了 coverAspect）。
-void _expectUniformCoverSize(WidgetTester tester, String label) {
-  final sizes = tester
-      .widgetList<NovelCover>(find.byType(NovelCover))
-      .map(
-        (cover) =>
-            '${cover.width.toStringAsFixed(2)}×${cover.height.toStringAsFixed(2)}',
-      )
-      .toSet();
-  expect(sizes.length, 1, reason: '$label 里封面尺寸必须一致，实际 $sizes');
+/// 当前分类网格里的封面尺寸。按卡片类型圈定（小说分类是
+/// [NovelGridCard]，短剧/漫剧是 [VideoCard]），避免以后同屏出现混合卡片时
+/// 拿错对象；保活的隐藏页默认被 finder 的 skipOffstage 跳过。
+List<Size> _gridCoverSizes(WidgetTester tester, {required bool novel}) {
+  final cards = novel ? find.byType(NovelGridCard) : find.byType(VideoCard);
+  final covers = find.descendant(of: cards, matching: find.byType(NovelCover));
+  return tester
+      .widgetList<NovelCover>(covers)
+      .map((cover) => Size(cover.width, cover.height))
+      .toList();
+}
+
+/// 搜索结果横向列表里的封面尺寸（[FeedResultTile] 圈定）。
+List<Size> _searchCoverSizes(WidgetTester tester) {
+  final covers = find.descendant(
+    of: find.byType(FeedResultTile),
+    matching: find.byType(NovelCover),
+  );
+  return tester
+      .widgetList<NovelCover>(covers)
+      .map((cover) => Size(cover.width, cover.height))
+      .toList();
 }
 
 /// 这一页所有封面的高宽比都必须 = [kCoverAspect]（11:8）。
@@ -405,94 +514,115 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets('推荐页', (tester) async {
+  testWidgets('推荐页-小说分类', (tester) async {
     await _pump(tester, const RecommendPage());
+    // 合并后推荐态不再有「为你推荐 / 短剧推荐」区块标题。
+    expect(find.text('为你推荐'), findsNothing);
+    expect(find.text('短剧推荐'), findsNothing);
     await expectLater(
       find.byType(RecommendPage),
       matchesGoldenFile('goldens/recommend.png'),
     );
   });
 
-  testWidgets('短剧页', (tester) async {
-    await _pump(tester, const VideoPage());
-    await expectLater(
-      find.byType(VideoPage),
-      matchesGoldenFile('goldens/video.png'),
-    );
-  });
-
-  /// 封面尺寸回归：两条推荐流的封面必须同宽同高。
-  ///
-  /// 上游给的原生比例不同（小说 240×320 = 3:4，短剧 400×571 ≈ 1.427），以前
-  /// 两条流各用各的 `coverAspect`，切 tab 能看出短剧封面矮一截。现在统一走
-  /// [kCoverAspect]，这里把「一样大」钉死。
-  testWidgets('封面尺寸-小说流与短剧流一致', (tester) async {
+  testWidgets('推荐页-短剧分类', (tester) async {
     await _pump(tester, const RecommendPage());
-    _expectUniformCoverSize(tester, '小说流');
-    final novel = tester.getSize(find.byType(NovelCover).first);
-    expect(
-      novel.height / novel.width,
-      closeTo(kCoverAspect, 0.001),
-      reason: '小说封面高宽比应等于统一比例',
-    );
-
-    await _pump(tester, const VideoPage());
-    _expectUniformCoverSize(tester, '短剧流');
-    final drama = tester.getSize(find.byType(NovelCover).first);
-    expect(
-      drama.height / drama.width,
-      closeTo(kCoverAspect, 0.001),
-      reason: '短剧封面高宽比应等于统一比例',
-    );
-
-    expect(drama.width, closeTo(novel.width, 0.01), reason: '两条流封面宽度必须一致');
-    expect(drama.height, closeTo(novel.height, 0.01), reason: '两条流封面高度必须一致');
-  });
-
-  /// 搜索态也统一：两个 tab 都是横向列表 + 同一套条目，封面同宽同高。
-  ///
-  /// 以前小说搜索是横向列表、短剧搜索还是三列网格，同一个 app 两套形态。
-  testWidgets('封面尺寸-搜索结果两个 tab 一致', (tester) async {
-    await _pump(tester, const RecommendPage());
-    await tester.enterText(find.byType(TextField), '剑来');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    _expectCoverAspect(tester, '小说搜索结果');
-    final novelSearch = tester.getSize(find.byType(NovelCover).first);
-
-    await _pump(tester, const VideoPage());
-    await tester.enterText(find.byType(TextField), '太奶奶');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    _expectCoverAspect(tester, '短剧搜索结果');
-    final dramaSearch = tester.getSize(find.byType(NovelCover).first);
-
-    expect(
-      novelSearch.width,
-      FeedResultTile.coverWidth,
-      reason: '搜索结果封面宽度应走 FeedResultTile.coverWidth',
-    );
-    expect(
-      dramaSearch.width,
-      novelSearch.width,
-      reason: '两个 tab 搜索结果的封面宽度必须一致',
-    );
-    expect(
-      dramaSearch.height,
-      novelSearch.height,
-      reason: '两个 tab 搜索结果的封面高度必须一致',
-    );
-  });
-
-  testWidgets('短剧页-搜索态', (tester) async {
-    await _pump(tester, const VideoPage());
-    await tester.enterText(find.byType(TextField), '太奶奶');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await tester.tap(find.text('短剧'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('太奶奶'), findsWidgets);
     await expectLater(
-      find.byType(VideoPage),
-      matchesGoldenFile('goldens/video_search.png'),
+      find.byType(RecommendPage),
+      matchesGoldenFile('goldens/recommend_drama.png'),
     );
+  });
+
+  testWidgets('推荐页-漫剧分类', (tester) async {
+    await _pump(tester, const RecommendPage());
+    await tester.tap(find.text('漫剧'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('动态漫'), findsWidgets);
+    await expectLater(
+      find.byType(RecommendPage),
+      matchesGoldenFile('goldens/recommend_anime.png'),
+    );
+  });
+
+  testWidgets('推荐页-分类 tabs 横向可滚动', (tester) async {
+    await _pump(tester, const RecommendPage());
+    final tabBar = tester.widget<TabBar>(find.byType(TabBar));
+    expect(tabBar.isScrollable, isTrue, reason: '分类 tabs 必须能左右滑动');
+    expect(find.byType(Tab), findsNWidgets(3));
+    for (final label in ['小说', '短剧', '漫剧']) {
+      expect(find.text(label), findsOneWidget, reason: '缺少分类 $label');
+    }
+  });
+
+  /// 封面尺寸回归：三个分类的推荐流封面必须同宽同高。
+  ///
+  /// 上游原生比例不同（小说 240×320 = 3:4，短剧 400×571 ≈ 1.427），以前两条
+  /// 流各用各的 `coverAspect`；合并成一个页面后更不能出现切分类封面大小跳变。
+  /// 切分类后旧页面会被 TabBarView 保活，所以按卡片类型圈定当前分类的封面。
+  testWidgets('封面尺寸-三个分类的推荐流一致', (tester) async {
+    await _pump(tester, const RecommendPage());
+    final novel = _gridCoverSizes(tester, novel: true);
+    expect(novel, isNotEmpty);
+    expect(novel.map((size) => size.width).toSet(), hasLength(1));
+    expect(
+      novel.first.height / novel.first.width,
+      closeTo(kCoverAspect, 0.001),
+    );
+
+    await tester.tap(find.text('短剧'));
+    await tester.pumpAndSettle();
+    final drama = _gridCoverSizes(tester, novel: false);
+    expect(drama, isNotEmpty);
+    expect(drama.map((size) => size.width).toSet(), hasLength(1));
+    expect(
+      drama.first.height / drama.first.width,
+      closeTo(kCoverAspect, 0.001),
+    );
+
+    await tester.tap(find.text('漫剧'));
+    await tester.pumpAndSettle();
+    final anime = _gridCoverSizes(tester, novel: false);
+    expect(anime, isNotEmpty);
+
+    expect(drama.first, novel.first, reason: '短剧与小说封面尺寸必须一致');
+    expect(anime.first, novel.first, reason: '漫剧与小说封面尺寸必须一致');
+  });
+
+  /// 搜索态也统一：三个分类都是横向列表 + 同一套条目，封面同宽同高。
+  testWidgets('封面尺寸-三个分类的搜索结果一致', (tester) async {
+    Future<Size> searchOn(String query, {String? tab}) async {
+      await _pump(tester, const RecommendPage());
+      if (tab != null) {
+        await tester.tap(find.text(tab));
+        await tester.pumpAndSettle();
+      }
+      await tester.enterText(find.byType(TextField), query);
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      final sizes = _searchCoverSizes(tester);
+      expect(sizes, isNotEmpty);
+      expect(sizes.map((size) => size.width).toSet(), hasLength(1));
+      expect(
+        sizes.first.width,
+        FeedResultTile.coverWidth,
+        reason: '搜索结果封面宽度应走 FeedResultTile.coverWidth',
+      );
+      expect(
+        sizes.first.height / sizes.first.width,
+        closeTo(kCoverAspect, 0.001),
+      );
+      return sizes.first;
+    }
+
+    final novel = await searchOn('剑来');
+    final drama = await searchOn('太奶奶', tab: '短剧');
+    final anime = await searchOn('漫剧', tab: '漫剧');
+
+    expect(drama, novel, reason: '短剧与小说搜索结果封面尺寸必须一致');
+    expect(anime, novel, reason: '漫剧与小说搜索结果封面尺寸必须一致');
   });
 
   testWidgets('推荐页-搜索框内容垂直居中', (tester) async {
@@ -530,6 +660,118 @@ void main() {
       find.byType(RecommendPage),
       matchesGoldenFile('goldens/recommend_search.png'),
     );
+  });
+
+  testWidgets('首页-推荐/我的两个底部 tab', (tester) async {
+    await _pump(tester, const HomeShell());
+    expect(find.byType(NavigationDestination), findsNWidgets(2));
+    expect(find.text('推荐'), findsOneWidget);
+    expect(find.text('我的'), findsOneWidget);
+    // 合并后底部只剩「推荐 / 我的」，分类在搜索框下方的 tabs 里。
+    expect(find.text('小说'), findsOneWidget);
+    await expectLater(
+      find.byType(HomeShell),
+      matchesGoldenFile('goldens/home.png'),
+    );
+
+    await tester.tap(find.text('我的'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.byType(MinePage), findsOneWidget);
+  });
+
+  /// 当前可见竖向列表的滚动偏移（跳过 PageView 的横向 Scrollable）。
+  double verticalOffset(WidgetTester tester) {
+    final finder = find.byWidgetPredicate(
+      (widget) =>
+          widget is Scrollable && widget.axisDirection == AxisDirection.down,
+    );
+    return tester.state<ScrollableState>(finder.first).position.pixels;
+  }
+
+  testWidgets('推荐页-内容区左右滑动切分类', (tester) async {
+    await _pump(tester, const RecommendPage());
+    await tester.drag(find.byType(TabBarView), const Offset(-320, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('搜索短剧'), findsOneWidget);
+    expect(find.textContaining('太奶奶'), findsWidgets);
+
+    await tester.drag(find.byType(TabBarView), const Offset(320, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('搜索书名/作者'), findsOneWidget);
+  });
+
+  testWidgets('推荐页-切分类回来保留滚动位置', (tester) async {
+    final fake = _FakeTransport()..novelItemCount = 30;
+    await _pump(tester, const RecommendPage(), transport: fake);
+    expect(verticalOffset(tester), 0);
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    final scrolled = verticalOffset(tester);
+    expect(scrolled, greaterThan(100), reason: '多屏内容应该能滚动');
+
+    await tester.tap(find.text('短剧'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('小说'));
+    await tester.pumpAndSettle();
+    expect(
+      verticalOffset(tester),
+      closeTo(scrolled, 0.5),
+      reason: '保活后滚动位置必须保持',
+    );
+  });
+
+  testWidgets('推荐页-取消搜索回显推荐流且不重新请求', (tester) async {
+    final fake = _FakeTransport();
+    await _pump(tester, const RecommendPage(), transport: fake);
+    int countOf(String prefix) =>
+        fake.calls.where((call) => call.startsWith(prefix)).length;
+
+    expect(countOf('/api/v1/search'), 0);
+
+    await tester.enterText(find.byType(TextField), '剑来');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    final searchCalls = countOf('/api/v1/search');
+    expect(searchCalls, greaterThanOrEqualTo(1));
+
+    final feedCalls = countOf('/api/v1/recommend/homepage');
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('取消'), findsNothing);
+    expect(
+      countOf('/api/v1/search'),
+      searchCalls,
+      reason: '取消搜索只回显快照，不应再发请求',
+    );
+    expect(
+      countOf('/api/v1/recommend/homepage'),
+      feedCalls,
+      reason: '取消搜索不应重新拉推荐流',
+    );
+    expect(find.text('剑来'), findsWidgets, reason: '应回到推荐流');
+  });
+
+  testWidgets('推荐页-搜索失败后换关键词先显示 loading 而不是旧错误', (tester) async {
+    final fake = _FakeTransport()
+      ..failingQueries.add('失败')
+      ..responseDelay = const Duration(milliseconds: 60);
+    await _pump(tester, const RecommendPage(), transport: fake);
+
+    await tester.enterText(find.byType(TextField), '失败');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('boom'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), '剑来');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    // 请求还没回来：必须显示 loading，而不是把上一次的 ErrorView 钉住。
+    await tester.pump();
+    expect(find.text('boom'), findsNothing);
+    expect(find.text('搜索中…'), findsOneWidget);
+
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('搜索结果 剑来'), findsOneWidget);
   });
 
   testWidgets('详情页', (tester) async {

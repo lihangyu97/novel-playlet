@@ -4,7 +4,7 @@ import '../../data/models/novel_item.dart';
 import '../theme/app_theme.dart';
 import 'novel_cover.dart';
 
-/// 推荐页的卡片：大封面 + 标题 + 作者/分类。
+/// 推荐页小说分类的卡片：大封面 + 标题 + 作者/分类。
 ///
 /// 推荐流是混排的（榜单、猜你喜欢、新书），这里用统一的三列网格承载；区块
 /// 标题与"更多"留给后续按 cell 渲染，卡片本身不感知区块。

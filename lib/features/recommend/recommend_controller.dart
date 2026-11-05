@@ -4,14 +4,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/api/api_client.dart';
-import '../../data/models/novel_item.dart';
+import 'recommend_category.dart';
+import 'recommend_item.dart';
 import 'recommend_state.dart';
 
-/// 当前搜索关键词；null 表示停留在推荐流。
+/// 推荐页当前搜索关键词；null 表示停留在推荐流。
 ///
-/// 单独抽成一个 Notifier：搜索结果 controller 用 `ref.watch` 监听它，提交/
-/// 取消搜索就只是改这一个值，页面不用手动触发重新加载，也不会在两个页面
-/// 状态之间手动同步"现在是搜索模式吗"。
+/// 三个分类共用一个搜索词：提交后各分类按自己的搜索 `tab_type` 取结果，
+/// 切换分类时搜索词和结果都还在；取消搜索只是改这一个值，各分类自动回显
+/// 自己的推荐流快照。
 final searchQueryProvider = NotifierProvider<SearchQueryController, String?>(
   SearchQueryController.new,
 );
@@ -33,13 +34,22 @@ class SearchQueryController extends Notifier<String?> {
   void cancel() => state = null;
 }
 
-/// 推荐页数据。首屏失败走 AsyncError，翻页失败留在 RecommendState 里。
-final recommendControllerProvider =
-    AsyncNotifierProvider<RecommendController, RecommendState>(
-      RecommendController.new,
-    );
+/// 一个分类的推荐/搜索流。
+///
+/// family 按分类隔离：切分类时各自保留已加载的列表、游标与 session，不会
+/// 因为切走再切回来重新冷启动。首屏失败走 AsyncError，翻页失败留在
+/// [FeedState] 里（只影响底部提示，不清空列表）。
+final recommendFeedProvider = AsyncNotifierProvider.family<
+  RecommendFeedController,
+  RecommendState,
+  RecommendCategory
+>(RecommendFeedController.new);
 
-class RecommendController extends AsyncNotifier<RecommendState> {
+class RecommendFeedController extends AsyncNotifier<RecommendState> {
+  RecommendFeedController(this.category);
+
+  final RecommendCategory category;
+
   /// 推荐流快照：取消搜索时直接回显，不让"返回"再等一次冷启动请求。
   RecommendState? _feedSnapshot;
 
@@ -58,7 +68,7 @@ class RecommendController extends AsyncNotifier<RecommendState> {
     final query = ref.watch(searchQueryProvider);
     _generation += 1;
     if (query != null && query.isNotEmpty) {
-      return _loadSearch(query);
+      return _fetchSearch(query);
     }
     final snapshot = _feedSnapshot;
     if (snapshot != null) return snapshot;
@@ -77,35 +87,18 @@ class RecommendController extends AsyncNotifier<RecommendState> {
     if (current == null) {
       state = const AsyncLoading<RecommendState>();
       final next = await AsyncValue.guard(
-        () => query == null ? _loadFeed() : _loadSearch(query),
+        () => query == null ? _loadFeed() : _fetchSearch(query),
       );
       if (generation != _generation) return;
       state = next;
       return;
     }
 
-    if (current.isSearchMode) {
-      final page = await _api.search(current.query);
-      if (generation != _generation) return;
-      state = AsyncData(
-        FeedState<NovelItem>.search(
-          query: current.query,
-          items: page.items,
-          nextOffset: page.nextOffset,
-        ),
-      );
-      return;
-    }
-
-    // 推荐流刷新从 offset 0 重新开一个 session，不带旧 sessionId。
-    final page = await _api.recommend();
+    final fresh = query == null
+        ? await _fetchFeed()
+        : await _fetchSearch(query);
     if (generation != _generation) return;
-    final fresh = FeedState<NovelItem>.feed(
-      items: page.items,
-      nextOffset: page.nextOffset,
-      sessionId: page.sessionId,
-    );
-    _feedSnapshot = fresh;
+    if (query == null) _feedSnapshot = fresh;
     state = AsyncData(fresh);
   }
 
@@ -127,12 +120,10 @@ class RecommendController extends AsyncNotifier<RecommendState> {
     _loadingMore = true;
     state = AsyncData(current.withLoadingMore(true));
     try {
+      final offset = current.nextOffset!;
       final page = current.isSearchMode
-          ? await _api.search(current.query, offset: current.nextOffset!)
-          : await _api.recommend(
-              offset: current.nextOffset!,
-              sessionId: current.sessionId,
-            );
+          ? await _fetchSearch(current.query, offset: offset)
+          : await _fetchFeed(offset: offset, sessionId: current.sessionId);
       if (generation != _generation) return;
       final latest = state.value;
       if (latest == null) return;
@@ -163,21 +154,53 @@ class RecommendController extends AsyncNotifier<RecommendState> {
   }
 
   Future<RecommendState> _loadFeed() async {
-    final page = await _api.recommend();
-    final snapshot = FeedState<NovelItem>.feed(
-      items: page.items,
+    final fresh = await _fetchFeed();
+    _feedSnapshot = fresh;
+    return fresh;
+  }
+
+  /// 推荐流的一页。小说走书籍首页接口，短剧/漫剧共用视频类接口（按 tab_type）。
+  Future<RecommendState> _fetchFeed({
+    int offset = 0,
+    String? sessionId,
+  }) async {
+    if (category.isNovel) {
+      final page = await _api.recommend(offset: offset, sessionId: sessionId);
+      return FeedState<RecommendItem>.feed(
+        items: [for (final item in page.items) RecommendItem.novel(item)],
+        nextOffset: page.nextOffset,
+        sessionId: page.sessionId,
+      );
+    }
+    final page = await _api.videoFeed(
+      tabType: category.tabType,
+      offset: offset,
+      sessionId: sessionId,
+    );
+    return FeedState<RecommendItem>.feed(
+      items: [for (final item in page.items) RecommendItem.video(item)],
       nextOffset: page.nextOffset,
       sessionId: page.sessionId,
     );
-    _feedSnapshot = snapshot;
-    return snapshot;
   }
 
-  Future<RecommendState> _loadSearch(String query) async {
-    final page = await _api.search(query);
-    return FeedState<NovelItem>.search(
+  Future<RecommendState> _fetchSearch(String query, {int offset = 0}) async {
+    if (category.isNovel) {
+      final page = await _api.search(query, offset: offset);
+      return FeedState<RecommendItem>.search(
+        query: query,
+        items: [for (final item in page.items) RecommendItem.novel(item)],
+        nextOffset: page.nextOffset,
+      );
+    }
+    final page = await _api.searchVideos(
+      query,
+      tabType: category.searchTabType,
+      offset: offset,
+    );
+    return FeedState<RecommendItem>.search(
       query: query,
-      items: page.items,
+      items: [for (final item in page.items) RecommendItem.video(item)],
       nextOffset: page.nextOffset,
     );
   }

@@ -60,18 +60,22 @@ class ApiClient {
     return NovelFeedPage(items: items, nextOffset: nextOffset);
   }
 
-  /// 短剧 tab 的推荐流。
+  /// 视频类分类（短剧 / 漫剧）的推荐流。
   ///
   /// 同一套书城首页接口按 `tab_type` 分类，取值见官方 `BookstoreTabType`
   /// （fqapp 抄的那份在 `lib/models/channel_tab.dart`）：2 推荐/小说、5 听书、
   /// **8 短剧（看剧）**、9 漫画、16 视频 feed、24 漫剧、25 小说、103 短篇。
   /// 之前用 16 是「视频 feed」，上游只回 2 张卡且没有游标；8 才是短剧流，
   /// 实测 6 张/页、`next_offset` 逐页 +1（0→1→2 每页都是新剧），session 稳定。
+  /// 漫剧（24）实测 12 张卡但没有游标，只能刷首页。
   ///
   /// 与书城推荐同一套信封：游标与 session 挂在被回答的 `tab_item` 上，翻页
   /// 必须回传 session，否则上游会换设备。
-  Future<VideoFeedPage> videoFeed({int offset = 0, String? sessionId}) async {
-    const tabType = 8;
+  Future<VideoFeedPage> videoFeed({
+    int tabType = 8,
+    int offset = 0,
+    String? sessionId,
+  }) async {
     final payload = await _getJson('/api/v1/recommend/homepage', {
       'tab_type': '$tabType',
       'offset': '$offset',
@@ -81,9 +85,9 @@ class ApiClient {
     final data = unwrapEnvelope(payload);
     final tab = _answeredRecommendTab(data);
     // 上游会答非所问：`tab_item` 里只有被回答那项带 cell_data，按 `tab_type`
-    // 认领。类型对不上就是别的分类的流（fqapp 同样会整页拒绝），不能当短剧画。
+    // 认领。类型对不上就是别的分类的流（fqapp 同样会整页拒绝），不能当本分类画。
     if (tab == null || asInt(tab['tab_type'], -1) != tabType) {
-      throw ApiException('短剧推荐数据异常，下拉刷新试试');
+      throw ApiException('推荐数据异常，下拉刷新试试');
     }
     final nextOffset = asInt(tab['next_offset']);
     return VideoFeedPage(
@@ -93,17 +97,25 @@ class ApiClient {
     );
   }
 
-  /// 短剧搜索（`tab_type=11` = 上游"视频"tab）。
-  Future<VideoFeedPage> searchVideos(String query, {int offset = 0}) async {
+  /// 视频类分类的搜索。
+  ///
+  /// [tabType] 取上游搜索 tab：11 = 短剧；上游没有「漫剧」搜索 tab，暂用 8
+  /// （漫画）。搜索响应里可能同时有多个 `search_tabs`，只解析匹配的那个，
+  /// 没有匹配 tab 时返回空列表（页面显示空结果），避免把别的分类当成本分类。
+  Future<VideoFeedPage> searchVideos(
+    String query, {
+    int tabType = 11,
+    int offset = 0,
+  }) async {
     final payload = await _getJson('/api/v1/search', {
       'query': query,
-      'tab_type': '11',
+      'tab_type': '$tabType',
       'offset': '$offset',
       'count': '10',
     });
     return VideoFeedPage(
-      items: parseVideoSeries(payload),
-      nextOffset: _searchNextOffset(payload, offset: offset, tabTypes: const {11}),
+      items: parseSearchVideoSeries(payload, tabType: tabType),
+      nextOffset: _searchNextOffset(payload, offset: offset, tabTypes: {tabType}),
     );
   }
 

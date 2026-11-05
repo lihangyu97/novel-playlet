@@ -4,9 +4,8 @@ import '../widgets/novel_cover.dart';
 
 /// 搜索结果的条目形态：封面 + 标题 + 元信息 + 简介两行。
 ///
-/// 小说搜索与短剧搜索共用同一个条目：以前小说搜索是横向列表、短剧搜索还是
-/// 三列网格，两个 tab 提交搜索后的形态完全不同。现在两条流都走这里，封面
-/// 尺寸/字距/分隔线一致，差异只有 [meta] 文案（作者·分类 / 全 N 集）。
+/// 推荐页三个分类的搜索结果共用同一个条目：小说搜索与短剧/漫剧搜索都走这里，
+/// 封面尺寸/字距/分隔线一致，差异只有 [meta] 文案（作者·分类 / 全 N 集）。
 class FeedResultTile extends StatelessWidget {
   const FeedResultTile({
     super.key,

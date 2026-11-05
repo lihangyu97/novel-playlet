@@ -6,10 +6,10 @@ import '../../../data/models/video_series.dart';
 
 /// 视频列表的卡片：竖版封面 + 标题 + 集数。
 ///
-/// 与小说卡片的区别只在元信息：短剧没有作者，展示「全 N 集」，缺集数时
-/// 不硬凑一行（避免出现空字符串占位）。封面比例、圆角、字号与小说卡
-/// 完全一致（都走 [kCoverAspect] / [AppTheme.cardRadius]），两条推荐流
-/// 切 tab 时卡片尺寸不变。
+/// 与小说卡片的区别只在元信息：短剧/漫剧没有作者，展示「全 N 集」，缺集数
+/// 时不硬凑一行（避免出现空字符串占位）。封面比例、圆角、字号与小说卡
+/// 完全一致（都走 [kCoverAspect] / [AppTheme.cardRadius]），推荐页切分类
+/// 时卡片尺寸不变。
 class VideoCard extends StatelessWidget {
   const VideoCard({
     super.key,

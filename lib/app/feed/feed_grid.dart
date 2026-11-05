@@ -14,7 +14,7 @@ class FeedGridMetrics {
   });
 
   /// [coverAspect] 是封面高 / 宽，默认 [kCoverAspect]：小说流与短剧流共用
-  /// 同一个比例，两个 tab 的封面才会一样大。
+  /// 三个分类的封面才会一样大。
   factory FeedGridMetrics.of(
     BuildContext context, {
     double coverAspect = kCoverAspect,
