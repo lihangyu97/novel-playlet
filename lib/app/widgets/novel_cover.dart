@@ -19,10 +19,9 @@ const double kCoverAspect = 11 / 8;
 /// 上游封面 URL 可能是 http、可能为空、可能 403，所以不能直接用
 /// `Image.network`：失败时给灰色占位而不是红色报错块。
 ///
-/// [fallbackUrl] 是"上一张已经在缓存里的图"：正常情况下列表与详情取的是同一张
-/// 缩略图（见 `coverKeys`），两者相等时不会出现两个图层；只有详情退到更大的
-/// 兜底图、URL 确实不同时，才先用旧图垫着，新图就绪后**直接替换**（配合
-/// `fadeInDuration: Duration.zero`），避免"灰块 → 淡入"的刷新感。
+/// 详情页固定沿用列表带过来的封面（见 `DetailCoverHeader`），不会在接口回来
+/// 后换成另一张 URL，所以这里只处理"一张图从占位到就绪"的淡入，不需要垫图
+/// 或换图逻辑。
 class NovelCover extends StatelessWidget {
   const NovelCover({
     super.key,
@@ -30,7 +29,6 @@ class NovelCover extends StatelessWidget {
     required this.width,
     required this.height,
     this.radius = 10,
-    this.fallbackUrl = '',
     this.fadeInDuration = const Duration(milliseconds: 120),
   });
 
@@ -38,9 +36,6 @@ class NovelCover extends StatelessWidget {
   final double width;
   final double height;
   final double radius;
-
-  /// 主图加载期间的垫图（通常是列表里已经加载过的那张）。
-  final String fallbackUrl;
 
   /// 主图就绪后的淡入时长；详情页大封面传 [Duration.zero] 直接替换。
   final Duration fadeInDuration;
@@ -60,23 +55,6 @@ class NovelCover extends StatelessWidget {
       ),
     );
 
-    // `asFallbackLayer` 指"垫在另一张图下面"的旧图：那层不能淡入，否则
-    // 换图时会闪一下。列表封面没有垫图层，走正常短淡入，图片就绪时不是
-    // 灰块硬切，观感更稳。
-    Widget image(String imageUrl, {required bool asFallbackLayer}) =>
-        CachedNetworkImage(
-          imageUrl: imageUrl,
-          cacheManager: AppImageCache.manager,
-          fit: BoxFit.cover,
-          width: width,
-          height: height,
-          placeholder: (_, _) => placeholder,
-          errorWidget: (_, _, _) => placeholder,
-          fadeInDuration: asFallbackLayer ? Duration.zero : fadeInDuration,
-        );
-
-    final hasFallback = fallbackUrl.isNotEmpty && fallbackUrl != url;
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox(
@@ -84,15 +62,17 @@ class NovelCover extends StatelessWidget {
         height: height,
         child: url.isEmpty
             ? placeholder
-            : hasFallback
-            ? Stack(
-                fit: StackFit.expand,
-                children: [
-                  image(fallbackUrl, asFallbackLayer: true),
-                  image(url, asFallbackLayer: false),
-                ],
-              )
-            : image(url, asFallbackLayer: false),
+            : CachedNetworkImage(
+                imageUrl: url,
+                cacheManager: AppImageCache.manager,
+                fit: BoxFit.cover,
+                width: width,
+                height: height,
+                placeholder: (_, _) => placeholder,
+                errorWidget: (_, _, _) => placeholder,
+                // 详情页传 zero：图片就绪立即出现，不再做淡入替换动画。
+                fadeInDuration: fadeInDuration,
+              ),
       ),
     );
   }

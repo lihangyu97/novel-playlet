@@ -12,10 +12,13 @@ import '../features/video/video_player_page.dart';
 /// 详情页入参。[preview] 是列表里点进来的卡片，用来在详情接口返回前先把
 /// 封面/标题画出来，避免白屏。
 class DetailArgs {
-  const DetailArgs({required this.bookId, this.preview});
+  const DetailArgs({required this.bookId, this.preview, this.heroTag});
 
   final String bookId;
   final NovelItem? preview;
+
+  /// 发起点击的列表封面 Hero tag；详情页用同一个 tag 接住飞入动画。
+  final String? heroTag;
 }
 
 /// 阅读页入参。[chapterId] 为空表示从第一章或上次进度开始。
@@ -42,10 +45,13 @@ class ReaderArgs {
 
 /// 短剧详情入参。[preview] 同样用于接口返回前先画封面/标题。
 class VideoDetailArgs {
-  const VideoDetailArgs({required this.seriesId, this.preview});
+  const VideoDetailArgs({required this.seriesId, this.preview, this.heroTag});
 
   final String seriesId;
   final VideoSeries? preview;
+
+  /// 发起点击的列表封面 Hero tag；详情页用同一个 tag 接住飞入动画。
+  final String? heroTag;
 }
 
 /// 播放页入参：整份选集 + 起播下标。
@@ -82,8 +88,11 @@ class AppRoutes {
         final args = settings.arguments as DetailArgs;
         return MaterialPageRoute(
           settings: settings,
-          builder: (_) =>
-              DetailPage(bookId: args.bookId, preview: args.preview),
+          builder: (_) => DetailPage(
+            bookId: args.bookId,
+            preview: args.preview,
+            heroTag: args.heroTag,
+          ),
         );
       case reader:
         final args = settings.arguments as ReaderArgs;
@@ -95,8 +104,11 @@ class AppRoutes {
         final args = settings.arguments as VideoDetailArgs;
         return MaterialPageRoute(
           settings: settings,
-          builder: (_) =>
-              VideoDetailPage(seriesId: args.seriesId, preview: args.preview),
+          builder: (_) => VideoDetailPage(
+            seriesId: args.seriesId,
+            preview: args.preview,
+            heroTag: args.heroTag,
+          ),
         );
       case videoPlay:
         final args = settings.arguments as VideoPlayArgs;

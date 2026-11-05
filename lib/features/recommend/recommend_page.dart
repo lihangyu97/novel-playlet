@@ -6,6 +6,7 @@ import '../../app/feed/feed_results.dart';
 import '../../app/feed/feed_search_field.dart';
 import '../../app/feed/feed_view.dart';
 import '../../app/router.dart';
+import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/novel_card.dart';
 import '../../app/widgets/states.dart';
 import '../video/widgets/video_card.dart';
@@ -317,19 +318,37 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
 
   void _retryLoadMore() => _controller.retryLoadMore();
 
+  /// 列表封面 Hero tag：分类名进 tag，同一路由里被 TabBarView 保活的多个
+  /// 分类互不冲突；详情页用同一个 tag 接住飞入动画。
+  String _coverHeroTag(RecommendItem item) {
+    final source = 'recommend-${_category.name}';
+    return item.novel != null
+        ? CoverHeroTag.novel(source, item.id)
+        : CoverHeroTag.video(source, item.id);
+  }
+
   void _openDetail(RecommendItem item) {
+    final heroTag = _coverHeroTag(item);
     final novel = item.novel;
     if (novel != null) {
       Navigator.of(context).pushNamed(
         AppRoutes.detail,
-        arguments: DetailArgs(bookId: novel.id, preview: novel),
+        arguments: DetailArgs(
+          bookId: novel.id,
+          preview: novel,
+          heroTag: heroTag,
+        ),
       );
       return;
     }
     final video = item.video!;
     Navigator.of(context).pushNamed(
       AppRoutes.videoDetail,
-      arguments: VideoDetailArgs(seriesId: video.id, preview: video),
+      arguments: VideoDetailArgs(
+        seriesId: video.id,
+        preview: video,
+        heroTag: heroTag,
+      ),
     );
   }
 
@@ -394,6 +413,7 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
             metaOf: (item) => item.searchMeta,
             introOf: (item) => item.intro,
             onTap: _openDetail,
+            heroTagOf: _coverHeroTag,
           );
         }
         final metrics = FeedGridMetrics.of(context);
@@ -411,6 +431,7 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
                 item: novel,
                 width: width,
                 onTap: onTap,
+                heroTag: _coverHeroTag(item),
               );
             }
             return VideoCard(
@@ -418,6 +439,7 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
               item: item.video!,
               width: width,
               onTap: onTap,
+              heroTag: _coverHeroTag(item),
             );
           },
         );

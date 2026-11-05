@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/router.dart';
+import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
@@ -129,6 +130,7 @@ class MinePage extends ConsumerWidget {
         itemWidth: itemWidth,
         itemHeight: itemHeight,
         spacing: _gridSpacing,
+        heroTagOf: (item) => CoverHeroTag.novel('mine-shelf', item.id),
         onOpen: (item) => _openDetail(context, item),
         onLongPress: (item) => _showShelfMenu(context, ref, item),
       ),
@@ -140,7 +142,11 @@ class MinePage extends ConsumerWidget {
   void _openDetail(BuildContext context, NovelItem item) {
     Navigator.of(context).pushNamed(
       AppRoutes.detail,
-      arguments: DetailArgs(bookId: item.id, preview: item),
+      arguments: DetailArgs(
+        bookId: item.id,
+        preview: item,
+        heroTag: CoverHeroTag.novel('mine-shelf', item.id),
+      ),
     );
   }
 

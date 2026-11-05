@@ -4,15 +4,35 @@ import '../../app/widgets/detail/detail_common.dart';
 import '../../data/models/book_detail.dart';
 import '../../data/models/novel_item.dart';
 
-/// 小说详情顶部：大封面 + 书名/作者/分类·状态·字数/评分/更新到。
+/// 小说详情顶部背景：只用封面，Hero 从列表卡片飞进来后直接铺成背景。
 ///
-/// 版式与短剧详情共用 [DetailCoverHeader]，这里只负责把小说字段整理成
-/// 副标题/元信息/评分行。
+/// 封面固定以列表 preview 为准（详情接口回来不换图，避免二次加载闪一下）；
+/// 列表没有封面时才回退到详情图。
+class DetailHeroBackdrop extends StatelessWidget {
+  const DetailHeroBackdrop({
+    super.key,
+    this.detail,
+    this.preview,
+    this.heroTag,
+  });
+
+  final BookDetail? detail;
+  final NovelItem? preview;
+  final String? heroTag;
+
+  @override
+  Widget build(BuildContext context) {
+    final cover = _firstNonEmpty([preview?.cover, detail?.cover]);
+    return DetailCoverBackdrop(cover: cover, heroTag: heroTag);
+  }
+}
+
+/// 小说详情文字区：书名/作者/分类·状态·字数/评分/更新到。
 ///
-/// [detail] 是接口数据；加载阶段只有 [preview]（列表卡片）。此时用它的
-/// 封面与标题先把版式撑起来，避免整页白屏。
-class DetailHero extends StatelessWidget {
-  const DetailHero({super.key, this.detail, this.preview});
+/// 接口就绪后才构建（外层包 [DetailFadeIn]），所以这里不再需要 preview 兜底
+/// 标题；preview 只在详情缺字段时补分类/字数。
+class DetailHeroInfo extends StatelessWidget {
+  const DetailHeroInfo({super.key, this.detail, this.preview});
 
   final BookDetail? detail;
   final NovelItem? preview;
@@ -23,126 +43,93 @@ class DetailHero extends StatelessWidget {
     final scheme = theme.colorScheme;
 
     final title = _firstNonEmpty([detail?.title, preview?.title]);
-    final cover = _firstNonEmpty([detail?.cover, preview?.cover]);
-    // 列表和详情现在都取同一张缩略图（字段顺序共用 `coverKeys`），正常情况
-    // 下两个 cover 就是同一个 URL，从列表点进来直接命中磁盘缓存、不二次下载。
-    // 只有详情缺 `thumb_url`、退到更大的兜底图时两者才会不同：那时先用列表
-    // 那张垫着（不淡入），大图就绪后直接替换，避免灰块和"刷新"感。
-    final coverFallback = preview != null && preview!.cover != cover
-        ? preview!.cover
-        : '';
-    // 深链进入且还没有任何数据时，这里不画空壳，交给下方的 Loading/Error
-    // 占满视口。
-    if (title.isEmpty && cover.isEmpty) return const SizedBox.shrink();
-
     final author = _firstNonEmpty([detail?.author, preview?.author]);
-    final meta = _metaLabel();
     final rawScore = _firstNonEmpty([detail?.score, preview?.score]);
     final score = rawScore == '0' || rawScore == '0.0' ? '' : rawScore;
     final readers = _readersLabel(detail?.readCount ?? '');
     final lastChapter = _firstNonEmpty([detail?.lastChapterTitle]);
-    final showRating = score.isNotEmpty || readers.isNotEmpty;
 
-    Widget? extra;
-    if (showRating || lastChapter.isNotEmpty) {
-      extra = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (showRating)
-            Row(
-              children: [
-                if (score.isNotEmpty) ...[
-                  Icon(Icons.star_rounded, size: 16, color: scheme.primary),
-                  const SizedBox(width: 3),
-                  Text(
-                    score,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-                if (score.isNotEmpty && readers.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Text(
-                    '·',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                if (readers.isNotEmpty)
-                  Flexible(
-                    child: Text(
-                      readers,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          if (lastChapter.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              '更新至 $lastChapter',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ],
+    // 作者同一行带上状态/字数；分类去掉了（简介下面已经有标签，重复）。
+    final subtitle = [
+      if (author.isNotEmpty) author,
+      if (detail != null && detail!.statusLabel.isNotEmpty)
+        detail!.statusLabel,
+      if (detail != null && detail!.wordLabel.isNotEmpty) detail!.wordLabel,
+    ].join(' · ');
+
+    // 评分 / 在读 / 更新至 合并成同一行。
+    final infoStyle = theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+    );
+    final segments = <Widget>[];
+    void addSeparator() {
+      if (segments.isNotEmpty) segments.add(Text(' · ', style: infoStyle));
+    }
+
+    if (score.isNotEmpty) {
+      segments.add(Icon(Icons.star_rounded, size: 16, color: scheme.primary));
+      segments.add(const SizedBox(width: 3));
+      segments.add(
+        Text(
+          score,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+    }
+    if (readers.isNotEmpty) {
+      addSeparator();
+      segments.add(
+        Flexible(
+          child: Text(
+            readers,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: infoStyle,
+          ),
+        ),
+      );
+    }
+    if (lastChapter.isNotEmpty) {
+      addSeparator();
+      segments.add(
+        Flexible(
+          child: Text(
+            '更新至 $lastChapter',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: infoStyle,
+          ),
+        ),
       );
     }
 
-    return DetailCoverHeader(
-      cover: cover,
-      coverFallback: coverFallback,
+    return DetailTitleSection(
       title: title,
-      subtitle: author,
-      meta: meta,
-      extra: extra,
+      subtitle: subtitle,
+      extra: segments.isEmpty ? null : Row(children: segments),
     );
   }
 
-  /// 详情优先；加载中退回卡片的分类/字数，让 Hero 的骨架和最终版更接近。
-  String _metaLabel() {
-    final parts = detail?.metaParts ?? const <String>[];
-    if (parts.isNotEmpty) return parts.join(' · ');
-    return [
-      if (preview != null && preview!.category.isNotEmpty) preview!.category,
-      if (preview != null) _wordLabel(preview!.wordCount),
-    ].where((part) => part.isNotEmpty).join(' · ');
-  }
+}
 
-  String _firstNonEmpty(List<String?> values) {
-    for (final value in values) {
-      final text = value?.trim() ?? '';
-      if (text.isNotEmpty) return text;
-    }
-    return '';
+String _firstNonEmpty(List<String?> values) {
+  for (final value in values) {
+    final text = value?.trim() ?? '';
+    if (text.isNotEmpty) return text;
   }
+  return '';
+}
 
-  String _wordLabel(int count) {
-    if (count <= 0) return '';
-    if (count < 10000) return '$count字';
-    final wan = count / 10000;
-    return '${wan.toStringAsFixed(wan >= 100 ? 0 : 1)}万字';
-  }
-
-  /// 上游 `read_count` 可能是纯数字或已经带单位（「12.4万」），两种都要能显示。
-  String _readersLabel(String raw) {
-    final text = raw.trim();
-    if (text.isEmpty) return '';
-    final value = int.tryParse(text);
-    if (value == null) return text.endsWith('在读') ? text : '$text人在读';
-    if (value < 10000) return '$value人在读';
-    final wan = value / 10000;
-    final label = wan >= 100 ? wan.toStringAsFixed(0) : wan.toStringAsFixed(1);
-    return '$label万人在读';
-  }
+/// 上游 `read_count` 可能是纯数字或已经带单位（「12.4万」），两种都要能显示。
+String _readersLabel(String raw) {
+  final text = raw.trim();
+  if (text.isEmpty) return '';
+  final value = int.tryParse(text);
+  if (value == null) return text.endsWith('在读') ? text : '$text人在读';
+  if (value < 10000) return '$value人在读';
+  final wan = value / 10000;
+  final label = wan >= 100 ? wan.toStringAsFixed(0) : wan.toStringAsFixed(1);
+  return '$label万人在读';
 }
