@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/feed/feed_results.dart';
+import 'package:novel_playlet/app/feed/feed_search_field.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/shell/floating_navigation_bar.dart';
@@ -55,6 +56,9 @@ class _FakeTransport extends BackendTransport {
   /// 小说推荐流的卡片数；滚动保活测试需要多屏内容。
   int novelItemCount = 9;
 
+  /// 搜索结果条数（默认 6；调大用于验证「搜索态滚动」等场景）。
+  int searchItemCount = 6;
+
   @override
   Future<BackendResponse> send(
     String method,
@@ -71,7 +75,8 @@ class _FakeTransport extends BackendTransport {
     final keyword = params['query'] ?? '';
     final failed =
         (failRecommend && path.startsWith('/api/v1/recommend/homepage')) ||
-        (path.startsWith('/api/v1/search') && failingQueries.any(keyword.contains));
+        (path.startsWith('/api/v1/search') &&
+            failingQueries.any(keyword.contains));
     if (failed) {
       return BackendResponse(
         500,
@@ -115,7 +120,8 @@ class _FakeTransport extends BackendTransport {
                             for (var i = 1; i <= 9; i++)
                               {
                                 'series_id_str': 'v$i',
-                                'series_title': _dramaTitles[(i - 1) % _dramaTitles.length],
+                                'series_title':
+                                    _dramaTitles[(i - 1) % _dramaTitles.length],
                                 'series_cover': '',
                                 'episode_cnt': '${40 + i}',
                               },
@@ -208,12 +214,11 @@ class _FakeTransport extends BackendTransport {
       // 里，靠 genre=205 / 「漫剧」标签区分（对齐 ApiClient.manjuSearch）。
       if (params['query'] == '漫剧') {
         return _videoSearchPayload(11, [
-          for (var i = 1; i <= 6; i++)
+          for (var i = 1; i <= searchItemCount; i++)
             {
               'pseries_id': 'p$i',
               'series_name': _animeTitles[(i - 1) % _animeTitles.length],
-              'series_intro':
-                  '这是第 $i 条漫剧搜索结果的简介，用来验证翻页兜底与横向列表排版。',
+              'series_intro': '这是第 $i 条漫剧搜索结果的简介，用来验证翻页兜底与横向列表排版。',
               'episode_cnt': '${12 + i * 2}',
               'series_cover': '',
               'genre': 205,
@@ -224,13 +229,12 @@ class _FakeTransport extends BackendTransport {
       switch (params['tab_type']) {
         case '11':
           return _videoSearchPayload(11, [
-            for (var i = 1; i <= 6; i++)
+            for (var i = 1; i <= searchItemCount; i++)
               {
                 'series_id_str': 'vs$i',
                 'series_title':
                     '搜索结果 ${_dramaTitles[(i - 1) % _dramaTitles.length]}',
-                'series_intro':
-                    '这是第 $i 条短剧搜索结果的简介，用来验证横向列表两行省略与排版是否和小说搜索一致。',
+                'series_intro': '这是第 $i 条短剧搜索结果的简介，用来验证横向列表两行省略与排版是否和小说搜索一致。',
                 'episode_cnt': '${40 + i}',
                 'series_cover': '',
               },
@@ -245,15 +249,14 @@ class _FakeTransport extends BackendTransport {
                   'title': '书籍',
                   'next_offset': 10,
                   'data': [
-                    for (var i = 1; i <= 6; i++)
+                    for (var i = 1; i <= searchItemCount; i++)
                       {
                         'book_data': {
                           'book_id': 's$i',
                           'book_name':
                               '搜索结果 ${_titles[(i - 1) % _titles.length]}',
                           'author': '作者$i',
-                          'abstract':
-                              '这是第 $i 条搜索结果的简介，用来验证两行省略与排版。',
+                          'abstract': '这是第 $i 条搜索结果的简介，用来验证两行省略与排版。',
                           'thumb_url': '',
                         },
                       },
@@ -556,6 +559,15 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  /// 当前可见竖向列表的滚动偏移（跳过 PageView 的横向 Scrollable）。
+  double verticalOffset(WidgetTester tester) {
+    final finder = find.byWidgetPredicate(
+      (widget) =>
+          widget is Scrollable && widget.axisDirection == AxisDirection.down,
+    );
+    return tester.state<ScrollableState>(finder.first).position.pixels;
+  }
+
   testWidgets('推荐页-小说分类', (tester) async {
     await _pump(tester, const RecommendPage());
     // 合并后推荐态不再有「为你推荐 / 短剧推荐」区块标题。
@@ -597,6 +609,101 @@ void main() {
     for (final label in ['小说', '短剧', '漫剧']) {
       expect(find.text(label), findsOneWidget, reason: '缺少分类 $label');
     }
+  });
+
+  /// A：顶部尺寸收紧——搜索框 40pt、tabs 36pt，搜索+tabs+间距压到 100pt 内。
+  testWidgets('推荐页-顶部高度收紧', (tester) async {
+    await _pump(tester, const RecommendPage());
+    expect(
+      tester.getSize(find.byType(FeedSearchField)).height,
+      FeedSearchField.height,
+    );
+    expect(FeedSearchField.height, 40, reason: '搜索框高度应为 40');
+    final tabsBottom = tester.getBottomLeft(find.byType(TabBar)).dy;
+    expect(
+      tabsBottom,
+      lessThanOrEqualTo(100),
+      reason: '搜索框 + tabs + 间距应压到 100pt 以内，实际 $tabsBottom',
+    );
+  });
+
+  /// C：上滑浏览时搜索框整条收起，tabs 保留；回到顶部再展开。
+  testWidgets('推荐页-上滑收起搜索框、tabs 保留、回顶展开', (tester) async {
+    final fake = _FakeTransport()..novelItemCount = 30;
+    await _pump(tester, const RecommendPage(), transport: fake);
+    expect(find.byType(FeedSearchField), findsOneWidget);
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(FeedSearchField), findsNothing, reason: '上滑后搜索框应收起');
+    expect(find.text('小说'), findsOneWidget, reason: 'tabs 必须保留，否则切不了分类');
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, 300));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(FeedSearchField), findsOneWidget, reason: '回到顶部应重新展开');
+  });
+
+  /// 搜索态不能收起：输入框正在被使用，藏起来用户就不知道自己在搜什么。
+  testWidgets('推荐页-搜索态下滚动不收起搜索框', (tester) async {
+    final fake = _FakeTransport()..searchItemCount = 30;
+    await _pump(tester, const RecommendPage(), transport: fake);
+    await tester.enterText(find.byType(TextField), '剑来');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(
+      find.byType(FeedSearchField),
+      findsOneWidget,
+      reason: '搜索态必须保持搜索框可见',
+    );
+  });
+
+  /// 各分类的折叠状态独立：短剧没滚过要展开，切回已滚动的小说要继续收起。
+  /// 收起后左右切分类不能把搜索框弹回来：折叠是页面级状态，与各分类
+  /// 自己的滚动位置无关（即使切到的分类还停在顶部）。
+  testWidgets('推荐页-收起后切分类保持收起', (tester) async {
+    final fake = _FakeTransport()..novelItemCount = 30;
+    await _pump(tester, const RecommendPage(), transport: fake);
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(FeedSearchField), findsNothing);
+
+    await tester.tap(find.text('短剧'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(
+      find.byType(FeedSearchField),
+      findsNothing,
+      reason: '切到未滚动的分类也不应重新展开搜索框',
+    );
+    expect(find.text('短剧'), findsOneWidget);
+
+    await tester.tap(find.text('小说'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(FeedSearchField), findsNothing, reason: '切回来仍保持收起');
+  });
+
+  /// 深处回落立即展开：滚得很深时，往回滑的第一下就要看到搜索框，
+  /// 不能等一路滚回顶部才展开。
+  testWidgets('推荐页-深滚动后往回滑立即展开', (tester) async {
+    final fake = _FakeTransport()..novelItemCount = 30;
+    await _pump(tester, const RecommendPage(), transport: fake);
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(FeedSearchField), findsNothing);
+    final deepOffset = verticalOffset(tester);
+    expect(deepOffset, greaterThan(300), reason: '前置条件：确实滚了很远');
+
+    // 往回滑一小段（仍在很深的位置）：搜索框必须立刻出现。
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, 80));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(FeedSearchField), findsOneWidget, reason: '往回滑应立即展开搜索框');
+    expect(
+      verticalOffset(tester),
+      greaterThan(300),
+      reason: '展开不依赖滚回顶部：此时仍应处于深滚动位置',
+    );
   });
 
   /// 封面尺寸回归：三个分类的推荐流封面必须同宽同高。
@@ -762,6 +869,22 @@ void main() {
     );
   });
 
+  testWidgets('首页-滚动后顶部收起', (tester) async {
+    final fake = _FakeTransport()..novelItemCount = 30;
+    await _pump(tester, const HomeShell(), transport: fake);
+    await tester.drag(
+      find.byType(CustomScrollView).first,
+      const Offset(0, -420),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(FeedSearchField), findsNothing);
+    expect(find.text('小说'), findsOneWidget);
+    await expectLater(
+      find.byType(HomeShell),
+      matchesGoldenFile('goldens/home_scrolled.png'),
+    );
+  });
+
   testWidgets('推荐页-内容区左右滑动切分类', (tester) async {
     await _pump(tester, const RecommendPage());
     await tester.drag(find.byType(TabBarView), const Offset(-320, 0));
@@ -795,6 +918,33 @@ void main() {
     );
   });
 
+  /// 搜索结果的滚动不能污染推荐流的折叠状态：取消搜索后推荐流还在顶部，
+  /// 搜索框必须重新展开（不能还停在「搜索时滚过」的收起态）。
+  testWidgets('推荐页-取消搜索后按推荐流位置展开', (tester) async {
+    final fake = _FakeTransport()..searchItemCount = 30;
+    await _pump(tester, const RecommendPage(), transport: fake);
+    await tester.enterText(find.byType(TextField), '剑来');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(verticalOffset(tester), greaterThan(100), reason: '搜索结果应能滚动');
+    expect(
+      find.byType(FeedSearchField),
+      findsOneWidget,
+      reason: '搜索态滚动时输入框必须保持可见',
+    );
+
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(
+      find.byType(FeedSearchField),
+      findsOneWidget,
+      reason: '取消搜索后推荐流在顶部，搜索框应展开而不是继承搜索结果的滚动位置',
+    );
+  });
+
   testWidgets('推荐页-取消搜索回显推荐流且不重新请求', (tester) async {
     final fake = _FakeTransport();
     await _pump(tester, const RecommendPage(), transport: fake);
@@ -813,11 +963,7 @@ void main() {
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(find.text('取消'), findsNothing);
-    expect(
-      countOf('/api/v1/search'),
-      searchCalls,
-      reason: '取消搜索只回显快照，不应再发请求',
-    );
+    expect(countOf('/api/v1/search'), searchCalls, reason: '取消搜索只回显快照，不应再发请求');
     expect(
       countOf('/api/v1/recommend/homepage'),
       feedCalls,
