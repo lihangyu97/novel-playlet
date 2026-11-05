@@ -20,7 +20,10 @@ import 'widgets/mine_shelf_grid.dart';
 /// 因此从详情页加书架、从阅读页保存进度后回到这里，数据已经是新的。
 /// 页面只做布局与交互，异步状态由 provider 承载，不使用 setState。
 class MinePage extends ConsumerWidget {
-  const MinePage({super.key});
+  const MinePage({super.key, this.bottomInset = 0});
+
+  /// 悬浮底栏遮住的高度（外层 shell 传进来）；列表末尾多留这么多空白。
+  final double bottomInset;
 
   static const _gutter = 16.0;
   static const _gridSpacing = 12.0;
@@ -52,7 +55,12 @@ class MinePage extends ConsumerWidget {
                   ),
                 ),
                 if (data != null)
-                  ..._contentSlivers(context, ref, constraints.maxWidth, data)
+                  ..._contentSlivers(
+                    context,
+                    ref,
+                    constraints.maxWidth,
+                    data,
+                  )
                 else if (async.hasError)
                   SliverFillRemaining(
                     hasScrollBody: false,
@@ -125,7 +133,7 @@ class MinePage extends ConsumerWidget {
         onLongPress: (item) => _showShelfMenu(context, ref, item),
       ),
       // 存储/清缓存入口移到「设置」页，这里只留书架与最近阅读。
-      const SliverToBoxAdapter(child: SizedBox(height: 28)),
+      SliverToBoxAdapter(child: SizedBox(height: 28 + bottomInset)),
     ];
   }
 

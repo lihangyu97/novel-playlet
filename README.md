@@ -10,7 +10,7 @@
 
 ## 现在能做什么
 
-两个 tab：**推荐** / **我的**（`IndexedStack`，切 tab 不丢滚动位置与已加载数据）。推荐页搜索框下方是可左右滑动的分类 tabs：**小说**（`tab_type=2`）/ **短剧**（8）/ **漫剧**（24），三个分类各自保留列表与滚动位置，内容区也能左右滑动切换。
+两个 tab：**推荐** / **我的**（`PageView` + keep-alive，切 tab 不丢滚动位置与已加载数据；底部是悬浮胶囊底栏，基于 Flutter `NavigationBar` 改造，参考同仓库族 PiliPlus 的 `FloatingNavigationBar`，见 `lib/app/shell/floating_navigation_bar.dart`；`extendBody` 让列表从胶囊下方穿过，各滚动页末尾按底栏高度留白；点底栏时两个页面横向滑动切换（`PageView` + keep-alive，保留滚动位置与已加载数据））。推荐页搜索框下方是可左右滑动的分类 tabs：**小说**（`tab_type=2`）/ **短剧**（8）/ **漫剧**（24），三个分类各自保留列表与滚动位置，内容区也能左右滑动切换。
 
 | 页面 | 状态 |
 |---|---|

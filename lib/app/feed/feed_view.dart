@@ -21,6 +21,7 @@ class FeedView<T> extends StatefulWidget {
     required this.emptyMessage,
     required this.emptyIcon,
     this.onRefresh,
+    this.bottomInset = 0,
   });
 
   final FeedState<T> state;
@@ -39,6 +40,9 @@ class FeedView<T> extends StatefulWidget {
 
   final String emptyMessage;
   final IconData emptyIcon;
+
+  /// 被悬浮底栏遮住的底部高度；追加到列表末尾空白上，保证最后一项能滚出来。
+  final double bottomInset;
 
   @override
   State<FeedView<T>> createState() => _FeedViewState<T>();
@@ -147,7 +151,7 @@ class _FeedViewState<T> extends State<FeedView<T>> {
               onRetry: widget.onRetryLoadMore,
             ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          SliverToBoxAdapter(child: SizedBox(height: 24 + widget.bottomInset)),
         ],
       ),
     );
