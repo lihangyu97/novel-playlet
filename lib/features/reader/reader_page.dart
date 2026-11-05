@@ -217,14 +217,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
+  /// 阅读纸色对应的一套主题：配色方案按纸色的明暗重新派生。
+  ///
+  /// 弹层（设置/目录）也要用它包一层——showModalBottomSheet 挂在 root
+  /// Navigator 上，不包就会拿到全局主题的 primary，在纸色/夜间底色上对比度
+  /// 不够（暗色 App + 纸色底时曾经低到 1.5:1）。
   ThemeData _readerTheme(ReaderPaper paper) {
     final brightness = paper == ReaderPaper.night
         ? Brightness.dark
         : Brightness.light;
     return Theme.of(context).copyWith(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: AppTheme.accent,
-        brightness: brightness,
+      colorScheme: AppTheme.schemeFor(
+        // 跟着「设置 → 主题色」走：阅读页的工具栏/目录高亮也要一起换色。
+        AppTheme.accentOf(context),
+        brightness,
       ),
       scaffoldBackgroundColor: paper.background,
     );
@@ -761,12 +767,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   void _openSettings() {
     _hideToolbar();
+    final paper = ref.read(readerSettingsProvider).paper;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: 0.3),
-      builder: (_) => const ReaderSettingsSheet(),
+      builder: (_) =>
+          Theme(data: _readerTheme(paper), child: const ReaderSettingsSheet()),
     );
   }
 
@@ -783,17 +791,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: 0.3),
-      builder: (sheetContext) => ReaderDirectorySheet(
-        chapters: session.chapters,
-        currentIndex: session.index,
-        background: paper.background,
-        foreground: paper.foreground,
-        onSelected: (index) {
-          Navigator.of(sheetContext).pop();
-          _pendingEntry = null;
-          _rememberPosition();
-          controller.goToChapter(index);
-        },
+      builder: (sheetContext) => Theme(
+        data: _readerTheme(paper),
+        child: ReaderDirectorySheet(
+          chapters: session.chapters,
+          currentIndex: session.index,
+          background: paper.background,
+          foreground: paper.foreground,
+          onSelected: (index) {
+            Navigator.of(sheetContext).pop();
+            _pendingEntry = null;
+            _rememberPosition();
+            controller.goToChapter(index);
+          },
+        ),
       ),
     );
   }

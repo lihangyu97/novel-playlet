@@ -332,6 +332,11 @@ class ReaderSettingsSheet extends ConsumerWidget {
     final paper = settings.paper;
     final foreground = paper.foreground;
     final muted = foreground.withValues(alpha: 0.55);
+    // 弹层由阅读页用「纸色对应的 Theme」包着（reader_page._readerTheme），
+    // 所以这里的 primary 已按纸色明暗派生，在纸色/夜间底上对比度足够；
+    // 不能直接用 AppTheme.accentOf（raw seed）——用户选近白/近黑主题色时
+    // 滑块和描边会彻底看不见。
+    final highlight = Theme.of(context).colorScheme.primary;
     // 弹层要一直铺到屏幕底：把 Home 指示条高度做成容器内部的 padding，
     // 而不是 SafeArea 在外层留白。否则最底部会露出弹层外的灰色横条。
     final bottomInset = MediaQuery.paddingOf(context).bottom;
@@ -344,10 +349,10 @@ class ReaderSettingsSheet extends ConsumerWidget {
       padding: EdgeInsets.fromLTRB(20, 10, 20, 18 + bottomInset),
       child: SliderTheme(
         data: SliderTheme.of(context).copyWith(
-          activeTrackColor: AppTheme.accent,
+          activeTrackColor: highlight,
           inactiveTrackColor: foreground.withValues(alpha: 0.14),
-          thumbColor: AppTheme.accent,
-          overlayColor: AppTheme.accent.withValues(alpha: 0.12),
+          thumbColor: highlight,
+          overlayColor: highlight.withValues(alpha: 0.12),
           trackHeight: 2.5,
           thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
         ),
@@ -474,6 +479,9 @@ class _PaperOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // primary 按纸色明暗派生，选中态文字/边框都用它：比 raw seed 稳，
+    // 用户选近白/近黑主题色时也不会消失。
+    final highlight = Theme.of(context).colorScheme.primary;
     return InkResponse(
       onTap: onTap,
       radius: 34,
@@ -488,9 +496,7 @@ class _PaperOption extends StatelessWidget {
               color: option.background,
               shape: BoxShape.circle,
               border: Border.all(
-                color: selected
-                    ? AppTheme.accent
-                    : foreground.withValues(alpha: 0.2),
+                color: selected ? highlight : foreground.withValues(alpha: 0.2),
                 width: selected ? 2 : 0.8,
               ),
             ),
@@ -503,9 +509,7 @@ class _PaperOption extends StatelessWidget {
             option.label,
             style: TextStyle(
               fontSize: 11.5,
-              color: selected
-                  ? AppTheme.accent
-                  : foreground.withValues(alpha: 0.6),
+              color: selected ? highlight : foreground.withValues(alpha: 0.6),
               fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
             ),
           ),
@@ -626,17 +630,18 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
     final chapter = widget.chapters[index];
     final selected = index == widget.currentIndex;
     final title = chapter.title.isEmpty ? '第 ${index + 1} 章' : chapter.title;
+    final highlight = Theme.of(context).colorScheme.primary;
     return InkWell(
       onTap: () => widget.onSelected(index),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         decoration: BoxDecoration(
           color: selected
-              ? AppTheme.accent.withValues(alpha: 0.07)
+              ? highlight.withValues(alpha: 0.07)
               : Colors.transparent,
           border: Border(
             left: BorderSide(
-              color: selected ? AppTheme.accent : Colors.transparent,
+              color: selected ? highlight : Colors.transparent,
               width: 3,
             ),
           ),
@@ -653,7 +658,7 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
                   fontSize: 14,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                   color: selected
-                      ? AppTheme.accent
+                      ? highlight
                       : widget.foreground.withValues(alpha: 0.82),
                 ),
               ),
@@ -661,7 +666,10 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
             if (selected)
               Text(
                 '当前',
-                style: TextStyle(fontSize: 11, color: AppTheme.accent),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: widget.foreground.withValues(alpha: 0.6),
+                ),
               ),
           ],
         ),

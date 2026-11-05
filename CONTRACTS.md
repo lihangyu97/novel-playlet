@@ -7,8 +7,8 @@
 - 启动链：`lib/main.dart → BootstrapGate → BackendService.start() → Rust init`
 - 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / videoFeed / searchVideos / detail / directory / chapter）
 - 模型：`lib/data/models/`（NovelItem、BookDetail、Chapter、ChapterContent、json_utils）
-- 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读）；缓存：`lib/core/cache/`（封面缓存 `AppImageCache`、占用统计与清理 `AppCache`，入口在「我的 → 存储」）
-- 主题：`lib/app/theme/app_theme.dart`（含 `ReaderPaper` 阅读底色）
+- 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读）；缓存：`lib/core/cache/`（封面缓存 `AppImageCache`、占用统计与清理 `AppCache`，入口在「我的 → 设置 → 存储」）
+- 主题：`lib/app/theme/app_theme.dart`（Material 3 seed 主题 + `AppAccent` 扩展 + `ReaderPaper` 阅读底色）；主题色偏好：`lib/app/theme/theme_settings.dart`（`themeSeedProvider`，持久化在 `shared_preferences`）。页面颜色一律走 `Theme.of(context).colorScheme`（M3 保证对比度），不要引用 `AppTheme.accent` 常量；只有「需要原始 seed 再自己派生 scheme」的场景（如阅读页按纸色明暗重建主题）才用 `AppTheme.accentOf(context)` + `AppTheme.schemeFor(seed, brightness)`
 - 共享组件：`lib/app/widgets/`（NovelCover、NovelGridCard、LoadingView、ErrorView、EmptyView）
 - 列表页通用骨架：`lib/app/feed/`（`FeedState<T>` 分页状态、`FeedView<T>` 滚动/补屏/下拉刷新/底部状态、`FeedGrid<T>` 三列网格、`FeedResultsSliver<T>` + `FeedResultTile` 搜索结果横向列表（推荐页各分类共用）、`FeedSearchField`、`FeedSectionTitle`、`FeedFooter`）。新列表页优先复用它，不要各写一套
 - 详情页通用组件：`lib/app/widgets/detail/detail_common.dart`（`DetailCoverHeader` 封面头、`DetailIntroCard` 简介+标签、`ExpandableIntro`、`DetailSectionHeader`、`DetailTagChip`）。小说/短剧详情共用，特殊模块（目录/选集）各自在 feature 内实现
@@ -86,6 +86,7 @@ Navigator.of(context).pushNamed(AppRoutes.reader,
 1. 推荐页：顶部搜索输入框 + 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧）+ 各分类推荐列表（底部导航只剩「推荐 / 我的」）
 2. 详情页：封面/书名/作者/分类/状态/字数/简介/标签 + 目录 + 底部「开始阅读」
 3. 阅读页：分页正文 + 点击呼出工具栏 + 上一章/下一章 + 字号/行距/底色 + 进度保存
-4. 我的页：书架 + 最近阅读（底部导航的第二个 tab）
+4. 我的页：书架 + 最近阅读（底部导航的第二个 tab）+ 右上角设置入口
+5. 设置页：主题色（预设 + HSV 自定义取色，全站生效并持久化）+ 存储占用与清理
 
-不在本期范围：离线下载、听书、漫画、评论、段评、登录、设置页。
+不在本期范围：离线下载、听书、漫画、评论、段评、登录。

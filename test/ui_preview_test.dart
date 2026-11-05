@@ -10,6 +10,7 @@ import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/shell/home_shell.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/app/theme/theme_settings.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
@@ -18,13 +19,14 @@ import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
-import 'package:novel_playlet/features/mine/mine_providers.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
 import 'package:novel_playlet/features/reader/reader_controller.dart';
 import 'package:novel_playlet/features/reader/reader_widgets.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
+import 'package:novel_playlet/features/settings/settings_page.dart';
+import 'package:novel_playlet/features/settings/settings_providers.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -422,14 +424,41 @@ Future<void> _loadPreviewFont() async {
   }
 }
 
-ThemeData _previewTheme() {
-  final base = AppTheme.light();
+ThemeData _previewTheme(
+  Color seed, [
+  Brightness brightness = Brightness.light,
+]) {
+  final base = brightness == Brightness.light
+      ? AppTheme.light(seed)
+      : AppTheme.dark(seed);
   return base.copyWith(
     textTheme: base.textTheme.apply(fontFamily: _previewFontFamily),
     primaryTextTheme: base.primaryTextTheme.apply(
       fontFamily: _previewFontFamily,
     ),
   );
+}
+
+/// 与 app.dart 同构的预览壳：watch 主题色后再建 MaterialApp，
+/// 这样换色 golden 能看到「全站真的跟着变」，而不是只有一个页面。
+class _PreviewApp extends ConsumerWidget {
+  const _PreviewApp({required this.home, this.brightness = Brightness.light});
+
+  final Widget home;
+  final Brightness brightness;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final seed = ref.watch(themeSeedProvider);
+    final theme = _previewTheme(seed, brightness);
+    return MaterialApp(
+      theme: theme,
+      debugShowCheckedModeBanner: false,
+      // 页面本身依赖外层 Scaffold 提供 Material（HomeShell 里有），
+      // 预览时补一个，保证 InkWell / 文本选择等祖先齐全。
+      home: Scaffold(body: home),
+    );
+  }
 }
 
 /// 预览用缓存占用：iPhone 13 上实测量级（视频 339 MB + 封面 41 MB + 章节 16 KB
@@ -447,6 +476,7 @@ Future<void> _pump(
   ReadingStore? store,
   _FakeTransport? transport,
   bool settle = true,
+  Brightness brightness = Brightness.light,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
@@ -457,18 +487,10 @@ Future<void> _pump(
       overrides: [
         apiClientProvider.overrideWithValue(api),
         readerChapterCacheProvider.overrideWithValue(_PreviewChapterCache()),
-        cacheUsageProvider.overrideWith(
-          (ref) async => _previewCacheUsage,
-        ),
+        cacheUsageProvider.overrideWith((ref) async => _previewCacheUsage),
         if (store != null) readingStoreProvider.overrideWithValue(store),
       ],
-      child: MaterialApp(
-        theme: _previewTheme(),
-        debugShowCheckedModeBanner: false,
-        // 页面本身依赖外层 Scaffold 提供 Material（HomeShell 里有），
-        // 预览时补一个，保证 InkWell / 文本选择等祖先齐全。
-        home: Scaffold(body: page),
-      ),
+      child: _PreviewApp(home: page, brightness: brightness),
     ),
   );
   if (!settle) return;
@@ -969,6 +991,71 @@ void main() {
     await expectLater(
       find.byType(MinePage),
       matchesGoldenFile('goldens/mine_shelf.png'),
+    );
+  });
+
+  testWidgets('设置页', (tester) async {
+    await _pump(tester, const SettingsPage());
+    await expectLater(
+      find.byType(SettingsPage),
+      matchesGoldenFile('goldens/settings.png'),
+    );
+  });
+
+  testWidgets('设置页-自定义颜色弹层', (tester) async {
+    await _pump(tester, const SettingsPage());
+    await tester.tap(find.text('自定义颜色'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    // 截整个屏幕（含遮罩与背后的设置页），只截 sheet 子树会丢掉上下文。
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/settings_color_picker.png'),
+    );
+  });
+
+  /// 换主题色必须「全站跟着变」：底色/按钮/选中态都由新的 seed 派生。
+  testWidgets('设置页-绯红主题', (tester) async {
+    SharedPreferences.setMockInitialValues({'app_seed_color_v1': 0xFFEF5350});
+    await _pump(tester, const SettingsPage());
+    await expectLater(
+      find.byType(SettingsPage),
+      matchesGoldenFile('goldens/settings_theme_red.png'),
+    );
+  });
+
+  testWidgets('设置页-深色', (tester) async {
+    await _pump(tester, const SettingsPage(), brightness: Brightness.dark);
+    await expectLater(
+      find.byType(SettingsPage),
+      matchesGoldenFile('goldens/settings_dark.png'),
+    );
+  });
+
+  /// 阅读弹层的主题作用域回归：弹层挂在 root Navigator 上，必须显式包一层
+  /// 「纸色对应的 Theme」。否则暗色 App + 浅色纸底时，弹层里会用全局的亮色
+  /// primary 画文字，在纸色上对比度只有 1.5:1（曾出现目录当前章看不清）。
+  testWidgets('阅读页-设置弹层（暗色 App + 纸色底）', (tester) async {
+    await _pump(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      brightness: Brightness.dark,
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    final sheetContext = tester.element(find.byType(ReaderSettingsSheet));
+    expect(
+      Theme.of(sheetContext).colorScheme.brightness,
+      Brightness.light,
+      reason: '默认纸色是浅色，弹层应该用纸色的浅色 scheme，而不是全局暗色',
+    );
+    await expectLater(
+      find.byType(ReaderSettingsSheet),
+      matchesGoldenFile('goldens/reader_settings_sheet.png'),
     );
   });
 }
