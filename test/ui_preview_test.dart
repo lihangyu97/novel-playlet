@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/feed/feed_results.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
+import 'package:novel_playlet/app/shell/floating_navigation_bar.dart';
 import 'package:novel_playlet/app/shell/home_shell.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
@@ -521,6 +522,15 @@ List<Size> _searchCoverSizes(WidgetTester tester) {
       .toList();
 }
 
+/// 当前可见竖向列表的滚动偏移（跳过 PageView 的横向 Scrollable）。
+double verticalOffset(WidgetTester tester) {
+  final finder = find.byWidgetPredicate(
+    (widget) =>
+        widget is Scrollable && widget.axisDirection == AxisDirection.down,
+  );
+  return tester.state<ScrollableState>(finder.first).position.pixels;
+}
+
 /// 这一页所有封面的高宽比都必须 = [kCoverAspect]（11:8）。
 void _expectCoverAspect(WidgetTester tester, String label) {
   final bad = tester
@@ -696,7 +706,16 @@ void main() {
 
   testWidgets('首页-推荐/我的两个底部 tab', (tester) async {
     await _pump(tester, const HomeShell());
-    expect(find.byType(NavigationDestination), findsNWidgets(2));
+    expect(find.byType(FloatingNavigationBar), findsOneWidget);
+    expect(find.byType(FloatingNavigationDestination), findsNWidgets(2));
+    // 内容从胶囊下面穿过：列表 viewport 必须铺到胶囊顶边以下。
+    final listRect = tester.getRect(find.byType(CustomScrollView).first);
+    final barRect = tester.getRect(find.byType(FloatingNavigationBar));
+    expect(
+      listRect.bottom,
+      greaterThan(barRect.top),
+      reason: '悬浮底栏应叠在列表上方，而不是把 body 顶上去',
+    );
     expect(find.text('推荐'), findsOneWidget);
     expect(find.text('我的'), findsOneWidget);
     // 合并后底部只剩「推荐 / 我的」，分类在搜索框下方的 tabs 里。
@@ -706,19 +725,42 @@ void main() {
       matchesGoldenFile('goldens/home.png'),
     );
 
+    // 切 tab 是横向滑过去，而不是硬切：动画中途「我的」页应该处于屏幕内
+    // 的某个中间位置。
     await tester.tap(find.text('我的'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    final mineDx = tester.getTopLeft(find.byType(MinePage)).dx;
+    expect(mineDx, greaterThan(0), reason: '切换过程中页面应在横向滑动');
+    expect(mineDx, lessThan(390), reason: '切换过程中页面应在横向滑动');
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(tester.getTopLeft(find.byType(MinePage)).dx, 0);
     expect(find.byType(MinePage), findsOneWidget);
   });
 
-  /// 当前可见竖向列表的滚动偏移（跳过 PageView 的横向 Scrollable）。
-  double verticalOffset(WidgetTester tester) {
-    final finder = find.byWidgetPredicate(
-      (widget) =>
-          widget is Scrollable && widget.axisDirection == AxisDirection.down,
+  testWidgets('首页-切 tab 回来保留推荐页滚动位置', (tester) async {
+    final fake = _FakeTransport()..novelItemCount = 30;
+    await _pump(tester, const HomeShell(), transport: fake);
+    expect(verticalOffset(tester), 0);
+
+    await tester.drag(
+      find.byType(CustomScrollView).first,
+      const Offset(0, -420),
     );
-    return tester.state<ScrollableState>(finder.first).position.pixels;
-  }
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    final scrolled = verticalOffset(tester);
+    expect(scrolled, greaterThan(100), reason: '多屏内容应该能滚动');
+
+    await tester.tap(find.text('我的'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await tester.tap(find.text('推荐'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(
+      verticalOffset(tester),
+      closeTo(scrolled, 0.5),
+      reason: 'PageView keep-alive 后滚动位置必须保持',
+    );
+  });
 
   testWidgets('推荐页-内容区左右滑动切分类', (tester) async {
     await _pump(tester, const RecommendPage());

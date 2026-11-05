@@ -24,7 +24,11 @@ import 'recommend_state.dart';
 /// 页面只保留输入框/焦点这类 UI 状态；列表数据全部在
 /// [recommendFeedProvider] 里，切分类、搜索往返都不丢已加载的内容。
 class RecommendPage extends ConsumerStatefulWidget {
-  const RecommendPage({super.key});
+  const RecommendPage({super.key, this.bottomInset = 0});
+
+  /// 悬浮底栏遮住的高度（外层 shell 传进来）；列表底部多留这么多空白，
+  /// 最后一屏才能滚到胶囊上方。直接作为页面根节点时保持 0。
+  final double bottomInset;
 
   @override
   ConsumerState<RecommendPage> createState() => _RecommendPageState();
@@ -129,6 +133,7 @@ class _RecommendPageState extends ConsumerState<RecommendPage>
                   _CategoryFeedPage(
                     key: ValueKey(category),
                     category: category,
+                    bottomInset: widget.bottomInset,
                   ),
               ],
             ),
@@ -172,9 +177,14 @@ class _RecommendPageState extends ConsumerState<RecommendPage>
 /// 用 [AutomaticKeepAliveClientMixin] 保活：TabBarView 滚出屏幕后会销毁子树，
 /// 保活才能让每个分类的滚动位置在左右滑动切回时原样保留。
 class _CategoryFeedPage extends ConsumerStatefulWidget {
-  const _CategoryFeedPage({super.key, required this.category});
+  const _CategoryFeedPage({
+    super.key,
+    required this.category,
+    required this.bottomInset,
+  });
 
   final RecommendCategory category;
+  final double bottomInset;
 
   @override
   ConsumerState<_CategoryFeedPage> createState() => _CategoryFeedPageState();
@@ -262,6 +272,7 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
     final isSearch = data.isSearchMode;
     return FeedView<RecommendItem>(
       state: data,
+      bottomInset: widget.bottomInset,
       // 合并后分类本身就是标题，推荐态不再显示「为你推荐 / 短剧推荐」；
       // 搜索态保留「搜索结果」便于区分。
       title: isSearch ? '搜索结果' : null,
