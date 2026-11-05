@@ -63,11 +63,18 @@ class VideoPlayArgs {
     required this.seriesTitle,
     required this.episodes,
     required this.index,
+    this.seriesId = '',
+    this.cover = '',
   });
 
   final String seriesTitle;
   final List<Chapter> episodes;
   final int index;
+
+  /// 剧集 id / 封面：播放页用它记录「看到第几集」，我的页最近观看要展示。
+  /// 从详情页进来时一定带；老调用方不传也不影响播放。
+  final String seriesId;
+  final String cover;
 }
 
 class AppRoutes {

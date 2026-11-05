@@ -28,6 +28,22 @@ class VideoSeries {
   final bool isManju;
 
   bool get isValid => id.isNotEmpty && title.isNotEmpty;
+
+  Map<String, dynamic> toStorageJson() => {
+    'id': id,
+    'title': title,
+    'cover': cover,
+    'intro': intro,
+    if (episodeCount > 0) 'episodeCount': episodeCount,
+  };
+
+  static VideoSeries fromStorageJson(Map<String, dynamic> json) => VideoSeries(
+    id: asString(json['id']),
+    title: asString(json['title']),
+    cover: asString(json['cover']),
+    intro: asString(json['intro']),
+    episodeCount: asInt(json['episodeCount']),
+  );
 }
 
 /// 视频列表的一页。[nextOffset] 为 null 表示到底。

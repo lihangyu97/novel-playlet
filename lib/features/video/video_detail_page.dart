@@ -5,10 +5,12 @@ import '../../app/providers.dart';
 import '../../app/router.dart';
 import '../../app/widgets/detail/detail_common.dart';
 import '../../app/widgets/states.dart';
+import '../detail/detail_action_bar.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/video_detail.dart';
 import '../../data/models/video_series.dart';
+import 'video_library_providers.dart';
 import 'widgets/episode_picker.dart';
 
 /// 短剧详情：与小说详情共用同一套版式（沉浸渐变 + 封面/标题/元信息 +
@@ -64,46 +66,116 @@ class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
 
   void _retry() => setState(_load);
 
+  /// 详情页展示的封面/标题优先级（列表 preview 优先，避免接口回来后换图）。
+  String _titleOf(VideoDetail? detail) => detail != null && detail.title.isNotEmpty
+      ? detail.title
+      : (widget.preview?.title ?? '短剧');
+
+  String _coverOf(VideoDetail? detail) {
+    final preview = widget.preview;
+    if (preview != null && preview.cover.isNotEmpty) return preview.cover;
+    return detail?.cover ?? '';
+  }
+
   void _openEpisode(VideoDetail detail, List<Chapter> episodes, int index) {
     Navigator.of(context).pushNamed(
       AppRoutes.videoPlay,
       arguments: VideoPlayArgs(
-        seriesTitle: detail.title.isNotEmpty
-            ? detail.title
-            : (widget.preview?.title ?? '短剧'),
+        seriesTitle: _titleOf(detail),
         episodes: episodes,
         index: index,
+        seriesId: widget.seriesId,
+        cover: _coverOf(detail),
       ),
+    );
+  }
+
+  Future<void> _toggleShelf(VideoDetail detail, bool onShelf) async {
+    final store = ref.read(readingStoreProvider);
+    if (onShelf) {
+      await store.removeVideoFromShelf(widget.seriesId);
+    } else {
+      await store.addVideoToShelf(
+        VideoSeries(
+          id: widget.seriesId,
+          title: _titleOf(detail),
+          cover: _coverOf(detail),
+          intro: detail.intro.isNotEmpty
+              ? detail.intro
+              : (widget.preview?.intro ?? ''),
+          episodeCount: detail.episodeCount > 0
+              ? detail.episodeCount
+              : (widget.preview?.episodeCount ?? 0),
+        ),
+      );
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(onShelf ? '已取消收藏' : '已收藏')),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      body: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              scheme.primary.withValues(alpha: 0.10),
-              scheme.primary.withValues(alpha: 0),
-            ],
-            stops: const [0, 0.32],
-          ),
-        ),
-        child: FutureBuilder<({VideoDetail detail, List<Chapter> episodes})>(
-          future: _future,
-          builder: (context, snapshot) {
-            return _buildContent(
-              snapshot.data?.detail,
-              snapshot.data?.episodes,
+    return FutureBuilder<({VideoDetail detail, List<Chapter> episodes})>(
+      future: _future,
+      builder: (context, snapshot) {
+        final detail = snapshot.data?.detail;
+        final episodes = snapshot.data?.episodes;
+        return Scaffold(
+          body: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  scheme.primary.withValues(alpha: 0.10),
+                  scheme.primary.withValues(alpha: 0),
+                ],
+                stops: const [0, 0.32],
+              ),
+            ),
+            child: _buildContent(
+              detail,
+              episodes,
               error: snapshot.error,
-            );
-          },
-        ),
-      ),
+            ),
+          ),
+          bottomNavigationBar: _buildActionBar(detail, episodes),
+        );
+      },
+    );
+  }
+
+  /// 底部操作栏：收藏 + 播放/继续观看（与小说详情的书架 + 阅读同款）。
+  Widget? _buildActionBar(VideoDetail? detail, List<Chapter>? episodes) {
+    if (detail == null && widget.preview == null) return null;
+    final shelfAsync = ref.watch(videoShelfStatusProvider(widget.seriesId));
+    final progressAsync = ref.watch(videoProgressProvider(widget.seriesId));
+    final onShelf = shelfAsync.value ?? false;
+    final shelfBusy = shelfAsync.isLoading && !shelfAsync.hasValue;
+    final progress = progressAsync.value;
+    final count = episodes?.length ?? 0;
+    final canPlay = detail != null && count > 0;
+    final resumeIndex = progress == null
+        ? 0
+        : (progress.episodeIndex < count ? progress.episodeIndex : 0);
+    final primaryLabel = !canPlay
+        ? '加载中…'
+        : progress == null
+        ? '播放'
+        : '继续观看 · 第 ${resumeIndex + 1} 集';
+    return DetailActionBar(
+      primaryLabel: primaryLabel,
+      onPrimary: canPlay
+          ? () => _openEpisode(detail, episodes!, resumeIndex)
+          : null,
+      shelfLabel: onShelf ? '已收藏' : '收藏',
+      shelfActive: onShelf,
+      onShelf: detail == null || shelfBusy
+          ? null
+          : () => _toggleShelf(detail, onShelf),
     );
   }
 
