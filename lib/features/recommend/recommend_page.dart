@@ -45,6 +45,26 @@ class _RecommendPageState extends ConsumerState<RecommendPage>
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
 
+  /// 折叠判定阈值（方向 + 位移）：
+  /// - 向下滚够 [_collapseTravel] 且已离开顶部 [_collapseAt] 才收起，避免一点就收；
+  /// - 向上滚 [_revealTravel] 立即展开：滚很深时，用户往回滑的第一下就该看到
+  ///   搜索框，而不是等一路滚回顶部。
+  static const double _collapseTravel = 28;
+  static const double _revealTravel = 6;
+  static const double _collapseAt = 48;
+  static const double _expandAt = 8;
+
+  /// 顶部搜索框是否已收起（只为列表腾空间，搜索态永远展开）。
+  bool _searchCollapsed = false;
+
+  /// 上一次滚动位置；切分类时置空，避免把「新列表从 0 开始」误读成一次
+  /// 巨大的向上滚动而把搜索框弹出来。
+  double? _lastPixels;
+
+  /// 当前方向累计的滚动距离（方向一变就清零）。
+  double _downTravel = 0;
+  double _upTravel = 0;
+
   RecommendCategory get _activeCategory => _categories[_tabController.index];
 
   @override
@@ -54,10 +74,12 @@ class _RecommendPageState extends ConsumerState<RecommendPage>
     // 否则会看到"结果列表 + 空搜索框"的错位状态。
     final query = ref.read(searchQueryProvider);
     if (query != null) _searchController.text = query;
+    _tabController.addListener(_onTabChanged);
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
@@ -94,48 +116,125 @@ class _RecommendPageState extends ConsumerState<RecommendPage>
     ref.read(searchQueryProvider.notifier).cancel();
   }
 
+  /// 折叠状态是页面级的：收起后左右切分类保持收起，不因为新分类在顶部
+  /// 就把搜索框弹回来。这里只清掉方向累计，避免新列表的第一次通知被当成
+  /// 跨列表的巨大位移。
+  void _onTabChanged() {
+    _lastPixels = null;
+    _downTravel = 0;
+    _upTravel = 0;
+  }
+
+  /// 竖向列表的滚动通知会冒泡到这里；PageView 的横向滚动按 axis 过滤掉。
+  ///
+  /// 搜索态不参与折叠：搜索结果与推荐流是两条列表，用搜索结果的滚动位置
+  /// 影响折叠会让「取消搜索后回到推荐流」的状态错乱。
+  bool _handleScroll(ScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical) return false;
+    if (ref.read(searchQueryProvider) != null) return false;
+    final offset = notification.metrics.pixels;
+    final last = _lastPixels;
+    _lastPixels = offset;
+    if (last == null) return false;
+    final delta = offset - last;
+    if (delta > 0) {
+      _downTravel += delta;
+      _upTravel = 0;
+    } else if (delta < 0) {
+      _upTravel += -delta;
+      _downTravel = 0;
+    }
+    _updateCollapsed(offset);
+    return false;
+  }
+
+  /// 收起/展开判定。
+  ///
+  /// 搜索态或输入框聚焦时永远展开：正在输入/看搜索结果时把输入框藏起来
+  /// 会让人不知道自己在哪、也没法改关键词。
+  void _updateCollapsed(double offset) {
+    if (!mounted) return;
+    final bool next;
+    if (ref.read(searchQueryProvider) != null || _searchFocus.hasFocus) {
+      next = false;
+    } else if (_searchCollapsed) {
+      // 回到顶部附近，或任意一次向上的滚动（不看滚了多深）都立即展开。
+      final atTop = offset <= _expandAt;
+      final scrollingBack = _upTravel >= _revealTravel;
+      next = !(atTop || scrollingBack);
+    } else {
+      next = offset > _collapseAt && _downTravel >= _collapseTravel;
+    }
+    _applyCollapsed(next);
+  }
+
+  void _applyCollapsed(bool next) {
+    if (next == _searchCollapsed) return;
+    setState(() => _searchCollapsed = next);
+    _downTravel = 0;
+    _upTravel = 0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeQuery = ref.watch(searchQueryProvider);
+    // 进入搜索态立即展开输入框；退出搜索时保持当前状态（推荐流的滚动位置
+    // 没变，不需要再按偏移重新判断）。
+    ref.listen(searchQueryProvider, (previous, next) {
+      if (next != null) _applyCollapsed(false);
+    });
 
     return SafeArea(
       bottom: false,
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            // 提示文案跟着当前分类走；AnimatedBuilder 同时让左右滑动切分类时
-            // 提示词及时更新。
-            child: AnimatedBuilder(
-              animation: _tabController,
-              builder: (context, _) => FeedSearchField(
-                controller: _searchController,
-                focusNode: _searchFocus,
-                hintText: _activeCategory.searchHint,
-                onSubmitted: _submitSearch,
-                onClear: _clearSearchInput,
-                onCancel: _cancelSearch,
-                showCancel: activeQuery != null,
-              ),
-            ),
+          // 搜索框常驻但可收起：上滑浏览时整条折叠，把屏幕让给列表；
+          // 回到顶部或进入搜索态自动展开。AnimatedSize 让高度变化是动画，
+          // 列表跟随变高、滚动偏移不变，不会出现跳帧感。
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: _searchCollapsed
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                    // 提示文案跟着当前分类走；AnimatedBuilder 同时让左右滑动
+                    // 切分类时提示词及时更新。
+                    child: AnimatedBuilder(
+                      animation: _tabController,
+                      builder: (context, _) => FeedSearchField(
+                        controller: _searchController,
+                        focusNode: _searchFocus,
+                        hintText: _activeCategory.searchHint,
+                        onSubmitted: _submitSearch,
+                        onClear: _clearSearchInput,
+                        onCancel: _cancelSearch,
+                        showCancel: activeQuery != null,
+                      ),
+                    ),
+                  ),
           ),
-          // tabs 与列表之间留一段呼吸空间：选中态的蓝色下划线紧贴卡片时
-          // 视觉上会和第一行封面挤在一起。
+          // tabs 与列表之间留呼吸空间；收起搜索框时给 tabs 补回状态栏下方的
+          // 安全距离，否则下划线会贴着状态栏。
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: EdgeInsets.only(top: _searchCollapsed ? 8 : 0, bottom: 8),
             child: _buildCategoryTabs(context),
           ),
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                for (final category in _categories)
-                  _CategoryFeedPage(
-                    key: ValueKey(category),
-                    category: category,
-                    bottomInset: widget.bottomInset,
-                  ),
-              ],
+            child: NotificationListener<ScrollNotification>(
+              onNotification: _handleScroll,
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  for (final category in _categories)
+                    _CategoryFeedPage(
+                      key: ValueKey(category),
+                      category: category,
+                      bottomInset: widget.bottomInset,
+                    ),
+                ],
+              ),
             ),
           ),
         ],
@@ -152,22 +251,26 @@ class _RecommendPageState extends ConsumerState<RecommendPage>
       controller: _tabController,
       isScrollable: true,
       tabAlignment: TabAlignment.start,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+      // 高度从 M3 默认的 46 收到 36：分类只有两三个字，46pt 会让顶部显得很厚。
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 10),
       labelColor: scheme.primary,
       unselectedLabelColor: scheme.onSurfaceVariant,
-      labelStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+      labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
       unselectedLabelStyle: const TextStyle(
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: FontWeight.w400,
       ),
       indicatorSize: TabBarIndicatorSize.label,
       indicator: UnderlineTabIndicator(
-        borderSide: BorderSide(width: 3, color: scheme.primary),
+        borderSide: BorderSide(width: 2.5, color: scheme.primary),
         insets: const EdgeInsets.symmetric(horizontal: 4),
       ),
       dividerColor: Colors.transparent,
-      tabs: [for (final category in _categories) Tab(text: category.label)],
+      tabs: [
+        for (final category in _categories)
+          Tab(height: 36, text: category.label),
+      ],
     );
   }
 }
@@ -205,9 +308,8 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
       await _controller.refresh();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(describeFeedError(error))));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(describeFeedError(error))));
     }
   }
 

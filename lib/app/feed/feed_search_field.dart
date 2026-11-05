@@ -8,7 +8,10 @@ import 'package:flutter/material.dart';
 /// 结构刻意不用 `InputDecoration` 的 prefix/suffixIcon：
 ///   - suffix 的 `IconButton` 有最小触控尺寸，输入后会把整行撑高；
 ///   - prefixIcon 在固定高度里不垂直居中。
-/// 改成 Row 自己排：固定 48pt 高，图标/输入/清空都在同一行里垂直居中。
+/// 改成 Row 自己排：固定 [height] 高，图标/输入/清空都在同一行里垂直居中。
+///
+/// 高度从 48 收到 40：搜索框是每屏都占着的常驻元素，iOS 原生搜索栏内容高
+/// 一般 36–40；40pt 仍远大于触控下限，且页面滚动时会整条收起（见 RecommendPage）。
 class FeedSearchField extends StatelessWidget {
   const FeedSearchField({
     super.key,
@@ -29,7 +32,7 @@ class FeedSearchField extends StatelessWidget {
   final VoidCallback onCancel;
   final bool showCancel;
 
-  static const double _height = 48;
+  static const double height = 40;
 
   @override
   Widget build(BuildContext context) {
@@ -46,19 +49,19 @@ class FeedSearchField extends StatelessWidget {
             // 只留底色不画描边：iOS 搜索栏观感，避免和列表卡片分隔线叠在一起。
             decoration: BoxDecoration(
               color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(_height / 2),
+              borderRadius: BorderRadius.circular(height / 2),
             ),
             child: SizedBox(
-              height: _height,
+              height: height,
               child: Row(
                 children: [
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 12),
                   Icon(
                     Icons.search_rounded,
-                    size: 20,
+                    size: 18,
                     color: scheme.onSurfaceVariant,
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: TextField(
                       controller: controller,
@@ -68,7 +71,7 @@ class FeedSearchField extends StatelessWidget {
                       style: theme.textTheme.bodyMedium,
                       onSubmitted: onSubmitted,
                       // collapsed：去掉 decoration 自带的上下留白，行高由外层
-                      // 48pt 决定，文字自然垂直居中。
+                      // 40pt 决定，文字自然垂直居中。
                       decoration: InputDecoration.collapsed(
                         hintText: hintText,
                         hintStyle: hintStyle,
@@ -78,14 +81,14 @@ class FeedSearchField extends StatelessWidget {
                   ValueListenableBuilder<TextEditingValue>(
                     valueListenable: controller,
                     builder: (context, value, _) {
-                      if (value.text.isEmpty) return const SizedBox(width: 12);
+                      if (value.text.isEmpty) return const SizedBox(width: 8);
                       return IconButton(
                         tooltip: '清空',
                         padding: EdgeInsets.zero,
                         visualDensity: VisualDensity.compact,
                         constraints: const BoxConstraints(
-                          minWidth: 36,
-                          minHeight: 36,
+                          minWidth: 32,
+                          minHeight: 32,
                         ),
                         iconSize: 18,
                         icon: Icon(
@@ -106,7 +109,16 @@ class FeedSearchField extends StatelessWidget {
         if (showCancel)
           Padding(
             padding: const EdgeInsets.only(left: 4),
-            child: TextButton(onPressed: onCancel, child: const Text('取消')),
+            // 搜索态的「取消」不能把搜索行撑高：按钮固定 36 高、去掉默认留白。
+            child: TextButton(
+              onPressed: onCancel,
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('取消'),
+            ),
           ),
       ],
     );
