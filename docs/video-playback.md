@@ -56,7 +56,7 @@
 ## 3. 实施路径
 
 - **M0（已实现，2026-11-04 真机验证通过）**：短剧 tab（搜索 + 短剧推荐流）、短剧详情页（简介 + 选集）、播放页（`video_player`，播放/暂停/拖动/上下集/播完自动下一集）；取流走非 stream 模式，播放内核 `/src/<id>.mp4` 的按 Range 解密结果；`ios/Runner/Info.plist` 已加 127.0.0.1 的 ATS 例外。
-- **M1（未开始）**：把流式解密回环保留到 iOS，起播不再等整集下载。实现选型见 4.1。
+- **M1（未开始）**：把流式解密回环保留到 iOS，起播不再等整集下载。方案已定（4.1 方案 A），技术方案见 [streaming-media-m1.md](streaming-media-m1.md)。
 - **M2（部分完成）**：短剧 tab / 详情 / 选集 / 播放页已闭环；缓存后离线播放复用 `/src` 缓存，暂未做缓存管理 UI。
 - **M3**：待定（缓存清理、错误重试等按 4.2 后续再定）。
 
@@ -66,10 +66,10 @@
 
 1. ~~**ATS**~~ **已验证（2026-11-04）**：`NSExceptionDomains["127.0.0.1"]` + `NSAllowsLocalNetworking` 在 iOS 27.2 上放行，AVPlayer 正常起播回环地址。
 2. ~~**AVPlayer 消费 `/src` 回环**~~ **已验证（2026-11-04）**：起播成功、拖动 seek 出画面，首页验证 206/416 行为正常（host 侧另测 `bytes=0-31`→206、越界→416、`Content-Type: video/mp4`、首 16 字节为 `ftyp isom`）。
-3. **流式回环的技术选型**（建议先做 C 流移植）：
+3. **流式回环的技术选型** —— **已定（2026-11-05）：方案 A**，技术方案见 [streaming-media-m1.md](streaming-media-m1.md)。
    - 方案 A：把 `fqapp/rust/src/desktop_media.rs` 的 cfg 从 Windows 扩到 iOS，给 Apple 目标编 `native/crypto_core`（纯 C11），从 fqapp 拷入 `native/`；改动小、与 Windows 行为一致。
    - 方案 B：不引入 C，在现有 axum 回环上新开一条 `/media/<session>.mp4`，用纯 Rust `apply_cenc_index` + 远程 Range 抓取；无 C 依赖，但要重写 moov 拉取与远程 Range 缓存。
-   - 决定依据：M0/M1 的构建成本与首播延迟实测。
+   - 决定依据：M0/M1 的构建成本与首播延迟实测；A 的会话/端口/Range/重试/解密全部现成（Windows 已跑通），B 需自写 moov 探测与跨块 sample 处理。
 4. ~~**渲染通路**~~ **已验证（2026-11-04）**：`VideoViewType.platformView` 在真机上顶部/底部 Flutter 控制条**没有被原生视频层遮挡**，保留 platformView；未做 texture 对比（无遮挡迹象，按方案 A 处理）。
 5. ~~**视频 tab 数据源过窄**~~ **已解决（2026-11-04）**：书城首页接口按 `tab_type` 分媒介，取值对齐官方 `BookstoreTabType`（fqapp `lib/models/channel_tab.dart` 有抄录）：2 推荐/小说、5 听书、**8 短剧（看剧）**、9 漫画、16 视频 feed、24 漫剧、25 小说、103 短篇。短剧 tab 已从 16（视频 feed，只回 2 部且无游标）换成 **8**：实测 6 部/页，`next_offset` 逐页 +1（offset 0→1→2 每页都是新剧），session 稳定；响应还要按 `tab_type` 认领（对不上说明上游答了别的分类，整页拒绝）。
    - 后续可扩展：漫剧（24，实测 12 部但 offset>0 空，只能首页）、听书（5）、漫画（9，fqapp 走搜索兜底）。
