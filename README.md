@@ -20,12 +20,13 @@
 | 阅读页：TextPainter 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、目录跳章、邻章预取、正文本地缓存（300 章上限、7 天后后台刷新）、章节 + 页首段落进度保存 | ✅ |
 | 播放页：`video_player`（AVPlayer）播放，控制条 3.5s 自动隐藏、缓冲 spinner、拖动松手才 seek、上下集/播完自动下一集、选集弹层、横屏视频全屏；密文交给内核 `/src` 按 Range 解密；失败给「原因 + 可复制详情 + 重新下载这一集」 | ✅ 骨架（先整集缓存后播） |
 | 我的页：**小说 / 短剧** 两块镜像面板——右下角悬浮按钮或左右滑动切换；切换时按「最近阅读/观看 → 标题 → 书架/收藏」三块依次延迟 0/100/200ms 滑出滑入（每块滑 300ms，最近块先走、标题第二拍）；设置入口合并成一个按钮，随面板在屏幕内左右滑动、不会滑出屏幕。小说侧含书架（长按管理）+ 最近阅读 3 条（带段落级续读）；短剧侧含收藏网格（长按管理、点进详情）+ 最近观看 3 条（和最近阅读同一版式：封面在左、箭头在右，点击直接续播对应集） | ✅ |
-| 设置页：主题色（8 个预设 + HSV 自定义取色，全站即时生效并持久化）、存储占用（视频/封面/章节明细）与清理 | ✅ |
-| 流式起播（边下边播）、整本离线下载、听书、漫画、评论、段评、登录 | ⬜ 后续 |
+| 设置页：主题色（8 个预设 + HSV 自定义取色，全站即时生效并持久化）、存储占用（视频/封面/章节明细）与清理、**离线缓存**两个独立区（离线小说 / 离线短剧）的统计与管理入口 | ✅ |
+| 离线缓存：小说整本 / 短剧整剧一键下载到独立 pinned 区（小说上限 1 GB、短剧 3 GB），断网可读可看；与自动缓存物理隔离，只能在「设置 → 存储」手动删除；已缓存的短剧切换秒开 | ✅ |
+| 流式起播（边下边播）、听书、漫画、评论、段评、登录 | ⬜ 后续 |
 
 > 视频方案与边界见 [docs/video-playback.md](docs/video-playback.md)：本轮不做画中画/HDR/后台播放/AirPlay/锁屏/清晰度切换/弹幕。
 >
-> 书城首页流按 `tab_type` 分类的实测对照见 [docs/bookmall-tabs.md](docs/bookmall-tabs.md)；小说离线缓存方案（未实现）在 `feat/lhy/novel-cache` 分支的 `docs/novel-cache.md`。
+> 书城首页流按 `tab_type` 分类的实测对照见 [docs/bookmall-tabs.md](docs/bookmall-tabs.md)；离线缓存（离线小说/短剧）的方案、存储布局与验收清单见 [docs/offline-cache.md](docs/offline-cache.md)。
 
 ## 架构
 
@@ -60,16 +61,16 @@ lib/
   app/widgets/detail/  详情页共用组件（封面头/简介卡/标签/区块标题）
   core/backend/   FRB 传输、内核启动与运行时文件部署
   core/cache/     封面图磁盘缓存、缓存占用统计与清理
-  core/storage/   书架与进度存储、设备池密钥
+  core/storage/   书架与进度存储、设备池密钥；offline/ 是离线缓存（小说/短剧两个 pinned 区）
   data/           接口客户端 + 模型；parsers/ 是卡片解析（card_walker / novel_parsers / video_parsers）
-  features/       recommend / feed / video / detail / reader / mine / settings（章节缓存在 reader/reader_chapter_cache.dart）
+  features/       recommend / feed / video / detail / reader / mine / settings / cache（离线下载器与管理页）
   features/feed/  列表页通用骨架（FeedState/FeedView：分页、补屏、下拉刷新、底部状态；FeedResultsSliver：搜索结果横向列表）
   src/rust/       flutter_rust_bridge 生成绑定（勿手改）
 rust/             Rust 内核（从 fqapp 整体拷入；fork 基线与本地补丁见 PATCHES.md）
 assets/config/    config.json / device_pool.example.json（启动时部署到 App 沙盒）
-docs/             视频播放方案、书城 tab_type 对照、阅读页分页真机 profile
+docs/             视频播放方案、书城 tab_type 对照、阅读页分页真机 profile、离线缓存方案
 scripts/          build_rust_ios.sh（先跑 FRB codegen，再编 iOS 静态库）
-test/             数据/缓存/并发测试 + test/ui/ 按页面拆分的 UI 测试 + goldens/（21 张）
+test/             数据/缓存/并发/离线测试 + test/ui/ 按页面拆分的 UI 测试 + goldens/（21 张）
 CONTRACTS.md      页面开发约定（页面清单 / 数据层与存储 API / 路由 / 共享组件 / 测试门禁）
 PATCHES.md        Rust 内核相对 fqapp 的 fork 基线、本地补丁清单与上游同步流程
 ```
@@ -142,11 +143,13 @@ App 沙盒里会落盘的东西（iPhone 13 调试期实测：文稿与数据 40
 | `Application Support/backend/src/` | 播放时下载的剧集（CENC 源保留密文 + 密钥 sidecar，非加密源则明文）、漫画图 | 内核 `MAX_VIDEO_CACHE_BYTES` = **128 MB**（视频与漫画图共用），下载完异步按最旧淘汰，同时最多 2 个下载；单集下载上限 2 GiB |
 | `Library/Caches/libCachedImageData/` + `Application Support/libCachedImageData.db` | 封面图磁盘缓存（500–800px 大图也会落到这里）与 sqflite 索引 | 120 个对象 / 7 天；启动时体积 >40 MB 裁到 25 MB |
 | `Application Support/reader_chapters/` | 章节正文 JSON（内存再叠 8 章 LRU） | 最多 300 个文件，超出按最旧淘汰；超过 7 天只算过期，仍先展示并后台刷新 |
+| `Application Support/offline/novel/` | **离线小说（pinned）**：`<bookKey>/book.json` + 每章 JSON（明文） | 上限 **1 GB**；**永不自动清理**，只在「设置 → 存储 → 离线小说」手动删除 |
+| `Application Support/offline/video/` | **离线短剧（pinned）**：`<seriesKey>/series.json` + 每集明文 `.mp4` | 上限 **3 GB**；**永不自动清理**，只在「设置 → 存储 → 离线短剧」手动删除 |
 | `Documents/diag.log` | 早期调试探针遗留日志（当前代码不再写入） | 清理时一并删除 |
 | `Application Support/backend/config/` | 上游设备注册池、运行时 `config.json` | **不是缓存**：删了要重新注册设备 |
 | `Library/Preferences/*.plist` | 书架、阅读进度（含页首段落下标）、最近阅读、阅读设置、主题色 | **用户数据**：不清理 |
 
-「设置 → 存储」会显示当前缓存占用（视频/封面/章节明细）并提供「清理」：只清上面四类可重建缓存，书架与进度不动。统计/清理逻辑在 `lib/core/cache/app_cache.dart`。
+「设置 → 存储」会显示当前缓存占用（视频/封面/章节明细）并提供「清理」：只清上面四类可重建缓存，书架与进度不动；**离线缓存在独立区块，不参与这次清理**（只能手动删）。统计/清理逻辑在 `lib/core/cache/app_cache.dart`，离线区在 `lib/core/storage/offline/`。
 
 「设置 → 主题色」改的是 Material 3 的 seed：primary/secondary/选中态全部跟着派生，阅读页工具栏与目录高亮也会一起变（阅读弹层按纸色明暗单独派生 scheme，避免暗色 App + 浅色纸底时文字看不清）。近中性色（白/灰/黑）走单色方案，不会把白色染成青色、黑色染成粉色。选择落盘在 `shared_preferences`（`app_seed_color_v1`），`main.dart` 在建 MaterialApp 之前先读盘（最多等 300ms），首帧就是用户选的颜色；读盘失败/超时就按默认色走。主题色只负责配色，不提供深色模式开关（跟随系统）。
 
@@ -155,7 +158,7 @@ App 沙盒里会落盘的东西（iPhone 13 调试期实测：文稿与数据 40
 ## 已知限制
 
 1. **首次打开必须联网完成设备注册**（`log.snssdk.com`）。若本机代理/网络拦截该域名，会一直停在「阅读环境启动失败」，可点重试。
-2. 没有整本离线下载：正文只有本地章节缓存（最多 300 个文件；7 天后视为过期但不清除，仍先展示再后台刷新），视频缓存也只是「播放时下载」的缓存（上限 128 MB），不能当离线片库；离线缓存的 M0 方案见 `feat/lhy/novel-cache` 分支的文档。
+2. 离线缓存目前是「前台下载」：任务进行中切后台会暂停（回前台不自动继续），不支持 iOS 后台下载、断点字节续传、选集下载；短剧离线是**明文 mp4**（按需求「能看就行」），小说正文同样是明文；两段式下载峰值磁盘约 2× 单集（稳态只剩离线一份）。
 3. 无评论/段评/听书/漫画；阅读器只有横向分页，没有滚动跨章。
 4. 阅读进度记录到「章 + 页首段落下标」：换字号/换设备重新分页后能回到读到的那一段，但没有精确到页（页号本身随字号变化）。
 5. 视频是骨架：起播要等整集下载进内核缓存（流式回环见 [docs/video-playback.md](docs/video-playback.md) M1）；不做画中画/HDR/后台播放/AirPlay/锁屏/清晰度切换/弹幕；视频进度只记到「集」、不落盘。退后台不会主动暂停（快速切回继续播，长时间后台由系统挂起）。短剧流走书城首页的 `tab_type=8`（6 部/页、`next_offset` 游标翻页），翻完游标后暂时不会像 fqapp 那样回退到搜索兜底，见 [docs/video-playback.md](docs/video-playback.md) 4.1-5。

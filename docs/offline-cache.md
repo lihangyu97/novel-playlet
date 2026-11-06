@@ -1,7 +1,7 @@
 # 离线缓存（小说 / 短剧）：方案与实施计划
 
 > 分支：`feat/lhy/offline-cache`（从 `main` 切出）
-> 状态：方案定稿，待实现。
+> 状态：**已实现**（M0 存储/下载引擎、M1 小说链路、M2 短剧链路；M3 真机验收与打磨见 §14）。
 > 目标：小说按「整本」、短剧按「整剧」一键下载到两个**独立、只手动清理**的离线区；
 > 断网可读 / 可看；与现有自动缓存完全隔离。
 > 本文只记录决策与路径，不含实现代码。
@@ -328,3 +328,52 @@ CONTRACTS.md / README.md                      # 功能表/存储约定同步
 | 前台才能下载 | 明示文案；切后台暂停、回前台提示继续（不做后台下载） |
 | 系统空间不足 | 本期靠写入失败兜底；P2 加 MethodChannel 预检（iOS `volumeAvailableCapacityForImportantUsage`） |
 | iCloud 备份占用 | P2 加 `NSURLIsExcludedFromBackupKey`（需要原生代码或现有依赖的 API） |
+
+## 14. 落地记录（2026-11-06）
+
+### 14.1 实际文件
+
+**存储层**：`lib/core/storage/offline/offline_paths.dart`（目录/Base64URL key/原子写/目录统计）、
+`offline_book.dart` + `offline_book_store.dart`、`offline_series.dart` + `offline_series_store.dart`
+
+**下载引擎**：`lib/features/cache/offline_task.dart`（任务模型 + `offline_task_v1` 持久化）、
+`offline_downloader.dart`（单任务状态机：小说 20 章/批 + 单章回退；短剧逐集 `videoSource` →
+回环 `/src` 明文流 → `.part` → `commitEpisode`；pause/resume/cancel/clearFor；前后台暂停；
+额度上限；manifest 节流）、`cache_providers.dart`、`widgets/offline_download_button.dart`
+
+**页面**：`lib/features/cache/offline_cache_page.dart`（管理页两 tab）、
+`lib/features/settings/settings_page.dart`（存储 + 两个离线区块）、
+`lib/features/detail/*`（详情离线兜底 + 底栏按钮）、
+`lib/features/reader/reader_controller.dart`（offline → 自动缓存 → 网络的读链路）、
+`lib/features/video/offline_playback.dart` + `video_player_page.dart`（已缓存集 `file://` 秒开）、
+`video_detail_page.dart` / `video_detail_providers.dart`（整剧下载 + 详情离线兜底）、
+`lib/app/router.dart`（`OfflineCacheRoute`）、`lib/core/cache/app_cache.dart`（离线区不参与清理的显式约束）
+
+**测试**：`test/offline_book_store_test.dart`、`test/offline_series_store_test.dart`、
+`test/offline_downloader_test.dart`、`test/api_batch_test.dart`、`test/reader_offline_test.dart`、
+`test/detail_offline_test.dart`、`test/offline_playback_test.dart`、`test/ui/offline_cache_test.dart`；
+goldens 更新 `detail.png` / `video_detail_episodes.png`（底栏新增按钮，正文 0 像素变化）、
+`settings*.png`（新增离线区块）。
+
+### 14.2 与本文方案的偏差（均为实现时的收敛，非遗漏）
+
+1. **小说只做整本下载**：按决策去掉阅读器的 20/50/100 章预设；「继续缓存」按 manifest 缺口续传。
+2. **短剧 API 名称**：`startVideoSeries` 的 `items` 参数叫 `episodes`（与页面模型一致）；短剧落盘用
+   `partFile()` → 流式写 → `commitEpisode()`（不先读进内存）。
+3. **单任务不排队**：已有任务时后启动的抛 `OfflineTaskBusyException`，由按钮/UI 提示
+   「当前已有下载任务」；不实现队列排队。
+4. **离线判定**：项目没有 connectivity 依赖，短剧「未缓存 + 离线」只能从取流失败特征推断
+   （timeout / Socket 类 / unknown+连接类消息）；网络在线但上游超时也会落到「该集未离线缓存」
+   文案，属可接受的语义偏差。
+5. **详情离线兜底字段**：小说只回退书名/封面/目录，短剧回退剧名/封面/选集；简介、标签、评分等
+   不在 manifest 里（离线详情呈现精简形态）。
+6. **`pruneOrphans()` / `cleanupPartFiles()`**：进入管理页时做一次自愈；下载器启动时清理残留 `.part`。
+7. **封面**：manifest 只存封面 URL，下载时未额外落盘封面文件（离线管理列表的封面可能显示占位块；
+   如需离线缩略图可后续在下载时顺带保存，属 M3/P2）。
+
+### 14.3 验收状态
+
+- 自动化门禁：`dart format` / `flutter analyze --fatal-infos` / `flutter test`（**218 passed / 1 skipped**，
+  含 21 张 golden 与新增 51+ 条离线用例）、`cargo` 侧本轮未改。
+- 真机验收（M3）：按 §12 清单在 iPhone 13 上过一遍——整本下载/暂停/续传/杀进程恢复、
+  飞行模式阅读与选集播放、已缓存短剧切集秒开、离线区独立清空、清理自动缓存不影响离线区。
