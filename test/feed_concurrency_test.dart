@@ -44,10 +44,7 @@ class _SlowFake extends BackendTransport {
                 {
                   'book_data': [
                     for (var i = 0; i < 6; i++)
-                      {
-                        'book_id': 'b${offset}_$i',
-                        'book_name': '书$offset-$i',
-                      },
+                      {'book_id': 'b${offset}_$i', 'book_name': '书$offset-$i'},
                   ],
                 },
               ],
@@ -126,7 +123,9 @@ class _SlowFake extends BackendTransport {
       calls.add('search$tabType@$offset');
       return BackendResponse(
         200,
-        Uint8List.fromList(utf8.encode(jsonEncode(_searchPayload(tabType, offset)))),
+        Uint8List.fromList(
+          utf8.encode(jsonEncode(_searchPayload(tabType, offset))),
+        ),
         'application/json',
       );
     }
@@ -138,7 +137,6 @@ class _SlowFake extends BackendTransport {
     );
   }
 }
-
 
 /// 固定返回一份 JSON 的 transport，用来单独验证 ApiClient 的认领/游标逻辑。
 class _StaticTransport extends BackendTransport {
@@ -243,18 +241,16 @@ Future<(ProviderContainer, RecommendFeedController, _SlowFake)> _feedFor(
 void main() {
   group('分页状态字段', () {
     test('RecommendState.withLoadMoreError 保留 loadingMore', () {
-      final state = FeedState<RecommendItem>.feed(items: const <RecommendItem>[])
-          .withLoadingMore(true)
-          .withLoadMoreError('boom');
+      final state = FeedState<RecommendItem>.feed(
+        items: const <RecommendItem>[],
+      ).withLoadingMore(true).withLoadMoreError('boom');
       expect(state.loadingMore, isTrue, reason: '清错误不能把 loadingMore 清掉');
       expect(state.loadMoreError, 'boom');
     });
   });
 
   test('小说分类：并发 loadMore 只发一个请求', () async {
-    final (container, notifier, fake) = await _feedFor(
-      RecommendCategory.novel,
-    );
+    final (container, notifier, fake) = await _feedFor(RecommendCategory.novel);
     addTearDown(container.dispose);
     await Future.wait<void>([notifier.loadMore(), notifier.loadMore()]);
     expect(fake.calls, ['2@0', '2@1'], reason: '第二次并发调用必须被重入锁挡掉');
@@ -281,8 +277,11 @@ void main() {
     expect(state.hasMore, isTrue, reason: '首页流没有游标，但搜索兜底还有下一页');
 
     await Future.wait<void>([notifier.loadMore(), notifier.loadMore()]);
-    expect(fake.calls, ['24@0', 'search11@0', 'search11@1'],
-        reason: '翻页走搜索兜底，且并发调用只发一次');
+    expect(fake.calls, [
+      '24@0',
+      'search11@0',
+      'search11@1',
+    ], reason: '翻页走搜索兜底，且并发调用只发一次');
   });
 
   group('ApiClient 分类契约', () {
@@ -367,10 +366,8 @@ void main() {
 
     final state = container.read(provider).value!;
     expect(state.query, 'B', reason: '最终状态必须是最新关键词');
-    expect(
-      state.items.map((item) => item.id),
-      ['B'],
-      reason: 'A 的迟到结果必须被 generation 丢弃',
-    );
+    expect(state.items.map((item) => item.id), [
+      'B',
+    ], reason: 'A 的迟到结果必须被 generation 丢弃');
   });
 }

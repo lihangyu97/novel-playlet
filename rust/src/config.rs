@@ -11,25 +11,13 @@ pub struct AntiCrawler {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct Admin {
-    #[serde(default)]
-    pub token: String,
-    #[serde(default)]
-    pub update_server_url: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
-    #[serde(default)]
-    pub algorithm_type: String,
     #[serde(default)]
     pub zwsm: String,
     #[serde(default)]
     pub port: u16,
     #[serde(default)]
     pub anti_crawler: AntiCrawler,
-    #[serde(default)]
-    pub admin: Admin,
 }
 
 impl Config {
@@ -38,7 +26,10 @@ impl Config {
         let mut c: Config =
             serde_json::from_slice(&data).map_err(|e| format!("parse config {path}: {e}"))?;
         if c.port == 0 {
-            c.port = 18921;
+            // 端口唯一来源是 assets/config/config.json（部署后由 Flutter 传入）；
+            // 这里的缺省值与 config.json、backend_transport.dart 三处对齐，
+            // 改端口只改 config.json。
+            c.port = 18931;
         }
         Ok(c)
     }

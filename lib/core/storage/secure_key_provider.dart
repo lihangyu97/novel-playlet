@@ -12,9 +12,7 @@ abstract interface class SecureKeyStorage {
 
 /// 生产实现：iOS Keychain（Android 侧为 Keystore/EncryptedSharedPreferences）。
 class FlutterSecureKeyStorage implements SecureKeyStorage {
-  const FlutterSecureKeyStorage([
-    this._storage = const FlutterSecureStorage(),
-  ]);
+  const FlutterSecureKeyStorage([this._storage = const FlutterSecureStorage()]);
 
   final FlutterSecureStorage _storage;
 
@@ -79,9 +77,9 @@ class SecureKeyProvider {
 
   Future<Uint8List?> _loadOrCreate() async {
     try {
-      final stored = await _storage.read(devicePoolKeyName).timeout(
-        storageTimeout,
-      );
+      final stored = await _storage
+          .read(devicePoolKeyName)
+          .timeout(storageTimeout);
       if (stored != null) {
         try {
           final decoded = base64Decode(stored);
@@ -95,10 +93,9 @@ class SecureKeyProvider {
       final fresh = Uint8List.fromList(
         List<int>.generate(32, (_) => _random.nextInt(256)),
       );
-      await _storage.write(
-        devicePoolKeyName,
-        base64Encode(fresh),
-      ).timeout(storageTimeout);
+      await _storage
+          .write(devicePoolKeyName, base64Encode(fresh))
+          .timeout(storageTimeout);
       return _cached = fresh;
     } catch (_) {
       _failedAt = DateTime.now();

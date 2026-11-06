@@ -21,12 +21,15 @@ class MineData {
   final List<ReadingProgress> recent;
 }
 
-/// 把 [ReadingStore.revision] 桥接成 Riverpod 可以 watch 的计数。
+/// 把 [ReadingStore.novelRevision] 桥接成 Riverpod 可以 watch 的计数。
 ///
 /// 存储层刻意不依赖状态管理，只暴露 revision（`ValueNotifier<int>`）；
 /// 这里监听它并把变化写进 Notifier 状态，[mineDataProvider] 通过
 /// `ref.watch` 依赖本 provider，于是「加入书架 / 移出书架 / 保存进度」后
 /// 页面会自动重取数据，不需要命令式刷新，也不会把异步数据塞进 setState。
+///
+/// 只监听小说侧的计数器：看短剧时进度写入走 [videoRevisionProvider]，
+/// 不应该触发书架 / 最近阅读重读一遍 SharedPreferences。
 final readingRevisionProvider = NotifierProvider<ReadingRevision, int>(
   ReadingRevision.new,
 );
@@ -35,16 +38,35 @@ class ReadingRevision extends Notifier<int> {
   @override
   int build() {
     final store = ref.watch(readingStoreProvider);
-    void onRevisionChanged() => state = store.revision.value;
-    store.revision.addListener(onRevisionChanged);
-    ref.onDispose(() => store.revision.removeListener(onRevisionChanged));
-    return store.revision.value;
+    void onRevisionChanged() => state = store.novelRevision.value;
+    store.novelRevision.addListener(onRevisionChanged);
+    ref.onDispose(() => store.novelRevision.removeListener(onRevisionChanged));
+    return store.novelRevision.value;
+  }
+}
+
+/// 把 [ReadingStore.videoRevision] 桥接成 Riverpod 可以 watch 的计数。
+///
+/// 与 [readingRevisionProvider] 同构，只监听短剧侧的写入：收藏 / 取消收藏、
+/// 换集存进度都只 bump 短剧计数器，避免"看视频导致小说侧也重读"。
+final videoRevisionProvider = NotifierProvider<VideoRevision, int>(
+  VideoRevision.new,
+);
+
+class VideoRevision extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(readingStoreProvider);
+    void onRevisionChanged() => state = store.videoRevision.value;
+    store.videoRevision.addListener(onRevisionChanged);
+    ref.onDispose(() => store.videoRevision.removeListener(onRevisionChanged));
+    return store.videoRevision.value;
   }
 }
 
 /// 书架 + 最近阅读。
 final mineDataProvider = FutureProvider<MineData>((ref) async {
-  // 依赖 revision：书架/进度一有写入就让本 provider 重新读取。
+  // 依赖小说侧 revision：书架/进度一有写入就让本 provider 重新读取。
   ref.watch(readingRevisionProvider);
   final store = ref.watch(readingStoreProvider);
   final shelf = await store.shelf();

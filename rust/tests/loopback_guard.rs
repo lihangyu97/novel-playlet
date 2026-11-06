@@ -221,7 +221,7 @@ async fn anti_crawler_redirect_carries_a_location_header() {
         &[],
         &[],
         &pool_json(1),
-        r#"{"algorithm_type":"8404","port":0,
+        r#"{"port":0,
             "anti_crawler":{"enabled":true,"redirect_url":"https://www.example.com/"}}"#,
     )
     .await;
@@ -256,30 +256,82 @@ async fn anti_crawler_redirect_carries_a_location_header() {
     );
     lb.task.abort();
 }
-// --- Read routes are open, device-bound writes are not --------------------
+// --- The loopback surface is narrowed to the routes this app uses ----------
 //
-// External readers (Legado book sources, local tooling) cannot know the
-// per-launch capability, so every read route answers any local client that
-// names this listener in `Host`. The guard that matters now is the write one:
-// posting a comment or danmaku under this installation's device identity still
-// requires the capability.
+// A caller without the per-launch capability only reaches `/health`, `/src/*`
+// and the seven APIs in `dispatch::APP_APIS`. Everything else is either the
+// fqapp/Legado compatibility table (answered 404, as if the route did not
+// exist) or a device-bound write (answered 401, since it must act as this
+// installation and a sibling app must not be able to). Capability-carrying
+// callers keep reaching the full table.
 
 #[tokio::test]
-async fn read_routes_answer_a_capability_free_local_client() {
-    let dir = TempDir::new("gate-open-reads");
-    let server = build_server(&dir, None, &[], &[], &pool_json(3)).await;
+async fn only_app_routes_answer_a_capability_free_local_client() {
+    // The sentinel proves a bare 404 never came from the upstream payload.
+    let upstream = MockUpstream::start(|_| {
+        MockReply::json(json!({"code": 0, "data": {"secret_marker": "TOP-SECRET-UPSTREAM"}}))
+    })
+    .await;
+    let dir = TempDir::new("gate-public-reads");
+    let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(3)).await;
     let lb = start_loopback(server).await;
     let client = reqwest::Client::new();
 
-    // What a Legado book source sends: no capability, no Origin, no cookie.
+    // /health declares no data and stays on the public surface.
     let response = client
         .get(lb.bare_url("/health"))
         .send()
         .await
-        .expect("bare GET");
+        .expect("bare health GET");
     assert_eq!(response.status().as_u16(), 200);
     let text = response.text().await.expect("health body");
     assert!(text.contains("\"devices\":3"), "{text}");
+
+    // A compatibility read route (book comments) is not one the app uses:
+    // without the capability it must look like a path that was never routed,
+    // and must not touch the upstream at all.
+    let compat = "/api/v1/books/7507512821328904729/comments";
+    let response = client
+        .get(lb.bare_url(compat))
+        .send()
+        .await
+        .expect("bare compat GET");
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "compat route must be hidden"
+    );
+    let text = response.text().await.expect("404 body");
+    assert!(text.contains("not found"), "{text}");
+    assert!(
+        !text.contains("TOP-SECRET-UPSTREAM") && !text.contains("secret_marker"),
+        "a refusal must not leak the upstream payload: {text}"
+    );
+    assert!(
+        upstream.requests().is_empty(),
+        "a bare compat read must not reach the upstream"
+    );
+
+    // The same path with the launch capability reaches the dispatcher and the
+    // upstream: the 404 above is the gate, not a broken route.
+    let response = client
+        .get(lb.url(compat))
+        .send()
+        .await
+        .expect("scoped compat GET");
+    assert_eq!(response.status().as_u16(), 200);
+    let text = response.text().await.expect("scoped body");
+    assert!(text.contains("TOP-SECRET-UPSTREAM"), "{text}");
+    // Device registration happens lazily on the first device-signed call, so
+    // the comment request is the last recorded upstream hit, not necessarily
+    // the only one.
+    let recorded = upstream.requests();
+    assert!(
+        recorded
+            .last()
+            .is_some_and(|r| r.method == "GET" && r.path.contains("novel_comment/book")),
+        "the scoped compat read must reach the comment endpoint: {recorded:?}"
+    );
 
     // A leading `/_session/<capability>` is still stripped for callers that do
     // carry one (Flutter's resource URLs), so both shapes reach the dispatcher.
@@ -290,6 +342,7 @@ async fn read_routes_answer_a_capability_free_local_client() {
         .expect("scoped GET");
     assert_eq!(response.status().as_u16(), 200);
     lb.task.abort();
+    upstream.shutdown();
 }
 
 #[tokio::test]
@@ -300,6 +353,8 @@ async fn a_device_bound_write_without_a_capability_is_refused() {
 
     // A sibling app on the same phone can reach the listener, so the write
     // routes must not become a way to post as this installation's device.
+    // They keep the explicit 401 (`session required`) rather than the compat
+    // surface's 404: the route does exist, the caller is just not entitled.
     let response = client
         .post(lb.bare_url(COMMENT_ADD))
         .send()

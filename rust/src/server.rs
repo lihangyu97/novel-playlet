@@ -3,9 +3,8 @@
 //! Serves `/src/*` cache resources (manga images, clear media, and
 //! CENC-encrypted videos decrypted range by range — P1-7) and the
 //! `/api/v1/*` business routes to the same dispatcher the FFI bridge uses,
-//! so there is exactly one business implementation. External readers
-//! (Legado book sources, local tooling) use this adapter; there is no
-//! built-in Web UI.
+//! so there is exactly one business implementation. Local tooling uses this
+//! adapter; there is no built-in Web UI.
 //!
 //! Static file bodies are streamed from disk (with Range support) instead of
 //! being read into memory, so serving a large media file costs a bounded
@@ -16,10 +15,16 @@
 //! let a foreign page read responses) and, when it carries an `Origin`, come
 //! from this listener too (defeats cross-site form POSTs to the device-bound
 //! write routes, which read their arguments from the query string and so need
-//! no CORS preflight). Read routes answer any local client without a
-//! capability so external readers (Legado book sources, local tooling) can use
-//! them; device-bound writes still require the per-launch capability. See
-//! .agents/notes/implemented/bug-fix/2026-10-07-loopback-session.md.
+//! no CORS preflight).
+//!
+//! The loopback surface is further narrowed by [`crate::dispatch::APP_APIS`]:
+//! a caller without this launch's capability only reaches `/health`, `/src/*`
+//! and the seven APIs the app itself uses. Everything else (the fqapp/Legado
+//! compatibility table, the account routes) answers 404, and device-bound
+//! writes answer 401, so a sibling app on the same phone cannot read the compat
+//! surface or act as this installation. Capability-carrying callers (the
+//! `/_session/<token>` prefix, a Bearer header, or the session cookie) reach
+//! every route. The FFI transport bypasses this adapter and is unaffected.
 
 use std::sync::Arc;
 
@@ -156,9 +161,32 @@ fn refusal(headers: &HeaderMap, port: u16, mode: ListenMode) -> Option<&'static 
     None
 }
 
+/// Maps an infrastructure refusal (the adapter answers before the dispatcher
+/// ever runs) to the same stable `kind` names the dispatcher emits (P1-4).
+///
+/// The status code is unchanged; only the JSON body gains the field:
+/// - 413 is the only local size refusal -> `too_large`;
+/// - 504 is the request deadline -> `timeout`;
+/// - 499 (client closed the connection) matches no caller-input class, so it
+///   stays `unknown`;
+/// - 400/401/403/404/405 all mean "this request is not acceptable" ->
+///   `bad_input`.
+fn refusal_kind(status: StatusCode) -> &'static str {
+    match status.as_u16() {
+        413 => crate::error::ApiError::KIND_TOO_LARGE,
+        504 => crate::error::ApiError::KIND_TIMEOUT,
+        499 => crate::error::ApiError::KIND_UNKNOWN,
+        _ => crate::error::ApiError::KIND_BAD_INPUT,
+    }
+}
+
 fn refuse(status: StatusCode, message: &str) -> Response {
-    let body =
-        serde_json::to_vec(&json!({ "success": false, "error": message })).unwrap_or_default();
+    let body = serde_json::to_vec(&json!({
+        "success": false,
+        "error": message,
+        "kind": refusal_kind(status),
+    }))
+    .unwrap_or_default();
     Response::builder()
         .status(status)
         .header(
@@ -217,13 +245,19 @@ async fn handle_request(state: AppState, req: axum::extract::Request) -> Respons
         .filter_map(|part| part.trim().split_once('='))
         .any(|(name, value)| name == cookie_name && value == state.token);
     let request_path = scoped.unwrap_or(path).to_string();
-    // Reads answer any local client: external readers (Legado book sources,
-    // local tooling) cannot know the per-launch capability. Device-bound
-    // writes still need it.
     let capability_ok =
         scoped.is_some() || bearer == Some(format!("Bearer {}", state.token).as_str()) || cookie_ok;
+    // 设备写接口单独用 401：它们是「需要能力才能调用」，语义比 404 更准确。
+    // 其余不在 App 白名单里的路由对无能力调用者直接当不存在（404），
+    // 这样同机其他 App 既读不到兼容面数据，也无法枚举有哪些路由。
     if !capability_ok && crate::dispatch::requires_capability(&request_path) {
         return refuse(StatusCode::UNAUTHORIZED, "session required");
+    }
+    // 免能力的 loopback 面只剩 App 自己用的 7 个读接口 + /src + /health；
+    // 兼容面（听书、漫画、评论、排行榜……）与 account 路由都要求能力。
+    // 这个判断放在读 body 之前：被拒的请求连 body 都不会被读入内存。
+    if !capability_ok && !crate::dispatch::is_public_loopback_path(&request_path) {
+        return refuse(StatusCode::NOT_FOUND, "not found");
     }
     let declared = req
         .headers()
@@ -434,5 +468,30 @@ mod tests {
             discard_request_body(body).await,
             Err(StatusCode::PAYLOAD_TOO_LARGE)
         );
+    }
+
+    /// P1-4: adapter-level refusals use the same JSON shape as dispatcher
+    /// errors, so a client parses one envelope for both paths.
+    #[tokio::test]
+    async fn infrastructure_refusals_carry_a_kind() {
+        let cases = [
+            (StatusCode::FORBIDDEN, "bad_input"),
+            (StatusCode::UNAUTHORIZED, "bad_input"),
+            (StatusCode::NOT_FOUND, "bad_input"),
+            (StatusCode::PAYLOAD_TOO_LARGE, "too_large"),
+            (StatusCode::BAD_REQUEST, "bad_input"),
+            (StatusCode::GATEWAY_TIMEOUT, "timeout"),
+            (StatusCode::from_u16(499).unwrap(), "unknown"),
+        ];
+        for (status, kind) in cases {
+            let bytes = axum::body::to_bytes(refuse(status, "probe").into_body(), 1024)
+                .await
+                .expect("refusal body");
+            let value: serde_json::Value =
+                serde_json::from_slice(&bytes).expect("refusal body is JSON");
+            assert_eq!(value["success"], false, "status {status}");
+            assert_eq!(value["error"], "probe", "status {status}");
+            assert_eq!(value["kind"], kind, "status {status}");
+        }
     }
 }

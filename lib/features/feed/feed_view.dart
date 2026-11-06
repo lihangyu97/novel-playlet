@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../widgets/states.dart';
+import '../../app/widgets/states.dart';
 import 'feed_footer.dart';
 import 'feed_section_title.dart';
 import 'feed_state.dart';
@@ -71,9 +71,7 @@ class _FeedViewState<T> extends State<FeedView<T>> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
       final data = widget.state;
-      if (!data.hasMore ||
-          data.loadingMore ||
-          data.loadMoreError != null) {
+      if (!data.hasMore || data.loadingMore || data.loadMoreError != null) {
         return;
       }
       if (data.items.length == _lastFillCheckCount) return;
@@ -96,9 +94,7 @@ class _FeedViewState<T> extends State<FeedView<T>> {
 
   ScrollPhysics get _physics => widget.onRefresh == null
       ? const ClampingScrollPhysics()
-      : const AlwaysScrollableScrollPhysics(
-          parent: ClampingScrollPhysics(),
-        );
+      : const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics());
 
   Widget _wrapScrollable(Widget child) {
     final listened = NotificationListener<ScrollNotification>(
@@ -126,7 +122,10 @@ class _FeedViewState<T> extends State<FeedView<T>> {
           slivers: [
             SliverFillRemaining(
               hasScrollBody: false,
-              child: EmptyView(message: widget.emptyMessage, icon: widget.emptyIcon),
+              child: EmptyView(
+                message: widget.emptyMessage,
+                icon: widget.emptyIcon,
+              ),
             ),
           ],
         ),
@@ -139,9 +138,7 @@ class _FeedViewState<T> extends State<FeedView<T>> {
         physics: _physics,
         slivers: [
           if (widget.title != null)
-            SliverToBoxAdapter(
-              child: FeedSectionTitle(title: widget.title!),
-            ),
+            SliverToBoxAdapter(child: FeedSectionTitle(title: widget.title!)),
           widget.sliverBuilder(context, data),
           SliverToBoxAdapter(
             child: FeedFooter(
@@ -149,6 +146,7 @@ class _FeedViewState<T> extends State<FeedView<T>> {
               error: data.loadMoreError,
               hasMore: data.hasMore,
               onRetry: widget.onRetryLoadMore,
+              retryable: data.loadMoreRetryable,
             ),
           ),
           SliverToBoxAdapter(child: SizedBox(height: 24 + widget.bottomInset)),

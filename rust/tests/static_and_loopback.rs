@@ -256,6 +256,19 @@ async fn loopback_adapter_serves_plain_and_ranged_requests() {
     assert_eq!(header("content-range"), "bytes 2-5/10");
     assert_eq!(header("accept-ranges"), "bytes");
 
+    // The video player resolves `/src/<id>.mp4` against `baseUrl()`, which
+    // carries no capability prefix, so `/src/*` must stay on the public
+    // loopback surface; a bare Range GET is exactly what AVPlayer sends.
+    let client = reqwest::Client::builder().build().expect("client");
+    let resp = client
+        .get(lb.bare_url("/src/ok.txt"))
+        .header("range", "bytes=2-5")
+        .send()
+        .await
+        .expect("bare ranged GET");
+    assert_eq!(resp.status().as_u16(), 206);
+    assert_eq!(resp.bytes().await.expect("bare body").as_ref(), b"2345");
+
     lb.task.abort();
 }
 
@@ -281,6 +294,10 @@ async fn loopback_adapter_refuses_traversal_over_a_real_socket() {
 /// The account routes read their credentials from a POST body. The adapter
 /// must forward it: draining every body sent these requests to the handlers
 /// empty, which rejected them as unparseable.
+///
+/// The account routes are not part of the app's loopback surface, so this
+/// goes through the capability-carrying URL; a bare target would answer 404
+/// before the handler ever sees the body.
 #[tokio::test]
 async fn loopback_adapter_forwards_account_post_bodies() {
     let (_dir, server) = fixture().await;
@@ -301,7 +318,7 @@ async fn loopback_adapter_forwards_account_post_bodies() {
     ];
     for (path, body) in cases {
         let resp = client
-            .post(lb.bare_url(path))
+            .post(lb.url(path))
             .body(body)
             .send()
             .await
@@ -324,7 +341,7 @@ async fn loopback_adapter_refuses_an_oversized_account_body() {
 
     let body = "x".repeat(fqapi_core::dispatch::ACCOUNT_REQUEST_BODY_LIMIT + 1);
     let resp = client
-        .post(lb.bare_url("/api/v1/account/fanqie/history"))
+        .post(lb.url("/api/v1/account/fanqie/history"))
         .body(body)
         .send()
         .await

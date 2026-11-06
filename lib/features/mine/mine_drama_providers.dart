@@ -21,10 +21,11 @@ class MineDramaData {
 
 /// 短剧收藏 + 最近观看。
 ///
-/// 和 [mineDataProvider] 一样依赖本地存储的 revision：收藏/观看进度一有写入
-/// 就自动重取，不需要命令式刷新。
+/// 和 [mineDataProvider] 一样依赖本地存储的 revision：但只看短剧侧的计数器
+/// （[videoRevisionProvider]），收藏/观看进度一有写入就自动重取，看小说不会
+/// 连带重读短剧收藏与历史。
 final mineDramaDataProvider = FutureProvider<MineDramaData>((ref) async {
-  ref.watch(readingRevisionProvider);
+  ref.watch(videoRevisionProvider);
   final store = ref.watch(readingStoreProvider);
   final collections = await store.videoShelf();
   final history = await store.videoHistory();

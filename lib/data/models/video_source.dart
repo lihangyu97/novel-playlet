@@ -7,7 +7,11 @@ import 'json_utils.dart';
 /// 密钥（需要客户端边读边解密，暂未接入）。两种形态共用这个模型，
 /// [url] 由 ApiClient 负责拼成绝对地址。
 class VideoSource {
-  const VideoSource({required this.url, this.keyHex = '', this.variants = const []});
+  const VideoSource({
+    required this.url,
+    this.keyHex = '',
+    this.variants = const [],
+  });
 
   final String url;
 

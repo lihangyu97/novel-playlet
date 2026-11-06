@@ -24,11 +24,11 @@ void main() {
     File('${videoDir.path}/a.key').writeAsBytesSync(List.filled(100, 2));
     File('${videoDir.path}/b.part').writeAsBytesSync(List.filled(500, 3));
 
-    // 不能删的：设备池 / 过滤配置。
+    // 不能删的：设备池 / 运行时配置。
     final configDir = Directory('${support.path}/backend/config')
       ..createSync(recursive: true);
     File('${configDir.path}/device_pool.json').writeAsStringSync('{"dev":1}');
-    File('${configDir.path}/filter.json').writeAsStringSync('{}');
+    File('${configDir.path}/config.json').writeAsStringSync('{"port":0}');
 
     // 章节正文缓存。
     final chapterDir = Directory('${support.path}/reader_chapters')
@@ -77,7 +77,7 @@ void main() {
 
     // 用户数据/设备池必须还在（否则要重新注册设备、丢书架）。
     expect(File('${configDir.path}/device_pool.json').existsSync(), isTrue);
-    expect(File('${configDir.path}/filter.json').existsSync(), isTrue);
+    expect(File('${configDir.path}/config.json').existsSync(), isTrue);
     expect(videoDir.existsSync(), isTrue, reason: '目录本身保留，内核还要往里写');
   });
 
@@ -88,7 +88,8 @@ void main() {
     // iOS 的布局：<container>/Library/Application Support 与 <container>/Library/Caches，
     // path_provider 的 getTemporaryDirectory() 返回后者。
     final library = Directory('${root.path}/Library')..createSync();
-    final support = Directory('${library.path}/Application Support')..createSync();
+    final support = Directory('${library.path}/Application Support')
+      ..createSync();
     final caches = Directory('${library.path}/Caches')..createSync();
     final docs = Directory('${root.path}/Documents')..createSync();
 
@@ -107,6 +108,39 @@ void main() {
       (await cache.measure()).image,
       400,
       reason: '两个候选目录在 iOS 上指向同一处，必须去重',
+    );
+  });
+
+  test('统计超过一批的文件时按固定批次并发 stat，总数不变', () async {
+    final root = Directory.systemTemp.createTempSync('app_cache_batch_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+
+    final support = Directory('${root.path}/support')..createSync();
+    final tmp = Directory('${root.path}/tmp')..createSync();
+    final docs = Directory('${root.path}/docs')..createSync();
+    final chapterDir = Directory('${support.path}/reader_chapters')
+      ..createSync(recursive: true);
+
+    // 97 个文件跨 4 个 stat 批次（32/32/32/1），大小按序号递增。
+    var expected = 0;
+    for (var i = 0; i < 97; i++) {
+      final size = i + 1;
+      File('${chapterDir.path}/c$i.json')
+          .writeAsBytesSync(List.filled(size, 0));
+      expected += size;
+    }
+
+    final cache = AppCache(
+      supportDirectory: () async => support,
+      temporaryDirectory: () async => tmp,
+      documentsDirectory: () async => docs,
+      clearImageCache: () async {},
+    );
+
+    expect(
+      (await cache.measure()).chapter,
+      expected,
+      reason: '并发分批只改等待方式，统计口径（字节总数）必须一致',
     );
   });
 

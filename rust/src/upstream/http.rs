@@ -88,11 +88,28 @@ impl RawResponse {
 pub enum TransportError {
     /// Connection-level failure (Go: `http.Client.Do` error).
     Network(String),
+    /// A *local* request deadline expired (reqwest timeout or an exhausted
+    /// caller budget). Request-kind classification (P1-4) reports this as
+    /// `timeout`; it is retried like a network error, but for a different
+    /// reason.
+    Timeout(String),
     /// A *local* size limit was hit (caller cap, gunzip cap). This is not a
     /// transport failure and must not be read as one: callers rotate a pooled
     /// device on `Network`, and a response that is simply too big says nothing
     /// about the device.
     TooLarge(String),
+}
+
+/// A `.timeout(..)` expiry is a distinct request kind (P1-4 calls it
+/// `timeout`); every other reqwest failure stays a connection-level error.
+/// Both are retried the same way today, so this only sharpens the reported
+/// kind and never changes retry or device-rotation behaviour.
+fn classify_reqwest_error(e: &reqwest::Error) -> TransportError {
+    if e.is_timeout() {
+        TransportError::Timeout(e.to_string())
+    } else {
+        TransportError::Network(e.to_string())
+    }
 }
 
 pub struct HttpTransport {
@@ -185,7 +202,7 @@ impl HttpTransport {
     ) -> Result<RawResponse, TransportError> {
         let timeout = super::budget::cap_timeout(timeout.unwrap_or(self.timeout));
         if timeout.is_zero() {
-            return Err(TransportError::Network(
+            return Err(TransportError::Timeout(
                 "request deadline exceeded".to_string(),
             ));
         }
@@ -211,7 +228,7 @@ impl HttpTransport {
         let resp = builder
             .send()
             .await
-            .map_err(|e| TransportError::Network(e.to_string()))?;
+            .map_err(|e| classify_reqwest_error(&e))?;
         let status = resp.status().as_u16();
         let headers: Vec<(String, String)> = resp
             .headers()
@@ -228,7 +245,7 @@ impl HttpTransport {
         let mut body = Vec::new();
         let mut stream = resp.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| TransportError::Network(e.to_string()))?;
+            let chunk = chunk.map_err(|e| classify_reqwest_error(&e))?;
             if let Some(limit) = body_limit {
                 if chunk.len() > limit.saturating_sub(body.len()) {
                     return Err(TransportError::TooLarge(format!(

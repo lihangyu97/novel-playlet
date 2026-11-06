@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::device::Device;
 use crate::error::{ApiError, ApiResult};
-use crate::upstream::{ClientError, PinnedDevice, UpstreamClient, UpstreamRequest};
+use crate::upstream::{ClientError, PinnedDevice, TransientKind, UpstreamClient, UpstreamRequest};
 
 pub const HOST_FQNOVEL: &str = "https://api5-normal-sinfonlineb.fqnovel.com";
 pub const HOST_FQNOVELA: &str = "https://api5-normal-sinfonlinea.fqnovel.com";
@@ -138,12 +138,23 @@ impl Upstream {
     }
 }
 
+/// Maps a transport-level failure onto the API error model (P1-4).
+///
+/// The HTTP status is unchanged (everything here is a 500); only the stable
+/// `kind` differs, which is what lets the Dart layer decide between retrying,
+/// refreshing the device and showing a message.
 pub fn map_client_error(err: ClientError) -> ApiError {
     match err {
-        ClientError::DeviceFailed(m) => ApiError::Internal(format!("device failed: {m}")),
-        ClientError::Transient { message, .. } => ApiError::Internal(message),
-        ClientError::Http(m) => ApiError::Internal(m),
-        ClientError::Other(m) => ApiError::Internal(m),
+        ClientError::DeviceFailed(m) => ApiError::device_failed(format!("device failed: {m}")),
+        ClientError::Transient { message, kind, .. } => match kind {
+            TransientKind::Network => ApiError::internal(message),
+            TransientKind::Timeout => ApiError::timeout(message),
+            TransientKind::RateLimited => ApiError::rate_limited(message),
+            TransientKind::Upstream5xx => ApiError::upstream_5xx(message),
+        },
+        ClientError::TooLarge(m) => ApiError::too_large(m),
+        ClientError::Http(m) => ApiError::internal(m),
+        ClientError::Other(m) => ApiError::internal(m),
     }
 }
 
@@ -218,6 +229,50 @@ pub(crate) fn reading724_params() -> Vec<(String, String)> {
     .iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
     .collect()
+}
+
+#[cfg(test)]
+mod client_error_kind_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn transient(kind: TransientKind, message: &str) -> ClientError {
+        ClientError::Transient {
+            message: message.to_string(),
+            retry_after: Some(Duration::ZERO),
+            kind,
+        }
+    }
+
+    // P1-4: every transport failure class must keep its own stable kind in
+    // the JSON envelope; the HTTP status stays 500 for all of them.
+    #[test]
+    fn each_client_error_class_maps_to_a_stable_kind() {
+        let cases = [
+            (
+                ClientError::DeviceFailed("HTTP 401".to_string()),
+                "device_failed",
+            ),
+            (ClientError::TooLarge("too big".to_string()), "too_large"),
+            (transient(TransientKind::Timeout, "deadline"), "timeout"),
+            (
+                transient(TransientKind::RateLimited, "HTTP 429"),
+                "rate_limited",
+            ),
+            (
+                transient(TransientKind::Upstream5xx, "HTTP 503"),
+                "upstream_5xx",
+            ),
+            (transient(TransientKind::Network, "reset"), "unknown"),
+            (ClientError::Http("HTTP 404".to_string()), "unknown"),
+            (ClientError::Other("io".to_string()), "unknown"),
+        ];
+        for (err, kind) in cases {
+            let mapped = map_client_error(err);
+            assert_eq!(mapped.kind(), kind);
+            assert_eq!(mapped.status(), 500);
+        }
+    }
 }
 
 #[cfg(test)]

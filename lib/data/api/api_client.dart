@@ -4,11 +4,14 @@ import '../../core/backend/backend_transport.dart';
 import '../models/book_detail.dart';
 import '../models/chapter.dart';
 import '../models/chapter_content.dart';
+import '../models/feed_page.dart';
 import '../models/json_utils.dart';
 import '../models/novel_item.dart';
 import '../models/video_detail.dart';
 import '../models/video_series.dart';
 import '../models/video_source.dart';
+import '../parsers/novel_parsers.dart';
+import '../parsers/video_parsers.dart';
 
 /// 业务接口层：路径 + 查询参数 + 解析。
 ///
@@ -21,7 +24,7 @@ class ApiClient {
 
   /// 上游书城小说推荐（`tab_type=2`）。[sessionId] 翻页时必须回传，否则
   /// 上游会换设备导致 101116。
-  Future<NovelFeedPage> recommend({
+  Future<FeedPage<NovelItem>> recommend({
     int offset = 0,
     String? sessionId,
   }) async {
@@ -39,7 +42,7 @@ class ApiClient {
     final nextOffset = tab == null ? 0 : asInt(tab['next_offset']);
     // 上游的 has_more 不可信：实测 has_more=false 时继续用 offset=2 仍会返回
     // 一大批新书。所以只认"游标是否前进"，游标后退/不动才停止翻页。
-    return NovelFeedPage(
+    return FeedPage<NovelItem>(
       items: parseNovelItems(payload),
       nextOffset: nextOffset > offset ? nextOffset : null,
       sessionId: tab == null ? null : firstString(tab, ['session_id']),
@@ -47,7 +50,7 @@ class ApiClient {
   }
 
   /// 书籍搜索（`tab_type=3` = 上游"书籍"tab）。
-  Future<NovelFeedPage> search(String query, {int offset = 0}) async {
+  Future<FeedPage<NovelItem>> search(String query, {int offset = 0}) async {
     final payload = await _getJson('/api/v1/search', {
       'query': query,
       // 上游 tab 语义：1 综合 / 2 听书 / 3 书籍 / 8 漫画 / 11 短剧。
@@ -57,7 +60,7 @@ class ApiClient {
     });
     final items = parseSearchNovels(payload);
     final nextOffset = _searchNextOffset(payload, offset: offset);
-    return NovelFeedPage(items: items, nextOffset: nextOffset);
+    return FeedPage<NovelItem>(items: items, nextOffset: nextOffset);
   }
 
   /// 视频类分类（短剧 / 漫剧）的推荐流。
@@ -71,7 +74,7 @@ class ApiClient {
   ///
   /// 与书城推荐同一套信封：游标与 session 挂在被回答的 `tab_item` 上，翻页
   /// 必须回传 session，否则上游会换设备。
-  Future<VideoFeedPage> videoFeed({
+  Future<FeedPage<VideoSeries>> videoFeed({
     int tabType = 8,
     int offset = 0,
     String? sessionId,
@@ -90,22 +93,27 @@ class ApiClient {
       throw ApiException('推荐数据异常，下拉刷新试试');
     }
     final nextOffset = asInt(tab['next_offset']);
-    return VideoFeedPage(
+    return FeedPage<VideoSeries>(
       items: parseVideoSeries(data),
       nextOffset: nextOffset > offset ? nextOffset : null,
       sessionId: firstString(tab, ['session_id']),
     );
   }
 
-  /// 视频类分类的搜索。
+  /// 视频类搜索（`/api/v1/search`，纯端点）。
   ///
-  /// [tabType] 取上游搜索 tab：11 = 短剧；上游没有「漫剧」搜索 tab，暂用 8
-  /// （漫画）。搜索响应里可能同时有多个 `search_tabs`，只解析匹配的那个，
-  /// 没有匹配 tab 时返回空列表（页面显示空结果），避免把别的分类当成本分类。
-  Future<VideoFeedPage> searchVideos(
+  /// [tabType] 取上游搜索 tab：11 = 短剧、8 = 漫画。搜索响应里可能同时有多个
+  /// `search_tabs`，只解析匹配的那个；没有匹配 tab 时返回空列表（页面显示空
+  /// 结果），避免把别的分类当成本分类画。
+  ///
+  /// [manjuOnly] 是上游缺口的解析口径（不是分类逻辑）：上游没有「漫剧」搜索
+  /// tab，漫剧卡片混在短剧 tab 里，只能按卡片元数据（`genre=205` /「漫剧」
+  /// 标签）过滤，游标也不时缺失（见 [parseManjuSearchPage]）。
+  Future<FeedPage<VideoSeries>> searchVideos(
     String query, {
     int tabType = 11,
     int offset = 0,
+    bool manjuOnly = false,
   }) async {
     final payload = await _getJson('/api/v1/search', {
       'query': query,
@@ -113,27 +121,15 @@ class ApiClient {
       'offset': '$offset',
       'count': '10',
     });
-    return VideoFeedPage(
+    if (manjuOnly) return parseManjuSearchPage(payload, offset: offset);
+    return FeedPage<VideoSeries>(
       items: parseSearchVideoSeries(payload, tabType: tabType),
-      nextOffset: _searchNextOffset(payload, offset: offset, tabTypes: {tabType}),
+      nextOffset: _searchNextOffset(
+        payload,
+        offset: offset,
+        tabTypes: {tabType},
+      ),
     );
-  }
-
-  /// 漫剧的搜索 / 翻页兜底。
-  ///
-  /// 漫剧首页流（`tab_type=24`）只有一屏、没有游标，后续页只能走搜索：
-  /// 上游把漫剧混在短剧搜索 tab（`tab_type=11`）里，卡片靠 `genre=205` /
-  /// 「漫剧」标签区分（见 [parseManjuSearchPage]）。[query] 传分类名「漫剧」
-  /// 就是翻页兜底，传用户输入就是搜索。
-  Future<VideoFeedPage> manjuSearch(String query, {int offset = 0}) async {
-    final payload = await _getJson('/api/v1/search', {
-      'query': query,
-      'tab_type': '11',
-      'offset': '$offset',
-      'count': '10',
-    });
-    final page = parseManjuSearchPage(payload, offset: offset);
-    return VideoFeedPage(items: page.items, nextOffset: page.nextOffset);
   }
 
   /// 短剧详情（`/api/v1/series/{id}`）。
@@ -153,7 +149,10 @@ class ApiClient {
   /// 当前走默认（非 stream）模式：内核把整集下载进加密缓存后返回
   /// `/src/<id>.mp4`，播放器只需按普通 HTTP 拉明文分片。流式回环（边下边播）
   /// 见 docs/video-playback.md 的 M1，接入后这里换成 `mode=stream`。
-  Future<VideoSource> videoSource(String episodeId, {bool refresh = false}) async {
+  Future<VideoSource> videoSource(
+    String episodeId, {
+    bool refresh = false,
+  }) async {
     final payload = await _getJson(
       '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
       // refresh=1：内核删掉本地缓存文件后重新下载。播放失败（半截/坏缓存）
@@ -217,7 +216,10 @@ class ApiClient {
     final encoded = Uri.encodeComponent(itemId);
     Object? firstError;
     try {
-      final payload = await _getJson('/api/v1/chapters/$encoded/novel', const {});
+      final payload = await _getJson(
+        '/api/v1/chapters/$encoded/novel',
+        const {},
+      );
       return parseChapterContent(payload, chapterId: itemId, title: title);
     } catch (error) {
       firstError = error;
@@ -228,6 +230,10 @@ class ApiClient {
     } catch (error) {
       throw ApiException(
         '无法获取正文：${firstError is ApiException ? firstError.message : error}',
+        // 透传底层语义（超时/限流等），上层需要时能按 kind 分支。
+        kind: firstError is ApiException
+            ? firstError.kind
+            : ApiErrorKind.unknown,
       );
     }
   }
@@ -238,31 +244,52 @@ class ApiClient {
     Duration? timeout,
   }) async {
     final encodedQuery = Uri(queryParameters: query).query;
-    final response = await _transport.send(
-      'GET',
-      path,
-      query: encodedQuery.isEmpty ? null : encodedQuery,
-      timeout: timeout ?? BackendTransport.defaultTimeout,
-    );
+    final BackendResponse response;
+    try {
+      response = await _transport.send(
+        'GET',
+        path,
+        query: encodedQuery.isEmpty ? null : encodedQuery,
+        timeout: timeout ?? BackendTransport.defaultTimeout,
+      );
+    } on BackendTimeoutException {
+      // B2：内核 504 是真实超时，在这里归一成带 kind 的 ApiException；499
+      // 取消仍是 TimeoutException，不在这里接（取消不是用户可见错误）。
+      throw ApiException(
+        ApiErrorKind.timeout.userCopy,
+        kind: ApiErrorKind.timeout,
+      );
+    }
     if (response.statusCode != 200) {
-      // 内核把错误也包成 JSON，能读 message 就透出去。
+      // 内核把错误也包成 JSON，能读 message 就透出去；kind 一并透出，
+      // 供上层按语义分支（本层不重试）。读不到就保持 unknown。
+      // 504 即使没有 JSON body 也按超时处理（部分传输实现会原样返回状态码）。
+      var kind = response.statusCode == 504
+          ? ApiErrorKind.timeout
+          : ApiErrorKind.unknown;
       String message = '请求失败（HTTP ${response.statusCode}）';
       try {
         final payload = jsonDecode(response.text);
         if (payload is Map) {
-          final detail = firstString(
-            Map<String, dynamic>.from(payload),
-            ['error', 'message', 'msg'],
-          );
+          final map = Map<String, dynamic>.from(payload);
+          final wireKind = ApiErrorKind.fromWire(map['kind']);
+          if (wireKind != ApiErrorKind.unknown) kind = wireKind;
+          final detail = firstString(map, ['error', 'message', 'msg']);
           if (detail.isNotEmpty) message = detail;
         }
       } catch (_) {
-        // 非 JSON 响应保持状态码文案。
+        // 非 JSON 响应保持状态码文案与 kind 的默认判断。
       }
-      throw ApiException(message);
+      // 技术兜底 message（如 "HTTP 500"）换成 kind 短句；具体 message 原样抛出。
+      final exception = ApiException(message, kind: kind);
+      throw ApiException(
+        apiErrorCopy(exception, fallback: message),
+        kind: kind,
+      );
     }
     final decoded = jsonDecode(response.text);
     if (decoded is! Map) {
+      // HTTP 200 但不是信封：格式异常，语义未知。
       throw ApiException('响应格式异常');
     }
     return Map<String, dynamic>.from(decoded);
@@ -285,102 +312,15 @@ Map<String, dynamic>? _answeredRecommendTab(Map<String, dynamic> data) {
   return tabs.first;
 }
 
-// cell_id 属于"区块"，不属于书：排行榜区块本身也带 cell_id，
-// 用它会把「排行榜」当成一本书。只认书自己的身份字段。
-const _novelIdKeys = ['book_id', 'item_id', 'id'];
-const _nonNovelKeys = [
-  'video_id',
-  'vid',
-  'series_id',
-  'pseries_id',
-  'manga_id',
-  'comic_id',
-  'audio_book_id',
-  'audio_id',
-];
-
-/// 从推荐/搜索载荷里递归捞出小说卡片。
-///
-/// 上游把卡片藏在 `cell_data` / `book_data`（单对象或数组）/ 卡片直挂三种
-/// 位置，深度不定，所以按 key 白名单递归；短剧/漫画/听书卡片带自己的 id
-/// 字段而**没有** `book_id`，据此排除。
-List<NovelItem> parseNovelItems(Map<String, dynamic> payload) {
-  final root = asMap(payload['data']) ?? payload;
-  final out = <NovelItem>[];
-  final seen = <String>{};
-
-  void add(Map<String, dynamic> raw) {
-    final item = NovelItem.fromRaw(raw);
-    if (!item.isValid) return;
-    if (seen.add(item.id)) out.add(item);
-  }
-
-  void visit(Object? value, int depth) {
-    if (depth > 12 || value == null) return;
-    if (value is List) {
-      for (final child in value) {
-        visit(child, depth + 1);
-      }
-      return;
-    }
-    final map = asMap(value);
-    if (map == null) return;
-
-    final hasNovelId = _novelIdKeys.any((key) => asString(map[key]).isNotEmpty);
-    final hasOtherId = _nonNovelKeys.any(
-      (key) => asString(map[key]).isNotEmpty,
-    );
-    if (hasNovelId && !(hasOtherId && asString(map['book_id']).isEmpty)) {
-      add(map);
-    }
-
-    for (final key in const [
-      'tab_item',
-      'cell_data',
-      'cell_view',
-      'search_tabs',
-      'book_data',
-      'items',
-      'lists',
-      'item_data_list',
-      'recommend_list',
-      'data',
-    ]) {
-      if (map.containsKey(key)) visit(map[key], depth + 1);
-    }
-  }
-
-  visit(root, 0);
-  return out;
-}
-
-/// 搜索响应：只取"书籍"tab（`tab_type=3`），兼容综合 tab（1）。
-List<NovelItem> parseSearchNovels(Map<String, dynamic> payload) {
-  final data = asMap(payload['data']) ?? payload;
-  final tabs = asList(data['search_tabs']).map(asMap).whereType<Map<String, dynamic>>();
-  final selected = <Map<String, dynamic>>[];
-  for (final tab in tabs) {
-    final type = asInt(tab['tab_type']);
-    if (type == 3 || type == 1) selected.add(tab);
-  }
-  final source = selected.isEmpty ? tabs.toList() : selected;
-  final items = <NovelItem>[];
-  final seen = <String>{};
-  for (final tab in source) {
-    for (final item in parseNovelItems({'data': {'search_tabs': [tab]}})) {
-      if (seen.add(item.id)) items.add(item);
-    }
-  }
-  return items;
-}
-
 int? _searchNextOffset(
   Map<String, dynamic> payload, {
   required int offset,
   Set<int> tabTypes = const {1, 3},
 }) {
   final data = asMap(payload['data']) ?? payload;
-  for (final tab in asList(data['search_tabs']).map(asMap).whereType<Map<String, dynamic>>()) {
+  for (final tab in asList(
+    data['search_tabs'],
+  ).map(asMap).whereType<Map<String, dynamic>>()) {
     final type = asInt(tab['tab_type']);
     if (!tabTypes.contains(type)) continue;
     final next = asInt(tab['next_offset']);

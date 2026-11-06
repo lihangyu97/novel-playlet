@@ -7,7 +7,7 @@ pub mod dh;
 pub mod http;
 pub mod shuqi;
 
-pub use client::{ClientError, PinnedDevice, UpstreamClient, UpstreamRequest};
+pub use client::{ClientError, PinnedDevice, TransientKind, UpstreamClient, UpstreamRequest};
 pub use http::{HttpTransport, RawResponse, TransportError};
 
 use num_bigint::BigUint;

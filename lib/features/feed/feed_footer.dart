@@ -10,12 +10,17 @@ class FeedFooter extends StatelessWidget {
     required this.error,
     required this.hasMore,
     required this.onRetry,
+    this.retryable = true,
   });
 
   final bool loadingMore;
   final String? error;
   final bool hasMore;
   final VoidCallback onRetry;
+
+  /// 这次失败是否值得重试：非瞬时失败（badInput / tooLarge / deviceFailed）
+  /// 重试同一个请求不会变好，因此不给"重试"按钮（策略来源见 FeedState）。
+  final bool retryable;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +42,8 @@ class FeedFooter extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(error, textAlign: TextAlign.center, style: mutedStyle),
-          TextButton(onPressed: onRetry, child: const Text('重试')),
+          if (retryable)
+            TextButton(onPressed: onRetry, child: const Text('重试')),
         ],
       );
     } else if (!hasMore) {

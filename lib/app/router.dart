@@ -9,19 +9,66 @@ import '../features/settings/settings_page.dart';
 import '../features/video/video_detail_page.dart';
 import '../features/video/video_player_page.dart';
 
-/// 详情页入参。[preview] 是列表里点进来的卡片，用来在详情接口返回前先把
+/// 类型化路由：路由对象自己携带强类型参数，并负责构造对应的 [Route]。
+///
+/// 取代原来的字符串路由 + `onGenerateRoute` 里的 `arguments as XxxArgs`：
+/// 参数传错会在编译期报错，而不是等到运行期才崩。页面里用
+/// [BuildContext.pushAppRoute] 发起跳转：
+///
+/// ```dart
+/// context.pushAppRoute(DetailRoute(bookId: id, preview: item));
+/// ```
+sealed class AppRoute<T> {
+  const AppRoute();
+
+  /// 构造承载目标页面、参数已强类型化的 [Route]。
+  Route<T> toRoute();
+}
+
+/// 极简跳转辅助，省掉每处 `Navigator.of(context).push(...toRoute())` 的样板。
+extension AppRouteContext on BuildContext {
+  Future<T?> pushAppRoute<T>(AppRoute<T> route) =>
+      Navigator.of(this).push(route.toRoute());
+}
+
+/// 小说详情页。[preview] 是列表里点进来的卡片，用来在详情接口返回前先把
 /// 封面/标题画出来，避免白屏。
-class DetailArgs {
-  const DetailArgs({required this.bookId, this.preview, this.heroTag});
+final class DetailRoute extends AppRoute<void> {
+  const DetailRoute({required this.bookId, this.preview, this.heroTag});
 
   final String bookId;
   final NovelItem? preview;
 
   /// 发起点击的列表封面 Hero tag；详情页用同一个 tag 接住飞入动画。
   final String? heroTag;
+
+  @override
+  Route<void> toRoute() => MaterialPageRoute<void>(
+    builder: (_) =>
+        DetailPage(bookId: bookId, preview: preview, heroTag: heroTag),
+  );
+}
+
+/// 短剧详情页。[preview] 同样用于接口返回前先画封面/标题。
+final class VideoDetailRoute extends AppRoute<void> {
+  const VideoDetailRoute({required this.seriesId, this.preview, this.heroTag});
+
+  final String seriesId;
+  final VideoSeries? preview;
+
+  /// 发起点击的列表封面 Hero tag；详情页用同一个 tag 接住飞入动画。
+  final String? heroTag;
+
+  @override
+  Route<void> toRoute() => MaterialPageRoute<void>(
+    builder: (_) =>
+        VideoDetailPage(seriesId: seriesId, preview: preview, heroTag: heroTag),
+  );
 }
 
 /// 阅读页入参。[chapterId] 为空表示从第一章或上次进度开始。
+///
+/// 它仍是阅读页自己的入参（[ReaderRoute] 只是把它包成路由），不是路由标识。
 class ReaderArgs {
   const ReaderArgs({
     required this.bookId,
@@ -43,15 +90,15 @@ class ReaderArgs {
   final int? blockIndex;
 }
 
-/// 短剧详情入参。[preview] 同样用于接口返回前先画封面/标题。
-class VideoDetailArgs {
-  const VideoDetailArgs({required this.seriesId, this.preview, this.heroTag});
+/// 阅读页路由。
+final class ReaderRoute extends AppRoute<void> {
+  const ReaderRoute(this.args);
 
-  final String seriesId;
-  final VideoSeries? preview;
+  final ReaderArgs args;
 
-  /// 发起点击的列表封面 Hero tag；详情页用同一个 tag 接住飞入动画。
-  final String? heroTag;
+  @override
+  Route<void> toRoute() =>
+      MaterialPageRoute<void>(builder: (_) => ReaderPage(args: args));
 }
 
 /// 播放页入参：整份选集 + 起播下标。
@@ -77,54 +124,22 @@ class VideoPlayArgs {
   final String cover;
 }
 
-class AppRoutes {
-  static const detail = '/detail';
-  static const reader = '/reader';
-  static const videoDetail = '/video/detail';
-  static const videoPlay = '/video/play';
-  static const settings = '/settings';
+/// 播放页路由。
+final class VideoPlayRoute extends AppRoute<void> {
+  const VideoPlayRoute(this.args);
 
-  static Route<dynamic>? onGenerateRoute(RouteSettings settings) {
-    switch (settings.name) {
-      case AppRoutes.settings:
-        return MaterialPageRoute(
-          settings: settings,
-          builder: (_) => const SettingsPage(),
-        );
-      case detail:
-        final args = settings.arguments as DetailArgs;
-        return MaterialPageRoute(
-          settings: settings,
-          builder: (_) => DetailPage(
-            bookId: args.bookId,
-            preview: args.preview,
-            heroTag: args.heroTag,
-          ),
-        );
-      case reader:
-        final args = settings.arguments as ReaderArgs;
-        return MaterialPageRoute(
-          settings: settings,
-          builder: (_) => ReaderPage(args: args),
-        );
-      case videoDetail:
-        final args = settings.arguments as VideoDetailArgs;
-        return MaterialPageRoute(
-          settings: settings,
-          builder: (_) => VideoDetailPage(
-            seriesId: args.seriesId,
-            preview: args.preview,
-            heroTag: args.heroTag,
-          ),
-        );
-      case videoPlay:
-        final args = settings.arguments as VideoPlayArgs;
-        return MaterialPageRoute(
-          settings: settings,
-          builder: (_) => VideoPlayerPage(args: args),
-        );
-      default:
-        return null;
-    }
-  }
+  final VideoPlayArgs args;
+
+  @override
+  Route<void> toRoute() =>
+      MaterialPageRoute<void>(builder: (_) => VideoPlayerPage(args: args));
+}
+
+/// 设置页路由：无参数。
+final class SettingsRoute extends AppRoute<void> {
+  const SettingsRoute();
+
+  @override
+  Route<void> toRoute() =>
+      MaterialPageRoute<void>(builder: (_) => const SettingsPage());
 }

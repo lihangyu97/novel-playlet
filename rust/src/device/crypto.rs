@@ -56,8 +56,7 @@ pub fn tt_encrypt(data: &[u8], random_bytes32: Option<[u8; 32]>) -> Result<Vec<u
 
 /// Decrypts a registerkey response `data.key` into the raw secret-key bytes.
 pub fn decrypt_register_key(encrypted_key_b64: &str) -> Result<Vec<u8>, String> {
-    // Note: reject malformed upstream blocks before the CBC helper asserts —
-    // see .agents/notes/implemented/bug-fix/2026-09-28-registerkey-ciphertext.md.
+    // Note: reject malformed upstream blocks before the CBC helper asserts.
     let data = base64::engine::general_purpose::STANDARD
         .decode(encrypted_key_b64)
         .map_err(|e| e.to_string())?;

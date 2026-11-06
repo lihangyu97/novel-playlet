@@ -43,6 +43,7 @@ class NovelCover extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
     final placeholder = Container(
       width: width,
       height: height,
@@ -68,6 +69,14 @@ class NovelCover extends StatelessWidget {
                 fit: BoxFit.cover,
                 width: width,
                 height: height,
+                // 推荐流 108pt / 搜索结果 64pt / 书架与最近阅读 44pt 共用本
+                // 组件，上游封面却可能是 500–1440px 的原图（单张 1–3MB）。
+                // 按目标显示尺寸的物理像素解码，否则 44pt 的格位也会解出一张
+                // 1080px 的 RGBA（4–6MB），默认 100MB 的 ImageCache 只装得下
+                // 约 20 张，来回滑动时就会反复解码 / 驱逐。
+                memCacheWidth: (width * dpr).round(),
+                // 磁盘缓存也别存原图：这些格位都用不到 720 宽以上的细节。
+                maxWidthDiskCache: 720,
                 placeholder: (_, _) => placeholder,
                 errorWidget: (_, _, _) => placeholder,
                 // 详情页传 zero：图片就绪立即出现，不再做淡入替换动画。

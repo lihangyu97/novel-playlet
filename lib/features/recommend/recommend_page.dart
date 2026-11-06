@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/feed/feed_grid.dart';
-import '../../app/feed/feed_results.dart';
-import '../../app/feed/feed_search_field.dart';
-import '../../app/feed/feed_view.dart';
+import '../feed/feed_grid.dart';
+import '../feed/feed_results.dart';
+import '../feed/feed_search_field.dart';
+import '../feed/feed_view.dart';
 import '../../app/router.dart';
 import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/novel_card.dart';
@@ -322,34 +322,28 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
   /// 分类互不冲突；详情页用同一个 tag 接住飞入动画。
   String _coverHeroTag(RecommendItem item) {
     final source = 'recommend-${_category.name}';
-    return item.novel != null
-        ? CoverHeroTag.novel(source, item.id)
-        : CoverHeroTag.video(source, item.id);
+    return switch (item) {
+      NovelRecommendItem() => CoverHeroTag.novel(source, item.id),
+      VideoRecommendItem() => CoverHeroTag.video(source, item.id),
+    };
   }
 
   void _openDetail(RecommendItem item) {
     final heroTag = _coverHeroTag(item);
-    final novel = item.novel;
-    if (novel != null) {
-      Navigator.of(context).pushNamed(
-        AppRoutes.detail,
-        arguments: DetailArgs(
-          bookId: novel.id,
-          preview: novel,
-          heroTag: heroTag,
-        ),
-      );
-      return;
+    switch (item) {
+      case NovelRecommendItem(:final novel):
+        context.pushAppRoute(
+          DetailRoute(bookId: novel.id, preview: novel, heroTag: heroTag),
+        );
+      case VideoRecommendItem(:final video):
+        context.pushAppRoute(
+          VideoDetailRoute(
+            seriesId: video.id,
+            preview: video,
+            heroTag: heroTag,
+          ),
+        );
     }
-    final video = item.video!;
-    Navigator.of(context).pushNamed(
-      AppRoutes.videoDetail,
-      arguments: VideoDetailArgs(
-        seriesId: video.id,
-        preview: video,
-        heroTag: heroTag,
-      ),
-    );
   }
 
   @override
@@ -422,25 +416,25 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
           metrics: metrics,
           itemBuilder: (context, item, width) {
             void onTap() => _openDetail(item);
+            final heroTag = _coverHeroTag(item);
             // 小说与短剧/漫剧的卡片元信息不同（作者 vs 集数），复用各自
             // 现有卡片，保证封面比例/字号完全一致。
-            final novel = item.novel;
-            if (novel != null) {
-              return NovelGridCard(
+            return switch (item) {
+              NovelRecommendItem(:final novel) => NovelGridCard(
                 key: ValueKey(item.id),
                 item: novel,
                 width: width,
                 onTap: onTap,
-                heroTag: _coverHeroTag(item),
-              );
-            }
-            return VideoCard(
-              key: ValueKey(item.id),
-              item: item.video!,
-              width: width,
-              onTap: onTap,
-              heroTag: _coverHeroTag(item),
-            );
+                heroTag: heroTag,
+              ),
+              VideoRecommendItem(:final video) => VideoCard(
+                key: ValueKey(item.id),
+                item: video,
+                width: width,
+                onTap: onTap,
+                heroTag: heroTag,
+              ),
+            };
           },
         );
       },

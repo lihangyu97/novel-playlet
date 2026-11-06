@@ -2,11 +2,14 @@
 #
 # Regenerate with:
 #   flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
-# scripts/build_rust_backend.ps1 / .sh run this before every build, so the
-# bindings and the crate always stay in step.
+# scripts/build_rust_ios.sh runs this before every build, and CI re-generates and
+# fails on any diff, so the bindings and the crate always stay in step.
+#
+# rust_format: true 让 codegen 直接产出 rustfmt 过的 frb_generated.rs，
+# `cargo fmt --check` 才能把生成代码也纳入门禁。
 base_dir: .
 rust_input: crate::api
 rust_root: rust/
 dart_output: lib/src/rust
 web: false
-rust_format: false
+rust_format: true

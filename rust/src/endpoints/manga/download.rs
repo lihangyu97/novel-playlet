@@ -60,7 +60,7 @@ pub(super) async fn download_pictures(
             let dec = decrypt_manga_image(&enc, key_bytes).ok()?;
             let format = detect_image_format(&dec, &pic.pic_url);
             // Note: content-addressed manga files prevent chapter URL basename
-            // collisions; see .agents/notes/implemented/bug-fix/2026-09-28-manga-image-collisions.md.
+            // collisions.
             let name = image_file_name(&dec, &format);
             let fp = std::path::Path::new(&ctx.src_dir).join(&name);
             write_image_once(&fp, &dec).await.ok()?;

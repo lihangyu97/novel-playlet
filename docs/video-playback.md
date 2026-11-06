@@ -48,9 +48,9 @@
 | 资产 | 位置 | iOS 现状 |
 |---|---|---|
 | 视频取流接口（`/api/v1/videos/<id>`，`mode=stream` 出远程地址+key，默认整集下载） | `rust/src/endpoints/video.rs` | 已编进 iOS 静态库，可直接调 |
-| CENC 解密 + Range 服务（`/src/<id>.mp4`，200/206/416，`video/mp4`） | `rust/src/endpoints/video.rs` `serve_src_file`、`rust/src/dispatch.rs` | **可用**，回环读路由不需要 capability token |
+| CENC 解密 + Range 服务（`/src/<id>.mp4`，200/206/416，`video/mp4`） | `rust/src/endpoints/video.rs` `serve_src_file`、`rust/src/dispatch.rs` | **可用**：`/src/*` 属于免 capability 的公开面（与 `/health` 及 App 自用的 7 个读接口同级），其余兼容面路由需要 capability |
 | 回环 HTTP adapter | `rust/src/server.rs`、`rust/src/api/mod.rs` | 随 `init` 无条件启动，`baseUrl()` 可取 |
-| 流式解密回环（每会话独立端口 + token，Range→C 流解密） | `fqapp/rust/src/desktop_media.rs` | **未编进 iOS**（`build.rs` 只在 Windows 生效，novel-playlet 尚无 `native/`） |
+| 流式解密回环（每会话独立端口 + token，Range→C 流解密） | `fqapp/rust/src/desktop_media.rs` | **未编进 iOS**（该 Windows 专有代码未随内核拷入，`rust/build.rs` 已随死分支删除） |
 | 播放器 UI / 集数据模型 | `fqapp/lib/pages/player_page.dart`、`episode_source_cache.dart` 等 | 可搬运，播放器 host 需按 AVFoundation 重写 |
 
 ## 3. 实施路径
@@ -134,11 +134,11 @@
 | 2026-11-04 | 播放器走 AVFoundation 系（先 `video_player`），渲染优先 platformView；拒绝 media_kit |
 | 2026-11-04 | M0 真机验证通过：ATS 回环放行、platformView 无遮挡、起播 ~1s；后台不做显式暂停（产品确认可接受）；播放器补控制条自动隐藏/点按显隐、缓冲 spinner、拖动松手才 seek |
 | 2026-11-04 | 短剧流改用 `tab_type=8`（官方 video_episode，fqapp 短剧 tab 同款）：6 部/页、游标翻页；16 是视频 feed（2 部无游标），不再使用；响应按 `tab_type` 认领，答非所问整页拒绝 |
-| 2026-11-04 | UI 重构：列表抽 `app/feed/`（FeedState/FeedView/FeedGrid/SearchField/Footer），详情抽 `app/widgets/detail/`（DetailCoverHeader/DetailIntroCard/标签/区块标题）；短剧详情改成与小说详情同版式（沉浸渐变+封面头+简介卡），选集作为特殊模块保留；播放页加「选集」弹层（6 列数字、当前集高亮）；两个推荐页保留下拉刷新（搜索框固定、内容区下滑松手刷新）；其它页面去掉下拉刷新，全局改为 clamping 物理（无橡皮筋） |
+| 2026-11-04 | UI 重构：列表抽 `lib/features/feed/`（FeedState/FeedView/FeedGrid/SearchField/Footer），详情抽 `app/widgets/detail/`（DetailCoverHeader/DetailIntroCard/标签/区块标题）；短剧详情改成与小说详情同版式（沉浸渐变+封面头+简介卡），选集作为特殊模块保留；播放页加「选集」弹层（6 列数字、当前集高亮）；两个推荐页保留下拉刷新（搜索框固定、内容区下滑松手刷新）；其它页面去掉下拉刷新，全局改为 clamping 物理（无橡皮筋） |
 | 2026-11-05 | UI 布局优化：底部「小说 / 短剧」两个 tab 合并为「推荐」，搜索框下方加可左右滑动的分类 tabs（小说 `tab_type=2` / 短剧 `8` / 漫剧 `24`，`TabBar` + `TabBarView`）；三个分类共用搜索词、各自按分类请求并保留搜索结果；推荐态去掉「为你推荐 / 短剧推荐」区块标题；删除原 `VideoPage`。 |
 | 2026-11-05 | 推荐页细节：分类 tabs 与列表之间留 12pt 间距（蓝色下划线不再贴着封面）；漫剧接搜索兜底翻页——首屏合并 `tab_type=24` 与搜索第一页，下一页游标用短剧搜索 tab（`query=漫剧`、`tab_type=11`）的 `next_offset`，卡片按 `genre=205`/「漫剧」标签过滤；漫剧用户搜索也走同一接口。 |
 | 2026-11-04 | 播放失败可定位：错误页显示「标题 + 可能原因 + 可复制技术详情（集 id/播放地址/原始异常/堆栈前 4 行）」，按钮为重试 / 重新下载这一集 / 复制错误信息；内核取流支持 `refresh=1`（删缓存 + side key 后重新下载），解决"坏缓存导致重试永远失败" |
 | 2026-11-04 | 修复翻页请求风暴：`withLoadMoreError` 会把 `loadingMore` 重置导致并发守卫失效，同一 offset 每帧连发（实测 12 秒 220 次），并发响应互相覆盖造成列表闪烁；两个 `with*` 互保字段 + 控制器重入锁 + 用最新状态追加；回归见 `test/feed_concurrency_test.dart` |
-| 2026-11-04 | UI 细节：封面比例统一走 `kCoverAspect`（11:8）——小说 240×320 与短剧 400×571 原生比例不同，此前各写 1.38 / 4/3，切 tab 短剧封面矮 5pt；现在两条推荐流、搜索结果、书架、最近阅读、详情封面同宽同高。两个 tab 的搜索态统一成横向列表（新增 `app/feed/feed_results.dart`：`FeedResultsSliver` + `FeedResultTile`，封面 64×88）；搜索结果不再显示副标题（搜索词与已加载条数），短剧卡圆角对齐 `AppTheme.cardRadius`；回归见 `test/ui_preview_test.dart` 的封面尺寸断言 |
+| 2026-11-04 | UI 细节：封面比例统一走 `kCoverAspect`（11:8）——小说 240×320 与短剧 400×571 原生比例不同，此前各写 1.38 / 4/3，切 tab 短剧封面矮 5pt；现在两条推荐流、搜索结果、书架、最近阅读、详情封面同宽同高。两个 tab 的搜索态统一成横向列表（新增 `lib/features/feed/feed_results.dart`：`FeedResultsSliver` + `FeedResultTile`，封面 64×88）；搜索结果不再显示副标题（搜索词与已加载条数），短剧卡圆角对齐 `AppTheme.cardRadius`；回归见 `test/ui/`（按页面拆分：recommend / home / detail / video / reader / mine / settings）的封面尺寸断言 |
 | 2026-11-04 | 存储治理：真机检查发现 App 沙盒 400 MB——视频缓存 339 MB（旧上限 512 MB，27 集就撑到 339 MB）+ 封面缓存 40 MB。「我的」加「存储」区块：显示缓存占用（视频/封面明细）并可一键清理（只清可重建缓存，书架/进度/设备池不动）；内核视频缓存上限 512 MB → **128 MB**（约 5–10 集，重看会重新下载）；顺带清掉早期调试探针遗留的 `Documents/diag.log`。统计/清理见 `lib/core/cache/app_cache.dart`，回归 `test/cache_test.dart` |
 | 2026-11-04 | 方向：App 全局锁竖屏；只有播放页的横屏视频（宽高比 >1.05）给「全屏」按钮，点击才临时开横屏，退出全屏/返回/离开播放页/切到竖屏视频都恢复竖屏 |

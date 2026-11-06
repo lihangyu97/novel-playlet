@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../widgets/cover_hero.dart';
-import '../widgets/novel_cover.dart';
+import '../../app/widgets/cover_hero.dart';
+import '../../app/widgets/novel_cover.dart';
 
 /// 搜索结果的条目形态：封面 + 标题 + 元信息 + 简介两行。
 ///
@@ -42,10 +42,7 @@ class FeedResultTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: gutter,
-          vertical: 10,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: gutter, vertical: 10),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

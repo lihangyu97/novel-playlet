@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'frb_generated.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `cancelled_response`, `init_core`, `new`, `race_dispatch`, `release_inflight`, `resolve_runtime_dir`, `take_pre_cancelled`, `timeout_response`
@@ -30,7 +31,6 @@ Future<String> version() => RustLib.instance.api.crateApiVersion();
 Future<String> init({
   required String configPath,
   required String poolPath,
-  required String filterPath,
   required String runtimeDir,
   required int port,
   required bool lanShare,
@@ -38,7 +38,6 @@ Future<String> init({
 }) => RustLib.instance.api.crateApiInit(
   configPath: configPath,
   poolPath: poolPath,
-  filterPath: filterPath,
   runtimeDir: runtimeDir,
   port: port,
   lanShare: lanShare,

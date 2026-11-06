@@ -22,6 +22,23 @@ class BackendResponse {
   String get text => utf8.decode(body, allowMalformed: true);
 }
 
+/// 内核 504：这次请求耗尽了内核的时间预算（真实超时）。
+///
+/// 这是一个"可以归一成用户可见错误"的失败：`ApiClient` 会把它转成
+/// `ApiException(kind: timeout)`，让上层拿到 `timeout` 语义与统一文案。
+/// 与 499 取消区分开：499 仍抛 [TimeoutException]（取消不是错误，不能变成
+/// 用户可见错误），由调用方像以前一样静默处理。
+class BackendTimeoutException implements Exception {
+  const BackendTimeoutException(this.timeout);
+
+  /// 本次请求允许的时长。
+  final Duration timeout;
+
+  @override
+  String toString() =>
+      'BackendTimeoutException(after ${timeout.inMilliseconds}ms)';
+}
+
 /// Rust 核传输层。
 ///
 /// 职责只有三件事：加载 FRB 运行时、按参数 init 内核、把一次
@@ -30,7 +47,9 @@ class BackendResponse {
 class BackendTransport {
   BackendTransport({this.port = defaultPort});
 
-  /// 与 `assets/config/config.json` 的 port 保持一致。
+  /// 端口唯一来源是 `assets/config/config.json`（部署后由 BackendService 读它）；
+  /// 这里的缺省值与 config.json、`rust/src/config.rs` 三处对齐，改端口只改
+  /// config.json。
   static const defaultPort = 18931;
 
   /// 单次请求默认超时：后端在本机进程内，正常远小于此值；挂死不能永久转圈。
@@ -58,24 +77,21 @@ class BackendTransport {
     if (RustLib.instance.initialized) {
       return _runtimeReady = Future<void>.value();
     }
-    return _runtimeReady = Future<void>.sync(initRustRuntime).catchError((
-      Object error,
-      StackTrace stack,
-    ) {
-      // 失败的加载不缓存，否则一次坏初始化会让整个进程再也连不上内核。
-      if (RustLib.instance.initialized) {
-        RustLib.dispose();
-      }
-      _runtimeReady = null;
-      Error.throwWithStackTrace(error, stack);
-    });
+    return _runtimeReady = Future<void>.sync(initRustRuntime)
+        .catchError((Object error, StackTrace stack) {
+          // 失败的加载不缓存，否则一次坏初始化会让整个进程再也连不上内核。
+          if (RustLib.instance.initialized) {
+            RustLib.dispose();
+          }
+          _runtimeReady = null;
+          Error.throwWithStackTrace(error, stack);
+        });
   }
 
   /// 部署完成后启动内核。重复调用返回 "running"。
   Future<String> start({
     required String configPath,
     required String poolPath,
-    required String filterPath,
     required String runtimeDir,
     int? listenPort,
   }) async {
@@ -96,7 +112,6 @@ class BackendTransport {
     final result = await rust.init(
       configPath: configPath,
       poolPath: poolPath,
-      filterPath: filterPath,
       runtimeDir: runtimeDir,
       port: listenPort ?? port,
       lanShare: false,
@@ -131,10 +146,13 @@ class BackendTransport {
       timeoutMs: timeout.inMilliseconds,
     );
     if (response.status == 499) {
+      // 客户端主动取消：保持原有语义，不归一成 ApiException。
       throw TimeoutException('backend cancelled', timeout);
     }
     if (response.status == 504) {
-      throw TimeoutException('backend timeout', timeout);
+      // 真实超时：抛可区分的异常，由 data 层的 ApiClient 归一成
+      // ApiException(kind: timeout)（core 不依赖 data）。
+      throw BackendTimeoutException(timeout);
     }
     return BackendResponse(
       response.status,

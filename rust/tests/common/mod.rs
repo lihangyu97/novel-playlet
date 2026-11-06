@@ -18,7 +18,6 @@ use axum::Router;
 use fqapi_core::config::Config;
 use fqapi_core::device::DevicePool;
 use fqapi_core::endpoints::{Ctx, Server};
-use fqapi_core::filter::FilterManager;
 use fqapi_core::sign::Manager;
 use fqapi_core::upstream::UpstreamClient;
 
@@ -80,7 +79,7 @@ pub async fn build_server(
         web,
         src,
         pool_json,
-        r#"{"algorithm_type":"8404","port":0,"anti_crawler":{"enabled":false,"redirect_url":""}}"#,
+        r#"{"port":0,"anti_crawler":{"enabled":false,"redirect_url":""}}"#,
     )
     .await
 }
@@ -100,9 +99,6 @@ pub async fn build_server_with_config(
 
     let config_path = dir.write("config/config.json", config_json);
     let pool_path = dir.write("config/device_pool.json", pool_json);
-    // A missing filter.json yields a no-op manager, matching the Go behaviour.
-    let filter_path = dir.join("config/filter.json");
-
     for (rel, contents) in web {
         dir.write(&format!("web/{rel}"), contents);
     }
@@ -125,17 +121,11 @@ pub async fn build_server_with_config(
         }
         None => UpstreamClient::new(pool.clone(), signer).expect("upstream client"),
     };
-    let filters = Arc::new(
-        FilterManager::load_with_base(&filter_path.to_string_lossy(), &root.to_string_lossy())
-            .expect("filters"),
-    );
-
     Arc::new(Server::new(Arc::new(Ctx {
         up: Arc::new(up),
         pool,
         cfg: Arc::new(cfg),
         src_dir: root.join("src").to_string_lossy().into_owned(),
-        filters,
     })))
 }
 
@@ -190,8 +180,9 @@ impl Loopback {
         format!("{}/_session/{capability}{path}", self.origin())
     }
 
-    /// A URL with no capability at all: what an external reader such as a
-    /// Legado book source sends.
+    /// A URL with no capability at all: what an unrelated local client sends.
+    /// Only `/health`, `/src/*` and the app's own read APIs answer it; every
+    /// other route is refused by the loopback gate before dispatch.
     pub fn bare_url(&self, path: &str) -> String {
         format!("{}{path}", self.origin())
     }

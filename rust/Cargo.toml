@@ -3,7 +3,7 @@ name = "fqapi_core"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Rust native core for fqapp"
+description = "Rust native core for novel-playlet: request signing, device pool, upstream access and CENC decryption"
 
 [lib]
 name = "fqapi_core"
@@ -39,9 +39,6 @@ tower-http = { version = "0.6", default-features = false, features = ["fs", "set
 http-body-util = "0.1"
 futures = "0.3"
 log = "0.4"
-
-[build-dependencies]
-cc = "1"
 
 [target.'cfg(windows)'.dependencies]
 reqwest = { version = "0.13", default-features = false, features = ["blocking"] }

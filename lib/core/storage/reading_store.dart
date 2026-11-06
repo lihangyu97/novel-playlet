@@ -50,9 +50,7 @@ class ReadingProgress {
       chapterId: asString(json['chapterId']),
       chapterIndex: asInt(json['chapterIndex']),
       blockIndex: asInt(json['blockIndex']),
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(
-        asInt(json['updatedAt']),
-      ),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(asInt(json['updatedAt'])),
     );
   }
 }
@@ -93,9 +91,7 @@ class VideoWatchProgress {
       title: asString(json['title']),
       cover: asString(json['cover']),
       episodeIndex: asInt(json['episodeIndex']),
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(
-        asInt(json['updatedAt']),
-      ),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(asInt(json['updatedAt'])),
     );
   }
 }
@@ -105,12 +101,28 @@ class VideoWatchProgress {
 /// 只用 shared_preferences 存"小而重要"的状态；正文不落盘（离线缓存是后续
 /// 功能，届时加一层明文/密文存储实现即可，接口不变）。
 class ReadingStore {
-  /// 书架/进度变更计数。跨页面的 UI（如"我的"）监听它来刷新，避免引入
-  /// 全局状态管理依赖。
-  final ValueNotifier<int> revision = ValueNotifier<int>(0);
+  /// 小说侧（书架 / 阅读进度）变更计数。跨页面的 UI（如"我的"）监听它来刷新，
+  /// 避免引入全局状态管理依赖。
+  ///
+  /// 刻意按小说 / 短剧拆成两个计数：看短剧时每次存进度只 bump
+  /// [videoRevision]，否则"我的"页的小说书架、搜索页的收藏态等只关心小说的
+  /// UI 会被无关写入带着重读一遍本地数据。
+  final ValueNotifier<int> novelRevision = ValueNotifier<int>(0);
+
+  /// 短剧侧（收藏 / 观看进度）变更计数；拆开的原因见 [novelRevision]。
+  final ValueNotifier<int> videoRevision = ValueNotifier<int>(0);
 
   static const _shelfKey = 'shelf_books_v1';
   static const _progressKey = 'reading_progress_v1';
+
+  /// 阅读进度表的 LRU 上限：只保留最近更新过的 [progressLimit] 本。
+  ///
+  /// 进度表每次保存都全量 `jsonDecode` → 改一条 → `jsonEncode` 写回，长尾
+  /// 用户读了几百本后每次翻页都在主 isolate 重写几百 KB（P1-7）。这是文档
+  /// 允许的最小方案：表结构不变，只给长度封顶，不进 per-book key 分片 /
+  /// sqflite（那需要跨版本迁移，风险大于收益）。被淘汰的是最久没读的书，
+  /// 最近阅读入口由独立的 [_recentKey] 维护，不受影响。
+  static const int progressLimit = 200;
 
   /// 短剧收藏（对应小说书架）。
   static const _videoShelfKey = 'video_shelf_v1';
@@ -154,14 +166,14 @@ class ReadingStore {
     if (books.any((book) => book.id == item.id)) return;
     books.insert(0, item);
     await _writeShelf(books);
-    revision.value++;
+    novelRevision.value++;
   }
 
   Future<void> removeFromShelf(String bookId) async {
     final books = await shelf();
     books.removeWhere((book) => book.id == bookId);
     await _writeShelf(books);
-    revision.value++;
+    novelRevision.value++;
   }
 
   // ---------------------------------------------------------------------
@@ -185,14 +197,14 @@ class ReadingStore {
     if (items.any((entry) => entry.id == item.id)) return;
     items.insert(0, item);
     await _writeVideoShelf(items);
-    revision.value++;
+    videoRevision.value++;
   }
 
   Future<void> removeVideoFromShelf(String seriesId) async {
     final items = await videoShelf();
     items.removeWhere((item) => item.id == seriesId);
     await _writeVideoShelf(items);
-    revision.value++;
+    videoRevision.value++;
   }
 
   /// 记一次观看进度；顺带刷新最近观看（最多 [videoHistoryLimit] 条）。
@@ -222,12 +234,14 @@ class ReadingStore {
       history.removeRange(videoHistoryLimit, history.length);
     }
     await prefs.setString(_videoHistoryKey, jsonEncode(history));
-    revision.value++;
+    videoRevision.value++;
   }
 
   Future<VideoWatchProgress?> videoProgress(String seriesId) async {
     final prefs = await _prefs;
-    final raw = _decodeVideoProgress(prefs.getString(_videoProgressKey))[seriesId];
+    final raw = _decodeVideoProgress(
+      prefs.getString(_videoProgressKey),
+    )[seriesId];
     return raw == null ? null : VideoWatchProgress.fromJson(raw);
   }
 
@@ -239,11 +253,11 @@ class ReadingStore {
     var entries = _decodeVideoHistory(prefs.getString(_videoHistoryKey));
     if (entries.isEmpty) {
       // 老版本可能只有进度表：按更新时间补出最近几条。
-      final progress = _decodeVideoProgress(
-        prefs.getString(_videoProgressKey),
-      );
+      final progress = _decodeVideoProgress(prefs.getString(_videoProgressKey));
       final derived = progress.values.toList()
-        ..sort((a, b) => asInt(b['updatedAt']).compareTo(asInt(a['updatedAt'])));
+        ..sort(
+          (a, b) => asInt(b['updatedAt']).compareTo(asInt(a['updatedAt'])),
+        );
       entries = derived.take(limit).toList();
       if (entries.isNotEmpty) {
         await prefs.setString(_videoHistoryKey, jsonEncode(entries));
@@ -276,6 +290,7 @@ class ReadingStore {
         blockIndex: blockIndex,
         updatedAt: DateTime.now(),
       ).toJson();
+    _pruneProgress(map);
     await prefs.setString(_progressKey, jsonEncode(map));
 
     // 最近阅读单独一张表，只留最近 [recentLimit] 本。
@@ -288,7 +303,25 @@ class ReadingStore {
     await prefs.setString(_recentKey, jsonEncode(recent));
 
     await prefs.setString(_lastReadKey, bookId);
-    revision.value++;
+    novelRevision.value++;
+  }
+
+  /// 按 `updatedAt` 淘汰最旧的条目，把进度表收敛到 [progressLimit] 本。
+  ///
+  /// 只处理"本次写入后超限"的情况；同一毫秒写入的并列条目淘汰顺序不保证，
+  /// 但它们都同样"旧"，对续读位置没有影响。
+  void _pruneProgress(Map<String, Map<String, dynamic>> progress) {
+    if (progress.length <= progressLimit) return;
+    final excess = progress.length - progressLimit;
+    final byAge = progress.keys.toList()
+      ..sort(
+        (a, b) =>
+            asInt(progress[a]!['updatedAt'])
+                .compareTo(asInt(progress[b]!['updatedAt'])),
+      );
+    for (final bookId in byAge.take(excess)) {
+      progress.remove(bookId);
+    }
   }
 
   Future<ReadingProgress?> progress(String bookId) async {
@@ -310,12 +343,10 @@ class ReadingStore {
       // 老版本只有进度表：首次读取时按更新时间补出最近几条并落盘，避免升级后
       // "最近阅读" 空白直到用户再读一本。
       final progress = _decodeProgress(prefs.getString(_progressKey));
-      final derived =
-          progress.values.toList()
-            ..sort(
-              (a, b) =>
-                  asInt(b['updatedAt']).compareTo(asInt(a['updatedAt'])),
-            );
+      final derived = progress.values.toList()
+        ..sort(
+          (a, b) => asInt(b['updatedAt']).compareTo(asInt(a['updatedAt'])),
+        );
       entries = derived.take(limit).toList();
       if (entries.isNotEmpty) {
         await prefs.setString(_recentKey, jsonEncode(entries));
@@ -365,10 +396,7 @@ class ReadingStore {
     try {
       final list = jsonDecode(raw);
       if (list is! List) return [];
-      return list
-          .map(asMap)
-          .whereType<Map<String, dynamic>>()
-          .toList();
+      return list.map(asMap).whereType<Map<String, dynamic>>().toList();
     } catch (_) {
       return [];
     }
@@ -401,8 +429,7 @@ class ReadingStore {
       if (map == null) return {};
       return {
         for (final entry in map.entries)
-          if (asMap(entry.value) != null)
-            entry.key: asMap(entry.value)!,
+          if (asMap(entry.value) != null) entry.key: asMap(entry.value)!,
       };
     } catch (_) {
       return {};

@@ -48,7 +48,8 @@ class AppCache {
     Future<void> Function()? clearImageCache,
   }) : _supportDirectory = supportDirectory ?? getApplicationSupportDirectory,
        _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory,
-       _documentsDirectory = documentsDirectory ?? getApplicationDocumentsDirectory,
+       _documentsDirectory =
+           documentsDirectory ?? getApplicationDocumentsDirectory,
        _clearImageCache = clearImageCache ?? _emptyImageCache;
 
   /// App 运行时用的单例；测试里可以 new 一个注入临时目录。
@@ -90,7 +91,9 @@ class AppCache {
     }
 
     try {
-      await add(Directory('${(await _temporaryDirectory()).path}/$_imageCacheKey'));
+      await add(
+        Directory('${(await _temporaryDirectory()).path}/$_imageCacheKey'),
+      );
     } catch (_) {}
     try {
       final support = await _supportDirectory();
@@ -161,6 +164,13 @@ class AppCache {
     return freed > 0 ? freed : 0;
   }
 
+  /// 一批并发 stat 的文件数。
+  ///
+  /// 视频/封面目录可能有几百个文件，串行 `File.length()` 在设置页统计时是
+  /// 肉眼可见的卡顿（P2-8）。固定批次而不是一次 `Future.wait` 全部：既能把
+  /// 等待时间摊到并发上，又不会同时打开几百个文件描述符。
+  static const int _statBatchSize = 32;
+
   Future<int> _dirSize(Directory dir) async {
     return _fileSizes(await _filesIn(dir));
   }
@@ -173,16 +183,32 @@ class AppCache {
     return total;
   }
 
+  /// 统计一批文件的字节数，每 [_statBatchSize] 个并发一批。
+  ///
+  /// 统计口径不变：stat 失败（并发删除/无权限）按 0 跳过。
   Future<int> _fileSizes(List<File> files) async {
     var total = 0;
-    for (final file in files) {
-      try {
-        total += await file.length();
-      } catch (_) {
-        // 并发删除/无权限：跳过即可，统计不需要精确到最后一字节。
+    for (var start = 0; start < files.length; start += _statBatchSize) {
+      final end = start + _statBatchSize;
+      final batch = files.sublist(
+        start,
+        end < files.length ? end : files.length,
+      );
+      final sizes = await Future.wait(batch.map(_fileSize));
+      for (final size in sizes) {
+        total += size;
       }
     }
     return total;
+  }
+
+  Future<int> _fileSize(File file) async {
+    try {
+      return await file.length();
+    } catch (_) {
+      // 并发删除/无权限：跳过即可，统计不需要精确到最后一字节。
+      return 0;
+    }
   }
 
   Future<List<File>> _filesIn(Directory dir) async {

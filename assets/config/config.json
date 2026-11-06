@@ -1,23 +1,8 @@
 {
-  "algorithm_type": "8404",
+  "_comment": "端口唯一来源是这份 config.json（部署后 Flutter 从它读 port）；缺省值在 config.json / rust/src/config.rs / backend_transport.dart 三处对齐，改端口只改这里。",
   "port": 18931,
   "anti_crawler": {
     "enabled": false,
     "redirect_url": "https://www.example.com"
-  },
-  "player_bottom_style_config": {
-    "use_new_player_bottom_style": true,
-    "has_banner": false
-  },
-  "func_reverse_of_clear_screen_v691": {
-    "reverse": false
-  },
-  "landscape_func_config_v705": {
-    "enable_lock": true
-  },
-  "video_landscape_style_609": {
-    "enable": true
-  },
-  "pad_new_player_bottom_style": false,
-  "play_control_panel_style_v681": {}
+  }
 }

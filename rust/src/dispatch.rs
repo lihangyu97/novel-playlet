@@ -1,12 +1,14 @@
 //! The single request dispatcher shared by the FFI bridge and the loopback
 //! HTTP adapter. Port of `router.go` `Server.ServeHTTP`.
 //!
-//! Architecture decision and consequences:
-//! .agents/notes/implemented/architecture/2026-09-23-rust-native-core-migration.md
+//! Architecture decision and consequences: see `CONTRACTS.md` and
+//! `docs/architecture-review.md`.
 //!
 //! There is exactly one business implementation: Flutter reaches it over
-//! flutter_rust_bridge and external HTTP clients (Legado book sources, local
-//! tooling) reach it over the loopback adapter.
+//! flutter_rust_bridge and external HTTP clients (local tooling) reach it over
+//! the loopback adapter. The loopback surface is deliberately narrowed to the
+//! routes this app uses (see [`APP_APIS`]); the rest of the fqapp/Legado
+//! compatibility table stays reachable only for capability-carrying callers.
 
 use std::path::{Path, PathBuf};
 
@@ -89,8 +91,18 @@ impl Response {
         }
     }
 
+    /// Error envelope shared by the dispatcher and the loopback adapter:
+    /// `{"success":false,"error":...,"kind":...}` (P1-4). `kind` is a stable
+    /// string from [`ApiError::kind`]; the HTTP status stays as it was.
+    pub fn error(status: u16, message: impl Into<String>, kind: &str) -> Self {
+        Response::json(
+            status,
+            &json!({ "success": false, "error": message.into(), "kind": kind }),
+        )
+    }
+
     pub fn not_found(message: String) -> Self {
-        Response::json(404, &json!({ "success": false, "error": message }))
+        Response::error(404, message, ApiError::KIND_BAD_INPUT)
     }
 
     /// Materialises the body into bytes. Used by the FFI transport and by
@@ -171,21 +183,58 @@ pub fn request_body_limit(path: &str) -> Option<usize> {
 /// never turn into an upstream POST just because the path matched one of
 /// these. New device-bound write routes must be added here and to the
 /// contract test; the list lives apart from router.rs's route table on
-/// purpose — see
-/// .agents/notes/implemented/bug-fix/2026-09-28-loopback-write-methods.md.
+/// purpose.
 const DEVICE_BOUND_WRITE_APIS: &[&str] = &[
     "playlet_comment_add",
     "playlet_comment_digg",
     "playlet_comment_reply",
 ];
 
+/// The only read APIs the Flutter app actually calls (over FRB; the loopback
+/// adapter serves the same set to local tooling).
+///
+/// The core still carries the whole fqapp/Legado compatibility table, but
+/// exposing it over `127.0.0.1` is a free attack surface: on iOS the loopback
+/// address is shared by every app on the device, and a sibling app that spoofs
+/// `Host: 127.0.0.1:<port>` could otherwise read all 40+ compat routes. Only
+/// these seven APIs plus `/health` and `/src/*` stay capability-free.
+pub const APP_APIS: &[&str] = &[
+    "homepage_recommend",
+    "search",
+    "book_detail_legacy",
+    "directory",
+    "content",
+    "video_detail",
+    "video",
+];
+
+/// Whether `path` may be served to a loopback client that carries no
+/// capability (no `/_session/<token>` prefix, Bearer header or session cookie).
+///
+/// Everything else is treated as non-existent for such a caller: the
+/// dispatcher's 404 is indistinguishable from a path that was never routed.
+/// The FFI transport bypasses this gate entirely, so extra APIs consumed in
+/// process (tests, future features) do not need to be added here unless they
+/// must also be reachable from outside the app.
+pub fn is_public_loopback_path(path: &str) -> bool {
+    if path == "/health" || path == "/src" || path.starts_with("/src/") {
+        return true;
+    }
+    // The query string cannot change which API a path maps to (every matcher
+    // keys off the path segments), so an empty query is enough to classify it.
+    match router::match_rest_path(path, &Params::parse("")) {
+        Some(m) => APP_APIS.contains(&m.api),
+        None => false,
+    }
+}
+
 /// Whether `path` addresses a device-bound write route.
 ///
-/// Read routes answer any local client without the capability, so that external
-/// readers (Legado book sources, local tooling) can consume them. These routes
-/// stay behind the capability: they submit actions as this installation's
-/// device identity, and a sibling app on the same phone must not be able to
-/// post comments or danmaku on the user's behalf.
+/// These routes stay behind the capability even though most other routes are
+/// now capability-free: they submit actions as this installation's device
+/// identity, and a sibling app on the same phone must not be able to post
+/// comments or danmaku on the user's behalf. (Every other non-app route is
+/// refused with 404 by [`is_public_loopback_path`] before it is dispatched.)
 pub fn requires_capability(path: &str) -> bool {
     let params = Params::parse("");
     match router::match_rest_path(path, &params) {
@@ -237,21 +286,17 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
                 response.headers.push(("location".to_string(), url));
                 return response;
             }
-            return Response::json(
-                404,
-                &json!({ "success": false, "error": format!("not found: {path}") }),
-            );
+            return Response::error(404, format!("not found: {path}"), ApiError::KIND_BAD_INPUT);
         }
     };
     params = m.params;
 
-    // Method enforcement for device-bound writes: see DEVICE_BOUND_WRITE_APIS
-    // and the note it references.
+    // Method enforcement for device-bound writes: see DEVICE_BOUND_WRITE_APIS.
+    // The loopback adapter already refuses capability-free callers, but the FFI
+    // transport reaches this code without a method gate, so GET must not turn
+    // into an upstream POST there either.
     if DEVICE_BOUND_WRITE_APIS.contains(&m.api) && !req.method.eq_ignore_ascii_case("POST") {
-        let mut response = Response::json(
-            405,
-            &json!({ "success": false, "error": "method not allowed" }),
-        );
+        let mut response = Response::error(405, "method not allowed", ApiError::KIND_BAD_INPUT);
         response
             .headers
             .push(("allow".to_string(), "POST".to_string()));
@@ -274,9 +319,10 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
     }
 
     let Some(ep) = server.handler(m.api) else {
-        return Response::json(
+        return Response::error(
             404,
-            &json!({ "success": false, "error": format!("unsupported api type: {}", m.api) }),
+            format!("unsupported api type: {}", m.api),
+            ApiError::KIND_BAD_INPUT,
         );
     };
 
@@ -287,10 +333,7 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
     }
 
     match ep(ctx, &params).await {
-        Ok(mut data) => {
-            data = ctx.filters.apply(path, data);
-            Response::json(200, &data)
-        }
+        Ok(data) => Response::json(200, &data),
         Err(e) => {
             // Release builds have no console; this is the only trace a
             // business failure leaves in logcat (tag fqapi_core).
@@ -300,11 +343,13 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
     }
 }
 
+/// Turning a business failure into the response body.
+///
+/// The `kind` field is what lets the Dart layer pick a strategy (retry, swap
+/// device, show a message) without parsing the human-readable `error`; the
+/// HTTP status keeps its old meaning (400 for bad input, 500 otherwise).
 fn error_response(e: &ApiError) -> Response {
-    Response::json(
-        e.status(),
-        &json!({ "success": false, "error": e.message() }),
-    )
+    Response::error(e.status(), e.message(), e.kind())
 }
 
 /// Minimal extension table for the bundled Web UI assets.
