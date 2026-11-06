@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../widgets/states.dart';
+import '../../app/widgets/states.dart';
 import 'feed_footer.dart';
 import 'feed_section_title.dart';
 import 'feed_state.dart';

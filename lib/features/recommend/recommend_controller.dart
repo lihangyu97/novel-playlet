@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/api/api_client.dart';
-import '../../data/models/video_series.dart';
 import 'recommend_category.dart';
 import 'recommend_item.dart';
 import 'recommend_state.dart';
@@ -129,11 +128,9 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
     state = AsyncData(current.withLoadingMore(true));
     try {
       final offset = current.nextOffset!;
+      // 翻页请求的分类差异（含漫剧无游标时改走搜索兜底）都在 ContentSource 里。
       final page = current.isSearchMode
           ? await _fetchSearch(current.query, offset: offset)
-          : category.usesManjuSearch
-          // 漫剧流没有游标，翻页游标来自搜索兜底（见 [_fetchManjuFeed]）。
-          ? await _fetchManjuFeedPage(offset: offset)
           : await _fetchFeed(offset: offset, sessionId: current.sessionId);
       if (generation != _generation) return;
       final latest = state.value;
@@ -170,93 +167,26 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
     return fresh;
   }
 
-  /// 推荐流的一页。小说走书籍首页接口，短剧/漫剧共用视频类接口（按 tab_type）。
+  /// 推荐流的一页。分类 → 上游请求的差异（tab、漫剧兜底）全在
+  /// [RecommendCategory.source] 里。
   Future<RecommendState> _fetchFeed({int offset = 0, String? sessionId}) async {
-    if (category.isNovel) {
-      final page = await _api.recommend(offset: offset, sessionId: sessionId);
-      return FeedState<RecommendItem>.feed(
-        items: [for (final item in page.items) RecommendItem.novel(item)],
-        nextOffset: page.nextOffset,
-        sessionId: page.sessionId,
-      );
-    }
-    if (category.usesManjuSearch) return _fetchManjuFeed();
-    final page = await _api.videoFeed(
-      tabType: category.tabType,
+    final page = await category.source.feed(
+      _api,
       offset: offset,
       sessionId: sessionId,
     );
     return FeedState<RecommendItem>.feed(
-      items: [for (final item in page.items) RecommendItem.video(item)],
+      items: page.items,
       nextOffset: page.nextOffset,
       sessionId: page.sessionId,
     );
   }
 
-  /// 漫剧首屏：首页流（`tab_type=24`）只有一屏、没有游标，所以同时取一页
-  /// 搜索兜底并把它的游标当作下一页游标，列表一上来就能继续翻页。
-  ///
-  /// 两个请求都失败才报错；只挂一个（比如搜索兜底偶发失败）时先展示拿到的
-  /// 内容，滚动到底部的「重试」还能继续走兜底。
-  Future<RecommendState> _fetchManjuFeed() async {
-    VideoFeedPage? feed;
-    Object? feedError;
-    try {
-      feed = await _api.videoFeed(tabType: category.tabType);
-    } catch (error) {
-      feedError = error;
-    }
-    VideoFeedPage? search;
-    try {
-      search = await _fetchManjuPage(offset: 0);
-    } catch (_) {
-      // 兜底失败只意味着暂时没有更多，不影响已拿到的首页流。
-    }
-    if (feed == null && search == null) throw feedError!;
-
-    final items = <RecommendItem>[];
-    final seen = <String>{};
-    for (final series in [...?feed?.items, ...?search?.items]) {
-      if (!series.isValid || !seen.add(series.id)) continue;
-      items.add(RecommendItem.video(series));
-    }
-    return FeedState<RecommendItem>.feed(
-      items: items,
-      nextOffset: search?.nextOffset,
-    );
-  }
-
-  Future<VideoFeedPage> _fetchManjuPage({required int offset}) =>
-      _api.manjuSearch(category.fallbackQuery!, offset: offset);
-
-  /// 漫剧搜索兜底的一页，转换成列表状态供 [loadMore] 追加。
-  Future<RecommendState> _fetchManjuFeedPage({required int offset}) async {
-    final page = await _fetchManjuPage(offset: offset);
-    return FeedState<RecommendItem>.feed(
-      items: [for (final item in page.items) RecommendItem.video(item)],
-      nextOffset: page.nextOffset,
-    );
-  }
-
   Future<RecommendState> _fetchSearch(String query, {int offset = 0}) async {
-    if (category.isNovel) {
-      final page = await _api.search(query, offset: offset);
-      return FeedState<RecommendItem>.search(
-        query: query,
-        items: [for (final item in page.items) RecommendItem.novel(item)],
-        nextOffset: page.nextOffset,
-      );
-    }
-    final page = category.usesManjuSearch
-        ? await _api.manjuSearch(query, offset: offset)
-        : await _api.searchVideos(
-            query,
-            tabType: category.searchTabType,
-            offset: offset,
-          );
+    final page = await category.source.search(_api, query, offset: offset);
     return FeedState<RecommendItem>.search(
       query: query,
-      items: [for (final item in page.items) RecommendItem.video(item)],
+      items: page.items,
       nextOffset: page.nextOffset,
     );
   }

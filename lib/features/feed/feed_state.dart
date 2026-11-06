@@ -113,6 +113,30 @@ class FeedState<T> {
       sessionId: sessionId ?? this.sessionId,
     );
   }
+
+  /// 字段级相等：页面状态是否"内容没变"。列表按元素比较（元素模型的相等性
+  /// 由 T 自己决定，推荐页的 `RecommendItem` 目前是恒等比较）。
+  @override
+  bool operator ==(Object other) =>
+      other is FeedState<T> &&
+      other.mode == mode &&
+      other.query == query &&
+      listEquals(other.items, items) &&
+      other.nextOffset == nextOffset &&
+      other.sessionId == sessionId &&
+      other.loadingMore == loadingMore &&
+      other.loadMoreError == loadMoreError;
+
+  @override
+  int get hashCode => Object.hash(
+    mode,
+    query,
+    Object.hashAll(items),
+    nextOffset,
+    sessionId,
+    loadingMore,
+    loadMoreError,
+  );
 }
 
 /// 把异常变成可直接展示的一句话；[ApiException] 的 message 已经是人话。

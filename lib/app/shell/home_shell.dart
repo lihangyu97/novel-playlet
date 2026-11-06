@@ -11,7 +11,10 @@ import 'floating_navigation_bar.dart';
 /// 页面用 [PageView] 承载：点底栏时横向滑动切换（PiliPlus 同款），而不是
 /// 硬切；`NeverScrollableScrollPhysics` 关掉手势翻页，避免和推荐页里的
 /// 分类 tabs 左右滑动手势打架。页面子树用 keep-alive 保活，保留滚动位置与
-/// 已加载数据；后续加 tab 只需在 [destinations] 与 [PageView] 的 children 各加一项。
+/// 已加载数据。
+///
+/// 底栏项与页面由同一张 [_tabs] 表驱动（顺序即 tab 顺序）：加一个 tab 只改
+/// 这张表，不用再同步维护 destinations 和 PageView children 两份列表。
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -25,16 +28,25 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   static const _slideDuration = Duration(milliseconds: 280);
 
-  static const _destinations = <FloatingNavigationDestination>[
-    FloatingNavigationDestination(
-      icon: Icon(Icons.explore_outlined),
-      selectedIcon: Icon(Icons.explore),
-      label: '推荐',
+  /// 每个 tab = 一条底栏项 + 一个页面构造器（页面需要底栏高度留白）。
+  ///
+  /// 不是 const：页面构造器是闭包，但这个列表只在 State 里建一次。
+  static final _tabs = <_ShellTab>[
+    _ShellTab(
+      destination: const FloatingNavigationDestination(
+        icon: Icon(Icons.explore_outlined),
+        selectedIcon: Icon(Icons.explore),
+        label: '推荐',
+      ),
+      builder: (bottomInset) => RecommendPage(bottomInset: bottomInset),
     ),
-    FloatingNavigationDestination(
-      icon: Icon(Icons.person_outline),
-      selectedIcon: Icon(Icons.person),
-      label: '我的',
+    _ShellTab(
+      destination: const FloatingNavigationDestination(
+        icon: Icon(Icons.person_outline),
+        selectedIcon: Icon(Icons.person),
+        label: '我的',
+      ),
+      builder: (bottomInset) => MinePage(bottomInset: bottomInset),
     ),
   ];
 
@@ -70,8 +82,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         controller: _pageController,
         physics: const NeverScrollableScrollPhysics(),
         children: [
-          _KeepAlivePage(child: RecommendPage(bottomInset: bottomInset)),
-          _KeepAlivePage(child: MinePage(bottomInset: bottomInset)),
+          for (final tab in _tabs)
+            _KeepAlivePage(child: tab.builder(bottomInset)),
         ],
       ),
       bottomNavigationBar: Center(
@@ -92,11 +104,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                   : scheme.onSurfaceVariant,
             );
           }),
-          destinations: _destinations,
+          destinations: [for (final tab in _tabs) tab.destination],
         ),
       ),
     );
   }
+}
+
+/// 一个底部 tab：底栏项 + 页面构造器。
+class _ShellTab {
+  const _ShellTab({required this.destination, required this.builder});
+
+  final FloatingNavigationDestination destination;
+  final Widget Function(double bottomInset) builder;
 }
 
 /// 让 [PageView] 离屏的页面保持存活（滚动位置、搜索框内容、已加载列表都

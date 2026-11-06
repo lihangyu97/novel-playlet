@@ -161,9 +161,32 @@ fn refusal(headers: &HeaderMap, port: u16, mode: ListenMode) -> Option<&'static 
     None
 }
 
+/// Maps an infrastructure refusal (the adapter answers before the dispatcher
+/// ever runs) to the same stable `kind` names the dispatcher emits (P1-4).
+///
+/// The status code is unchanged; only the JSON body gains the field:
+/// - 413 is the only local size refusal -> `too_large`;
+/// - 504 is the request deadline -> `timeout`;
+/// - 499 (client closed the connection) matches no caller-input class, so it
+///   stays `unknown`;
+/// - 400/401/403/404/405 all mean "this request is not acceptable" ->
+///   `bad_input`.
+fn refusal_kind(status: StatusCode) -> &'static str {
+    match status.as_u16() {
+        413 => crate::error::ApiError::KIND_TOO_LARGE,
+        504 => crate::error::ApiError::KIND_TIMEOUT,
+        499 => crate::error::ApiError::KIND_UNKNOWN,
+        _ => crate::error::ApiError::KIND_BAD_INPUT,
+    }
+}
+
 fn refuse(status: StatusCode, message: &str) -> Response {
-    let body =
-        serde_json::to_vec(&json!({ "success": false, "error": message })).unwrap_or_default();
+    let body = serde_json::to_vec(&json!({
+        "success": false,
+        "error": message,
+        "kind": refusal_kind(status),
+    }))
+    .unwrap_or_default();
     Response::builder()
         .status(status)
         .header(
@@ -445,5 +468,30 @@ mod tests {
             discard_request_body(body).await,
             Err(StatusCode::PAYLOAD_TOO_LARGE)
         );
+    }
+
+    /// P1-4: adapter-level refusals use the same JSON shape as dispatcher
+    /// errors, so a client parses one envelope for both paths.
+    #[tokio::test]
+    async fn infrastructure_refusals_carry_a_kind() {
+        let cases = [
+            (StatusCode::FORBIDDEN, "bad_input"),
+            (StatusCode::UNAUTHORIZED, "bad_input"),
+            (StatusCode::NOT_FOUND, "bad_input"),
+            (StatusCode::PAYLOAD_TOO_LARGE, "too_large"),
+            (StatusCode::BAD_REQUEST, "bad_input"),
+            (StatusCode::GATEWAY_TIMEOUT, "timeout"),
+            (StatusCode::from_u16(499).unwrap(), "unknown"),
+        ];
+        for (status, kind) in cases {
+            let bytes = axum::body::to_bytes(refuse(status, "probe").into_body(), 1024)
+                .await
+                .expect("refusal body");
+            let value: serde_json::Value =
+                serde_json::from_slice(&bytes).expect("refusal body is JSON");
+            assert_eq!(value["success"], false, "status {status}");
+            assert_eq!(value["error"], "probe", "status {status}");
+            assert_eq!(value["kind"], kind, "status {status}");
+        }
     }
 }

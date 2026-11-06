@@ -115,6 +115,15 @@ class ReadingStore {
   static const _shelfKey = 'shelf_books_v1';
   static const _progressKey = 'reading_progress_v1';
 
+  /// 阅读进度表的 LRU 上限：只保留最近更新过的 [progressLimit] 本。
+  ///
+  /// 进度表每次保存都全量 `jsonDecode` → 改一条 → `jsonEncode` 写回，长尾
+  /// 用户读了几百本后每次翻页都在主 isolate 重写几百 KB（P1-7）。这是文档
+  /// 允许的最小方案：表结构不变，只给长度封顶，不进 per-book key 分片 /
+  /// sqflite（那需要跨版本迁移，风险大于收益）。被淘汰的是最久没读的书，
+  /// 最近阅读入口由独立的 [_recentKey] 维护，不受影响。
+  static const int progressLimit = 200;
+
   /// 短剧收藏（对应小说书架）。
   static const _videoShelfKey = 'video_shelf_v1';
 
@@ -281,6 +290,7 @@ class ReadingStore {
         blockIndex: blockIndex,
         updatedAt: DateTime.now(),
       ).toJson();
+    _pruneProgress(map);
     await prefs.setString(_progressKey, jsonEncode(map));
 
     // 最近阅读单独一张表，只留最近 [recentLimit] 本。
@@ -294,6 +304,24 @@ class ReadingStore {
 
     await prefs.setString(_lastReadKey, bookId);
     novelRevision.value++;
+  }
+
+  /// 按 `updatedAt` 淘汰最旧的条目，把进度表收敛到 [progressLimit] 本。
+  ///
+  /// 只处理"本次写入后超限"的情况；同一毫秒写入的并列条目淘汰顺序不保证，
+  /// 但它们都同样"旧"，对续读位置没有影响。
+  void _pruneProgress(Map<String, Map<String, dynamic>> progress) {
+    if (progress.length <= progressLimit) return;
+    final excess = progress.length - progressLimit;
+    final byAge = progress.keys.toList()
+      ..sort(
+        (a, b) =>
+            asInt(progress[a]!['updatedAt'])
+                .compareTo(asInt(progress[b]!['updatedAt'])),
+      );
+    for (final bookId in byAge.take(excess)) {
+      progress.remove(bookId);
+    }
   }
 
   Future<ReadingProgress?> progress(String bookId) async {

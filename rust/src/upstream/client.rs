@@ -41,6 +41,22 @@ fn parse_retry_after(value: Option<&str>) -> Option<Duration> {
     Some(Duration::from_secs(secs).min(RETRY_AFTER_CAP))
 }
 
+/// Why an attempt was classified as transient. Kept next to the retry hint so
+/// the API error envelope can report a stable `kind` (P1-4) without parsing
+/// message strings; it does not influence the retry policy itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransientKind {
+    /// Connection-level transport failure (not a device fault).
+    #[default]
+    Network,
+    /// A transport or request deadline expired.
+    Timeout,
+    /// Upstream answered 429.
+    RateLimited,
+    /// Upstream answered 5xx.
+    Upstream5xx,
+}
+
 #[derive(Debug, Clone)]
 pub enum ClientError {
     /// A definite auth rejection: triggers device replacement.
@@ -50,7 +66,10 @@ pub enum ClientError {
     Transient {
         message: String,
         retry_after: Option<Duration>,
+        kind: TransientKind,
     },
+    /// A local size bound (response body or request body) was exceeded.
+    TooLarge(String),
     Http(String),
     Other(String),
 }
@@ -66,6 +85,7 @@ impl std::fmt::Display for ClientError {
         match self {
             ClientError::DeviceFailed(m) => write!(f, "device failed: {m}"),
             ClientError::Transient { message, .. } => f.write_str(message),
+            ClientError::TooLarge(m) => f.write_str(m),
             ClientError::Http(m) => f.write_str(m),
             ClientError::Other(m) => f.write_str(m),
         }
@@ -228,11 +248,19 @@ impl UpstreamClient {
                 TransportError::Network(m) => ClientError::Transient {
                     message: m,
                     retry_after: None,
+                    kind: TransientKind::Network,
+                },
+                // Same retry treatment; the kind only tells the envelope that
+                // this attempt ran out of time.
+                TransportError::Timeout(m) => ClientError::Transient {
+                    message: m,
+                    retry_after: None,
+                    kind: TransientKind::Timeout,
                 },
                 // A local size limit is not a device fault: retiring the
                 // device here would rotate identities over a response that was
                 // merely too large.
-                TransportError::TooLarge(m) => ClientError::Other(m),
+                TransportError::TooLarge(m) => ClientError::TooLarge(m),
             })?;
 
         if resp.status != 200 {
@@ -240,9 +268,17 @@ impl UpstreamClient {
                 return Err(ClientError::DeviceFailed(format!("HTTP {}", resp.status)));
             }
             if is_retryable_status(resp.status) {
+                // 429 and 5xx are both transient, but they mean different
+                // things upstream: overloading vs. a server fault.
+                let kind = if resp.status == 429 {
+                    TransientKind::RateLimited
+                } else {
+                    TransientKind::Upstream5xx
+                };
                 return Err(ClientError::Transient {
                     message: format!("HTTP {}", resp.status),
                     retry_after: parse_retry_after(resp.header("retry-after")),
+                    kind,
                 });
             }
             return Err(ClientError::Http(format!("HTTP {}", resp.status)));
@@ -319,14 +355,14 @@ impl UpstreamClient {
                         self.pool
                             .get()
                             .await
-                            .map_err(|e| ClientError::Other(format!("get device: {e}")))?
+                            .map_err(|e| ClientError::DeviceFailed(format!("get device: {e}")))?
                     }
                 },
                 None => self
                     .pool
                     .get()
                     .await
-                    .map_err(|e| ClientError::Other(format!("get device: {e}")))?,
+                    .map_err(|e| ClientError::DeviceFailed(format!("get device: {e}")))?,
             };
 
             let mut attempt = req.clone();
@@ -355,11 +391,20 @@ impl UpstreamClient {
                 }
             }
         }
-        Err(ClientError::Other(format!(
-            "device request failed after {} retries: {}",
-            self.max_retries,
-            last_err.map(|e| e.to_string()).unwrap_or_default()
-        )))
+        // Only device-class failures can reach this point (everything else
+        // returns from inside the loop), so keep that class instead of
+        // flattening it into an unclassified `Other`.
+        Err(match last_err {
+            Some(err) if err.is_device_failed() => ClientError::DeviceFailed(format!(
+                "device request failed after {} retries: {err}",
+                self.max_retries
+            )),
+            last_err => ClientError::Other(format!(
+                "device request failed after {} retries: {}",
+                self.max_retries,
+                last_err.map(|e| e.to_string()).unwrap_or_default()
+            )),
+        })
     }
 }
 

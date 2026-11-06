@@ -30,7 +30,9 @@ class BackendResponse {
 class BackendTransport {
   BackendTransport({this.port = defaultPort});
 
-  /// 与 `assets/config/config.json` 的 port 保持一致。
+  /// 端口唯一来源是 `assets/config/config.json`（部署后由 BackendService 读它）；
+  /// 这里的缺省值与 config.json、`rust/src/config.rs` 三处对齐，改端口只改
+  /// config.json。
   static const defaultPort = 18931;
 
   /// 单次请求默认超时：后端在本机进程内，正常远小于此值；挂死不能永久转圈。

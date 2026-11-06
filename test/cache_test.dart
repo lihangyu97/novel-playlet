@@ -111,6 +111,39 @@ void main() {
     );
   });
 
+  test('统计超过一批的文件时按固定批次并发 stat，总数不变', () async {
+    final root = Directory.systemTemp.createTempSync('app_cache_batch_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+
+    final support = Directory('${root.path}/support')..createSync();
+    final tmp = Directory('${root.path}/tmp')..createSync();
+    final docs = Directory('${root.path}/docs')..createSync();
+    final chapterDir = Directory('${support.path}/reader_chapters')
+      ..createSync(recursive: true);
+
+    // 97 个文件跨 4 个 stat 批次（32/32/32/1），大小按序号递增。
+    var expected = 0;
+    for (var i = 0; i < 97; i++) {
+      final size = i + 1;
+      File('${chapterDir.path}/c$i.json')
+          .writeAsBytesSync(List.filled(size, 0));
+      expected += size;
+    }
+
+    final cache = AppCache(
+      supportDirectory: () async => support,
+      temporaryDirectory: () async => tmp,
+      documentsDirectory: () async => docs,
+      clearImageCache: () async {},
+    );
+
+    expect(
+      (await cache.measure()).chapter,
+      expected,
+      reason: '并发分批只改等待方式，统计口径（字节总数）必须一致',
+    );
+  });
+
   test('formatBytes 展示口径', () {
     expect(formatBytes(0), '0 B');
     expect(formatBytes(1023), '1023 B');

@@ -1,10 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/book_detail.dart';
 import 'package:novel_playlet/data/models/chapter.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
+import 'package:novel_playlet/data/models/feed_page.dart';
 import 'package:novel_playlet/data/models/json_utils.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
+import 'package:novel_playlet/data/parsers/novel_parsers.dart';
 
 /// 数据层解析测试：只用 JSON，不联网、不启内核。
 ///
@@ -286,6 +287,109 @@ void main() {
     });
   });
 
+  group('模型相等性', () {
+    test('NovelItem 按所有参与展示的字段比较', () {
+      const a = NovelItem(
+        id: 'b1',
+        title: '书',
+        cover: 'c.jpg',
+        author: '作者',
+        intro: '简介',
+        category: '玄幻',
+        wordCount: 100,
+        score: '9.0',
+        lastChapter: '第一章',
+      );
+      const same = NovelItem(
+        id: 'b1',
+        title: '书',
+        cover: 'c.jpg',
+        author: '作者',
+        intro: '简介',
+        category: '玄幻',
+        wordCount: 100,
+        score: '9.0',
+        lastChapter: '第一章',
+      );
+      expect(a, same);
+      expect(a.hashCode, same.hashCode);
+      // 同一本书但封面晚到：全字段比较应该发现它变了（不是只比 id）。
+      expect(a, isNot(const NovelItem(id: 'b1', title: '书')));
+    });
+
+    test('FeedPage 按 items / 游标 / session 比较', () {
+      const page = FeedPage<NovelItem>(
+        items: [NovelItem(id: 'b1', title: '书')],
+        nextOffset: 10,
+        sessionId: 's1',
+      );
+      expect(
+        page,
+        const FeedPage<NovelItem>(
+          items: [NovelItem(id: 'b1', title: '书')],
+          nextOffset: 10,
+          sessionId: 's1',
+        ),
+      );
+      expect(
+        page,
+        isNot(
+          const FeedPage<NovelItem>(
+            items: [NovelItem(id: 'b1', title: '书')],
+            nextOffset: 20,
+            sessionId: 's1',
+          ),
+        ),
+      );
+    });
+  });
+
+  group('ApiException.kind', () {
+    test('错误信封的 kind 透出稳定语义，缺失/未知算 unknown', () {
+      expect(
+        () => unwrapEnvelope({
+          'success': false,
+          'error': '设备异常',
+          'kind': 'device_failed',
+        }),
+        throwsA(
+          isA<ApiException>()
+              .having((error) => error.kind, 'kind', ApiErrorKind.deviceFailed)
+              .having((error) => error.message, 'message', '设备异常'),
+        ),
+      );
+      expect(
+        () =>
+            unwrapEnvelope({'success': false, 'error': 'x', 'kind': 'future'}),
+        throwsA(
+          isA<ApiException>().having(
+            (error) => error.kind,
+            'kind',
+            ApiErrorKind.unknown,
+          ),
+        ),
+      );
+      // 老上游没有 kind：仍然 unknown，message 文案不变。
+      expect(
+        () => unwrapEnvelope({'code': 1, 'message': '老上游'}),
+        throwsA(
+          isA<ApiException>()
+              .having((error) => error.kind, 'kind', ApiErrorKind.unknown)
+              .having((error) => error.message, 'message', '老上游'),
+        ),
+      );
+    });
+
+    test('kind wire 值全部可解析到对应枚举', () {
+      for (final kind in ApiErrorKind.values) {
+        expect(ApiErrorKind.fromWire(kind.wireName), kind);
+      }
+      expect(ApiErrorKind.fromWire(null), ApiErrorKind.unknown);
+      expect(ApiErrorKind.fromWire(''), ApiErrorKind.unknown);
+      expect(ApiErrorKind.unknown.wireName, 'unknown');
+    });
+  });
+
   group('信封', () {
     test('业务错误抛 ApiException 并带 message', () {
       expect(
@@ -301,9 +405,9 @@ void main() {
     });
 
     test('返回下一页游标递增才算有下一页', () {
-      final page = NovelFeedPage(items: const [], nextOffset: 10);
+      const page = FeedPage<NovelItem>(items: [], nextOffset: 10);
       expect(page.hasMore, isTrue);
-      expect(const NovelFeedPage(items: []).hasMore, isFalse);
+      expect(const FeedPage<NovelItem>(items: []).hasMore, isFalse);
       expect(Chapter.fromRaw({'item_id': 'x'}).id, 'x');
     });
   });

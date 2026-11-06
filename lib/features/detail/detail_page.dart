@@ -18,7 +18,7 @@ import 'detail_providers.dart';
 /// 小说详情页：Hero 信息 + 简介/标签 + 目录 + 底部「开始阅读 / 加入书架」。
 ///
 /// 页面只负责布局与导航；数据、进度、书架状态都在 detail_providers.dart。
-/// 构造函数与 router.dart 里的 `DetailArgs` 对应，[preview] 用来在接口返回
+/// 构造函数与 router.dart 里的 [DetailRoute] 对应，[preview] 用来在接口返回
 /// 前先画封面/标题，避免白屏。
 class DetailPage extends ConsumerStatefulWidget {
   const DetailPage({
@@ -31,7 +31,7 @@ class DetailPage extends ConsumerStatefulWidget {
   final String bookId;
   final NovelItem? preview;
 
-  /// 封面 Hero tag（列表点进来时由 [DetailArgs] 带下来）；null = 不飞入。
+  /// 封面 Hero tag（列表点进来时由 [DetailRoute] 带下来）；null = 不飞入。
   final String? heroTag;
 
   @override
@@ -264,15 +264,16 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     int? blockIndex,
   }) async {
     final detail = ref.read(detailBundleProvider(widget.bookId)).value?.detail;
-    await Navigator.of(context).pushNamed(
-      AppRoutes.reader,
-      arguments: ReaderArgs(
-        bookId: widget.bookId,
-        bookTitle: detail?.title ?? widget.preview?.title ?? '',
-        cover: detail?.cover ?? widget.preview?.cover ?? '',
-        chapterId: chapterId,
-        chapterIndex: chapterIndex,
-        blockIndex: blockIndex,
+    await context.pushAppRoute(
+      ReaderRoute(
+        ReaderArgs(
+          bookId: widget.bookId,
+          bookTitle: detail?.title ?? widget.preview?.title ?? '',
+          cover: detail?.cover ?? widget.preview?.cover ?? '',
+          chapterId: chapterId,
+          chapterIndex: chapterIndex,
+          blockIndex: blockIndex,
+        ),
       ),
     );
     if (!context.mounted) return;

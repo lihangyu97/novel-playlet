@@ -76,17 +76,34 @@ class NovelItem {
     author: asString(json['author']),
     category: asString(json['category']),
   );
-}
 
-/// 一页推荐/搜索结果。
-class NovelFeedPage {
-  const NovelFeedPage({required this.items, this.nextOffset, this.sessionId});
+  /// 按"所有参与展示的字段"比较，不是只比 id：
+  /// 同一本书在推荐区块和搜索 tab 里的封面 / 简介 / 字数可能一处缺、一处全，
+  /// 按全字段比较才能让 diff / select 发现内容更新；需要按 id 去重的地方
+  /// （列表追加、收藏）由调用方显式用 [id]。
+  @override
+  bool operator ==(Object other) =>
+      other is NovelItem &&
+      other.id == id &&
+      other.title == title &&
+      other.cover == cover &&
+      other.author == author &&
+      other.intro == intro &&
+      other.category == category &&
+      other.wordCount == wordCount &&
+      other.score == score &&
+      other.lastChapter == lastChapter;
 
-  final List<NovelItem> items;
-
-  /// 下一页游标。上游用它而不是页码；没有则视为到底。
-  final int? nextOffset;
-  final String? sessionId;
-
-  bool get hasMore => nextOffset != null && nextOffset! > 0;
+  @override
+  int get hashCode => Object.hash(
+    id,
+    title,
+    cover,
+    author,
+    intro,
+    category,
+    wordCount,
+    score,
+    lastChapter,
+  );
 }

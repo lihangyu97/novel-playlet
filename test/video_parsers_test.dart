@@ -1,8 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/features/feed/feed_state.dart';
 import 'package:novel_playlet/data/models/video_detail.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
-import 'package:novel_playlet/app/feed/feed_state.dart';
+import 'package:novel_playlet/data/parsers/video_parsers.dart';
 
 /// 视频域解析测试：只用 JSON，不联网、不启内核。
 ///
@@ -398,6 +399,54 @@ void main() {
       );
       expect(next.items.map((item) => item.id), ['s1', 's2']);
       expect(next.hasMore, isFalse);
+    });
+
+    test('FeedState 字段级相等：加载态/错误态变化算不同', () {
+      final state = FeedState<VideoSeries>.feed(
+        items: const [VideoSeries(id: 's1', title: 'A')],
+        nextOffset: 10,
+      );
+      expect(
+        state,
+        FeedState<VideoSeries>.feed(
+          items: const [VideoSeries(id: 's1', title: 'A')],
+          nextOffset: 10,
+        ),
+      );
+      expect(
+        state,
+        isNot(
+          FeedState<VideoSeries>.feed(
+            items: const [VideoSeries(id: 's1', title: 'A')],
+            nextOffset: 10,
+          ).withLoadingMore(true),
+        ),
+      );
+    });
+  });
+
+  group('模型相等性', () {
+    test('VideoSeries 按所有参与展示的字段比较（不是只比 id）', () {
+      const a = VideoSeries(
+        id: 'v1',
+        title: '剧A',
+        cover: 'a.jpg',
+        intro: '简介',
+        episodeCount: 12,
+        isManju: true,
+      );
+      expect(
+        a,
+        const VideoSeries(
+          id: 'v1',
+          title: '剧A',
+          cover: 'a.jpg',
+          intro: '简介',
+          episodeCount: 12,
+          isManju: true,
+        ),
+      );
+      expect(a, isNot(const VideoSeries(id: 'v1', title: '剧A')));
     });
   });
 }

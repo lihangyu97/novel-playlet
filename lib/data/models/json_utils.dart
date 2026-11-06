@@ -72,18 +72,54 @@ Map<String, dynamic> unwrapEnvelope(Map<String, dynamic> payload) {
       code != null && asInt(code, -1) != 0 && asInt(code, -1) != 200;
   if (explicitFailure || badCode) {
     final message = firstString(payload, ['message', 'msg', 'error', 'errmsg']);
-    throw ApiException(message.isEmpty ? '请求失败（code=$code）' : message);
+    throw ApiException(
+      message.isEmpty ? '请求失败（code=$code）' : message,
+      kind: ApiErrorKind.fromWire(payload['kind']),
+    );
   }
   final data = payload['data'];
   return asMap(data) ?? payload;
 }
 
+/// 业务错误的语义分类，与 Rust 核的 `kind` wire 值一一对应。
+///
+/// 契约（与内核并行开发）：错误 JSON 为
+/// `{"success":false,"error":"...","kind":"<wire 值>"}`；缺失或不认识的
+/// `kind` 一律算 [unknown]。这里只暴露语义，重试/退避策略仍在 Rust 侧，
+/// Dart 不新增重试逻辑。
+enum ApiErrorKind {
+  badInput('bad_input'),
+  deviceFailed('device_failed'),
+  rateLimited('rate_limited'),
+  upstream5xx('upstream_5xx'),
+  timeout('timeout'),
+  tooLarge('too_large'),
+  unknown('unknown');
+
+  const ApiErrorKind(this.wireName);
+
+  /// 内核 JSON 里的 `kind` 取值。
+  final String wireName;
+
+  /// 从 `kind` 字段解析；null / 空 / 未知值都退回 [unknown]。
+  static ApiErrorKind fromWire(Object? value) {
+    final wire = asString(value).trim();
+    for (final kind in values) {
+      if (kind.wireName == wire) return kind;
+    }
+    return unknown;
+  }
+}
+
 /// 业务/网络错误，页面只负责展示 [message]。
 class ApiException implements Exception {
-  ApiException(this.message, {this.code});
+  ApiException(this.message, {this.code, this.kind = ApiErrorKind.unknown});
 
   final String message;
   final String? code;
+
+  /// 错误语义分类；本地构造、HTTP 非 200 无 JSON、格式异常等一律 unknown。
+  final ApiErrorKind kind;
 
   @override
   String toString() => 'ApiException($message)';

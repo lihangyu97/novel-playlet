@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../widgets/novel_cover.dart';
+import '../../app/widgets/novel_cover.dart';
 
 /// 三列卡片的尺寸。
 ///

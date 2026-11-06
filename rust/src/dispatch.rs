@@ -91,8 +91,18 @@ impl Response {
         }
     }
 
+    /// Error envelope shared by the dispatcher and the loopback adapter:
+    /// `{"success":false,"error":...,"kind":...}` (P1-4). `kind` is a stable
+    /// string from [`ApiError::kind`]; the HTTP status stays as it was.
+    pub fn error(status: u16, message: impl Into<String>, kind: &str) -> Self {
+        Response::json(
+            status,
+            &json!({ "success": false, "error": message.into(), "kind": kind }),
+        )
+    }
+
     pub fn not_found(message: String) -> Self {
-        Response::json(404, &json!({ "success": false, "error": message }))
+        Response::error(404, message, ApiError::KIND_BAD_INPUT)
     }
 
     /// Materialises the body into bytes. Used by the FFI transport and by
@@ -276,10 +286,7 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
                 response.headers.push(("location".to_string(), url));
                 return response;
             }
-            return Response::json(
-                404,
-                &json!({ "success": false, "error": format!("not found: {path}") }),
-            );
+            return Response::error(404, format!("not found: {path}"), ApiError::KIND_BAD_INPUT);
         }
     };
     params = m.params;
@@ -289,10 +296,7 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
     // transport reaches this code without a method gate, so GET must not turn
     // into an upstream POST there either.
     if DEVICE_BOUND_WRITE_APIS.contains(&m.api) && !req.method.eq_ignore_ascii_case("POST") {
-        let mut response = Response::json(
-            405,
-            &json!({ "success": false, "error": "method not allowed" }),
-        );
+        let mut response = Response::error(405, "method not allowed", ApiError::KIND_BAD_INPUT);
         response
             .headers
             .push(("allow".to_string(), "POST".to_string()));
@@ -315,9 +319,10 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
     }
 
     let Some(ep) = server.handler(m.api) else {
-        return Response::json(
+        return Response::error(
             404,
-            &json!({ "success": false, "error": format!("unsupported api type: {}", m.api) }),
+            format!("unsupported api type: {}", m.api),
+            ApiError::KIND_BAD_INPUT,
         );
     };
 
@@ -338,11 +343,13 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
     }
 }
 
+/// Turning a business failure into the response body.
+///
+/// The `kind` field is what lets the Dart layer pick a strategy (retry, swap
+/// device, show a message) without parsing the human-readable `error`; the
+/// HTTP status keeps its old meaning (400 for bad input, 500 otherwise).
 fn error_response(e: &ApiError) -> Response {
-    Response::json(
-        e.status(),
-        &json!({ "success": false, "error": e.message() }),
-    )
+    Response::error(e.status(), e.message(), e.kind())
 }
 
 /// Minimal extension table for the bundled Web UI assets.

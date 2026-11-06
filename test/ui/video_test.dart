@@ -1,0 +1,321 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
+import 'package:novel_playlet/core/storage/reading_store.dart';
+import 'package:novel_playlet/data/models/video_series.dart';
+import 'package:novel_playlet/features/recommend/recommend_page.dart';
+import 'package:novel_playlet/features/video/video_detail_page.dart';
+import 'package:novel_playlet/features/video/widgets/episode_picker.dart';
+import 'package:novel_playlet/features/video/widgets/video_card.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'preview_harness.dart';
+
+/// 短剧详情页预览：Hero、收藏/播放栏、观看进度与选集分组。
+///
+/// 更新基线：`flutter test --update-goldens test/ui/video_test.dart`。
+void main() {
+  setUpAll(() async {
+    await loadPreviewFont();
+  });
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  group('封面 Hero 飞入', () {
+    testWidgets('短剧列表点进详情：封面飞入并在返回时飞回', (tester) async {
+      final fake = FakePreviewTransport()
+        ..videoCoverUrl = 'https://example.com/drama-1.jpg';
+      await pumpPreview(tester, const RecommendPage(), transport: fake);
+      await tester.tap(find.text('短剧'));
+      await tester.pumpAndSettle();
+      final card = tester.widget<VideoCard>(find.byType(VideoCard).first);
+      final tag = card.heroTag!;
+      expect(tag, startsWith('cover-video-recommend-drama-'));
+
+      await tester.tap(find.byType(VideoCard).first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(find.byType(VideoDetailPage), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('cover-hero-flight')),
+        findsOneWidget,
+        reason: '进详情时应在飞行',
+      );
+      final detailHero = tester.widget<Hero>(
+        find
+            .descendant(
+              of: find.byType(VideoDetailPage),
+              matching: find.byType(Hero),
+            )
+            .first,
+      );
+      expect(detailHero.tag, tag, reason: '短剧详情封面必须用同一个 tag 接住 Hero');
+
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.byType(VideoDetailPage), findsOneWidget);
+
+      Navigator.of(tester.element(find.byType(VideoDetailPage))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(
+        find.byKey(const ValueKey('cover-hero-flight')),
+        findsOneWidget,
+        reason: '从短剧详情返回时应执行反向封面飞行',
+      );
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.byType(VideoDetailPage), findsNothing);
+    });
+
+    testWidgets('短剧详情-加载中也先画封面（Hero 目标从第一帧就存在）', (tester) async {
+      final fake = FakePreviewTransport()
+        ..responseDelay = const Duration(milliseconds: 80);
+      const preview = VideoSeries(
+        id: 'v1',
+        title: '测试短剧',
+        cover: 'https://example.com/list-drama.jpg',
+        episodeCount: 40,
+      );
+      await pumpPreview(
+        tester,
+        const VideoDetailPage(
+          seriesId: 'v1',
+          preview: preview,
+          heroTag: 'cover-video-test-v1',
+        ),
+        transport: fake,
+        settle: false,
+      );
+      await tester.pump(const Duration(milliseconds: 30));
+      // 背景/Hero 目标从第一帧就在；文字信息等接口回来再淡入，不再转圈。
+      expect(find.byType(Hero), findsOneWidget);
+      expect(find.text('测试短剧'), findsNothing, reason: '文字信息等数据回来再淡入');
+      expect(
+        find.byType(CircularProgressIndicator),
+        findsNothing,
+        reason: '详情加载不再显示转圈 loading',
+      );
+      final heightBefore = tester
+          .getSize(find.byType(DetailCoverBackdrop))
+          .height;
+
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.text('详情标题'), findsOneWidget);
+      expect(find.text('选集'), findsOneWidget);
+      expect(
+        tester.getSize(find.byType(DetailCoverBackdrop)).height,
+        heightBefore,
+        reason: '接口回来后背景高度不能变',
+      );
+    });
+
+    testWidgets('短剧详情-接口回来后不替换列表封面（不闪）', (tester) async {
+      const preview = VideoSeries(
+        id: 'v1',
+        title: '测试短剧',
+        cover: 'https://example.com/list-drama.jpg',
+        episodeCount: 40,
+      );
+      final fake = FakePreviewTransport()
+        ..detailSeriesCoverUrl = 'https://example.com/detail-drama.jpg';
+      await pumpPreview(
+        tester,
+        const VideoDetailPage(seriesId: 'v1', preview: preview),
+        transport: fake,
+      );
+      final backdrop = tester.widget<DetailCoverBackdrop>(
+        find.byType(DetailCoverBackdrop),
+      );
+      expect(backdrop.cover, preview.cover, reason: '短剧详情接口回来不应换图');
+    });
+
+    testWidgets('短剧详情-分类只在简介标签里出现一次', (tester) async {
+      const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
+      await pumpPreview(
+        tester,
+        const VideoDetailPage(seriesId: 'v1', preview: preview),
+        transport: FakePreviewTransport(),
+      );
+      expect(find.text('全 40 集 · 1.2 万 次播放'), findsOneWidget);
+      expect(find.text('全 40 集'), findsNothing, reason: '集数和播放量应在同一行');
+      expect(find.text('都市'), findsOneWidget, reason: '分类只作为简介标签出现一次');
+      expect(
+        find.textContaining('都市 ·'),
+        findsNothing,
+        reason: '信息行不应再出现点拼接的分类',
+      );
+    });
+
+    testWidgets('短剧详情-同一次进入内重建不重拉详情与选集', (tester) async {
+      const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
+      final fake = FakePreviewTransport();
+      // 注入同一个 store 实例：saveVideoProgress 要 bump 页面监听的那个
+      // videoRevision，进度 provider 才会刷新。
+      final store = ReadingStore();
+      await pumpPreview(
+        tester,
+        const VideoDetailPage(seriesId: 'v1', preview: preview),
+        transport: fake,
+        store: store,
+      );
+      int bundleCalls() => fake.calls
+          .where(
+            (call) =>
+                call.startsWith('/api/v1/series/v1') ||
+                call.startsWith('/api/v1/books/v1/directory'),
+          )
+          .length;
+      expect(bundleCalls(), 2, reason: '进入详情时详情与选集各拉一次');
+
+      // 收藏走 provider 乐观更新（按钮立即回显），页面因此重建一次。
+      await tester.tap(find.text('收藏'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(
+        find.descendant(
+          of: find.byType(OutlinedButton),
+          matching: find.text('已收藏'),
+        ),
+        findsOneWidget,
+        reason: '收藏应乐观回显，不等落盘',
+      );
+
+      // 播放页返回存进度会 bump videoRevision，进度 provider 刷新又让页面重建。
+      await store.saveVideoProgress(
+        seriesId: 'v1',
+        title: '测试短剧',
+        episodeIndex: 3,
+      );
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.text('继续观看 · 第 4 集'), findsOneWidget);
+
+      expect(bundleCalls(), 2, reason: '页面重建由 provider 驱动，不应重新请求上游');
+    });
+  });
+
+  testWidgets('短剧详情-底部收藏与播放栏', (tester) async {
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
+    await pumpPreview(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: FakePreviewTransport(),
+    );
+    expect(find.text('收藏'), findsOneWidget);
+    expect(find.text('播放'), findsOneWidget);
+
+    await tester.tap(find.text('收藏'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    final favoriteButton = find.descendant(
+      of: find.byType(OutlinedButton),
+      matching: find.text('已收藏'),
+    );
+    expect(favoriteButton, findsOneWidget, reason: '底部收藏按钮应变成「已收藏」');
+    final store = ReadingStore();
+    expect(await store.isVideoOnShelf('v1'), isTrue);
+
+    // 等「已收藏」snackbar 消失，避免它挡住底部按钮。
+    await tester.pumpAndSettle(const Duration(seconds: 5));
+    await tester.tap(favoriteButton);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(
+      find.descendant(
+        of: find.byType(OutlinedButton),
+        matching: find.text('收藏'),
+      ),
+      findsOneWidget,
+    );
+    expect(await store.isVideoOnShelf('v1'), isFalse);
+  });
+
+  testWidgets('短剧详情-有观看进度时显示继续观看', (tester) async {
+    final progress = VideoWatchProgress(
+      seriesId: 'v1',
+      title: '测试短剧',
+      episodeIndex: 2,
+      updatedAt: DateTime.now(),
+    );
+    SharedPreferences.setMockInitialValues({
+      'video_progress_v1': jsonEncode({'v1': progress.toJson()}),
+      'video_history_v1': jsonEncode([progress.toJson()]),
+    });
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
+    await pumpPreview(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: FakePreviewTransport(),
+    );
+    expect(find.text('继续观看 · 第 3 集'), findsOneWidget);
+  });
+
+  group('短剧选集', () {
+    testWidgets('默认折叠，展开后 36 集一个 tab、每行 6 个、只显示集数', (tester) async {
+      final fake = FakePreviewTransport()..directoryChapterCount = 80;
+      const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 80);
+      await pumpPreview(
+        tester,
+        const VideoDetailPage(seriesId: 'v1', preview: preview),
+        transport: fake,
+      );
+
+      final episodeButtons = find.descendant(
+        of: find.byType(EpisodePicker),
+        matching: find.byType(OutlinedButton),
+      );
+      // 默认展开：直接看到选集和集数按钮。
+      expect(find.text('选集'), findsOneWidget);
+      expect(find.text('共 80 集'), findsOneWidget);
+      expect(episodeButtons, findsWidgets);
+
+      // 36 集一个 tab，自动分组。
+      expect(find.text('1-36'), findsOneWidget);
+      expect(find.text('37-72'), findsOneWidget);
+      expect(find.text('73-80'), findsOneWidget);
+      // 只显示集数，没有「第 x 集」。
+      expect(find.text('第 1 集'), findsNothing);
+      expect(find.text('1'), findsOneWidget);
+
+      // 一行 6 个：前 6 个的 y 相同，第 7 个换行。
+      final firstRow = [
+        for (var i = 1; i <= 6; i++) tester.getTopLeft(find.text('$i')),
+      ];
+      for (final position in firstRow) {
+        expect(position.dy, closeTo(firstRow.first.dy, 0.5));
+      }
+      expect(
+        tester.getTopLeft(find.text('7')).dy,
+        greaterThan(firstRow.first.dy),
+        reason: '一行应放 6 个，第 7 个换行',
+      );
+
+      // 切到第二个 tab，看到第 37 集。
+      await tester.tap(find.text('37-72'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 300));
+      expect(find.text('37'), findsOneWidget);
+      expect(find.text('36'), findsNothing);
+
+      // 点标题可以收起，再点可以重新展开。
+      await tester.tap(find.text('选集'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 300));
+      expect(episodeButtons, findsNothing);
+      await tester.tap(find.text('选集'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 300));
+      expect(episodeButtons, findsWidgets);
+    });
+  });
+
+  testWidgets('短剧详情-选集展开（36 集一个 tab、一行 6 个）', (tester) async {
+    final fake = FakePreviewTransport()..directoryChapterCount = 80;
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 80);
+    await pumpPreview(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: fake,
+    );
+    await expectLater(
+      find.byType(VideoDetailPage),
+      matchesGoldenFile('../goldens/video_detail_episodes.png'),
+    );
+  });
+}

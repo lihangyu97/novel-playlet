@@ -8,7 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/app.dart';
 import 'package:novel_playlet/app/bootstrap_gate.dart';
 import 'package:novel_playlet/app/providers.dart';
-import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
 import 'package:novel_playlet/core/cache/app_cache.dart';
@@ -64,11 +63,7 @@ class _FakeAppCache extends AppCache {
 Widget _wrap(Widget child, {List<Override> overrides = const []}) {
   return ProviderScope(
     overrides: overrides,
-    child: MaterialApp(
-      theme: AppTheme.light(),
-      onGenerateRoute: AppRoutes.onGenerateRoute,
-      home: child,
-    ),
+    child: MaterialApp(theme: AppTheme.light(), home: child),
   );
 }
 
