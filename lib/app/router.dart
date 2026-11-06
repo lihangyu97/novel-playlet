@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../data/models/chapter.dart';
 import '../data/models/novel_item.dart';
 import '../data/models/video_series.dart';
+import '../features/cache/offline_cache_page.dart';
+import '../features/cache/offline_task.dart';
 import '../features/detail/detail_page.dart';
 import '../features/reader/reader_page.dart';
 import '../features/settings/settings_page.dart';
@@ -46,6 +48,18 @@ final class DetailRoute extends AppRoute<void> {
   Route<void> toRoute() => MaterialPageRoute<void>(
     builder: (_) =>
         DetailPage(bookId: bookId, preview: preview, heroTag: heroTag),
+  );
+}
+
+/// 离线缓存管理页。[initialKind] 决定先落在小说还是短剧 tab。
+final class OfflineCacheRoute extends AppRoute<void> {
+  const OfflineCacheRoute({this.initialKind = OfflineTaskKind.novel});
+
+  final OfflineTaskKind initialKind;
+
+  @override
+  Route<void> toRoute() => MaterialPageRoute<void>(
+    builder: (_) => OfflineCachePage(initialKind: initialKind),
   );
 }
 

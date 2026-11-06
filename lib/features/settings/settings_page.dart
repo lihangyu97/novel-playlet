@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/theme_settings.dart';
 import '../../core/cache/app_cache.dart';
+import '../../core/storage/offline/offline_book.dart' show OfflineStats;
+import '../cache/cache_providers.dart';
+import '../cache/offline_task.dart';
 import 'settings_providers.dart';
 import 'widgets/theme_color_picker.dart';
 
@@ -29,6 +33,9 @@ class SettingsPage extends StatelessWidget {
             _SectionTitle('存储'),
             _StorageCard(),
             _StorageHint(),
+            _SectionTitle('离线缓存'),
+            _OfflineCacheCard(),
+            _OfflineHint(),
           ],
         ),
       ),
@@ -453,7 +460,115 @@ class _StorageHint extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Text(
-        '清理只删除可重新下载的缓存（视频、封面、章节、遗留日志），书架与阅读进度不会动。',
+        '清理只删除可重新下载的缓存（视频、封面、章节、遗留日志），书架与阅读进度不会动。'
+        '离线缓存（下方「离线小说 / 离线短剧」）不在清理范围内。',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+          height: 1.5,
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 离线缓存（pinned 区，只手动清理）
+// ---------------------------------------------------------------------------
+
+/// 两个独立离线区的入口：各自显示本数与占用，点进去进同一个管理页的对应 tab。
+class _OfflineCacheCard extends ConsumerWidget {
+  const _OfflineCacheCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final novel = ref.watch(offlineNovelStatsProvider);
+    final video = ref.watch(offlineVideoStatsProvider);
+    final scheme = Theme.of(context).colorScheme;
+    return _Card(
+      child: Column(
+        children: [
+          _OfflineRow(
+            icon: Icons.menu_book_outlined,
+            label: '离线小说',
+            stats: novel,
+            onTap: () => context.pushAppRoute(
+              const OfflineCacheRoute(initialKind: OfflineTaskKind.novel),
+            ),
+          ),
+          Divider(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+          _OfflineRow(
+            icon: Icons.movie_outlined,
+            label: '离线短剧',
+            stats: video,
+            onTap: () => context.pushAppRoute(
+              const OfflineCacheRoute(initialKind: OfflineTaskKind.video),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OfflineRow extends StatelessWidget {
+  const _OfflineRow({
+    required this.icon,
+    required this.label,
+    required this.stats,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final AsyncValue<OfflineStats> stats;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final detail = stats.when(
+      data: (value) => '${value.count} 个 · ${formatBytes(value.bytes)}',
+      loading: () => '统计中…',
+      error: (_, _) => '统计失败',
+    );
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
+            Text(
+              detail,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.chevron_right, size: 20, color: scheme.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OfflineHint extends StatelessWidget {
+  const _OfflineHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Text(
+        '离线缓存只在你主动删除时才会释放空间（小说上限 1 GB、短剧 3 GB），'
+        '清理上面的自动缓存不会影响它。',
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
           height: 1.5,
