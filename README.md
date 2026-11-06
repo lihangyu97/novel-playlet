@@ -127,7 +127,11 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推
 
 > golden 依赖 macOS 系统字体（Arial Unicode / STHeiti），换机器或换系统版本可能不一致。
 
-CI（`.github/workflows/ci.yml`）对每个 PR 跑同一套门禁：`dart format --set-exit-if-changed` / `flutter analyze --fatal-infos` / `flutter test`（macOS runner，golden 需要系统字体），`cargo fmt --check` / `cargo clippy -D warnings` / `cargo test`（Linux），以及 FRB 绑定漂移校验（重新生成后 `git diff` 必须为空）。另有独立的 iOS 无签名构建 job（macOS）：`scripts/build_rust_ios.sh`（内部先跑 FRB codegen）→ `pod install` → `flutter build ios --release --no-codesign`，只验证「内核静态库 + Xcode 构建」能过，不签名也不安装。本地等价命令是 `make check`；只做格式化用 `make format`。
+CI 配置在 `.github/workflows/ci.yml`，包含同一套门禁：`dart format --set-exit-if-changed` / `flutter analyze --fatal-infos` / `flutter test`（macOS runner，golden 需要系统字体），`cargo fmt --check` / `cargo clippy -D warnings` / `cargo test`（Linux）、FRB 绑定漂移校验，以及 iOS 无签名构建 job（`scripts/build_rust_ios.sh` → `pod install` → `flutter build ios --release --no-codesign`，不签名也不安装）。
+
+> **自动触发暂时关闭**：App 还在快速迭代，连续提 PR 时等 CI 影响效率，当前只保留 `workflow_dispatch` 手动触发；稳定后把 `.github/workflows/ci.yml` 顶部的 `push` / `pull_request` 触发器加回来即可。
+
+本地等价门禁：`make check`（Rust/Dart 全套 + 绑定漂移；不含 iOS 构建）；只做格式化用 `make format`。
 
 ## 本地数据与缓存
 

@@ -11,10 +11,15 @@
 #   避免 rustfmt / clippy / Skia 版本漂移把 CI 变成随机红灯。
 name: CI
 
+# 自动触发暂时关闭（2026-11-06）：App 还在快速迭代，连续提 PR 时 CI 影响效率。
+# 等 App 稳定后把触发器加回来即可（job 内容不用动）：
+#   on:
+#     push:
+#       branches: [main]
+#     pull_request:
+# 手动跑一次：仓库 Actions 页面 → CI → Run workflow，或 `gh workflow run ci.yml`。
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
