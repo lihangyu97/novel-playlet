@@ -8,10 +8,7 @@ import '../widgets/novel_cover.dart';
 /// 而不是 `childAspectRatio`：后者在小屏 + 大字号时会按比例把两行标题挤出
 /// 卡片。这里按卡片组成逐项累加，并跟随系统字号缩放。
 class FeedGridMetrics {
-  const FeedGridMetrics({
-    required this.cellWidth,
-    required this.cellHeight,
-  });
+  const FeedGridMetrics({required this.cellWidth, required this.cellHeight});
 
   /// [coverAspect] 是封面高 / 宽，默认 [kCoverAspect]：小说流与短剧流共用
   /// 三个分类的封面才会一样大。
@@ -21,7 +18,9 @@ class FeedGridMetrics {
   }) {
     final width = MediaQuery.sizeOf(context).width;
     final cellWidth =
-        (width - FeedGridMetrics.horizontalPadding * 2 - FeedGridMetrics.crossAxisSpacing * 2) /
+        (width -
+            FeedGridMetrics.horizontalPadding * 2 -
+            FeedGridMetrics.crossAxisSpacing * 2) /
         FeedGridMetrics.columns;
 
     final textScaler = MediaQuery.textScalerOf(context);
@@ -79,7 +78,8 @@ class FeedGrid<T> extends StatelessWidget {
           mainAxisExtent: metrics.cellHeight,
         ),
         delegate: SliverChildBuilderDelegate(
-          (context, index) => itemBuilder(context, items[index], metrics.cellWidth),
+          (context, index) =>
+              itemBuilder(context, items[index], metrics.cellWidth),
           childCount: items.length,
         ),
       ),

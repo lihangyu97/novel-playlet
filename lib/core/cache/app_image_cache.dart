@@ -82,11 +82,7 @@ class AppImageCache {
     var total = 0;
     for (final file in files) {
       final stat = await file.stat();
-      entries.add((
-        file: file,
-        size: stat.size,
-        modified: stat.modified,
-      ));
+      entries.add((file: file, size: stat.size, modified: stat.modified));
       total += stat.size;
     }
     if (total <= maxBytes) return;

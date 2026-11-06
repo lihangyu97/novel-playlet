@@ -48,7 +48,8 @@ class AppCache {
     Future<void> Function()? clearImageCache,
   }) : _supportDirectory = supportDirectory ?? getApplicationSupportDirectory,
        _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory,
-       _documentsDirectory = documentsDirectory ?? getApplicationDocumentsDirectory,
+       _documentsDirectory =
+           documentsDirectory ?? getApplicationDocumentsDirectory,
        _clearImageCache = clearImageCache ?? _emptyImageCache;
 
   /// App 运行时用的单例；测试里可以 new 一个注入临时目录。
@@ -90,7 +91,9 @@ class AppCache {
     }
 
     try {
-      await add(Directory('${(await _temporaryDirectory()).path}/$_imageCacheKey'));
+      await add(
+        Directory('${(await _temporaryDirectory()).path}/$_imageCacheKey'),
+      );
     } catch (_) {}
     try {
       final support = await _supportDirectory();

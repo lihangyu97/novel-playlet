@@ -56,7 +56,10 @@ class BackendService {
       await configDir.create(recursive: true);
     }
 
-    await _deployAsset('assets/config/config.json', '${configDir.path}/config.json');
+    await _deployAsset(
+      'assets/config/config.json',
+      '${configDir.path}/config.json',
+    );
     await _deployAsset(
       'assets/config/filter.json',
       '${configDir.path}/filter.json',

@@ -40,17 +40,18 @@ class SearchQueryController extends Notifier<String?> {
 /// family 按分类隔离：切分类时各自保留已加载的列表、游标与 session，不会
 /// 因为切走再切回来重新冷启动。首屏失败走 AsyncError，翻页失败留在
 /// [FeedState] 里（只影响底部提示，不清空列表）。
-final recommendFeedProvider = AsyncNotifierProvider.family<
-  RecommendFeedController,
-  RecommendState,
-  RecommendCategory
->(
-  RecommendFeedController.new,
-  // 关闭 Riverpod 3 的默认自动重试（10 次、约 38 秒）。重试期间状态是
-  // 「isLoading=true + 上一次的 error」，页面会一直转圈、既看不到错误也点不到
-  // 重试按钮；首屏/搜索失败应当立即给 ErrorView，由用户手动重试。
-  retry: (retryCount, error) => null,
-);
+final recommendFeedProvider =
+    AsyncNotifierProvider.family<
+      RecommendFeedController,
+      RecommendState,
+      RecommendCategory
+    >(
+      RecommendFeedController.new,
+      // 关闭 Riverpod 3 的默认自动重试（10 次、约 38 秒）。重试期间状态是
+      // 「isLoading=true + 上一次的 error」，页面会一直转圈、既看不到错误也点不到
+      // 重试按钮；首屏/搜索失败应当立即给 ErrorView，由用户手动重试。
+      retry: (retryCount, error) => null,
+    );
 
 class RecommendFeedController extends AsyncNotifier<RecommendState> {
   RecommendFeedController(this.category);
@@ -170,10 +171,7 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
   }
 
   /// 推荐流的一页。小说走书籍首页接口，短剧/漫剧共用视频类接口（按 tab_type）。
-  Future<RecommendState> _fetchFeed({
-    int offset = 0,
-    String? sessionId,
-  }) async {
+  Future<RecommendState> _fetchFeed({int offset = 0, String? sessionId}) async {
     if (category.isNovel) {
       final page = await _api.recommend(offset: offset, sessionId: sessionId);
       return FeedState<RecommendItem>.feed(

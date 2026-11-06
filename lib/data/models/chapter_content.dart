@@ -35,8 +35,9 @@ ChapterContent parseChapterContent(
   if (decrypted != null && decrypted != true) {
     throw ApiException('正文尚未解密');
   }
-  final resolvedTitle =
-      title.isNotEmpty ? title : firstString(data, ['title', 'chapter_title']);
+  final resolvedTitle = title.isNotEmpty
+      ? title
+      : firstString(data, ['title', 'chapter_title']);
   final html = firstString(data, ['content', 'chapter_content', 'text']);
   final paragraphs = _stripLeadingTitle(htmlToParagraphs(html), resolvedTitle);
   if (paragraphs.isEmpty) {

@@ -83,10 +83,7 @@ void main() {
                   },
                 },
                 {
-                  'book_data': {
-                    'book_id': 'a1',
-                    'book_name': '书A',
-                  },
+                  'book_data': {'book_id': 'a1', 'book_name': '书A'},
                 },
                 {
                   'book_data': [
@@ -184,11 +181,7 @@ void main() {
     test('tags 是逗号串时拆成独立标签（上游实测 "传统玄幻,玄幻,武侠"）', () {
       final detail = BookDetail.fromPayload({
         'code': 0,
-        'data': {
-          'book_id': 'b1',
-          'book_name': '测试书',
-          'tags': '传统玄幻,玄幻,武侠、女帝',
-        },
+        'data': {'book_id': 'b1', 'book_name': '测试书', 'tags': '传统玄幻,玄幻,武侠、女帝'},
       });
       expect(detail.tags, ['传统玄幻', '玄幻', '武侠', '女帝']);
     });
@@ -267,13 +260,10 @@ void main() {
 
     test('正文响应必须显式标记已解密', () {
       expect(
-        () => parseChapterContent(
-          {
-            'code': 0,
-            'data': {'content': '<p>abc</p>', 'content_decrypted': false},
-          },
-          chapterId: 'c1',
-        ),
+        () => parseChapterContent({
+          'code': 0,
+          'data': {'content': '<p>abc</p>', 'content_decrypted': false},
+        }, chapterId: 'c1'),
         throwsA(isA<ApiException>()),
       );
     });

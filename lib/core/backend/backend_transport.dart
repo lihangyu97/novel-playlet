@@ -58,17 +58,15 @@ class BackendTransport {
     if (RustLib.instance.initialized) {
       return _runtimeReady = Future<void>.value();
     }
-    return _runtimeReady = Future<void>.sync(initRustRuntime).catchError((
-      Object error,
-      StackTrace stack,
-    ) {
-      // 失败的加载不缓存，否则一次坏初始化会让整个进程再也连不上内核。
-      if (RustLib.instance.initialized) {
-        RustLib.dispose();
-      }
-      _runtimeReady = null;
-      Error.throwWithStackTrace(error, stack);
-    });
+    return _runtimeReady = Future<void>.sync(initRustRuntime)
+        .catchError((Object error, StackTrace stack) {
+          // 失败的加载不缓存，否则一次坏初始化会让整个进程再也连不上内核。
+          if (RustLib.instance.initialized) {
+            RustLib.dispose();
+          }
+          _runtimeReady = null;
+          Error.throwWithStackTrace(error, stack);
+        });
   }
 
   /// 部署完成后启动内核。重复调用返回 "running"。

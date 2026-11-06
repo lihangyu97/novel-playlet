@@ -42,10 +42,7 @@ class FeedResultTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: gutter,
-          vertical: 10,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: gutter, vertical: 10),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

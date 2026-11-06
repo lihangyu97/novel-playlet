@@ -168,7 +168,12 @@ class DetailTitleSection extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(detailGutter + 4, 6, detailGutter + 4, 0),
+      padding: const EdgeInsets.fromLTRB(
+        detailGutter + 4,
+        6,
+        detailGutter + 4,
+        0,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -192,10 +197,7 @@ class DetailTitleSection extends StatelessWidget {
               ),
             ),
           ],
-          if (extra != null) ...[
-            const SizedBox(height: 8),
-            extra!,
-          ],
+          if (extra != null) ...[const SizedBox(height: 8), extra!],
         ],
       ),
     );

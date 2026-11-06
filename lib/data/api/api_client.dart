@@ -21,10 +21,7 @@ class ApiClient {
 
   /// 上游书城小说推荐（`tab_type=2`）。[sessionId] 翻页时必须回传，否则
   /// 上游会换设备导致 101116。
-  Future<NovelFeedPage> recommend({
-    int offset = 0,
-    String? sessionId,
-  }) async {
+  Future<NovelFeedPage> recommend({int offset = 0, String? sessionId}) async {
     final query = <String, String>{
       'tab_type': '2',
       'offset': '$offset',
@@ -115,7 +112,11 @@ class ApiClient {
     });
     return VideoFeedPage(
       items: parseSearchVideoSeries(payload, tabType: tabType),
-      nextOffset: _searchNextOffset(payload, offset: offset, tabTypes: {tabType}),
+      nextOffset: _searchNextOffset(
+        payload,
+        offset: offset,
+        tabTypes: {tabType},
+      ),
     );
   }
 
@@ -153,7 +154,10 @@ class ApiClient {
   /// 当前走默认（非 stream）模式：内核把整集下载进加密缓存后返回
   /// `/src/<id>.mp4`，播放器只需按普通 HTTP 拉明文分片。流式回环（边下边播）
   /// 见 docs/video-playback.md 的 M1，接入后这里换成 `mode=stream`。
-  Future<VideoSource> videoSource(String episodeId, {bool refresh = false}) async {
+  Future<VideoSource> videoSource(
+    String episodeId, {
+    bool refresh = false,
+  }) async {
     final payload = await _getJson(
       '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
       // refresh=1：内核删掉本地缓存文件后重新下载。播放失败（半截/坏缓存）
@@ -217,7 +221,10 @@ class ApiClient {
     final encoded = Uri.encodeComponent(itemId);
     Object? firstError;
     try {
-      final payload = await _getJson('/api/v1/chapters/$encoded/novel', const {});
+      final payload = await _getJson(
+        '/api/v1/chapters/$encoded/novel',
+        const {},
+      );
       return parseChapterContent(payload, chapterId: itemId, title: title);
     } catch (error) {
       firstError = error;
@@ -250,10 +257,11 @@ class ApiClient {
       try {
         final payload = jsonDecode(response.text);
         if (payload is Map) {
-          final detail = firstString(
-            Map<String, dynamic>.from(payload),
-            ['error', 'message', 'msg'],
-          );
+          final detail = firstString(Map<String, dynamic>.from(payload), [
+            'error',
+            'message',
+            'msg',
+          ]);
           if (detail.isNotEmpty) message = detail;
         }
       } catch (_) {
@@ -357,7 +365,9 @@ List<NovelItem> parseNovelItems(Map<String, dynamic> payload) {
 /// 搜索响应：只取"书籍"tab（`tab_type=3`），兼容综合 tab（1）。
 List<NovelItem> parseSearchNovels(Map<String, dynamic> payload) {
   final data = asMap(payload['data']) ?? payload;
-  final tabs = asList(data['search_tabs']).map(asMap).whereType<Map<String, dynamic>>();
+  final tabs = asList(data['search_tabs'])
+      .map(asMap)
+      .whereType<Map<String, dynamic>>();
   final selected = <Map<String, dynamic>>[];
   for (final tab in tabs) {
     final type = asInt(tab['tab_type']);
@@ -367,7 +377,11 @@ List<NovelItem> parseSearchNovels(Map<String, dynamic> payload) {
   final items = <NovelItem>[];
   final seen = <String>{};
   for (final tab in source) {
-    for (final item in parseNovelItems({'data': {'search_tabs': [tab]}})) {
+    for (final item in parseNovelItems({
+      'data': {
+        'search_tabs': [tab],
+      },
+    })) {
       if (seen.add(item.id)) items.add(item);
     }
   }
@@ -380,7 +394,9 @@ int? _searchNextOffset(
   Set<int> tabTypes = const {1, 3},
 }) {
   final data = asMap(payload['data']) ?? payload;
-  for (final tab in asList(data['search_tabs']).map(asMap).whereType<Map<String, dynamic>>()) {
+  for (final tab in asList(
+    data['search_tabs'],
+  ).map(asMap).whereType<Map<String, dynamic>>()) {
     final type = asInt(tab['tab_type']);
     if (!tabTypes.contains(type)) continue;
     final next = asInt(tab['next_offset']);

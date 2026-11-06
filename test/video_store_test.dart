@@ -50,11 +50,7 @@ void main() {
     expect(history.map((item) => item.seriesId), ['v4', 'v3', 'v2']);
 
     // 重看旧剧：进度更新并顶到最前，不新增条目。
-    await store.saveVideoProgress(
-      seriesId: 'v3',
-      title: '剧3',
-      episodeIndex: 9,
-    );
+    await store.saveVideoProgress(seriesId: 'v3', title: '剧3', episodeIndex: 9);
     history = await store.videoHistory();
     expect(history.length, 3);
     expect(history.map((item) => item.seriesId), ['v3', 'v4', 'v2']);
@@ -67,11 +63,7 @@ void main() {
   test('写入后 revision 递增，页面监听它刷新', () async {
     final store = ReadingStore();
     final before = store.revision.value;
-    await store.saveVideoProgress(
-      seriesId: 'v1',
-      title: '剧A',
-      episodeIndex: 0,
-    );
+    await store.saveVideoProgress(seriesId: 'v1', title: '剧A', episodeIndex: 0);
     expect(store.revision.value, greaterThan(before));
   });
 }

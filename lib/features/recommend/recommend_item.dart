@@ -12,8 +12,7 @@ class RecommendItem {
 
   factory RecommendItem.novel(NovelItem item) => RecommendItem._(novel: item);
 
-  factory RecommendItem.video(VideoSeries item) =>
-      RecommendItem._(video: item);
+  factory RecommendItem.video(VideoSeries item) => RecommendItem._(video: item);
 
   /// 小说卡片原始模型；短剧/漫剧为 null。
   final NovelItem? novel;

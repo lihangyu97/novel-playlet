@@ -84,7 +84,10 @@ class FloatingNavigationBar extends StatelessWidget {
   static double totalHeight(
     BuildContext context, {
     double bottomPadding = 8.0,
-  }) => _kNavigationHeight + bottomPadding + MediaQuery.viewPaddingOf(context).bottom;
+  }) =>
+      _kNavigationHeight +
+      bottomPadding +
+      MediaQuery.viewPaddingOf(context).bottom;
 
   VoidCallback _handleTap(int index) {
     return onDestinationSelected != null
@@ -401,16 +404,19 @@ class NavigationIndicator extends StatelessWidget {
   final double width;
   final double height;
 
-  static final _anim = Tween<double>(begin: 0.5, end: 1.0).chain(
-    CurveTween(curve: Curves.easeInOutCubicEmphasized),
-  );
+  static final _anim = Tween<double>(
+    begin: 0.5,
+    end: 1.0,
+  ).chain(CurveTween(curve: Curves.easeInOutCubicEmphasized));
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
-        final double scale = animation.isDismissed ? 0.0 : _anim.evaluate(animation);
+        final double scale = animation.isDismissed
+            ? 0.0
+            : _anim.evaluate(animation);
         return Transform(
           alignment: Alignment.center,
           transform: Matrix4.diagonal3Values(scale, 1.0, 1.0),
@@ -558,7 +564,10 @@ class _NavigationDestinationLayoutDelegate extends MultiChildLayoutDelegate {
 
     positionChild(
       labelId,
-      Offset(halfWidth(size) - halfWidth(labelSize), iconYPosition + iconSize.height),
+      Offset(
+        halfWidth(size) - halfWidth(labelSize),
+        iconYPosition + iconSize.height,
+      ),
     );
   }
 

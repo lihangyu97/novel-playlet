@@ -217,9 +217,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       if (RegExp(r'-1022|App Transport Security').hasMatch(text)) {
         title = '本地视频流被 ATS 拦截';
         reason = 'iOS 拒绝了 http://127.0.0.1 的回环请求（Info.plist 的 ATS 例外没生效）。';
-      } else if (RegExp(
-        r'-1001|-1005|-1009|-1011|-1012|-1200|-1202',
-      ).hasMatch(text)) {
+      } else if (RegExp(r'-1001|-1005|-1009|-1011|-1012|-1200|-1202')
+          .hasMatch(text)) {
         title = '本地视频流连接中断';
         reason =
             'AVPlayer 读本地回环流时断开了：常见于内核下载被中断（App 切后台）、'
@@ -265,14 +264,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     final error = _error;
     if (error == null) return;
     await Clipboard.setData(
-      ClipboardData(
-        text: '${error.title}\n${error.reason}\n${error.detail}',
-      ),
+      ClipboardData(text: '${error.title}\n${error.reason}\n${error.detail}'),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('错误信息已复制')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('错误信息已复制')));
   }
 
   void _togglePlay() {

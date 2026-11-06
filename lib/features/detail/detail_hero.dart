@@ -52,8 +52,7 @@ class DetailHeroInfo extends StatelessWidget {
     // 作者同一行带上状态/字数；分类去掉了（简介下面已经有标签，重复）。
     final subtitle = [
       if (author.isNotEmpty) author,
-      if (detail != null && detail!.statusLabel.isNotEmpty)
-        detail!.statusLabel,
+      if (detail != null && detail!.statusLabel.isNotEmpty) detail!.statusLabel,
       if (detail != null && detail!.wordLabel.isNotEmpty) detail!.wordLabel,
     ].join(' · ');
 
@@ -111,7 +110,6 @@ class DetailHeroInfo extends StatelessWidget {
       extra: segments.isEmpty ? null : Row(children: segments),
     );
   }
-
 }
 
 String _firstNonEmpty(List<String?> values) {

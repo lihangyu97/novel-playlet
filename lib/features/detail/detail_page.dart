@@ -263,10 +263,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     int? chapterIndex,
     int? blockIndex,
   }) async {
-    final detail = ref
-        .read(detailBundleProvider(widget.bookId))
-        .value
-        ?.detail;
+    final detail = ref.read(detailBundleProvider(widget.bookId)).value?.detail;
     await Navigator.of(context).pushNamed(
       AppRoutes.reader,
       arguments: ReaderArgs(

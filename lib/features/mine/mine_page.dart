@@ -738,9 +738,7 @@ class _DramaPanel extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            error is ApiException ? error.message : '打开播放失败，请重试',
-          ),
+          content: Text(error is ApiException ? error.message : '打开播放失败，请重试'),
         ),
       );
     }
@@ -803,9 +801,8 @@ class _DramaPanel extends ConsumerWidget {
         final store = ref.read(readingStoreProvider);
         await store.removeVideoFromShelf(item.id);
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已取消收藏《${item.title}》')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('已取消收藏《${item.title}》')));
     }
   }
 }

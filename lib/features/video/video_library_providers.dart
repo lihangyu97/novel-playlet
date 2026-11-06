@@ -17,11 +17,9 @@ final videoShelfStatusProvider = FutureProvider.family<bool, String>((
 });
 
 /// 某部短剧看到第几集；null = 还没看过。
-final videoProgressProvider = FutureProvider.family<VideoWatchProgress?, String>((
-  ref,
-  seriesId,
-) async {
-  ref.watch(readingRevisionProvider);
-  final store = ref.watch(readingStoreProvider);
-  return store.videoProgress(seriesId);
-});
+final videoProgressProvider =
+    FutureProvider.family<VideoWatchProgress?, String>((ref, seriesId) async {
+      ref.watch(readingRevisionProvider);
+      final store = ref.watch(readingStoreProvider);
+      return store.videoProgress(seriesId);
+    });

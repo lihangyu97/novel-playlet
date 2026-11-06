@@ -48,7 +48,12 @@ class NovelItem {
       title: title.isEmpty ? firstString(raw, ['title', 'name']) : title,
       cover: cover.isNotEmpty ? cover : firstString(raw, coverKeys),
       author: firstString(inner, ['author', 'author_name']),
-      intro: firstString(inner, ['abstract', 'intro', 'description', 'book_abstract']),
+      intro: firstString(inner, [
+        'abstract',
+        'intro',
+        'description',
+        'book_abstract',
+      ]),
       category: firstString(inner, ['category', 'category_name', 'badge']),
       wordCount: asInt(inner['word_number']),
       score: asString(inner['score']),
@@ -75,11 +80,7 @@ class NovelItem {
 
 /// 一页推荐/搜索结果。
 class NovelFeedPage {
-  const NovelFeedPage({
-    required this.items,
-    this.nextOffset,
-    this.sessionId,
-  });
+  const NovelFeedPage({required this.items, this.nextOffset, this.sessionId});
 
   final List<NovelItem> items;
 

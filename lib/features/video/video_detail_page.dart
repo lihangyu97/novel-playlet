@@ -67,7 +67,8 @@ class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
   void _retry() => setState(_load);
 
   /// 详情页展示的封面/标题优先级（列表 preview 优先，避免接口回来后换图）。
-  String _titleOf(VideoDetail? detail) => detail != null && detail.title.isNotEmpty
+  String _titleOf(VideoDetail? detail) =>
+      detail != null && detail.title.isNotEmpty
       ? detail.title
       : (widget.preview?.title ?? '短剧');
 
@@ -110,9 +111,8 @@ class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
       );
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(onShelf ? '已取消收藏' : '已收藏')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(onShelf ? '已取消收藏' : '已收藏')));
   }
 
   @override
@@ -136,11 +136,7 @@ class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
                 stops: const [0, 0.32],
               ),
             ),
-            child: _buildContent(
-              detail,
-              episodes,
-              error: snapshot.error,
-            ),
+            child: _buildContent(detail, episodes, error: snapshot.error),
           ),
           bottomNavigationBar: _buildActionBar(detail, episodes),
         );
@@ -213,18 +209,12 @@ class _VideoDetailPageState extends ConsumerState<VideoDetailPage> {
         // 背景只跟封面走、固定高度：Hero 目标从第一帧就存在，封面飞进来后
         // 直接成为背景；接口回来内容变高也不会牵动背景。
         SliverToBoxAdapter(
-          child: DetailCoverBackdrop(
-            cover: cover,
-            heroTag: widget.heroTag,
-          ),
+          child: DetailCoverBackdrop(cover: cover, heroTag: widget.heroTag),
         ),
         if (ready) ...[
           SliverToBoxAdapter(
             child: DetailFadeIn(
-              child: DetailTitleSection(
-                title: title,
-                subtitle: subtitle,
-              ),
+              child: DetailTitleSection(title: title, subtitle: subtitle),
             ),
           ),
           SliverToBoxAdapter(

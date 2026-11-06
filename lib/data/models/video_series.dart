@@ -48,11 +48,7 @@ class VideoSeries {
 
 /// 视频列表的一页。[nextOffset] 为 null 表示到底。
 class VideoFeedPage {
-  const VideoFeedPage({
-    required this.items,
-    this.nextOffset,
-    this.sessionId,
-  });
+  const VideoFeedPage({required this.items, this.nextOffset, this.sessionId});
 
   final List<VideoSeries> items;
   final int? nextOffset;
@@ -148,11 +144,7 @@ List<VideoSeries> parseVideoSeries(Map<String, dynamic> payload) {
         final childMap = asMap(child);
         if (childMap == null) continue;
         final detail = asMap(childMap['video_detail']);
-        add({
-          ...map,
-          ...?detail,
-          ...childMap,
-        });
+        add({...map, ...?detail, ...childMap});
       }
     }
 
@@ -202,9 +194,7 @@ List<VideoSeries> parseSearchVideoSeries(
       .toList();
   if (matched.isNotEmpty) {
     return parseVideoSeries({
-      'data': {
-        'search_tabs': matched,
-      },
+      'data': {'search_tabs': matched},
     });
   }
   final hasTypeInfo = tabs.any((tab) => asInt(tab['tab_type'], 0) > 0);
@@ -240,8 +230,7 @@ bool _isManjuCard(Map<String, dynamic> raw) {
 bool _hasManjuTag(Object? value) {
   if (value is Map) return _hasManjuTag(value['text']);
   if (value is Iterable) return value.any(_hasManjuTag);
-  return value is String &&
-      const {'漫剧', '动态漫', '动态漫画'}.contains(value.trim());
+  return value is String && const {'漫剧', '动态漫', '动态漫画'}.contains(value.trim());
 }
 
 /// 漫剧搜索兜底的一页。

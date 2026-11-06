@@ -88,7 +88,8 @@ void main() {
     // iOS 的布局：<container>/Library/Application Support 与 <container>/Library/Caches，
     // path_provider 的 getTemporaryDirectory() 返回后者。
     final library = Directory('${root.path}/Library')..createSync();
-    final support = Directory('${library.path}/Application Support')..createSync();
+    final support = Directory('${library.path}/Application Support')
+      ..createSync();
     final caches = Directory('${library.path}/Caches')..createSync();
     final docs = Directory('${root.path}/Documents')..createSync();
 

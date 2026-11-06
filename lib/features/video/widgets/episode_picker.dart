@@ -135,7 +135,8 @@ class _EpisodePickerState extends State<EpisodePicker>
     final tabCount = _tabCount;
     final rowsPerTab = (widget.episodesPerTab / widget.columns).ceil();
     final gridHeight =
-        rowsPerTab * (EpisodePicker.buttonHeight + EpisodePicker.buttonSpacing) -
+        rowsPerTab *
+            (EpisodePicker.buttonHeight + EpisodePicker.buttonSpacing) -
         EpisodePicker.buttonSpacing;
 
     return Column(
@@ -195,19 +196,17 @@ class _EpisodePickerState extends State<EpisodePicker>
 
   Widget _buildGrid(int tab) {
     final start = tab * widget.episodesPerTab;
-    final end = math.min(
-      start + widget.episodesPerTab,
-      widget.episodes.length,
-    );
+    final end = math.min(start + widget.episodesPerTab, widget.episodes.length);
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(detailGutter, 4, detailGutter, 4),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final itemWidth = ((constraints.maxWidth -
-                      (widget.columns - 1) * EpisodePicker.buttonSpacing) /
-                  widget.columns)
-              .floorToDouble();
+          final itemWidth =
+              ((constraints.maxWidth -
+                          (widget.columns - 1) * EpisodePicker.buttonSpacing) /
+                      widget.columns)
+                  .floorToDouble();
           return Wrap(
             spacing: EpisodePicker.buttonSpacing,
             runSpacing: EpisodePicker.buttonSpacing,
@@ -226,9 +225,7 @@ class _EpisodePickerState extends State<EpisodePicker>
                       textStyle: theme.textTheme.bodySmall?.copyWith(
                         fontSize: 12,
                       ),
-                      side: BorderSide(
-                        color: theme.colorScheme.outlineVariant,
-                      ),
+                      side: BorderSide(color: theme.colorScheme.outlineVariant),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),

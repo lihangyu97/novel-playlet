@@ -50,9 +50,7 @@ class ReadingProgress {
       chapterId: asString(json['chapterId']),
       chapterIndex: asInt(json['chapterIndex']),
       blockIndex: asInt(json['blockIndex']),
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(
-        asInt(json['updatedAt']),
-      ),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(asInt(json['updatedAt'])),
     );
   }
 }
@@ -93,9 +91,7 @@ class VideoWatchProgress {
       title: asString(json['title']),
       cover: asString(json['cover']),
       episodeIndex: asInt(json['episodeIndex']),
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(
-        asInt(json['updatedAt']),
-      ),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(asInt(json['updatedAt'])),
     );
   }
 }
@@ -227,7 +223,9 @@ class ReadingStore {
 
   Future<VideoWatchProgress?> videoProgress(String seriesId) async {
     final prefs = await _prefs;
-    final raw = _decodeVideoProgress(prefs.getString(_videoProgressKey))[seriesId];
+    final raw = _decodeVideoProgress(
+      prefs.getString(_videoProgressKey),
+    )[seriesId];
     return raw == null ? null : VideoWatchProgress.fromJson(raw);
   }
 
@@ -239,11 +237,11 @@ class ReadingStore {
     var entries = _decodeVideoHistory(prefs.getString(_videoHistoryKey));
     if (entries.isEmpty) {
       // 老版本可能只有进度表：按更新时间补出最近几条。
-      final progress = _decodeVideoProgress(
-        prefs.getString(_videoProgressKey),
-      );
+      final progress = _decodeVideoProgress(prefs.getString(_videoProgressKey));
       final derived = progress.values.toList()
-        ..sort((a, b) => asInt(b['updatedAt']).compareTo(asInt(a['updatedAt'])));
+        ..sort(
+          (a, b) => asInt(b['updatedAt']).compareTo(asInt(a['updatedAt'])),
+        );
       entries = derived.take(limit).toList();
       if (entries.isNotEmpty) {
         await prefs.setString(_videoHistoryKey, jsonEncode(entries));
@@ -310,12 +308,10 @@ class ReadingStore {
       // 老版本只有进度表：首次读取时按更新时间补出最近几条并落盘，避免升级后
       // "最近阅读" 空白直到用户再读一本。
       final progress = _decodeProgress(prefs.getString(_progressKey));
-      final derived =
-          progress.values.toList()
-            ..sort(
-              (a, b) =>
-                  asInt(b['updatedAt']).compareTo(asInt(a['updatedAt'])),
-            );
+      final derived = progress.values.toList()
+        ..sort(
+          (a, b) => asInt(b['updatedAt']).compareTo(asInt(a['updatedAt'])),
+        );
       entries = derived.take(limit).toList();
       if (entries.isNotEmpty) {
         await prefs.setString(_recentKey, jsonEncode(entries));
@@ -365,10 +361,7 @@ class ReadingStore {
     try {
       final list = jsonDecode(raw);
       if (list is! List) return [];
-      return list
-          .map(asMap)
-          .whereType<Map<String, dynamic>>()
-          .toList();
+      return list.map(asMap).whereType<Map<String, dynamic>>().toList();
     } catch (_) {
       return [];
     }
@@ -401,8 +394,7 @@ class ReadingStore {
       if (map == null) return {};
       return {
         for (final entry in map.entries)
-          if (asMap(entry.value) != null)
-            entry.key: asMap(entry.value)!,
+          if (asMap(entry.value) != null) entry.key: asMap(entry.value)!,
       };
     } catch (_) {
       return {};

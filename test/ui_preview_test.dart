@@ -829,8 +829,9 @@ void main() {
       final fake = _FakeTransport()
         ..bookCoverUrl = 'https://example.com/cover-1.jpg';
       await _pump(tester, const RecommendPage(), transport: fake);
-      final card = tester
-          .widget<NovelGridCard>(find.byType(NovelGridCard).first);
+      final card = tester.widget<NovelGridCard>(
+        find.byType(NovelGridCard).first,
+      );
       final tag = card.heroTag!;
 
       await tester.tap(find.byType(NovelGridCard).first);
@@ -844,7 +845,10 @@ void main() {
       );
       final detailHero = tester.widget<Hero>(
         find
-            .descendant(of: find.byType(DetailPage), matching: find.byType(Hero))
+            .descendant(
+              of: find.byType(DetailPage),
+              matching: find.byType(Hero),
+            )
             .first,
       );
       expect(detailHero.tag, tag, reason: '详情页封面必须用同一个 tag 接住 Hero');
@@ -997,7 +1001,10 @@ void main() {
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
       final detailHero = tester.widget<Hero>(
         find
-            .descendant(of: find.byType(DetailPage), matching: find.byType(Hero))
+            .descendant(
+              of: find.byType(DetailPage),
+              matching: find.byType(Hero),
+            )
             .first,
       );
       expect(detailHero.tag, card.heroTag);
@@ -1038,9 +1045,7 @@ void main() {
       // 评分 / 在读 / 更新至 合并成一行：三者的中线应一致。
       final score = tester.getCenter(find.text('9.3')).dy;
       final readers = tester.getCenter(find.text('1.2万人在读')).dy;
-      final updated = tester
-          .getCenter(find.text('更新至 第一千零二十四章 开天'))
-          .dy;
+      final updated = tester.getCenter(find.text('更新至 第一千零二十四章 开天')).dy;
       expect(readers, closeTo(score, 0.5));
       expect(updated, closeTo(score, 0.5));
     });
@@ -1062,11 +1067,7 @@ void main() {
       final backdrop = tester.widget<DetailCoverBackdrop>(
         find.byType(DetailCoverBackdrop),
       );
-      expect(
-        backdrop.cover,
-        preview.cover,
-        reason: '短剧详情接口回来不应换图',
-      );
+      expect(backdrop.cover, preview.cover, reason: '短剧详情接口回来不应换图');
     });
 
     testWidgets('详情页-封面同时作为顶部背景（顶部不透明到底部透明）', (tester) async {
@@ -1087,11 +1088,7 @@ void main() {
     });
 
     testWidgets('短剧详情-分类只在简介标签里出现一次', (tester) async {
-      const preview = VideoSeries(
-        id: 'v1',
-        title: '测试短剧',
-        episodeCount: 40,
-      );
+      const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
       await _pump(
         tester,
         const VideoDetailPage(seriesId: 'v1', preview: preview),
@@ -1368,11 +1365,7 @@ void main() {
   });
 
   testWidgets('短剧详情-底部收藏与播放栏', (tester) async {
-    const preview = VideoSeries(
-      id: 'v1',
-      title: '测试短剧',
-      episodeCount: 40,
-    );
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
     await _pump(
       tester,
       const VideoDetailPage(seriesId: 'v1', preview: preview),
@@ -1416,11 +1409,7 @@ void main() {
       'video_progress_v1': jsonEncode({'v1': progress.toJson()}),
       'video_history_v1': jsonEncode([progress.toJson()]),
     });
-    const preview = VideoSeries(
-      id: 'v1',
-      title: '测试短剧',
-      episodeCount: 40,
-    );
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
     await _pump(
       tester,
       const VideoDetailPage(seriesId: 'v1', preview: preview),
@@ -1494,11 +1483,7 @@ void main() {
   group('短剧选集', () {
     testWidgets('默认折叠，展开后 36 集一个 tab、每行 6 个、只显示集数', (tester) async {
       final fake = _FakeTransport()..directoryChapterCount = 80;
-      const preview = VideoSeries(
-        id: 'v1',
-        title: '测试短剧',
-        episodeCount: 80,
-      );
+      const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 80);
       await _pump(
         tester,
         const VideoDetailPage(seriesId: 'v1', preview: preview),
@@ -1553,11 +1538,7 @@ void main() {
 
   testWidgets('短剧详情-选集展开（36 集一个 tab、一行 6 个）', (tester) async {
     final fake = _FakeTransport()..directoryChapterCount = 80;
-    const preview = VideoSeries(
-      id: 'v1',
-      title: '测试短剧',
-      episodeCount: 80,
-    );
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 80);
     await _pump(
       tester,
       const VideoDetailPage(seriesId: 'v1', preview: preview),
@@ -1847,10 +1828,8 @@ void main() {
     await gesture.moveBy(const Offset(-100, 0));
     await tester.pump();
 
-    final headerDelta =
-        tester.getTopLeft(find.text('小说')).dx - headerBefore;
-    final recentDelta =
-        tester.getTopLeft(find.text('最近阅读')).dx - recentBefore;
+    final headerDelta = tester.getTopLeft(find.text('小说')).dx - headerBefore;
+    final recentDelta = tester.getTopLeft(find.text('最近阅读')).dx - recentBefore;
     final shelfAfter = tester.getTopLeft(find.text('我的书架')).dx;
     expect(recentDelta, lessThan(-120), reason: '最近阅读块（0ms）应该先滑');
     expect(headerDelta, lessThan(0), reason: '标题块（100ms）随后开始');
