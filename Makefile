@@ -7,7 +7,7 @@
 check: dart rust codegen ## 跑全部门禁（等价于 CI 的三个 job）
 
 dart: ## Dart：格式 / 静态分析 / 测试
-	dart format --output=none --set-exit-if-changed lib test
+	dart format --output=none --set-exit-if-changed lib test integration_test test_driver
 	flutter analyze --fatal-infos
 	flutter test
 
@@ -21,7 +21,7 @@ codegen: ## 重新生成绑定并校验入库版本没有漂移
 	git diff --exit-code
 
 format: ## 就地格式化（改完代码后跑）
-	dart format lib test
+	dart format lib test integration_test test_driver
 	cargo fmt --manifest-path rust/Cargo.toml
 
 help: ## 列出可用目标

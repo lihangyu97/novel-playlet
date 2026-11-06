@@ -67,7 +67,7 @@ lib/
   src/rust/       flutter_rust_bridge 生成绑定（勿手改）
 rust/             Rust 内核（从 fqapp 整体拷入；fork 基线与本地补丁见 PATCHES.md）
 assets/config/    config.json / device_pool.example.json（启动时部署到 App 沙盒）
-docs/             视频播放方案、书城 tab_type 对照
+docs/             视频播放方案、书城 tab_type 对照、阅读页分页真机 profile
 scripts/          build_rust_ios.sh（先跑 FRB codegen，再编 iOS 静态库）
 test/             数据/缓存/并发测试 + test/ui/ 按页面拆分的 UI 测试 + goldens/（21 张）
 CONTRACTS.md      页面开发约定（页面清单/数据层 API 已滞后，待同步）
@@ -123,6 +123,7 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推
 - `test/ui/`（recommend / home / detail / video / reader / mine / settings 七个文件，共享 `test/ui/preview_harness.dart`）：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`，21 张：含设置页默认/取色弹层/绯红主题/深色、阅读页设置弹层、首页滚动收起态、短剧选集展开、我的页短剧面板），并断言三个分类的推荐流/搜索结果封面尺寸与比例一致、分类 tabs 可横向滚动且没有「为你推荐/短剧推荐」旧标题、手势滑切分类、切分类回来保留滚动位置、顶部高度收紧（搜索 40 / tabs 36 / 顶栏 ≤100）、往下浏览收起搜索框且 tabs 保留、回顶自动展开、深滚动时往回滚立即展开、收起后切分类保持收起、搜索态滚动不收起、取消搜索回显快照且不重发请求、失败后换关键词先显示 loading、首屏失败立即显示错误页、搜索框不因清空按钮被撑高、带 `blockIndex` 进入阅读页不落在第一页；另断言封面 Hero 进出详情正反向飞行（含 iOS 手势返回）、详情加载不转圈、信息行合并、短剧选集 36 集一个 tab；以及我的页双面板：悬浮按钮/左右滑动切换、三块阶梯延迟（标题先走、书架块此时不动）、设置按钮只有一枚且切换时在屏幕内左右移动、短剧标题镜像、切换中点帧；短剧详情底部收藏/继续观看，我的页短剧收藏与最近观看（最多 3 条）。
 - `test/settings_test.dart`：主题色落盘与恢复（启动预读首帧即生效、旧值不覆盖用户新选择）、`AppAccent` 注入、白/灰/黑中性色不被染成彩色、阅读弹层主色 × 各纸色对比度 ≥ 4.5、真实 `NovelPlayletApp` 跟着主题色重建、预设换色、取色弹层纵向/横向拖动都能改色、清理缓存二次确认/进行中禁用/失败可恢复/清理后占用归零、「我的」右上角与短剧左侧设置按钮都能打开设置页。
 - `test/live_probe_test.dart`：默认跳过；需要先 `cargo build` 出 host dylib，且网络能访问设备注册域名。
+- `integration_test/reader_pagination_perf_test.dart`：真机 profile 采集阅读页整章分页/切章的 FrameTiming（不进 `flutter test` 与 CI）；跑法 `flutter drive --profile -d <device> --driver=test_driver/integration_test.dart --target=integration_test/reader_pagination_perf_test.dart`，结论与数据见 [docs/reader-pagination-profile.md](docs/reader-pagination-profile.md)。
 
 > golden 依赖 macOS 系统字体（Arial Unicode / STHeiti），换机器或换系统版本可能不一致。
 

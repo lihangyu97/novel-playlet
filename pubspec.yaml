@@ -32,6 +32,10 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # 真机性能采集（integration_test/reader_pagination_perf_test.dart）。
+  # 只在 `flutter drive --profile -d <device>` 时用，不进 flutter test。
+  integration_test:
+    sdk: flutter
   flutter_lints: ^6.0.0
 
 flutter:

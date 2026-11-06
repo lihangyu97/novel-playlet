@@ -34,7 +34,7 @@ jobs:
           cache: true
       - run: flutter pub get
       # 格式先于分析：Dart 的 tall-style 由 SDK 决定，不设门禁会慢慢漂。
-      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: dart format --output=none --set-exit-if-changed lib test integration_test test_driver
       - run: flutter analyze --fatal-infos
       - run: flutter test
 
