@@ -3,9 +3,8 @@
 //! Serves `/src/*` cache resources (manga images, clear media, and
 //! CENC-encrypted videos decrypted range by range — P1-7) and the
 //! `/api/v1/*` business routes to the same dispatcher the FFI bridge uses,
-//! so there is exactly one business implementation. External readers
-//! (Legado book sources, local tooling) use this adapter; there is no
-//! built-in Web UI.
+//! so there is exactly one business implementation. Local tooling uses this
+//! adapter; there is no built-in Web UI.
 //!
 //! Static file bodies are streamed from disk (with Range support) instead of
 //! being read into memory, so serving a large media file costs a bounded
@@ -16,10 +15,16 @@
 //! let a foreign page read responses) and, when it carries an `Origin`, come
 //! from this listener too (defeats cross-site form POSTs to the device-bound
 //! write routes, which read their arguments from the query string and so need
-//! no CORS preflight). Read routes answer any local client without a
-//! capability so external readers (Legado book sources, local tooling) can use
-//! them; device-bound writes still require the per-launch capability. See
-//! .agents/notes/implemented/bug-fix/2026-10-07-loopback-session.md.
+//! no CORS preflight).
+//!
+//! The loopback surface is further narrowed by [`crate::dispatch::APP_APIS`]:
+//! a caller without this launch's capability only reaches `/health`, `/src/*`
+//! and the seven APIs the app itself uses. Everything else (the fqapp/Legado
+//! compatibility table, the account routes) answers 404, and device-bound
+//! writes answer 401, so a sibling app on the same phone cannot read the compat
+//! surface or act as this installation. Capability-carrying callers (the
+//! `/_session/<token>` prefix, a Bearer header, or the session cookie) reach
+//! every route. The FFI transport bypasses this adapter and is unaffected.
 
 use std::sync::Arc;
 
@@ -217,13 +222,19 @@ async fn handle_request(state: AppState, req: axum::extract::Request) -> Respons
         .filter_map(|part| part.trim().split_once('='))
         .any(|(name, value)| name == cookie_name && value == state.token);
     let request_path = scoped.unwrap_or(path).to_string();
-    // Reads answer any local client: external readers (Legado book sources,
-    // local tooling) cannot know the per-launch capability. Device-bound
-    // writes still need it.
     let capability_ok =
         scoped.is_some() || bearer == Some(format!("Bearer {}", state.token).as_str()) || cookie_ok;
+    // 设备写接口单独用 401：它们是「需要能力才能调用」，语义比 404 更准确。
+    // 其余不在 App 白名单里的路由对无能力调用者直接当不存在（404），
+    // 这样同机其他 App 既读不到兼容面数据，也无法枚举有哪些路由。
     if !capability_ok && crate::dispatch::requires_capability(&request_path) {
         return refuse(StatusCode::UNAUTHORIZED, "session required");
+    }
+    // 免能力的 loopback 面只剩 App 自己用的 7 个读接口 + /src + /health；
+    // 兼容面（听书、漫画、评论、排行榜……）与 account 路由都要求能力。
+    // 这个判断放在读 body 之前：被拒的请求连 body 都不会被读入内存。
+    if !capability_ok && !crate::dispatch::is_public_loopback_path(&request_path) {
+        return refuse(StatusCode::NOT_FOUND, "not found");
     }
     let declared = req
         .headers()

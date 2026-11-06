@@ -59,7 +59,7 @@ fn cache_entry_lock(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
     lock
 }
 
-// Note: 编码拒绝必须穿透回退链，见 .agents/notes/implemented/bug-fix/2026-09-25-video-codec-gates.md
+// Note: 编码拒绝必须穿透回退链（策略见 docs/video-playback.md 的编码兼容一节）。
 #[derive(Debug, PartialEq, Eq)]
 enum VideoSourceResolution {
     Found(String, Vec<u8>),
@@ -138,8 +138,6 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             // 2026-10-14 三集全部回火山错误封包
             // `{BaseResp, Code:110001, Message:未知异常}`（无 `data`），上游只给
             // 通用码、不给原因，所以这里把外壳与剧集 id 一起留在核心日志里。
-            // Note: 为什么静默会丢一整档、以及日志里刻意不记什么 —
-            // 见 .agents/notes/implemented/bug-fix/2026-10-14-phoenix-reject-silent-quality-loss.md
             match &phoenix {
                 Ok(body) if body.root.get("data").is_some_and(Value::is_object) => {}
                 Ok(body) => log::warn!(

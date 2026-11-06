@@ -482,7 +482,6 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "cbc",
- "cc",
  "cipher",
  "flate2",
  "flutter_rust_bridge",

@@ -9,7 +9,6 @@ use crate::config::Config;
 use crate::device::DevicePool;
 use crate::endpoints::Ctx;
 use crate::error::ApiError;
-use crate::filter::FilterManager;
 use crate::sign::Manager;
 use crate::upstream::UpstreamClient;
 
@@ -57,7 +56,6 @@ async fn mock_ctx(delay_for: fn(&str) -> Duration) -> (Arc<Ctx>, Arc<Mutex<Vec<S
         pool,
         cfg: Arc::new(Config::default()),
         src_dir: dir.to_string_lossy().into_owned(),
-        filters: Arc::new(FilterManager::default()),
     };
     (Arc::new(ctx), seen)
 }

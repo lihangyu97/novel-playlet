@@ -9,9 +9,11 @@ import 'backend_transport.dart';
 
 /// 内核启动状态机：部署运行时文件 → 启动 Rust 核。
 ///
-/// 运行时文件全部来自 assets：`config.json`（端口等）、`filter.json`（当前
-/// 全禁用，缺失即 no-op）、`device_pool.example.json`（只作首次模板，之后
-/// 保留内核注册出来的真实设备池）。
+/// 运行时文件全部来自 assets：`config.json`（端口等）与
+/// `device_pool.example.json`（只作首次模板，之后保留内核注册出来的真实设备池）。
+///
+/// 响应 filter 子系统已整体删除（配置全是 disabled、永远 no-op），旧的
+/// `filter.json` 不再部署；内核也不会去读它。
 class BackendService {
   BackendService({
     AssetBundle? assets,
@@ -60,11 +62,6 @@ class BackendService {
       'assets/config/config.json',
       '${configDir.path}/config.json',
     );
-    await _deployAsset(
-      'assets/config/filter.json',
-      '${configDir.path}/filter.json',
-      overwrite: false,
-    );
     // 设备池：只在缺失时用示例初始化，之后完全由内核维护。
     final poolFile = File('${configDir.path}/device_pool.json');
     if (!await poolFile.exists()) {
@@ -78,7 +75,6 @@ class BackendService {
     return _transport.start(
       configPath: _configFile!.path,
       poolPath: poolFile.path,
-      filterPath: '${configDir.path}/filter.json',
       runtimeDir: dir.path,
     );
   }

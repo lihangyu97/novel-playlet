@@ -73,7 +73,6 @@ class BackendTransport {
   Future<String> start({
     required String configPath,
     required String poolPath,
-    required String filterPath,
     required String runtimeDir,
     int? listenPort,
   }) async {
@@ -94,7 +93,6 @@ class BackendTransport {
     final result = await rust.init(
       configPath: configPath,
       poolPath: poolPath,
-      filterPath: filterPath,
       runtimeDir: runtimeDir,
       port: listenPort ?? port,
       lanShare: false,

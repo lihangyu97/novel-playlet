@@ -24,11 +24,11 @@ void main() {
     File('${videoDir.path}/a.key').writeAsBytesSync(List.filled(100, 2));
     File('${videoDir.path}/b.part').writeAsBytesSync(List.filled(500, 3));
 
-    // 不能删的：设备池 / 过滤配置。
+    // 不能删的：设备池 / 运行时配置。
     final configDir = Directory('${support.path}/backend/config')
       ..createSync(recursive: true);
     File('${configDir.path}/device_pool.json').writeAsStringSync('{"dev":1}');
-    File('${configDir.path}/filter.json').writeAsStringSync('{}');
+    File('${configDir.path}/config.json').writeAsStringSync('{"port":0}');
 
     // 章节正文缓存。
     final chapterDir = Directory('${support.path}/reader_chapters')
@@ -77,7 +77,7 @@ void main() {
 
     // 用户数据/设备池必须还在（否则要重新注册设备、丢书架）。
     expect(File('${configDir.path}/device_pool.json').existsSync(), isTrue);
-    expect(File('${configDir.path}/filter.json').existsSync(), isTrue);
+    expect(File('${configDir.path}/config.json').existsSync(), isTrue);
     expect(videoDir.existsSync(), isTrue, reason: '目录本身保留，内核还要往里写');
   });
 

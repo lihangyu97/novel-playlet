@@ -101,9 +101,16 @@ class VideoWatchProgress {
 /// 只用 shared_preferences 存"小而重要"的状态；正文不落盘（离线缓存是后续
 /// 功能，届时加一层明文/密文存储实现即可，接口不变）。
 class ReadingStore {
-  /// 书架/进度变更计数。跨页面的 UI（如"我的"）监听它来刷新，避免引入
-  /// 全局状态管理依赖。
-  final ValueNotifier<int> revision = ValueNotifier<int>(0);
+  /// 小说侧（书架 / 阅读进度）变更计数。跨页面的 UI（如"我的"）监听它来刷新，
+  /// 避免引入全局状态管理依赖。
+  ///
+  /// 刻意按小说 / 短剧拆成两个计数：看短剧时每次存进度只 bump
+  /// [videoRevision]，否则"我的"页的小说书架、搜索页的收藏态等只关心小说的
+  /// UI 会被无关写入带着重读一遍本地数据。
+  final ValueNotifier<int> novelRevision = ValueNotifier<int>(0);
+
+  /// 短剧侧（收藏 / 观看进度）变更计数；拆开的原因见 [novelRevision]。
+  final ValueNotifier<int> videoRevision = ValueNotifier<int>(0);
 
   static const _shelfKey = 'shelf_books_v1';
   static const _progressKey = 'reading_progress_v1';
@@ -150,14 +157,14 @@ class ReadingStore {
     if (books.any((book) => book.id == item.id)) return;
     books.insert(0, item);
     await _writeShelf(books);
-    revision.value++;
+    novelRevision.value++;
   }
 
   Future<void> removeFromShelf(String bookId) async {
     final books = await shelf();
     books.removeWhere((book) => book.id == bookId);
     await _writeShelf(books);
-    revision.value++;
+    novelRevision.value++;
   }
 
   // ---------------------------------------------------------------------
@@ -181,14 +188,14 @@ class ReadingStore {
     if (items.any((entry) => entry.id == item.id)) return;
     items.insert(0, item);
     await _writeVideoShelf(items);
-    revision.value++;
+    videoRevision.value++;
   }
 
   Future<void> removeVideoFromShelf(String seriesId) async {
     final items = await videoShelf();
     items.removeWhere((item) => item.id == seriesId);
     await _writeVideoShelf(items);
-    revision.value++;
+    videoRevision.value++;
   }
 
   /// 记一次观看进度；顺带刷新最近观看（最多 [videoHistoryLimit] 条）。
@@ -218,7 +225,7 @@ class ReadingStore {
       history.removeRange(videoHistoryLimit, history.length);
     }
     await prefs.setString(_videoHistoryKey, jsonEncode(history));
-    revision.value++;
+    videoRevision.value++;
   }
 
   Future<VideoWatchProgress?> videoProgress(String seriesId) async {
@@ -286,7 +293,7 @@ class ReadingStore {
     await prefs.setString(_recentKey, jsonEncode(recent));
 
     await prefs.setString(_lastReadKey, bookId);
-    revision.value++;
+    novelRevision.value++;
   }
 
   Future<ReadingProgress?> progress(String bookId) async {

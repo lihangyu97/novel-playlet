@@ -317,7 +317,6 @@ fn channel_tabs<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
 }
 
 // Official lo3/f.java:281-285 uses scene=10, not a general recommendation.
-// Note: .agents/notes/implemented/feature/2026-10-15-related-series.md
 fn series_related<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult<Value>> {
     Box::pin(async move {
         let series_id = params.get_str("series_id");

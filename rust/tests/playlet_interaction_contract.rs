@@ -1,8 +1,7 @@
 //! Short-drama comment, danmaku and share contract tests.
 //!
-//! Every expectation is derived from the official 7.0.9.32 decompilation (see
-//! .agents/notes/proposed/architecture/2026-09-25-f04-official-evidence.md),
-//! not from the Rust implementation: each case pins the upstream path, the
+//! Every expectation is derived from the official 7.0.9.32 decompilation, not
+//! from the Rust implementation: each case pins the upstream path, the
 //! JSON body fields and the query bag the official client sends.
 //!
 //! The three families share one upstream endpoint family:

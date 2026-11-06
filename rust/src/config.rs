@@ -11,25 +11,13 @@ pub struct AntiCrawler {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct Admin {
-    #[serde(default)]
-    pub token: String,
-    #[serde(default)]
-    pub update_server_url: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
-    #[serde(default)]
-    pub algorithm_type: String,
     #[serde(default)]
     pub zwsm: String,
     #[serde(default)]
     pub port: u16,
     #[serde(default)]
     pub anti_crawler: AntiCrawler,
-    #[serde(default)]
-    pub admin: Admin,
 }
 
 impl Config {

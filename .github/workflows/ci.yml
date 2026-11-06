@@ -1,0 +1,79 @@
+# 最小质量门禁：format / analyze / test / clippy / 绑定漂移。
+#
+# 设计取舍：
+# - Flutter 跑在 macOS：test/ui_preview_test.dart 的 golden 会加载系统里的
+#   Arial Unicode 做中文预览字体（见该文件的 _loadPreviewFont），Linux 上没有
+#   这个字体，goldens 必然全红。
+# - Rust 跑在 Linux：内核测试全部用 mock upstream + 临时目录，不依赖 macOS。
+# - 两端工具链都按本机验证过的版本钉死（Flutter 3.47.9 / Rust 1.99.1），
+#   避免 rustfmt / clippy / Skia 版本漂移把 CI 变成随机红灯。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  flutter:
+    name: flutter (format / analyze / test)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.9
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # 格式先于分析：Dart 的 tall-style 由 SDK 决定，不设门禁会慢慢漂。
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze --fatal-infos
+      - run: flutter test
+
+  rust:
+    name: rust (fmt / clippy / test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo fmt --manifest-path rust/Cargo.toml --check
+      - run: cargo clippy --all-targets --manifest-path rust/Cargo.toml -- -D warnings
+      - run: cargo test --manifest-path rust/Cargo.toml
+
+  codegen:
+    name: FRB 绑定漂移校验
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.9
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      # codegen 依赖 cargo-expand 解析宏；用预编译装，别在 CI 里编译一遍。
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-expand
+      # 版本必须与 rust/Cargo.toml 的 flutter_rust_bridge 完全一致（2.13.0）。
+      - run: cargo install flutter_rust_bridge_codegen --version 2.13.0
+      - run: flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
+      - name: 生成物必须与入库版本一致
+        run: git diff --exit-code

@@ -60,10 +60,24 @@ void main() {
     expect(progress?.episodeIndex, 9);
   });
 
-  test('写入后 revision 递增，页面监听它刷新', () async {
+  test('写入后 videoRevision 递增，页面监听它刷新', () async {
     final store = ReadingStore();
-    final before = store.revision.value;
+    final before = store.videoRevision.value;
     await store.saveVideoProgress(seriesId: 'v1', title: '剧A', episodeIndex: 0);
-    expect(store.revision.value, greaterThan(before));
+    expect(store.videoRevision.value, greaterThan(before));
+  });
+
+  test('看视频只 bump videoRevision，不动小说侧计数器', () async {
+    final store = ReadingStore();
+    final novelBefore = store.novelRevision.value;
+    final videoBefore = store.videoRevision.value;
+
+    await store.addVideoToShelf(const VideoSeries(id: 'v1', title: '剧A'));
+    await store.saveVideoProgress(seriesId: 'v1', title: '剧A', episodeIndex: 1);
+    await store.removeVideoFromShelf('v1');
+
+    expect(store.videoRevision.value, videoBefore + 3);
+    // 短剧侧写入不应让小说书架 / 最近阅读跟着重读一遍本地数据。
+    expect(store.novelRevision.value, novelBefore);
   });
 }

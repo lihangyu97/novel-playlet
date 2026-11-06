@@ -14,8 +14,8 @@
 //   device    - persistent device pool + registration
 //   sign      - request signing primitives
 //
-// See docs/migration/rust-migration-contracts.md for the behaviour contract and
-// docs/rust-migration-progress.md for the current verification state.
+// See CONTRACTS.md for the app-side contract and docs/architecture-review.md
+// for the architecture decisions and known gaps.
 
 pub mod api;
 pub mod config;
@@ -25,7 +25,6 @@ pub mod device;
 pub mod dispatch;
 pub mod endpoints;
 pub mod error;
-pub mod filter;
 pub mod json;
 pub mod server;
 pub mod sign;

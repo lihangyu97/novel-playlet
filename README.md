@@ -44,7 +44,7 @@ UI (features/*)  ──►  Riverpod controller  ──►  ApiClient (data/api)
 
 - **签名、设备池、重试、限流、正文解密全部在 Rust 侧**，Dart 只传 `(request_id, method, path, query, body, timeout_ms)`，对应 `rust/src/api/mod.rs` 暴露的 9 个函数：`init` / `request` / `cancel` / `shutdown` / `status` / `base_url` / `session_capability` / `set_device_pool_key` / `version`。
 - 启动链：`main.dart`（锁竖屏、裁封面缓存）→ `BootstrapGate`（Splash，失败展示可读原因 + 重试）→ `BackendService.start()` → 内核 `init`。
-- 内核随 `init` 起一个 loopback HTTP adapter（`rust/src/server.rs`，默认端口 18931），给播放器提供 `/src/<video_id><ext>`（ext 由上游地址推断，按 Range 解密；capability 只约束会改设备状态的写接口，读接口不校验）。
+- 内核随 `init` 起一个 loopback HTTP adapter（`rust/src/server.rs`，默认端口 18931），给播放器提供 `/src/<video_id><ext>`（ext 由上游地址推断，按 Range 解密）。免鉴权的只有 App 自己用的 7 个读接口、`/src/*` 和 `/health`；其余 fqapp/Legado 兼容路由（听书、漫画、评论、排行榜……）必须带本次启动的 capability，会以设备身份写数据的接口（评论/点赞/回复）同样要 capability。
 - 上游返回的是**原始 JSON**（Rust 只做正文解密），字段兼容集中在 `lib/data/models/`，列表/搜索的信封与游标解析在 `lib/data/api/api_client.dart`，页面只消费模型。
 - 视频同样由内核解密：`/api/v1/videos/{id}` 把整集下载进本地缓存（CENC 源保留密文 + key sidecar，播放时按 Range 解密），返回上面的 `/src/...` 地址，播放器只拉明文 HTTP。
 - 本地状态只有书架/阅读进度/最近阅读/阅读设置/主题色（`shared_preferences`），设备池密钥在 Keychain（`flutter_secure_storage`），池文件在 App 私有目录（加密）。
@@ -66,16 +66,16 @@ lib/
   features/       recommend / video / detail / reader / mine / settings（章节缓存在 reader/reader_chapter_cache.dart）
   src/rust/       flutter_rust_bridge 生成绑定（勿手改）
 rust/             Rust 内核（从 fqapp 整体拷入）
-assets/config/    config.json / filter.json / device_pool.example.json
+assets/config/    config.json / device_pool.example.json（启动时部署到 App 沙盒）
 docs/             视频播放方案、书城 tab_type 对照
-scripts/          build_rust_ios.sh
+scripts/          build_rust_ios.sh（先跑 FRB codegen，再编 iOS 静态库）
 test/             8 个测试文件 + goldens/（21 张）
 CONTRACTS.md      页面开发约定（页面清单/数据层 API 已滞后，待同步）
 ```
 
 ## 构建与运行
 
-环境（本机验证用，仓库未锁定工具链）：Flutter 3.47.9、Rust 1.99.0（`rustup target add aarch64-apple-ios`）、Xcode 27.2、CocoaPods 1.17；Dart SDK `^3.13.7`，iOS 部署目标 15.0。
+环境（本机验证用，仓库未锁定工具链）：Flutter 3.47.9、Rust 1.99.1（`rustup target add aarch64-apple-ios`）、Xcode 27.2、CocoaPods 1.17；Dart SDK `^3.13.7`，iOS 部署目标 15.0。
 
 ```bash
 flutter pub get   # flutter_rust_bridge 两端必须同为 2.13.0（pubspec / rust/Cargo.toml）
@@ -120,11 +120,12 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推
 - `test/cache_test.dart`：缓存统计/清理只动可重建缓存，书架、进度与设备池不动。
 - `test/video_store_test.dart`：短剧收藏加入/去重/移出、观看进度与最近观看（最多 3 条、同剧去重顶到最前）、写入后 revision 递增。
 - `test/ui_preview_test.dart`：假 transport 注入固定数据，真实渲染各页面成 PNG（`test/goldens/`，21 张：含设置页默认/取色弹层/绯红主题/深色、阅读页设置弹层、首页滚动收起态、短剧选集展开、我的页短剧面板），并断言三个分类的推荐流/搜索结果封面尺寸与比例一致、分类 tabs 可横向滚动且没有「为你推荐/短剧推荐」旧标题、手势滑切分类、切分类回来保留滚动位置、顶部高度收紧（搜索 40 / tabs 36 / 顶栏 ≤100）、往下浏览收起搜索框且 tabs 保留、回顶自动展开、深滚动时往回滚立即展开、收起后切分类保持收起、搜索态滚动不收起、取消搜索回显快照且不重发请求、失败后换关键词先显示 loading、首屏失败立即显示错误页、搜索框不因清空按钮被撑高、带 `blockIndex` 进入阅读页不落在第一页；另断言封面 Hero 进出详情正反向飞行（含 iOS 手势返回）、详情加载不转圈、信息行合并、短剧选集 36 集一个 tab；以及我的页双面板：悬浮按钮/左右滑动切换、三块阶梯延迟（标题先走、书架块此时不动）、设置按钮只有一枚且切换时在屏幕内左右移动、短剧标题镜像、切换中点帧；短剧详情底部收藏/继续观看，我的页短剧收藏与最近观看（最多 3 条）。
-- `test/settings_test.dart`：主题色落盘与恢复（启动预读首帧即生效、旧值不覆盖用户新选择）、`AppAccent` 注入、白/灰/黑中性色不被染成彩色、阅读弹层主色 × 各纸色对比度 ≥ 4.5、真实 `NovelPlayletApp` 跟着主题色重建、预设换色、取色弹层纵向/横向拖动都能改色、清理缓存二次确认/进行中禁用/失败可恢复/清理后占用归零、「我的」右上角能打开设置页。
 - `test/settings_test.dart`：主题色落盘与恢复（启动预读首帧即生效、旧值不覆盖用户新选择）、`AppAccent` 注入、白/灰/黑中性色不被染成彩色、阅读弹层主色 × 各纸色对比度 ≥ 4.5、真实 `NovelPlayletApp` 跟着主题色重建、预设换色、取色弹层纵向/横向拖动都能改色、清理缓存二次确认/进行中禁用/失败可恢复/清理后占用归零、「我的」右上角与短剧左侧设置按钮都能打开设置页。
 - `test/live_probe_test.dart`：默认跳过；需要先 `cargo build` 出 host dylib，且网络能访问设备注册域名。
 
 > golden 依赖 macOS 系统字体（Arial Unicode / STHeiti），换机器或换系统版本可能不一致。
+
+CI（`.github/workflows/ci.yml`）对每个 PR 跑同一套门禁：`dart format --set-exit-if-changed` / `flutter analyze --fatal-infos` / `flutter test`（macOS runner，golden 需要系统字体），`cargo fmt --check` / `cargo clippy -D warnings` / `cargo test`（Linux），以及 FRB 绑定漂移校验（重新生成后 `git diff` 必须为空）。本地等价命令是 `make check`；只做格式化用 `make format`。
 
 ## 本地数据与缓存
 
@@ -136,7 +137,7 @@ App 沙盒里会落盘的东西（iPhone 13 调试期实测：文稿与数据 40
 | `Library/Caches/libCachedImageData/` + `Application Support/libCachedImageData.db` | 封面图磁盘缓存（500–800px 大图也会落到这里）与 sqflite 索引 | 120 个对象 / 7 天；启动时体积 >40 MB 裁到 25 MB |
 | `Application Support/reader_chapters/` | 章节正文 JSON（内存再叠 8 章 LRU） | 最多 300 个文件，超出按最旧淘汰；超过 7 天只算过期，仍先展示并后台刷新 |
 | `Documents/diag.log` | 早期调试探针遗留日志（当前代码不再写入） | 清理时一并删除 |
-| `Application Support/backend/config/` | 上游设备注册池、过滤配置 | **不是缓存**：删了要重新注册设备 |
+| `Application Support/backend/config/` | 上游设备注册池、运行时 `config.json` | **不是缓存**：删了要重新注册设备 |
 | `Library/Preferences/*.plist` | 书架、阅读进度（含页首段落下标）、最近阅读、阅读设置、主题色 | **用户数据**：不清理 |
 
 「设置 → 存储」会显示当前缓存占用（视频/封面/章节明细）并提供「清理」：只清上面四类可重建缓存，书架与进度不动。统计/清理逻辑在 `lib/core/cache/app_cache.dart`。

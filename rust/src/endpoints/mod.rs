@@ -37,7 +37,6 @@ use serde_json::Value;
 use crate::config::Config;
 use crate::device::DevicePool;
 use crate::error::ApiResult;
-use crate::filter::FilterManager;
 use crate::upstream::UpstreamClient;
 
 pub const INTERNAL_DEVICE_PIN_KEY: &str = "_pinned_device";
@@ -120,7 +119,6 @@ pub struct Ctx {
     pub pool: Arc<DevicePool>,
     pub cfg: Arc<Config>,
     pub src_dir: String,
-    pub filters: Arc<FilterManager>,
 }
 
 pub type Handler = for<'a> fn(&'a Ctx, &'a Params) -> BoxFuture<'a, ApiResult<Value>>;

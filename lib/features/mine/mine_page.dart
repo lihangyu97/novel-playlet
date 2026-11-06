@@ -130,7 +130,12 @@ class _MinePageState extends ConsumerState<MinePage>
   Widget build(BuildContext context) {
     // 预取短剧侧数据：如果等切换时才第一次 watch，滑入过程中会闪一下
     // 「正在读取…」。小说侧也是进页面就读，两边保持一致。
-    ref.watch(mineDramaDataProvider);
+    //
+    // 用 listen 而不是 watch：这里只关心"把 provider 拉起来"，数据变化由
+    // 各自的 _NovelPanel / _DramaPanel 自己 watch 消费。若用 watch，看剧存进度
+    // 会让整个 MinePage（含两个面板、两个动画控制器、设置按钮）重建一次，
+    // 而它还在 PageView 里 keep-alive，看不见时也照建。
+    ref.listen(mineDramaDataProvider, (_, _) {});
     return Scaffold(
       body: SafeArea(
         bottom: false,

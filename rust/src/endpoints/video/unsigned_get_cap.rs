@@ -40,7 +40,6 @@ async fn test_ctx(origin: String, dir: &Path) -> Ctx {
         pool,
         cfg: Arc::new(crate::config::Config::default()),
         src_dir: dir.to_string_lossy().into_owned(),
-        filters: Arc::new(crate::filter::FilterManager::default()),
     }
 }
 

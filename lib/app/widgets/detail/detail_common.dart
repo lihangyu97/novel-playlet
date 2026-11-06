@@ -39,6 +39,16 @@ class DetailCoverBackdrop extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final topInset = MediaQuery.paddingOf(context).top;
+    // 230pt 的模糊背景要盖满整屏宽度：按屏宽物理像素的 1.5 倍解码就够
+    // （高斯模糊本身会吃掉细节），不必把上游 1080–1440px 的原图整张解成
+    // RGBA 再交给 ImageFiltered。1.5 是给 hero 飞行放大时留的余量；内存
+    // 请求比磁盘上限（1440）更大时以磁盘为准，Flutter 不会放大，所以高 dpr
+    // 大屏上两个数不必完全相等。
+    final decodeWidth =
+        (MediaQuery.sizeOf(context).width *
+                MediaQuery.devicePixelRatioOf(context) *
+                1.5)
+            .round();
     final fallback = DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -80,6 +90,9 @@ class DetailCoverBackdrop extends StatelessWidget {
                         imageUrl: cover,
                         cacheManager: AppImageCache.manager,
                         fit: BoxFit.cover,
+                        memCacheWidth: decodeWidth,
+                        // 磁盘也别存原图；1440 已覆盖 Pro Max 的 1.5 倍余量。
+                        maxWidthDiskCache: 1440,
                         placeholder: (_, _) => fallback,
                         errorWidget: (_, _, _) => fallback,
                       ),

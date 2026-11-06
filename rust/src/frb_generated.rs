@@ -139,7 +139,6 @@ fn wire__crate__api__init_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_config_path = <String>::sse_decode(&mut deserializer);
             let api_pool_path = <String>::sse_decode(&mut deserializer);
-            let api_filter_path = <String>::sse_decode(&mut deserializer);
             let api_runtime_dir = <String>::sse_decode(&mut deserializer);
             let api_port = <u16>::sse_decode(&mut deserializer);
             let api_lan_share = <bool>::sse_decode(&mut deserializer);
@@ -151,7 +150,6 @@ fn wire__crate__api__init_impl(
                         let output_ok = crate::api::init(
                             api_config_path,
                             api_pool_path,
-                            api_filter_path,
                             api_runtime_dir,
                             api_port,
                             api_lan_share,

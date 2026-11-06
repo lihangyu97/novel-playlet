@@ -1,5 +1,4 @@
 //! `main_url` 有两种形态，混淆它们会让 fallback 列表（含 1080p）整片解不出来。
-//! 实例见 .agents/notes/implemented/bug-fix/2026-10-12-short-drama-1080p-variant-merge.md
 
 use super::*;
 use serde_json::json;

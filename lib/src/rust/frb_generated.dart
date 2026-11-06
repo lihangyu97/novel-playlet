@@ -86,7 +86,6 @@ abstract class RustLibApi extends BaseApi {
   Future<String> crateApiInit({
     required String configPath,
     required String poolPath,
-    required String filterPath,
     required String runtimeDir,
     required int port,
     required bool lanShare,
@@ -180,7 +179,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<String> crateApiInit({
     required String configPath,
     required String poolPath,
-    required String filterPath,
     required String runtimeDir,
     required int port,
     required bool lanShare,
@@ -192,7 +190,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(configPath, serializer);
           sse_encode_String(poolPath, serializer);
-          sse_encode_String(filterPath, serializer);
           sse_encode_String(runtimeDir, serializer);
           sse_encode_u_16(port, serializer);
           sse_encode_bool(lanShare, serializer);
@@ -212,7 +209,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         argValues: [
           configPath,
           poolPath,
-          filterPath,
           runtimeDir,
           port,
           lanShare,
@@ -228,7 +224,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     argNames: [
       "configPath",
       "poolPath",
-      "filterPath",
       "runtimeDir",
       "port",
       "lanShare",

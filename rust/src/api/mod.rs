@@ -1,8 +1,7 @@
 //! flutter_rust_bridge surface - the public entry point of the Rust core.
 //!
-//! Architecture decision and consequences:
-//! .agents/notes/implemented/architecture/2026-09-23-rust-native-core-migration.md
-//! Behaviour contract: docs/migration/rust-migration-contracts.md
+//! Architecture decisions and consequences: see `docs/architecture-review.md`.
+//! App-side contract: `CONTRACTS.md`.
 //!
 //! Flutter calls [request] for every backend call; the loopback HTTP adapter
 //! (`server.rs`) serves the same routes plus `/src/*` resources to external
@@ -28,7 +27,6 @@ use crate::config::Config;
 use crate::device::DevicePool;
 use crate::dispatch::Response;
 use crate::endpoints::{Ctx, Server};
-use crate::filter::FilterManager;
 use crate::sign::Manager;
 use crate::upstream::UpstreamClient;
 
@@ -78,7 +76,7 @@ pub fn version() -> String {
     format!("fqapi_core {}", env!("CARGO_PKG_VERSION"))
 }
 
-/// Resolves the runtime root (contains src/, web/, filters/).
+/// Resolves the runtime root (contains src/ and web/).
 fn resolve_runtime_dir(config_path: &str, explicit: &str) -> PathBuf {
     if !explicit.is_empty() {
         return std::fs::canonicalize(explicit).unwrap_or_else(|_| PathBuf::from(explicit));
@@ -103,7 +101,6 @@ fn resolve_runtime_dir(config_path: &str, explicit: &str) -> PathBuf {
 pub async fn init(
     config_path: String,
     pool_path: String,
-    filter_path: String,
     runtime_dir: String,
     port: u16,
     lan_share: bool,
@@ -128,16 +125,7 @@ pub async fn init(
     } else {
         crate::server::ListenMode::Loopback
     };
-    init_core(
-        config_path,
-        pool_path,
-        filter_path,
-        runtime_dir,
-        port,
-        mode,
-        mock,
-    )
-    .await
+    init_core(config_path, pool_path, runtime_dir, port, mode, mock).await
 }
 
 /// Initialization with an optional upstream origin override. The public
@@ -146,7 +134,6 @@ pub async fn init(
 pub(crate) async fn init_core(
     config_path: String,
     pool_path: String,
-    filter_path: String,
     runtime_dir: String,
     port: u16,
     mode: crate::server::ListenMode,
@@ -178,17 +165,11 @@ pub(crate) async fn init_core(
         Some(origin) => UpstreamClient::with_mock_origin(pool.clone(), signer, origin)?,
         None => UpstreamClient::new(pool.clone(), signer)?,
     });
-    let filters = Arc::new(FilterManager::load_with_base(
-        &filter_path,
-        &root.to_string_lossy(),
-    )?);
-
     let ctx = Arc::new(Ctx {
         up,
         pool,
         cfg: cfg.clone(),
         src_dir: src_dir.to_string_lossy().into_owned(),
-        filters,
     });
     let server = Arc::new(Server::new(ctx));
 
@@ -668,11 +649,10 @@ mod tests {
         let dir = runtime_dir("span-restart");
         let (origin, mock_task) = slow_mock_upstream(Duration::from_millis(500)).await;
 
-        let (cfg, pool, filter, runtime, port, _) = init_args(&dir);
+        let (cfg, pool, runtime, port, _) = init_args(&dir);
         init_core(
             cfg,
             pool,
-            filter,
             runtime,
             port,
             ListenMode::Loopback,
@@ -695,18 +675,10 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(120)).await;
         shutdown().await.expect("shutdown");
 
-        let (cfg, pool, filter, runtime, port, _) = init_args(&dir);
-        init_core(
-            cfg,
-            pool,
-            filter,
-            runtime,
-            port,
-            ListenMode::Loopback,
-            Some(origin),
-        )
-        .await
-        .expect("second init");
+        let (cfg, pool, runtime, port, _) = init_args(&dir);
+        init_core(cfg, pool, runtime, port, ListenMode::Loopback, Some(origin))
+            .await
+            .expect("second init");
         let second_generation = core_generation().await;
         assert!(
             second_generation > first_generation,
@@ -773,23 +745,16 @@ mod tests {
             std::process::id()
         ));
         std::fs::create_dir_all(path.join("config")).expect("config dir");
-        std::fs::write(
-            path.join("config/config.json"),
-            r#"{"algorithm_type":"8404","port":0}"#,
-        )
-        .expect("config json");
+        std::fs::write(path.join("config/config.json"), r#"{"port":0}"#).expect("config json");
         path
     }
 
-    fn init_args(dir: &std::path::Path) -> (String, String, String, String, u16, Option<String>) {
+    fn init_args(dir: &std::path::Path) -> (String, String, String, u16, Option<String>) {
         (
             dir.join("config/config.json")
                 .to_string_lossy()
                 .into_owned(),
             dir.join("config/device_pool.json")
-                .to_string_lossy()
-                .into_owned(),
-            dir.join("config/filter.json")
                 .to_string_lossy()
                 .into_owned(),
             String::new(),
@@ -799,8 +764,9 @@ mod tests {
     }
 
     /// Proves that the core at `base` really answers on its published port. The
-    /// capability is part of the probe: `base_url()` alone is refused with 401,
-    /// so a stale pair (released port or restarted core) must fail this.
+    /// capability is part of the probe: a stale pair (released port or
+    /// restarted core) carries the retired token, so the scoped request must
+    /// fail even though `/health` alone is on the public loopback surface.
     async fn health_ok(base: &str, capability: &str) -> bool {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(3))
@@ -826,9 +792,9 @@ mod tests {
 
         let mut handles = Vec::new();
         for _ in 0..8 {
-            let (cfg, pool, filter, runtime, port, mock) = init_args(&dir);
+            let (cfg, pool, runtime, port, mock) = init_args(&dir);
             handles.push(tokio::spawn(async move {
-                init_core(cfg, pool, filter, runtime, port, ListenMode::Loopback, mock).await
+                init_core(cfg, pool, runtime, port, ListenMode::Loopback, mock).await
             }));
         }
         for handle in handles {
@@ -864,8 +830,8 @@ mod tests {
         let _ = shutdown().await;
         let dir = runtime_dir("restart");
 
-        let (cfg, pool, filter, runtime, port, mock) = init_args(&dir);
-        init_core(cfg, pool, filter, runtime, port, ListenMode::Loopback, mock)
+        let (cfg, pool, runtime, port, mock) = init_args(&dir);
+        init_core(cfg, pool, runtime, port, ListenMode::Loopback, mock)
             .await
             .expect("first init");
         let first_generation = core_generation().await;
@@ -875,8 +841,8 @@ mod tests {
         shutdown().await.expect("shutdown");
         assert_eq!(core_generation().await, 0);
 
-        let (cfg, pool, filter, runtime, port, mock) = init_args(&dir);
-        init_core(cfg, pool, filter, runtime, port, ListenMode::Loopback, mock)
+        let (cfg, pool, runtime, port, mock) = init_args(&dir);
+        init_core(cfg, pool, runtime, port, ListenMode::Loopback, mock)
             .await
             .expect("second init");
         let second_generation = core_generation().await;
@@ -904,14 +870,14 @@ mod tests {
         let _ = shutdown().await;
         let dir = runtime_dir("serialise");
 
-        let (cfg, pool, filter, runtime, port, mock) = init_args(&dir);
-        init_core(cfg, pool, filter, runtime, port, ListenMode::Loopback, mock)
+        let (cfg, pool, runtime, port, mock) = init_args(&dir);
+        init_core(cfg, pool, runtime, port, ListenMode::Loopback, mock)
             .await
             .expect("init");
 
         let shutdown_future = shutdown();
-        let (cfg, pool, filter, runtime, port, mock) = init_args(&dir);
-        let init_future = init_core(cfg, pool, filter, runtime, port, ListenMode::Loopback, mock);
+        let (cfg, pool, runtime, port, mock) = init_args(&dir);
+        let init_future = init_core(cfg, pool, runtime, port, ListenMode::Loopback, mock);
         let (stopped, started) = tokio::join!(shutdown_future, init_future);
         stopped.expect("shutdown");
         started.expect("init");

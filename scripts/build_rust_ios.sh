@@ -10,7 +10,8 @@
 #   ./scripts/build_rust_ios.sh              # 只编真机 arm64（出 IPA 用）
 #   ./scripts/build_rust_ios.sh --simulator  # 额外编模拟器片并打 xcframework
 #
-# 与 scripts/build_rust_backend.sh 同一套约定：pin 版本、缺依赖就硬错，不静默降级。
+# 约定：codegen 与编译本机版本钉死（flutter_rust_bridge 两端同为 2.13.0），
+# 缺依赖就硬错，不静默降级。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,6 +39,16 @@ if [ ! -f "$MANIFEST" ]; then
   echo "错误：找不到 Rust 清单 $MANIFEST" >&2
   exit 1
 fi
+if ! command -v flutter_rust_bridge_codegen >/dev/null 2>&1; then
+  echo "错误：未找到 flutter_rust_bridge_codegen（需与 Cargo.toml 同版本：cargo install flutter_rust_bridge_codegen --version 2.13.0）。" >&2
+  exit 1
+fi
+
+# 绑定必须先于内核产物刷新：`rust/src/api/*` 的函数签名变了却没重新生成，
+# Dart 侧要到编译期（甚至运行期）才会炸。这里把 codegen 钉进构建流程，
+# 保证入库的 lib/src/rust 与 rust/src/frb_generated.rs 永远跟当前 api 一致。
+echo "==> flutter_rust_bridge_codegen generate"
+( cd "$APP_DIR" && flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml )
 
 # release profile 里 `strip = true` 会把符号表一起裁掉，静态库链接会因此找不到导出符号。
 # iOS 产物统一用 debuginfo 级别：只去调试信息，保留符号。

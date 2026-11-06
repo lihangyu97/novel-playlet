@@ -30,7 +30,6 @@ void main() {
     final root = Directory.systemTemp.createTempSync('novel_playlet_live');
     final configDir = Directory('${root.path}/config')..createSync();
     File('assets/config/config.json').copySync('${configDir.path}/config.json');
-    File('assets/config/filter.json').copySync('${configDir.path}/filter.json');
     final poolFile = File('${configDir.path}/device_pool.json');
     File('assets/config/device_pool.example.json').copySync(poolFile.path);
 
@@ -38,7 +37,6 @@ void main() {
     await transport.start(
       configPath: '${configDir.path}/config.json',
       poolPath: poolFile.path,
-      filterPath: '${configDir.path}/filter.json',
       runtimeDir: root.path,
     );
     final api = ApiClient(transport);

@@ -31,7 +31,6 @@ Future<String> version() => RustLib.instance.api.crateApiVersion();
 Future<String> init({
   required String configPath,
   required String poolPath,
-  required String filterPath,
   required String runtimeDir,
   required int port,
   required bool lanShare,
@@ -39,7 +38,6 @@ Future<String> init({
 }) => RustLib.instance.api.crateApiInit(
   configPath: configPath,
   poolPath: poolPath,
-  filterPath: filterPath,
   runtimeDir: runtimeDir,
   port: port,
   lanShare: lanShare,

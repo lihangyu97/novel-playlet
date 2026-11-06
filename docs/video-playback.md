@@ -48,9 +48,9 @@
 | 资产 | 位置 | iOS 现状 |
 |---|---|---|
 | 视频取流接口（`/api/v1/videos/<id>`，`mode=stream` 出远程地址+key，默认整集下载） | `rust/src/endpoints/video.rs` | 已编进 iOS 静态库，可直接调 |
-| CENC 解密 + Range 服务（`/src/<id>.mp4`，200/206/416，`video/mp4`） | `rust/src/endpoints/video.rs` `serve_src_file`、`rust/src/dispatch.rs` | **可用**，回环读路由不需要 capability token |
+| CENC 解密 + Range 服务（`/src/<id>.mp4`，200/206/416，`video/mp4`） | `rust/src/endpoints/video.rs` `serve_src_file`、`rust/src/dispatch.rs` | **可用**：`/src/*` 属于免 capability 的公开面（与 `/health` 及 App 自用的 7 个读接口同级），其余兼容面路由需要 capability |
 | 回环 HTTP adapter | `rust/src/server.rs`、`rust/src/api/mod.rs` | 随 `init` 无条件启动，`baseUrl()` 可取 |
-| 流式解密回环（每会话独立端口 + token，Range→C 流解密） | `fqapp/rust/src/desktop_media.rs` | **未编进 iOS**（`build.rs` 只在 Windows 生效，novel-playlet 尚无 `native/`） |
+| 流式解密回环（每会话独立端口 + token，Range→C 流解密） | `fqapp/rust/src/desktop_media.rs` | **未编进 iOS**（该 Windows 专有代码未随内核拷入，`rust/build.rs` 已随死分支删除） |
 | 播放器 UI / 集数据模型 | `fqapp/lib/pages/player_page.dart`、`episode_source_cache.dart` 等 | 可搬运，播放器 host 需按 AVFoundation 重写 |
 
 ## 3. 实施路径
