@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +10,8 @@ import '../../app/providers.dart';
 import '../../app/router.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
+import '../cache/cache_providers.dart';
+import 'offline_playback.dart';
 import 'widgets/episode_picker_sheet.dart';
 
 /// 播放页：AVPlayer（`video_player`）播放内核解密后的本地 HTTP 流。
@@ -101,6 +104,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _hideTimer?.cancel();
     _disposeController();
     String sourceUrl = '';
+    String localPath = '';
     setState(() {
       _index = index;
       _loading = true;
@@ -110,6 +114,32 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     });
 
     try {
+      // 离线副本优先：命中就直接开本地明文 mp4，不请求内核、不等待
+      // 「准备播放」。未命中才走原来的在线流程（见 docs/offline-cache.md §6.2）。
+      final offlineFile = await _offlineFile(episode.id, refresh: refresh);
+      if (!mounted || generation != _generation) return;
+      // 「确认离线」只能在取流失败后推断，所以这里先按在线尝试。
+      final plan = resolveOfflineEpisode(
+        cachedFile: offlineFile,
+        offline: false,
+      );
+      if (plan.isLocal) {
+        localPath = plan.file!.path;
+        final controller = VideoPlayerController.file(
+          plan.file!,
+          // 无弹幕叠加需求，平台视图底层就是 AVPlayerLayer：少一次逐帧纹理
+          // 拷贝，发热和功耗更好。若真机上发现浮层被原生视图遮挡，可退回默认
+          // 的 textureView（见 docs/video-playback.md 4.1）。
+          viewType: VideoViewType.platformView,
+        );
+        await _startController(
+          controller,
+          index: index,
+          generation: generation,
+        );
+        return;
+      }
+
       final api = ref.read(apiClientProvider);
       // 默认（非 stream）模式：内核先把整集下载进加密缓存再返回 /src 地址，
       // 所以这里会等一会儿；流式回环（M1）接入后这一步会变成秒开。
@@ -119,53 +149,115 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
 
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(source.url),
-        // 无弹幕叠加需求，平台视图底层就是 AVPlayerLayer：少一次逐帧纹理
-        // 拷贝，发热和功耗更好。若真机上发现浮层被原生视图遮挡，可退回默认
-        // 的 textureView（见 docs/video-playback.md 4.1）。
         viewType: VideoViewType.platformView,
       );
-      await controller.initialize();
-      if (!mounted || generation != _generation) {
-        unawaited(controller.dispose());
-        return;
-      }
-      await controller.setLooping(false);
-      _controller = controller;
-      setState(() => _loading = false);
-      // 换集后方向可能变：全屏中切到竖屏视频要退回竖屏，否则画面缩成一条。
-      if (_fullscreen && !_isLandscapeVideo(controller.value)) {
-        unawaited(_exitFullscreen());
-      }
-      controller.addListener(_onTick);
-      await controller.play();
-      _scheduleHide();
-      // 真正播起来才记历史：取流失败/初始化失败的那一集不应该进最近观看。
-      final args = widget.args;
-      if (args.seriesId.isNotEmpty) {
-        unawaited(
-          ref
-              .read(readingStoreProvider)
-              .saveVideoProgress(
-                seriesId: args.seriesId,
-                title: args.seriesTitle,
-                cover: args.cover,
-                episodeIndex: index,
-              ),
-        );
-      }
+      await _startController(controller, index: index, generation: generation);
     } catch (error, stack) {
       if (!mounted || generation != _generation) return;
+      // 没有离线副本、失败又像「网络不可达」：换成明确文案；网络在线时保留
+      // 原来的失败原因（上游/鉴权/解码各有各的说明 + 重试入口）。
+      final missedOffline = resolveOfflineEpisode(
+        cachedFile: null,
+        offline: isOfflineNetworkFailure(error),
+      );
       setState(() {
         _loading = false;
-        _error = _describePlaybackError(
-          error,
-          stack: stack,
-          episode: episode,
-          sourceUrl: sourceUrl,
-          refreshed: refresh,
-        );
+        _error = missedOffline.source == EpisodePlaybackSource.offlineMiss
+            ? _PlaybackFailure(
+                title: EpisodePlaybackPlan.offlineMissTitle,
+                reason: EpisodePlaybackPlan.offlineMissReason,
+                detail: _playbackDetail(
+                  episode,
+                  sourceUrl: sourceUrl,
+                  localPath: localPath,
+                  refreshed: refresh,
+                  error: error,
+                  stack: stack,
+                ),
+              )
+            : _describePlaybackError(
+                error,
+                stack: stack,
+                episode: episode,
+                sourceUrl: sourceUrl,
+                localPath: localPath,
+                refreshed: refresh,
+              );
       });
     }
+  }
+
+  /// 初始化并接管 controller（离线本地文件 / 在线流共用）。
+  ///
+  /// 初始化成功后立刻上屏并开播；换集竞态（generation 对不上）时丢弃旧
+  /// controller，避免两集抢同一个画面。
+  Future<void> _startController(
+    VideoPlayerController controller, {
+    required int index,
+    required int generation,
+  }) async {
+    try {
+      await controller.initialize();
+    } catch (_) {
+      unawaited(controller.dispose());
+      rethrow;
+    }
+    if (!mounted || generation != _generation) {
+      unawaited(controller.dispose());
+      return;
+    }
+    await controller.setLooping(false);
+    _controller = controller;
+    setState(() => _loading = false);
+    // 换集后方向可能变：全屏中切到竖屏视频要退回竖屏，否则画面缩成一条。
+    if (_fullscreen && !_isLandscapeVideo(controller.value)) {
+      unawaited(_exitFullscreen());
+    }
+    controller.addListener(_onTick);
+    await controller.play();
+    _scheduleHide();
+    // 真正播起来才记历史：取流失败/初始化失败的那一集不应该进最近观看。
+    // 离线播放也算看过，进度照存。
+    final args = widget.args;
+    if (args.seriesId.isNotEmpty) {
+      unawaited(
+        ref
+            .read(readingStoreProvider)
+            .saveVideoProgress(
+              seriesId: args.seriesId,
+              title: args.seriesTitle,
+              cover: args.cover,
+              episodeIndex: index,
+            ),
+      );
+    }
+  }
+
+  /// 查这一集有没有离线副本。
+  ///
+  /// `refresh: true`（用户点「重新下载这一集」）时认为本地副本可能已损坏：
+  /// 先删掉它再走网络，让这次重试真正重新取流；否则坏文件会让每次点重试
+  /// 都回到同一个打不开的本地文件。删除失败不影响在线播放。
+  Future<File?> _offlineFile(String episodeId, {required bool refresh}) async {
+    final seriesId = widget.args.seriesId;
+    if (seriesId.isEmpty || episodeId.isEmpty) return null;
+    final store = ref.read(offlineSeriesStoreProvider);
+    try {
+      final cached = await store.episodeFileIfCached(seriesId, episodeId);
+      if (cached == null || !refresh) return cached;
+      // 用户点「重新下载这一集」：本地副本可能已损坏，删掉后走网络重新取流。
+      // 顺带按文件存在校正 manifest，否则详情页/管理页会继续显示这一集「已缓存」。
+      await cached.delete();
+      await store.reconcile(seriesId);
+    } catch (_) {
+      // 离线区读/删/校正失败（权限、插件缺失等）不能拖垮在线播放。
+    }
+    if (refresh) {
+      ref.invalidate(offlineVideoStatsProvider);
+      ref.invalidate(offlineVideoListProvider);
+      ref.invalidate(offlineSeriesProvider(seriesId));
+    }
+    return null;
   }
 
   void _onTick() {
@@ -196,6 +288,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     required StackTrace stack,
     required Chapter episode,
     required String sourceUrl,
+    required String localPath,
     required bool refreshed,
   }) {
     final raw = error.toString();
@@ -235,9 +328,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         caseSensitive: false,
       ).hasMatch(text)) {
         title = '视频解码失败';
-        reason =
-            '这一集的文件可能损坏（半截缓存）或编码不受支持。'
-            '可以点「重新下载这一集」清掉缓存重取。';
+        reason = localPath.isNotEmpty
+            ? '离线缓存文件可能损坏（下载不完整或被外部清理）。'
+                  '点「重新下载这一集」会删掉本地文件后重新联网取流。'
+            : '这一集的文件可能损坏（半截缓存）或编码不受支持。'
+                  '可以点「重新下载这一集」清掉缓存重取。';
       } else if (RegExp(r'403|404|410').hasMatch(text)) {
         title = '本地视频地址失效';
         reason = '回环服务对 /src 返回了 4xx，多半是缓存被清理或内核重启过。重新下载这一集即可。';
@@ -255,16 +350,39 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       reason = '未归类的错误，详情见下方。';
     }
 
+    return _PlaybackFailure(
+      title: title,
+      reason: reason,
+      detail: _playbackDetail(
+        episode,
+        sourceUrl: sourceUrl,
+        localPath: localPath,
+        refreshed: refreshed,
+        error: error,
+        stack: stack,
+      ),
+    );
+  }
+
+  /// 可复制的技术详情：集 id、地址、原始异常、堆栈前几行。
+  String _playbackDetail(
+    Chapter episode, {
+    required String sourceUrl,
+    required String localPath,
+    required bool refreshed,
+    required Object error,
+    required StackTrace stack,
+  }) {
     final frames = stack.toString().split('\n').take(4).join('\n');
-    final detail = [
+    return [
       '《${widget.args.seriesTitle}》第 ${_index + 1} 集 ${episode.title}（id=${episode.id}）',
       if (sourceUrl.isNotEmpty) '播放地址: $sourceUrl',
+      if (localPath.isNotEmpty) '离线文件: $localPath',
       if (refreshed) '本次为「重新下载这一集」后的结果',
       '错误类型: ${error.runtimeType}',
-      '原始错误: $raw',
+      '原始错误: $error',
       if (frames.isNotEmpty) '堆栈(前 4 行):\n$frames',
     ].join('\n');
-    return _PlaybackFailure(title: title, reason: reason, detail: detail);
   }
 
   Future<void> _copyError() async {
