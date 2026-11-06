@@ -97,7 +97,7 @@ void main() {
     expect(find.byType(OfflineDownloadButton), findsOneWidget);
     expect(find.byIcon(Icons.download_rounded), findsOneWidget);
     // 原有底栏布局还在：书架按钮与主按钮都完整可见。
-    expect(find.text('加入书架'), findsOneWidget);
+    expect(find.byTooltip('加入书架'), findsOneWidget);
     expect(find.text('开始阅读'), findsOneWidget);
   });
 

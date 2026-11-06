@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'detail_style.dart';
 
-/// 底部固定操作栏：左侧书架切换，右侧主按钮「开始阅读 / 继续阅读」。
+/// 底部固定操作栏：左侧书架切换（纯图标 + tooltip），右侧主按钮
+/// 「开始阅读 / 继续阅读」；中间可选「离线缓存」入口。
 ///
 /// 用 Scaffold.bottomNavigationBar 挂在 body 外面，滚动时始终可见；
 /// 传入 null 回调即按钮禁用（数据未就绪）。
@@ -58,25 +59,22 @@ class DetailActionBar extends StatelessWidget {
             ),
             child: Row(
               children: [
-                OutlinedButton.icon(
+                // 只保留图标：底栏空间让给主按钮；文案放 tooltip / 语义标签。
+                IconButton.outlined(
                   onPressed: onShelf,
+                  tooltip: shelfLabel,
                   icon: Icon(
                     shelfActive
                         ? Icons.check_rounded
                         : Icons.bookmark_add_outlined,
-                    size: 18,
+                    size: 20,
                   ),
-                  label: Text(
-                    shelfLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 46),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(46, 46),
                     foregroundColor: shelfActive
                         ? scheme.primary
                         : scheme.onSurface,
+                    side: BorderSide(color: scheme.outlineVariant),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),

@@ -61,6 +61,14 @@ class OfflineDownloadButton extends ConsumerWidget {
         tooltip: '继续缓存',
       );
     }
+    // done 直接显示勾选（manifest 可能还没被 provider 刷新，不能只依赖 isCached）。
+    if (active && task.isDone) {
+      return IconButton(
+        tooltip: '已离线缓存',
+        onPressed: () => _showMessage(context, '已离线缓存，可在 设置 → 存储 管理'),
+        icon: const Icon(Icons.offline_pin_rounded),
+      );
+    }
     if (isCached) {
       return IconButton(
         tooltip: '已离线缓存',

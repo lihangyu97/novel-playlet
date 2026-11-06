@@ -60,7 +60,9 @@ void main() {
   ];
 
   /// 建容器并等启动恢复跑完，避免恢复态覆盖新任务。
-  Future<ProviderContainer> makeContainer() async {
+  Future<ProviderContainer> makeContainer({
+    OfflineSeriesStore? seriesStoreOverride,
+  }) async {
     final container = ProviderContainer(
       overrides: [
         offlinePathsProvider.overrideWithValue(paths),
@@ -73,6 +75,8 @@ void main() {
             manifestInterval: Duration.zero,
           ),
         ),
+        if (seriesStoreOverride != null)
+          offlineSeriesStoreProvider.overrideWithValue(seriesStoreOverride),
       ],
     );
     addTearDown(container.dispose);
@@ -336,6 +340,35 @@ void main() {
       expect(leftovers, isEmpty);
     });
 
+    test('40 集整剧不会在开始时被额度估算误挡（线上真实 case）', () async {
+      // 曾经的 bug：按「缺失集数 × 150MB」预估算，40 集 ≈ 6GiB 直接超过 3GiB
+      // 上限，表现为刚点下载就报「空间不足」。现在只在区已满时才拒绝。
+      for (var i = 0; i < 40; i++) {
+        network.videoBytes['e$i'] = [1, 2];
+      }
+      final container = await makeContainer();
+      await startVideo(container, items: episodes(40));
+
+      final state = container.read(offlineDownloaderProvider)!;
+      expect(state.status, OfflineTaskStatus.done);
+      expect(state.completed, 40);
+    });
+
+    test('下到一半触及本区上限：暂停并提示，不再继续下载', () async {
+      final smallCapStore = OfflineSeriesStore(paths: paths, capBytes: 8);
+      for (var i = 0; i < 3; i++) {
+        network.videoBytes['e$i'] = List.filled(4, 1);
+      }
+      final container = await makeContainer(seriesStoreOverride: smallCapStore);
+      await startVideo(container, items: episodes(3));
+
+      final state = container.read(offlineDownloaderProvider)!;
+      expect(state.status, OfflineTaskStatus.paused);
+      expect(state.completed, 2);
+      expect(state.error, contains('空间不足'));
+      expect(await smallCapStore.hasEpisode('s1', 'e2'), isFalse);
+    });
+
     test('视频容量超限同样抛 OfflineQuotaExceeded', () async {
       await seriesStore.begin(
         OfflineSeries(
@@ -354,6 +387,13 @@ void main() {
   });
 
   group('任务模型', () {
+    test('done 的状态文案是「已完成」，不能显示成「已暂停」', () {
+      expect(offlineTaskStatusLabel(OfflineTaskStatus.done), '已完成');
+      expect(offlineTaskStatusLabel(OfflineTaskStatus.paused), '已暂停');
+      expect(offlineTaskStatusLabel(OfflineTaskStatus.failed), '下载失败');
+      expect(offlineTaskStatusLabel(OfflineTaskStatus.running), '下载中…');
+    });
+
     test('OfflineTask JSON 往返保留状态与进度', () {
       final task = OfflineTask(
         kind: OfflineTaskKind.video,

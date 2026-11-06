@@ -171,16 +171,10 @@ void main() {
       expect(bundleCalls(), 2, reason: '进入详情时详情与选集各拉一次');
 
       // 收藏走 provider 乐观更新（按钮立即回显），页面因此重建一次。
-      await tester.tap(find.text('收藏'));
+      // 底栏书架按钮是「纯图标 + tooltip」，用 tooltip 定位。
+      await tester.tap(find.byTooltip('收藏'));
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
-      expect(
-        find.descendant(
-          of: find.byType(OutlinedButton),
-          matching: find.text('已收藏'),
-        ),
-        findsOneWidget,
-        reason: '收藏应乐观回显，不等落盘',
-      );
+      expect(find.byTooltip('已收藏'), findsOneWidget, reason: '收藏应乐观回显，不等落盘');
 
       // 播放页返回存进度会 bump videoRevision，进度 provider 刷新又让页面重建。
       await store.saveVideoProgress(
@@ -202,15 +196,12 @@ void main() {
       const VideoDetailPage(seriesId: 'v1', preview: preview),
       transport: FakePreviewTransport(),
     );
-    expect(find.text('收藏'), findsOneWidget);
+    expect(find.byTooltip('收藏'), findsOneWidget);
     expect(find.text('播放'), findsOneWidget);
 
-    await tester.tap(find.text('收藏'));
+    await tester.tap(find.byTooltip('收藏'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    final favoriteButton = find.descendant(
-      of: find.byType(OutlinedButton),
-      matching: find.text('已收藏'),
-    );
+    final favoriteButton = find.byTooltip('已收藏');
     expect(favoriteButton, findsOneWidget, reason: '底部收藏按钮应变成「已收藏」');
     final store = ReadingStore();
     expect(await store.isVideoOnShelf('v1'), isTrue);
@@ -219,13 +210,7 @@ void main() {
     await tester.pumpAndSettle(const Duration(seconds: 5));
     await tester.tap(favoriteButton);
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    expect(
-      find.descendant(
-        of: find.byType(OutlinedButton),
-        matching: find.text('收藏'),
-      ),
-      findsOneWidget,
-    );
+    expect(find.byTooltip('收藏'), findsOneWidget);
     expect(await store.isVideoOnShelf('v1'), isFalse);
   });
 

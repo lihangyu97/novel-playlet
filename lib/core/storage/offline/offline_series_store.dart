@@ -15,10 +15,15 @@ import 'offline_series.dart';
 /// 与自动层（内核 `backend/src/` 的 CENC 临时缓存）物理隔离；这里的内容只由
 /// 用户显式删除。
 class OfflineSeriesStore {
-  OfflineSeriesStore({OfflinePaths? paths}) : _paths = paths ?? OfflinePaths();
+  OfflineSeriesStore({OfflinePaths? paths, int? capBytes})
+    : _paths = paths ?? OfflinePaths(),
+      capBytes = capBytes ?? videoCapBytes;
 
   /// 短剧离线区软上限（3 GiB）。
   static const int videoCapBytes = 3 * 1024 * 1024 * 1024;
+
+  /// 本区实际软上限；测试注入小值来验证「下到一半触顶暂停」。
+  final int capBytes;
 
   static const String manifestName = 'series.json';
 
@@ -209,7 +214,7 @@ class OfflineSeriesStore {
       count += 1;
       bytes += series.bytes;
     }
-    return OfflineStats(count: count, bytes: bytes, capBytes: videoCapBytes);
+    return OfflineStats(count: count, bytes: bytes, capBytes: capBytes);
   }
 
   /// 清理没有 manifest 的孤立目录与残留 `.part` 文件；返回删除的目录数。

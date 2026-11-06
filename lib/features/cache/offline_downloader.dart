@@ -173,9 +173,6 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
   /// 开任务前的粗估：一章正文约 15KB。
   static const int novelChapterEstimateBytes = 15 * 1024;
 
-  /// 一集短剧约 150MB（软上限判断用，宁可估大）。
-  static const int videoEpisodeEstimateBytes = 150 * 1024 * 1024;
-
   /// 连续失败多少章/集后暂停任务。
   static const int maxConsecutiveFailures = 3;
 
@@ -557,13 +554,15 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
     final store = _seriesStore;
     final existing = await store.read(seriesId);
     final missing = await store.missingEpisodeIds(seriesId, episodes);
+    // 短剧单集体积差异大（几十 MB 到几百 MB），不能用「集数 × 固定估算」在开始时
+    // 一刀切：一部 40 集的剧按 150MB/集估会直接超过 3GiB 上限，表现为刚点下载
+    // 就报「空间不足」。这里只挡「区已经满了」的情况，下载过程中逐集检查额度。
     final stats = await store.stats();
-    final estimate = missing.length * videoEpisodeEstimateBytes;
-    if (stats.bytes + estimate > OfflineSeriesStore.videoCapBytes) {
+    if (stats.bytes >= store.capBytes) {
       throw OfflineQuotaExceeded(
         kind: OfflineTaskKind.video,
         usedBytes: stats.bytes,
-        capBytes: OfflineSeriesStore.videoCapBytes,
+        capBytes: store.capBytes,
       );
     }
 
@@ -693,6 +692,16 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       }
       if (consecutive >= maxConsecutiveFailures) {
         control.pauseMessage ??= '网络异常，任务已暂停';
+        control.pauseRequested = true;
+        break;
+      }
+      // 软上限在下载过程中逐集检查：允许当前这一集把区间顶到上限（单集体积未知），
+      // 到了上限就暂停并提示去清理，而不是在开始时就按估算拒绝整部剧。
+      if (bytes >= seriesStore.capBytes) {
+        control.pauseMessage ??=
+            '离线区空间不足（已用 ${_formatBytesShort(bytes)} / 上限 '
+            '${_formatBytesShort(seriesStore.capBytes)}），任务已暂停，'
+            '请先在「设置 → 存储」清理';
         control.pauseRequested = true;
         break;
       }
@@ -1045,4 +1054,15 @@ Future<void> _closeStreamQuietly(OfflineVideoStream? stream) async {
   } catch (_) {
     // 同上。
   }
+}
+
+/// 下载器内部提示用的字节格式（不依赖 UI 层）。
+String _formatBytesShort(int bytes) {
+  final gb = 1024 * 1024 * 1024;
+  final mb = 1024 * 1024;
+  final kb = 1024;
+  if (bytes >= gb) return '${(bytes / gb).toStringAsFixed(1)} GB';
+  if (bytes >= mb) return '${(bytes / mb).toStringAsFixed(1)} MB';
+  if (bytes >= kb) return '${(bytes / kb).toStringAsFixed(1)} KB';
+  return '$bytes B';
 }

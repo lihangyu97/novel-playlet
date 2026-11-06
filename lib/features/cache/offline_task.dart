@@ -187,3 +187,15 @@ class OfflineTaskStore {
     }
   }
 }
+
+/// 任务状态的用户可读文案（管理页列表 / 详情页按钮共用）。
+///
+/// 注意 done 必须显示「已完成」：之前只区分 active/paused，会把下完的任务
+/// 显示成「已暂停」。
+String offlineTaskStatusLabel(OfflineTaskStatus status) => switch (status) {
+  OfflineTaskStatus.idle => '未开始',
+  OfflineTaskStatus.running => '下载中…',
+  OfflineTaskStatus.paused => '已暂停',
+  OfflineTaskStatus.done => '已完成',
+  OfflineTaskStatus.failed => '下载失败',
+};

@@ -189,6 +189,7 @@ class _NovelTabState extends ConsumerState<_NovelTab> {
       completed: task.completed,
       total: task.total,
       status: task.status,
+      error: task.error,
     );
   }
 }
@@ -333,6 +334,7 @@ class _VideoTabState extends ConsumerState<_VideoTab> {
       completed: task.completed,
       total: task.total,
       status: task.status,
+      error: task.error,
     );
   }
 }
@@ -346,11 +348,15 @@ class _TaskProgress {
     required this.completed,
     required this.total,
     required this.status,
+    this.error,
   });
 
   final int completed;
   final int total;
   final OfflineTaskStatus status;
+
+  /// 暂停/失败时的原因（如「2 章失败」「空间不足…」），展示在状态下方。
+  final String? error;
 
   double get ratio => total <= 0 ? 0 : (completed / total).clamp(0, 1);
 
@@ -569,15 +575,29 @@ class _OfflineItemTile extends StatelessWidget {
                     backgroundColor: scheme.surfaceContainerHighest,
                   ),
                 ),
+                if (progress.error != null &&
+                    progress.status != OfflineTaskStatus.running) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    progress.error!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ],
               const SizedBox(height: 2),
               Row(
                 children: [
                   if (progress != null)
                     Text(
-                      progress.active ? '下载中…' : '已暂停',
+                      offlineTaskStatusLabel(progress.status),
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.primary,
+                        color: progress.status == OfflineTaskStatus.failed
+                            ? scheme.error
+                            : scheme.primary,
                       ),
                     )
                   else if (onContinue != null)
