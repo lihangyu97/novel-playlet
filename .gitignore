@@ -59,3 +59,4 @@ ios/Frameworks/libfqapi_core.a
 
 # golden 测试失败时生成的 diff 快照（每次跑测试都会重写，不入库）
 test/failures/
+test/**/failures/
