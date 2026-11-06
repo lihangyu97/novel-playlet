@@ -1,10 +1,12 @@
-# 最小质量门禁：format / analyze / test / clippy / 绑定漂移。
+# 最小质量门禁：format / analyze / test / clippy / 绑定漂移 / iOS 无签名构建。
 #
 # 设计取舍：
-# - Flutter 跑在 macOS：test/ui_preview_test.dart 的 golden 会加载系统里的
-#   Arial Unicode 做中文预览字体（见该文件的 _loadPreviewFont），Linux 上没有
-#   这个字体，goldens 必然全红。
+# - Flutter 跑在 macOS：test/ui/ 的 golden 会加载系统里的 Arial Unicode 做中文
+#   预览字体（见 test/ui/preview_harness.dart 的 loadPreviewFont），Linux 上
+#   没有这个字体，goldens 必然全红。
 # - Rust 跑在 Linux：内核测试全部用 mock upstream + 临时目录，不依赖 macOS。
+# - iOS 构建单独一个 macOS job：只验证「内核静态库 + Xcode 无签名构建」能过，
+#   不签名、不安装，避免占用证书/设备。
 # - 两端工具链都按本机验证过的版本钉死（Flutter 3.47.9 / Rust 1.99.1），
 #   避免 rustfmt / clippy / Skia 版本漂移把 CI 变成随机红灯。
 name: CI
@@ -77,3 +79,30 @@ jobs:
       - run: flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
       - name: 生成物必须与入库版本一致
         run: git diff --exit-code
+
+  ios:
+    name: ios (无签名构建)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.9
+          channel: stable
+          cache: true
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-expand
+      - run: flutter pub get
+      # build_rust_ios.sh 内部先跑 FRB codegen（缺工具会硬错），再编 device 静态库。
+      - run: cargo install flutter_rust_bridge_codegen --version 2.13.0
+      - run: ./scripts/build_rust_ios.sh
+      - run: pod install
+        working-directory: ios
+      - run: flutter build ios --release --no-codesign
