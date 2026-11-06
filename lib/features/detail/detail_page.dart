@@ -8,6 +8,8 @@ import '../../app/widgets/states.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/novel_item.dart';
+import '../cache/offline_task.dart';
+import '../cache/widgets/offline_download_button.dart';
 import 'detail_action_bar.dart';
 import 'detail_directory_section.dart';
 import 'detail_directory_sheet.dart';
@@ -239,6 +241,15 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               onShelf: shelfItem == null || shelfBusy
                   ? null
                   : () => _toggleShelf(context, ref, shelfItem),
+              offlineButton: chapters.isEmpty
+                  ? null
+                  : OfflineDownloadButton(
+                      kind: OfflineTaskKind.novel,
+                      id: bookId,
+                      title: detail?.title ?? preview?.title ?? '',
+                      cover: detail?.cover ?? preview?.cover ?? '',
+                      items: chapters,
+                    ),
             )
           : null,
     );

@@ -5,12 +5,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/router.dart';
+import '../../core/storage/offline/offline_book.dart';
+import '../../core/storage/offline/offline_book_store.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/api/api_client.dart';
 import '../../data/models/book_detail.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/chapter_content.dart';
 import '../../data/models/json_utils.dart';
+import '../cache/cache_providers.dart';
 import 'reader_chapter_cache.dart';
 
 /// 阅读会话状态。
@@ -120,6 +123,12 @@ class ReaderController extends Notifier<ReaderSessionState> {
 
   late ReaderChapterCache _cache;
 
+  /// 小说离线 pinned 区（整本下载落盘的目录 + 正文）。
+  ///
+  /// 阅读链路按 offline → 自动缓存 → 网络 的顺序取正文，见
+  /// docs/offline-cache.md §5；它只被用户手动删除，阅读页不会写它。
+  late OfflineBookStore _offline;
+
   /// 下一章/上一章的后台预取队列。并发上限 1，避免快速滑动时打爆请求。
   final List<Chapter> _prefetchQueue = <Chapter>[];
   final Set<String> _prefetchQueued = <String>{};
@@ -136,6 +145,7 @@ class ReaderController extends Notifier<ReaderSessionState> {
       _progressTimer = null;
     });
     _cache = ref.read(readerChapterCacheProvider);
+    _offline = ref.read(offlineBookStoreProvider);
     // 目录与正文都是网络请求，不能阻塞 build；先给加载态，回来后刷新。
     _bootstrap();
     return ReaderSessionState(bookTitle: args.bookTitle, cover: args.cover);
@@ -145,36 +155,32 @@ class ReaderController extends Notifier<ReaderSessionState> {
     if (_bootstrapping) return;
     _bootstrapping = true;
     try {
-      final api = ref.read(apiClientProvider);
       final store = ref.read(readingStoreProvider);
-      // 详情和目录并行：详情只用来补书名/封面，失败不影响阅读。
-      final detailFuture = _loadDetail(api);
-      final chapters = await api.directory(args.bookId);
-      final detail = await detailFuture;
+      // 离线优先：整本下载过（有 book.json）就直接用本地目录进阅读，不等网络。
+      // 没有离线内容时保持原来的网络优先路径。
+      final offline = await _readOfflineBook();
       if (_disposed) return;
-      if (chapters.isEmpty) {
+      if (offline != null && offline.chapters.isNotEmpty) {
+        final chapters = _chaptersFromOffline(offline);
+        final start = await _resolveStart(chapters, store);
+        if (_disposed) return;
         state = state.copyWith(
-          chapters: const <Chapter>[],
-          loading: false,
-          error: '目录为空',
+          chapters: chapters,
+          index: start.index,
+          resumeBlockIndex: start.blockIndex,
+          resumeChapterIndex: start.blockIndex > 0 ? start.index : -1,
+          bookTitle: args.bookTitle.isNotEmpty ? args.bookTitle : offline.title,
+          cover: args.cover.isNotEmpty ? args.cover : offline.cover,
+          loading: true,
+          error: null,
         );
+        // 先把正文放出来（离线命中不进 loading），再后台静默刷新目录。
+        await _loadChapter(start.index);
+        if (_disposed) return;
+        unawaited(_refreshDirectoryInBackground());
         return;
       }
-      final start = await _resolveStart(chapters, store);
-      if (_disposed) return;
-      state = state.copyWith(
-        chapters: chapters,
-        index: start.index,
-        resumeBlockIndex: start.blockIndex,
-        resumeChapterIndex: start.blockIndex > 0 ? start.index : -1,
-        bookTitle: args.bookTitle.isNotEmpty
-            ? args.bookTitle
-            : (detail?.title ?? ''),
-        cover: args.cover.isNotEmpty ? args.cover : (detail?.cover ?? ''),
-        loading: true,
-        error: null,
-      );
-      await _loadChapter(start.index);
+      await _bootstrapFromNetwork(store);
     } catch (error) {
       if (_disposed) return;
       state = state.copyWith(
@@ -183,6 +189,106 @@ class ReaderController extends Notifier<ReaderSessionState> {
       );
     } finally {
       _bootstrapping = false;
+    }
+  }
+
+  /// 没有离线 manifest 时的原路径：目录 + 详情并行网络请求。
+  ///
+  /// 失败交给 [_bootstrap] 统一置错误态——未缓存的书断网时保持现有错误页，
+  /// 不会因为"离线兜底"而变成空白。
+  Future<void> _bootstrapFromNetwork(ReadingStore store) async {
+    final api = ref.read(apiClientProvider);
+    // 详情和目录并行：详情只用来补书名/封面，失败不影响阅读。
+    final detailFuture = _loadDetail(api);
+    final chapters = await api.directory(args.bookId);
+    final detail = await detailFuture;
+    if (_disposed) return;
+    if (chapters.isEmpty) {
+      state = state.copyWith(
+        chapters: const <Chapter>[],
+        loading: false,
+        error: '目录为空',
+      );
+      return;
+    }
+    final start = await _resolveStart(chapters, store);
+    if (_disposed) return;
+    state = state.copyWith(
+      chapters: chapters,
+      index: start.index,
+      resumeBlockIndex: start.blockIndex,
+      resumeChapterIndex: start.blockIndex > 0 ? start.index : -1,
+      bookTitle: args.bookTitle.isNotEmpty
+          ? args.bookTitle
+          : (detail?.title ?? ''),
+      cover: args.cover.isNotEmpty ? args.cover : (detail?.cover ?? ''),
+      loading: true,
+      error: null,
+    );
+    await _loadChapter(start.index);
+  }
+
+  /// 读整本离线 manifest；不存在/损坏/存储不可用都当没有（离线只是兜底）。
+  Future<OfflineBook?> _readOfflineBook() async {
+    try {
+      return await ref.read(offlineNovelProvider(args.bookId).future);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// manifest 章节 → 阅读器目录。
+  ///
+  /// 序号按数组顺序重排：manifest 的 index 是下载时目录的下标，换源/重排后
+  /// 可能重复或间断；阅读器只依赖列表相对顺序，用当前位置最稳。
+  List<Chapter> _chaptersFromOffline(OfflineBook book) => [
+    for (var i = 0; i < book.chapters.length; i++)
+      Chapter(
+        id: book.chapters[i].id,
+        title: book.chapters[i].title,
+        volumeName: book.chapters[i].volumeName,
+        index: i,
+      ),
+  ];
+
+  /// 有离线目录时后台刷新网络目录：成功后按 chapterId 保持当前章替换，失败
+  /// （断网/上游异常）静默保留本地目录，绝不清掉已经渲染出来的内容。
+  Future<void> _refreshDirectoryInBackground() async {
+    try {
+      final api = ref.read(apiClientProvider);
+      final detailFuture = _loadDetail(api);
+      final chapters = await api.directory(args.bookId);
+      final detail = await detailFuture;
+      if (_disposed || chapters.isEmpty) return;
+
+      final before = state;
+      final targetId = before.chapterAt(before.index)?.id ?? '';
+      final displayedId = before.chapterAt(before.contentIndex)?.id ?? '';
+      final targetIndex = targetId.isEmpty
+          ? -1
+          : chapters.indexWhere((chapter) => chapter.id == targetId);
+      // 找不到当前章（目录整体换源/换 id）时不拿旧下标硬套，保留本地目录。
+      if (targetIndex < 0) return;
+      final displayedIndex = displayedId.isEmpty
+          ? -1
+          : chapters.indexWhere((chapter) => chapter.id == displayedId);
+      state = state.copyWith(
+        chapters: chapters,
+        index: targetIndex,
+        contentIndex: displayedIndex,
+        bookTitle: args.bookTitle.isNotEmpty
+            ? args.bookTitle
+            : (detail?.title ?? before.bookTitle),
+        cover: args.cover.isNotEmpty
+            ? args.cover
+            : (detail?.cover ?? before.cover),
+      );
+      if (displayedIndex < 0) {
+        // 正在显示的章不在新目录里：按新目录重新加载目标章正文。
+        await _loadChapter(targetIndex);
+      }
+    } catch (_) {
+      // 断网/接口失败：静默保留本地目录，用户仍能继续读离线内容。
     }
   }
 
@@ -268,34 +374,35 @@ class ReaderController extends Notifier<ReaderSessionState> {
     final resumeBlock = resumeChapterIndex == clamped ? resumeBlockIndex : 0;
     _saveProgress(chapter, blockIndex: resumeBlock);
 
-    // 命中本地缓存就直接展示，连 loading 态都不进，才不会闪一下。
+    // 1) 离线 pinned 层优先：整本下载过的正文直接展示，连 loading 都不进。
+    //    离线命中不回写自动缓存——离线区是最终数据源，自动层只负责加速。
+    final offline = await _readOfflineChapter(chapter.id);
+    if (_disposed || token != _requestToken) return;
+    if (offline != null) {
+      _applyContent(chapter, offline);
+      _prefetchNeighbors();
+      return;
+    }
+
+    // 2) 自动加速层：命中就直接展示，连 loading 态都不进，才不会闪一下。
     final cached = await _cache.get(chapter.id);
     if (_disposed || token != _requestToken) return;
     if (cached != null) {
-      state = state.copyWith(
-        content: cached.content,
-        contentIndex: clamped,
-        loading: false,
-        error: null,
-      );
+      _applyContent(chapter, cached.content);
       // 超过 7 天的旧正文仍先展示，同时悄悄刷新一次缓存。
       if (cached.isStale) _enqueuePrefetch(chapter);
       _prefetchNeighbors();
       return;
     }
 
+    // 3) 网络。
     state = state.copyWith(loading: true);
     try {
       final content = await ref
           .read(apiClientProvider)
           .chapter(chapter.id, title: chapter.title);
       if (_disposed || token != _requestToken) return;
-      state = state.copyWith(
-        content: content,
-        contentIndex: clamped,
-        loading: false,
-        error: null,
-      );
+      _applyContent(chapter, content);
       unawaited(_cache.put(content));
       _prefetchNeighbors();
     } catch (error) {
@@ -304,6 +411,33 @@ class ReaderController extends Notifier<ReaderSessionState> {
         loading: false,
         error: _messageOf(error, '正文加载失败'),
       );
+    }
+  }
+
+  /// 正文就绪：按 chapterId 找回它在当前目录里的位置再落地。
+  ///
+  /// 后台刷新目录可能刚好在请求期间把 chapters 换掉，沿用旧下标会把内容挂到
+  /// 别的章上；找不到这一章（换源）时丢弃结果，不张冠李戴。
+  void _applyContent(Chapter chapter, ChapterContent content) {
+    final position = state.chapters.indexWhere((item) => item.id == chapter.id);
+    if (position < 0) {
+      state = state.copyWith(loading: false);
+      return;
+    }
+    state = state.copyWith(
+      content: content,
+      contentIndex: position,
+      loading: false,
+      error: null,
+    );
+  }
+
+  /// 读一章离线正文；失败/损坏都当 miss（自动层与网络会继续兜底）。
+  Future<ChapterContent?> _readOfflineChapter(String chapterId) async {
+    try {
+      return await _offline.readChapter(args.bookId, chapterId);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -357,6 +491,11 @@ class ReaderController extends Notifier<ReaderSessionState> {
     if (_prefetched.contains(id) || _prefetching.contains(id)) return;
     _prefetching.add(id);
     try {
+      // 离线区已有这一章就不再请求，也不写自动缓存（pinned 层优先）。
+      if (await _readOfflineChapter(id) != null) {
+        _prefetched.add(id);
+        return;
+      }
       final cached = await _cache.get(id);
       if (_disposed) return;
       // 已有新鲜缓存（含之前预取过的）就不再请求。

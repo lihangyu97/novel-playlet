@@ -14,6 +14,7 @@ class DetailActionBar extends StatelessWidget {
     required this.shelfLabel,
     required this.shelfActive,
     required this.onShelf,
+    this.offlineButton,
   });
 
   final String primaryLabel;
@@ -25,6 +26,12 @@ class DetailActionBar extends StatelessWidget {
   /// true = 已在书架，点击会移出。
   final bool shelfActive;
   final VoidCallback? onShelf;
+
+  /// 「缓存整本」入口（[OfflineDownloadButton]）；目录未就绪时为 null。
+  ///
+  /// 做成注入的 Widget 而不是在本组件里拼 provider：操作栏只负责布局，下载
+  /// 状态由详情页自己决定要不要展示。
+  final Widget? offlineButton;
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +82,10 @@ class DetailActionBar extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (offlineButton != null) ...[
+                  const SizedBox(width: 4),
+                  offlineButton!,
+                ],
                 const SizedBox(width: 10),
                 Expanded(
                   child: FilledButton(
