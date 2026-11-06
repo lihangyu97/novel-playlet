@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/api/api_client.dart';
+import '../../data/models/json_utils.dart';
 import 'recommend_category.dart';
 import 'recommend_item.dart';
 import 'recommend_state.dart';
@@ -147,7 +148,16 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
       if (generation != _generation) return;
       final latest = state.value;
       if (latest == null) return;
-      state = AsyncData(latest.withLoadMoreError(describeFeedError(error)));
+      // 失败时把 loadingMore 收回来：footer 先判 loadingMore 再判 error，
+      // 不收回来会永远停在转圈，用户既看不到错误也没有重试入口。
+      state = AsyncData(
+        latest
+            .withLoadingMore(false)
+            .withLoadMoreError(
+              describeFeedError(error),
+              retryable: isRetryableError(error),
+            ),
+      );
     } finally {
       _loadingMore = false;
     }
@@ -157,6 +167,9 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
   Future<void> retryLoadMore() async {
     final current = state.value;
     if (current == null || current.loadMoreError == null) return;
+    // 非瞬时失败（badInput / tooLarge / deviceFailed）重试同一个请求不会变好，
+    // 直接不发；底部也不会给重试入口（见 FeedFooter.retryable）。
+    if (!current.loadMoreRetryable) return;
     state = AsyncData(current.withLoadMoreError(null));
     await loadMore();
   }

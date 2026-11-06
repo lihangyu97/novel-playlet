@@ -252,8 +252,9 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     return null;
   }
 
+  /// 详情/目录失败文案：统一走 [apiErrorCopy]。
   String _errorMessage(Object error) =>
-      error is ApiException ? error.message : '加载失败，请稍后重试';
+      apiErrorCopy(error, fallback: '加载失败，请稍后重试');
 
   /// 打开阅读页；回到详情后刷新「继续阅读 · 第N章」。
   Future<void> _openReader(

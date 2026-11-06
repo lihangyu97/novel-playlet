@@ -146,6 +146,7 @@ class _FeedViewState<T> extends State<FeedView<T>> {
               error: data.loadMoreError,
               hasMore: data.hasMore,
               onRetry: widget.onRetryLoadMore,
+              retryable: data.loadMoreRetryable,
             ),
           ),
           SliverToBoxAdapter(child: SizedBox(height: 24 + widget.bottomInset)),

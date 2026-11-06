@@ -22,6 +22,23 @@ class BackendResponse {
   String get text => utf8.decode(body, allowMalformed: true);
 }
 
+/// 内核 504：这次请求耗尽了内核的时间预算（真实超时）。
+///
+/// 这是一个"可以归一成用户可见错误"的失败：`ApiClient` 会把它转成
+/// `ApiException(kind: timeout)`，让上层拿到 `timeout` 语义与统一文案。
+/// 与 499 取消区分开：499 仍抛 [TimeoutException]（取消不是错误，不能变成
+/// 用户可见错误），由调用方像以前一样静默处理。
+class BackendTimeoutException implements Exception {
+  const BackendTimeoutException(this.timeout);
+
+  /// 本次请求允许的时长。
+  final Duration timeout;
+
+  @override
+  String toString() =>
+      'BackendTimeoutException(after ${timeout.inMilliseconds}ms)';
+}
+
 /// Rust 核传输层。
 ///
 /// 职责只有三件事：加载 FRB 运行时、按参数 init 内核、把一次
@@ -129,10 +146,13 @@ class BackendTransport {
       timeoutMs: timeout.inMilliseconds,
     );
     if (response.status == 499) {
+      // 客户端主动取消：保持原有语义，不归一成 ApiException。
       throw TimeoutException('backend cancelled', timeout);
     }
     if (response.status == 504) {
-      throw TimeoutException('backend timeout', timeout);
+      // 真实超时：抛可区分的异常，由 data 层的 ApiClient 归一成
+      // ApiException(kind: timeout)（core 不依赖 data）。
+      throw BackendTimeoutException(timeout);
     }
     return BackendResponse(
       response.status,

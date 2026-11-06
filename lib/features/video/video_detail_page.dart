@@ -190,7 +190,8 @@ class VideoDetailPage extends ConsumerWidget {
           SliverFillRemaining(
             hasScrollBody: false,
             child: ErrorView(
-              message: error is ApiException ? error.message : '剧集加载失败，请重试',
+              // 详情+选集失败文案：统一走 apiErrorCopy（kind 短句兜底）。
+              message: apiErrorCopy(error, fallback: '剧集加载失败，请重试'),
               onRetry: onRetry,
             ),
           ),

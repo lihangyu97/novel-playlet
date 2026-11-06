@@ -244,29 +244,48 @@ class ApiClient {
     Duration? timeout,
   }) async {
     final encodedQuery = Uri(queryParameters: query).query;
-    final response = await _transport.send(
-      'GET',
-      path,
-      query: encodedQuery.isEmpty ? null : encodedQuery,
-      timeout: timeout ?? BackendTransport.defaultTimeout,
-    );
+    final BackendResponse response;
+    try {
+      response = await _transport.send(
+        'GET',
+        path,
+        query: encodedQuery.isEmpty ? null : encodedQuery,
+        timeout: timeout ?? BackendTransport.defaultTimeout,
+      );
+    } on BackendTimeoutException {
+      // B2：内核 504 是真实超时，在这里归一成带 kind 的 ApiException；499
+      // 取消仍是 TimeoutException，不在这里接（取消不是用户可见错误）。
+      throw ApiException(
+        ApiErrorKind.timeout.userCopy,
+        kind: ApiErrorKind.timeout,
+      );
+    }
     if (response.statusCode != 200) {
       // 内核把错误也包成 JSON，能读 message 就透出去；kind 一并透出，
       // 供上层按语义分支（本层不重试）。读不到就保持 unknown。
+      // 504 即使没有 JSON body 也按超时处理（部分传输实现会原样返回状态码）。
+      var kind = response.statusCode == 504
+          ? ApiErrorKind.timeout
+          : ApiErrorKind.unknown;
       String message = '请求失败（HTTP ${response.statusCode}）';
-      var kind = ApiErrorKind.unknown;
       try {
         final payload = jsonDecode(response.text);
         if (payload is Map) {
           final map = Map<String, dynamic>.from(payload);
-          kind = ApiErrorKind.fromWire(map['kind']);
+          final wireKind = ApiErrorKind.fromWire(map['kind']);
+          if (wireKind != ApiErrorKind.unknown) kind = wireKind;
           final detail = firstString(map, ['error', 'message', 'msg']);
           if (detail.isNotEmpty) message = detail;
         }
       } catch (_) {
-        // 非 JSON 响应保持状态码文案与 unknown。
+        // 非 JSON 响应保持状态码文案与 kind 的默认判断。
       }
-      throw ApiException(message, kind: kind);
+      // 技术兜底 message（如 "HTTP 500"）换成 kind 短句；具体 message 原样抛出。
+      final exception = ApiException(message, kind: kind);
+      throw ApiException(
+        apiErrorCopy(exception, fallback: message),
+        kind: kind,
+      );
     }
     final decoded = jsonDecode(response.text);
     if (decoded is! Map) {

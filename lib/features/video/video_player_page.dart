@@ -187,9 +187,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
 
   /// 把播放异常翻译成"人话原因 + 可复制的技术详情"。
   ///
-  /// 失败发生在两段：`videoSource`（内核取流/整集下载，抛 ApiException /
-  /// TimeoutException）和 `controller.initialize()`（AVPlayer，抛
-  /// PlatformException，msg 里带 AVFoundation 的 `Code=-xxxxx`）。
+  /// 失败发生在两段：`videoSource`（内核取流/整集下载，抛 ApiException；
+  /// B2 之后 504 超时已被 ApiClient 归一成 `ApiException(kind: timeout)`，
+  /// 只有 499 取消还走 TimeoutException）和 `controller.initialize()`
+  /// （AVPlayer，抛 PlatformException，msg 里带 AVFoundation 的 `Code=-xxxxx`）。
   _PlaybackFailure _describePlaybackError(
     Object error, {
     required StackTrace stack,
@@ -202,12 +203,18 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     String title;
     String reason;
 
-    if (error is TimeoutException) {
+    // 504 超时（ApiException.kind == timeout）与 499 取消的 TimeoutException
+    // 都按"取流超时"展示：B2 之后超时不再落进通用"取流失败"。
+    final timedOut =
+        error is TimeoutException ||
+        (error is ApiException && error.kind == ApiErrorKind.timeout);
+    if (timedOut) {
       title = '取流超时';
       reason = '等内核下载/解密这一集超过 120 秒。常见于网络慢、上游限速，或这一集体积过大。';
     } else if (error is ApiException) {
       title = '取流失败';
-      reason = error.message;
+      // 具体原因优先；技术兜底换 kind 短句（deviceFailed 会提示重启应用）。
+      reason = apiErrorCopy(error, fallback: '取流失败，请重试');
     } else if (error is PlatformException) {
       final text = [
         error.code,

@@ -472,6 +472,7 @@ class ReaderController extends Notifier<ReaderSessionState> {
     await _loadChapter(state.index);
   }
 
+  /// 目录/正文失败文案：统一走 [apiErrorCopy]（具体原因优先，技术兜底换短句）。
   String _messageOf(Object error, String fallback) =>
-      error is ApiException ? error.message : fallback;
+      apiErrorCopy(error, fallback: fallback);
 }

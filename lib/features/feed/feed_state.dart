@@ -19,6 +19,7 @@ class FeedState<T> {
     this.sessionId,
     this.loadingMore = false,
     this.loadMoreError,
+    this.loadMoreRetryable = true,
   });
 
   /// 推荐流：没有关键词，翻页必须回传 [sessionId]（上游否则会换设备）。
@@ -62,6 +63,11 @@ class FeedState<T> {
   /// 加载下一页失败的文案；列表保留，只在底部提示重试。
   final String? loadMoreError;
 
+  /// 这次翻页失败是否值得重试（来自 [ApiException.isRetryable]）。非瞬时的
+  /// 失败（badInput / tooLarge / deviceFailed）重试同一个请求不会变好：底部
+  /// 不给"重试"入口，控制器也不再发请求，避免用户点一次失败一次。
+  final bool loadMoreRetryable;
+
   bool get isSearchMode => mode == FeedMode.search;
   bool get hasMore => nextOffset != null && nextOffset! > 0;
   bool get isEmpty => items.isEmpty;
@@ -77,17 +83,20 @@ class FeedState<T> {
     sessionId: sessionId,
     loadingMore: value,
     loadMoreError: loadMoreError,
+    loadMoreRetryable: loadMoreRetryable,
   );
 
-  FeedState<T> withLoadMoreError(String? message) => FeedState<T>(
-    mode: mode,
-    query: query,
-    items: items,
-    nextOffset: nextOffset,
-    sessionId: sessionId,
-    loadingMore: loadingMore,
-    loadMoreError: message,
-  );
+  FeedState<T> withLoadMoreError(String? message, {bool retryable = true}) =>
+      FeedState<T>(
+        mode: mode,
+        query: query,
+        items: items,
+        nextOffset: nextOffset,
+        sessionId: sessionId,
+        loadingMore: loadingMore,
+        loadMoreError: message,
+        loadMoreRetryable: retryable,
+      );
 
   /// 追加一页并按 id 去重：同一本书/同一部剧可能同时出现在多个推荐区块里。
   ///
@@ -125,7 +134,8 @@ class FeedState<T> {
       other.nextOffset == nextOffset &&
       other.sessionId == sessionId &&
       other.loadingMore == loadingMore &&
-      other.loadMoreError == loadMoreError;
+      other.loadMoreError == loadMoreError &&
+      other.loadMoreRetryable == loadMoreRetryable;
 
   @override
   int get hashCode => Object.hash(
@@ -136,11 +146,13 @@ class FeedState<T> {
     sessionId,
     loadingMore,
     loadMoreError,
+    loadMoreRetryable,
   );
 }
 
-/// 把异常变成可直接展示的一句话；[ApiException] 的 message 已经是人话。
-String describeFeedError(Object error) {
-  if (error is ApiException) return error.message;
-  return '网络开小差了，请稍后重试';
-}
+/// 把异常变成可直接展示的一句话。
+///
+/// 文案策略集中在 [apiErrorCopy]：后端具体 message 优先，只有 "HTTP 500"
+/// 这类技术兜底才换成 kind 短句；非 ApiException 用统一网络兜底。
+String describeFeedError(Object error) =>
+    apiErrorCopy(error, fallback: '网络开小差了，请稍后重试');

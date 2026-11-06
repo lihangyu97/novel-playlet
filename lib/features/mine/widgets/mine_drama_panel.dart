@@ -134,9 +134,7 @@ class MineDramaPanel extends ConsumerWidget {
     } catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error is ApiException ? error.message : '打开播放失败，请重试'),
-        ),
+        SnackBar(content: Text(apiErrorCopy(error, fallback: '打开播放失败，请重试'))),
       );
     }
   }
