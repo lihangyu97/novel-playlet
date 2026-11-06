@@ -289,3 +289,43 @@ grep -rhoE "'/api/v1/[^']*'" lib | sort -u                       # 8 个 path
 grep -n "18921" rust/src/config.rs                                # 与 18931 不一致
 ls .github 2>&1                                                   # 不存在
 ```
+
+---
+
+## 9. 落地情况（2026-11-06）
+
+> 上文保持评审当时的快照，不做修改；本节只记录 2026-11-06 第一/二批重构与真机 profile 之后的落地状态。
+> 对应提交：`8df6c00`（第一批：CI / 封面解码 / 我的页 / 内核收口）、`b2e833e`（第二批：去重 + 错误模型 + 存储/路由 + PATCHES）、`5995bf0`（P1-6 真机 profile 决策）。
+
+### 9.1 已落地
+
+| 评审项 | 落地方式 | 当前证据（文件） |
+|---|---|---|
+| P0-1 | GitHub Actions 四类门禁（Dart format/analyze/test、Rust fmt/clippy/test、FRB 漂移校验、iOS 无签名构建）+ 本地 `make check`；codegen 也钉进 iOS 构建脚本 | `.github/workflows/ci.yml`、`Makefile`、`scripts/build_rust_ios.sh` |
+| P0-2 | 封面按目标显示尺寸解码：`NovelCover` 统一 `memCacheWidth: width * dpr` + 磁盘限宽；详情背景单独按屏宽给解码宽 | `lib/app/widgets/novel_cover.dart`、`lib/app/widgets/detail/detail_common.dart` |
+| P0-3 | 我的页根部预取由 `watch` 改 `listen`；存储 revision 拆成 `novelRevision` / `videoRevision`，短剧写入不再触发小说侧重读 | `lib/features/mine/mine_page.dart`、`lib/core/storage/reading_store.dart` |
+| P1-1 | 抽出 `MediaCard` / `ShelfGrid<T>` / `RecentList<T>` / `PanelShell<TData>`，小说/短剧只注入数据与文案；第 3 节 8 项重复全部落地（`walkCards`、`FeedPage<T>`、sealed `RecommendItem`、`ContentSource` 等） | `lib/app/widgets/media_card.dart`、`lib/features/mine/widgets/`、`lib/data/parsers/card_walker.dart`、`lib/data/models/feed_page.dart`、`lib/features/recommend/recommend_item.dart`、`lib/features/recommend/content_source.dart` |
+| P1-2 | 短剧详情改 provider 化：`videoDetailBundleProvider` 拉详情 + 选集，`VideoShelfController` 做收藏乐观更新，与小说详情 `lib/features/detail/detail_providers.dart` 对称；页面退化为纯布局 | `lib/features/video/video_detail_providers.dart`、`lib/features/video/video_library_providers.dart` |
+| P1-3 | 采用白名单方案：`APP_APIS` 只放 7 个 App 读接口，加上 `/health`、`/src/*` 免 capability；其余 loopback 路由对无 capability 调用直接 404（FFI 不受影响），设备绑定写接口仍要 capability | `rust/src/dispatch.rs`、`rust/src/server.rs`、`rust/tests/loopback_guard.rs` |
+| P1-4 | 错误模型加 `kind`：Rust `ApiError` 区分 `bad_input` / `device_failed` / `rate_limited` / `upstream_5xx` / `timeout` / `too_large` / `unknown`，错误 JSON 带 `kind`，Dart `ApiException.kind` 可分支；kind 语义已收口为 `isTransient` / `needsRestart` + 统一文案 `apiErrorCopy`，并有一处行为策略（翻页重试按钮按可重试性显示）；**仍不新增 Dart 自动重试循环**（重试/退避在 Rust） | `rust/src/error.rs`、`lib/data/models/json_utils.dart`、`lib/features/feed/feed_state.dart`、`lib/features/recommend/recommend_controller.dart`、`rust/tests/error_kind_contract.rs` |
+| P1-5 | codegen 进 `scripts/build_rust_ios.sh` 与 CI 漂移校验；删除 `rust/build.rs` 及其 `cc` build-dependency；`rust/Cargo.toml` 描述改成本项目 | `scripts/build_rust_ios.sh`、`.github/workflows/ci.yml`、`rust/Cargo.toml` |
+| P1-7 | 只做「加 LRU 上限」的最小方案：进度表保留最近 200 本（表结构不变，未做 per-book key / sqflite 迁移） | `lib/core/storage/reading_store.dart`（`progressLimit = 200`） |
+| P1-8 | `PATCHES.md` 记录 fork 基线（fqapp `aabde536c8621092f13b1a95f52e631b189f9243`）与本地补丁清单/上游同步流程 | `PATCHES.md` |
+| P2-1 | 类型化路由：`sealed class AppRoute<T>` + 每个路由一个 `final class` + `context.pushAppRoute(...)`；删除 `AppRoutes` / `onGenerateRoute` / `settings.arguments as XxxArgs` | `lib/app/router.dart`、`lib/app/app.dart` |
+| P2-2 | 端口唯一来源是 `assets/config/config.json`（缺省 18931），`rust/src/config.rs`、`lib/core/backend/backend_transport.dart` 与它三处对齐 | `assets/config/config.json`、`rust/src/config.rs`、`lib/core/backend/backend_transport.dart` |
+| P2-3 | `app/feed/` 移到 `features/feed/`（列表骨架不再放 app 层） | `lib/features/feed/` |
+| P2-4 | 删死文档引用、fqapp 残留配置与死代码（含整个 `filter` 子系统）；README 去重并补当前 API | `assets/config/config.json`、`rust/src/config.rs`、`rust/src/lib.rs`、`README.md` |
+| P2-6 | `test/ui_preview_test.dart` 拆成 `test/ui/` 的 7 个页面测试 + `test/ui/preview_harness.dart`；21 张 golden 文件不变 | `test/ui/`、`test/goldens/` |
+| P2-8 | `AppCache` 统计改分批并发（每批 `Future.wait`，固定批次避免一次开满），不再逐个串行 stat | `lib/core/cache/app_cache.dart` |
+| P2-9 | 模型补 `==` / `hashCode`（`NovelItem` / `VideoSeries` / `FeedPage` / `FeedState`） | `lib/data/models/novel_item.dart`、`lib/data/models/video_series.dart`、`lib/data/models/feed_page.dart`、`lib/features/feed/feed_state.dart` |
+| P2-10 | 解析统一到 `lib/data/parsers/`：`lib/data/parsers/card_walker.dart`（递归 + adapter）+ `lib/data/parsers/novel_parsers.dart` / `lib/data/parsers/video_parsers.dart`；model 只留数据 | `lib/data/parsers/` |
+| P2-11 | 引入 `ContentSource` 策略对象（`NovelSource` / `DramaSource` / `ManjuSource`），分类 enum 只留 label/searchHint/emptyIcon/source | `lib/features/recommend/content_source.dart`、`lib/features/recommend/recommend_category.dart` |
+| 第 4 节「加 tab」 | 底栏项与页面由单张 `_tabs` 表驱动，加 tab 只改这张表 | `lib/app/shell/home_shell.dart` |
+
+### 9.2 未做 / 观察项
+
+| 评审项 | 结论 | 依据 |
+|---|---|---|
+| P1-6 阅读器首屏整章分页 | **暂不实现**：真机 profile 实测切章只掉 1 帧（150 段/章时中位数约 19ms），不是评审推断的 20–50ms 持续卡顿；分帧补页会让页码跳变，收益不划算。保留观察项，后续若要在意首开手感，优先试「空闲帧预分页下一章」 | `docs/reader-pagination-profile.md`、`integration_test/reader_pagination_perf_test.dart` |
+| P2-5 iOS 侧自动化测试 | 本机没有安装 iOS 模拟器 runtime，未补 iOS 单测；内核 `/src` 的 Range 行为已由 Rust 集成测试覆盖（206 / Content-Range / 无 capability 可读），播放器侧仍靠真机回归 | `rust/tests/static_and_loopback.rs` |
+| P2-7 书架网格 sliver 化 | 未做：我的页把内容拆成三块做独立横向延迟动画，sliver 无法单独平移，`ShelfGrid` 继续用 `shrinkWrap` 的 `GridView`（个人书架量级可接受） | `lib/features/mine/widgets/shelf_grid.dart`、`lib/features/mine/widgets/panel_shell.dart` |

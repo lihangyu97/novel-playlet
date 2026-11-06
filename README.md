@@ -15,13 +15,13 @@
 | 页面 | 状态 |
 |---|---|
 | 推荐页：搜索框 + 分类 tabs（小说/短剧/漫剧）+ 各分类三列推荐流（下拉刷新、滚动分页、首屏不足自动补页）+ 搜索结果为横向列表；搜索框 40pt 高、继续往下浏览时整条收起（分类 tabs 吸顶）、往回滚的第一下就展开（不必滚回顶部）、收起后切分类保持收起；小说 `tab_type=2`、短剧 `8`（6 部/页、游标翻页）、漫剧 `24`（首页一屏无游标，滑到底走搜索兜底翻页） | ✅ |
-| 小说详情页：封面直接作为顶部背景（Hero 从列表飞入后落成背景，顶部不透明、向下渐隐到透明，高度固定不随内容跳动）、书名/作者/评分、简介折叠、标签、目录（前 10 章 + 全部弹层）、底部「开始/继续阅读 + 加入书架」；文字信息等接口就绪后从下方淡入（`app/widgets/cover_hero.dart` / `detail_common.dart`） | ✅ |
+| 小说详情页：封面直接作为顶部背景（Hero 从列表飞入后落成背景，顶部不透明、向下渐隐到透明，高度固定不随内容跳动）、书名/作者/评分、简介折叠、标签、目录（前 10 章 + 全部弹层）、底部「开始/继续阅读 + 加入书架」；文字信息等接口就绪后从下方淡入（`lib/app/widgets/cover_hero.dart` / `lib/app/widgets/detail/detail_common.dart`） | ✅ |
 | 短剧详情页：同一套封面背景/简介卡（全 N 集、播放量），选集默认展开、36 集自动分一个 tab、一行 6 个、只显示集数（1000+ 集也不撑爆页面），点集直接进播放页；列表封面同样 Hero 飞入并直接落成背景，正文内容等接口就绪后淡入 | ✅ |
 | 阅读页：TextPainter 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、目录跳章、邻章预取、正文本地缓存（300 章上限、7 天后后台刷新）、章节 + 页首段落进度保存 | ✅ |
 | 播放页：`video_player`（AVPlayer）播放，控制条 3.5s 自动隐藏、缓冲 spinner、拖动松手才 seek、上下集/播完自动下一集、选集弹层、横屏视频全屏；密文交给内核 `/src` 按 Range 解密；失败给「原因 + 可复制详情 + 重新下载这一集」 | ✅ 骨架（先整集缓存后播） |
 | 我的页：**小说 / 短剧** 两块镜像面板——右下角悬浮按钮或左右滑动切换；切换时按「最近阅读/观看 → 标题 → 书架/收藏」三块依次延迟 0/100/200ms 滑出滑入（每块滑 300ms，最近块先走、标题第二拍）；设置入口合并成一个按钮，随面板在屏幕内左右滑动、不会滑出屏幕。小说侧含书架（长按管理）+ 最近阅读 3 条（带段落级续读）；短剧侧含收藏网格（长按管理、点进详情）+ 最近观看 3 条（和最近阅读同一版式：封面在左、箭头在右，点击直接续播对应集） | ✅ |
 | 设置页：主题色（8 个预设 + HSV 自定义取色，全站即时生效并持久化）、存储占用（视频/封面/章节明细）与清理 | ✅ |
-| 短剧收藏与观看历史（短剧侧目前是空态占位）、流式起播（边下边播）、整本离线下载、听书、漫画、评论、段评、登录 | ⬜ 后续 |
+| 流式起播（边下边播）、整本离线下载、听书、漫画、评论、段评、登录 | ⬜ 后续 |
 
 > 视频方案与边界见 [docs/video-playback.md](docs/video-playback.md)：本轮不做画中画/HDR/后台播放/AirPlay/锁屏/清晰度切换/弹幕。
 >
@@ -45,32 +45,32 @@ UI (features/*)  ──►  Riverpod controller  ──►  ApiClient (data/api)
 - **签名、设备池、重试、限流、正文解密全部在 Rust 侧**，Dart 只传 `(request_id, method, path, query, body, timeout_ms)`，对应 `rust/src/api/mod.rs` 暴露的 9 个函数：`init` / `request` / `cancel` / `shutdown` / `status` / `base_url` / `session_capability` / `set_device_pool_key` / `version`。
 - 启动链：`main.dart`（锁竖屏、裁封面缓存）→ `BootstrapGate`（Splash，失败展示可读原因 + 重试）→ `BackendService.start()` → 内核 `init`。
 - 内核随 `init` 起一个 loopback HTTP adapter（`rust/src/server.rs`，默认端口 18931），给播放器提供 `/src/<video_id><ext>`（ext 由上游地址推断，按 Range 解密）。免鉴权的只有 App 自己用的 7 个读接口、`/src/*` 和 `/health`；其余 fqapp/Legado 兼容路由（听书、漫画、评论、排行榜……）必须带本次启动的 capability，会以设备身份写数据的接口（评论/点赞/回复）同样要 capability。
-- 上游返回的是**原始 JSON**（Rust 只做正文解密），字段兼容集中在 `lib/data/models/`，列表/搜索的信封与游标解析在 `lib/data/api/api_client.dart`，页面只消费模型。
+- 上游返回的是**原始 JSON**（Rust 只做正文解密）：卡片解析统一在 `lib/data/parsers/`（`card_walker` 的递归遍历 + 小说/短剧两个 adapter），`lib/data/models/` 只留字段模型；列表/搜索的信封与游标解析在 `lib/data/api/api_client.dart`，页面只消费模型。
 - 视频同样由内核解密：`/api/v1/videos/{id}` 把整集下载进本地缓存（CENC 源保留密文 + key sidecar，播放时按 Range 解密），返回上面的 `/src/...` 地址，播放器只拉明文 HTTP。
-- 本地状态只有书架/阅读进度/最近阅读/阅读设置/主题色（`shared_preferences`），设备池密钥在 Keychain（`flutter_secure_storage`），池文件在 App 私有目录（加密）。
+- 本地状态只有书架/阅读进度/短剧收藏/观看进度/最近阅读/阅读设置/主题色（`shared_preferences`），设备池密钥在 Keychain（`flutter_secure_storage`），池文件在 App 私有目录（加密）。
 
 ### 目录
 
 ```
 lib/
   main.dart       入口：锁竖屏、启动前裁剪封面缓存、ProviderScope
-  app/            MaterialApp（主题 / 中文本地化 / 路由）、启动闸门、三 tab 外壳
-  app/feed/       列表页通用骨架（FeedState/FeedView：分页、补屏、下拉刷新、底部状态；FeedResultsSliver：搜索结果横向列表）
+  app/            MaterialApp（主题 / 中文本地化 / 路由）、启动闸门、底部 tab 外壳
   app/theme/      Material 3 明暗主题（seed 可自定义、默认天蓝）、主题色偏好、统一滚动行为
-  app/widgets/    共享组件（NovelCover 用 kCoverAspect 11:8、NovelGridCard、Loading/Error/Empty）
+  app/widgets/    共享组件（NovelCover 用 kCoverAspect 11:8、MediaCard 列表卡骨架、Loading/Error/Empty）
   app/widgets/detail/  详情页共用组件（封面头/简介卡/标签/区块标题）
   core/backend/   FRB 传输、内核启动与运行时文件部署
   core/cache/     封面图磁盘缓存、缓存占用统计与清理
   core/storage/   书架与进度存储、设备池密钥
-  data/           接口客户端 + 模型与解析（含 video_series / video_detail / video_source）
-  features/       recommend / video / detail / reader / mine / settings（章节缓存在 reader/reader_chapter_cache.dart）
+  data/           接口客户端 + 模型；parsers/ 是卡片解析（card_walker / novel_parsers / video_parsers）
+  features/       recommend / feed / video / detail / reader / mine / settings（章节缓存在 reader/reader_chapter_cache.dart）
+  features/feed/  列表页通用骨架（FeedState/FeedView：分页、补屏、下拉刷新、底部状态；FeedResultsSliver：搜索结果横向列表）
   src/rust/       flutter_rust_bridge 生成绑定（勿手改）
 rust/             Rust 内核（从 fqapp 整体拷入；fork 基线与本地补丁见 PATCHES.md）
 assets/config/    config.json / device_pool.example.json（启动时部署到 App 沙盒）
 docs/             视频播放方案、书城 tab_type 对照、阅读页分页真机 profile
 scripts/          build_rust_ios.sh（先跑 FRB codegen，再编 iOS 静态库）
 test/             数据/缓存/并发测试 + test/ui/ 按页面拆分的 UI 测试 + goldens/（21 张）
-CONTRACTS.md      页面开发约定（页面清单/数据层 API 已滞后，待同步）
+CONTRACTS.md      页面开发约定（页面清单 / 数据层与存储 API / 路由 / 共享组件 / 测试门禁）
 PATCHES.md        Rust 内核相对 fqapp 的 fork 基线、本地补丁清单与上游同步流程
 ```
 
@@ -127,7 +127,7 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 打真实上游，抓推
 
 > golden 依赖 macOS 系统字体（Arial Unicode / STHeiti），换机器或换系统版本可能不一致。
 
-CI（`.github/workflows/ci.yml`）对每个 PR 跑同一套门禁：`dart format --set-exit-if-changed` / `flutter analyze --fatal-infos` / `flutter test`（macOS runner，golden 需要系统字体），`cargo fmt --check` / `cargo clippy -D warnings` / `cargo test`（Linux），以及 FRB 绑定漂移校验（重新生成后 `git diff` 必须为空）。本地等价命令是 `make check`；只做格式化用 `make format`。
+CI（`.github/workflows/ci.yml`）对每个 PR 跑同一套门禁：`dart format --set-exit-if-changed` / `flutter analyze --fatal-infos` / `flutter test`（macOS runner，golden 需要系统字体），`cargo fmt --check` / `cargo clippy -D warnings` / `cargo test`（Linux），以及 FRB 绑定漂移校验（重新生成后 `git diff` 必须为空）。另有独立的 iOS 无签名构建 job（macOS）：`scripts/build_rust_ios.sh`（内部先跑 FRB codegen）→ `pod install` → `flutter build ios --release --no-codesign`，只验证「内核静态库 + Xcode 构建」能过，不签名也不安装。本地等价命令是 `make check`；只做格式化用 `make format`。
 
 ## 本地数据与缓存
 
@@ -161,6 +161,6 @@ App 沙盒里会落盘的东西（iPhone 13 调试期实测：文稿与数据 40
 
 ## 后续扩展点
 
-- **加 tab**：`lib/app/shell/home_shell.dart` 的 `_destinations` / `_pages` 各加一项，页面走 `ConsumerWidget`。
-- **加页面**：`lib/app/router.dart` 加一条 `AppRoutes`。
+- **加 tab**：`lib/app/shell/home_shell.dart` 的 `_tabs` 表加一项（底栏与页面由同一张表驱动），页面走 `ConsumerWidget`。
+- **加页面**：`lib/app/router.dart` 加一个 `AppRoute` 子类（自带强类型参数 + `toRoute()`），页面里 `context.pushAppRoute(...)`；不要再加字符串路由 / `onGenerateRoute`。
 - **Android**：内核已是 `cdylib`，需补 `android/app/src/main/jniLibs/{arm64-v8a,armeabi-v7a}/libfqapi_core.so`（参照 fqapp 的 `scripts/build_rust_backend.sh`），NDK 与 ABI 的坑见 fqapp `DEVELOPMENT.md`；Flutter 侧代码无需改动。

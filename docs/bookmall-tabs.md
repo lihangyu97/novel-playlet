@@ -15,7 +15,7 @@ GET /api/v1/recommend/homepage
   &session_id=<翻页必须回传>
 ```
 
-内核对应实现：`rust/src/endpoints/recommend.rs`（`/api/v1/recommend/homepage`），Dart 侧入口：`lib/data/api/api_client.dart` 的 `recommend()`（小说）与 `videoFeed(tabType:)`（短剧 8 / 漫剧 24）。合并后的推荐页按搜索框下方的分类 tabs 调用：`lib/features/recommend/recommend_category.dart` 里的 `tabType` 就是这张表的取值。
+内核对应实现：`rust/src/endpoints/home.rs`（`/api/v1/recommend/homepage`，`homepage_recommend`），Dart 侧入口：`lib/data/api/api_client.dart` 的 `recommend()`（小说）与 `videoFeed(tabType:)`（短剧 8 / 漫剧 24）。合并后的推荐页按搜索框下方的分类 tabs 取数，分类差异（`tab_type` / 搜索 tab / 漫剧兜底）收在 `lib/features/recommend/content_source.dart` 的 `ContentSource` 实现（`NovelSource` / `DramaSource` / `ManjuSource`）里，下表就是这些策略的取值来源。
 
 短剧搜索是另一条接口：`GET /api/v1/search?tab_type=11`（见 §4）。
 
@@ -77,13 +77,13 @@ fqapp 的做法：`HomeNotifier._answersTab()` / `homePageAffinity()`，不匹�
 | 8 | 漫画 |
 | 11 | **短剧** |
 
-本项目：`search()` 用 3（小说），`searchVideos(tabType:)` 短剧用 11；漫剧没有独立搜索 tab，走 `manjuSearch()`——请求短剧 tab（11）后按 `genre=205` /「漫剧」标签过滤卡片（与 fqapp 的 `separateManjuSearchTabs` 同口径）。
+本项目：`search()` 用 3（小说），`searchVideos(tabType:)` 短剧用 11；漫剧没有独立搜索 tab，走 `lib/features/recommend/content_source.dart` 的 `ManjuSource`——内部用短剧 tab（11）搜索后按 `genre=205` /「漫剧」标签过滤卡片（与 fqapp 的 `separateManjuSearchTabs` 同口径）。
 
 ## 5. 翻页与兜底（fqapp 的做法，本项目可选补）
 
 - 推荐流游标耗尽后，fqapp 回退到**同分类搜索流**继续翻页（`_searchByType`），避免「只有首页那几屏」。短剧这类推荐池小的分类尤其明显。
 - 漫剧（24）没有游标：fqapp 首页用推荐流，后续页全用搜索兜底。
-- 本项目现状：短剧推荐流自带游标，游标翻完显示「没有更多了」；漫剧首页流没有游标，首屏同时取一页搜索兜底当下一页游标，滚到底后继续用搜索兜底翻页（`ApiClient.manjuSearch`），兜底也到底才显示「没有更多了」。小说/短剧尚未接搜索兜底（`docs/video-playback.md` 4.1-5 有记录）。
+- 本项目现状：短剧推荐流自带游标，游标翻完显示「没有更多了」；漫剧首页流没有游标，首屏同时取一页搜索兜底当下一页游标，滚到底后继续用搜索兜底翻页（`lib/features/recommend/content_source.dart` 的 `ManjuSource`），兜底也到底才显示「没有更多了」。小说/短剧尚未接搜索兜底（`docs/video-playback.md` 4.1-5 有记录）。
 
 ## 6. 怎么复核
 
