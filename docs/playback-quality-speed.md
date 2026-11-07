@@ -17,6 +17,23 @@
 
 ---
 
+### 0.1 实现状态（截至 2026-11-07，Android 打包合并后）
+
+| 能力 | 状态 |
+|---|---|
+| 切集保留上一帧 / spinner 延迟 250ms / 加载期间顶栏常驻 | ✅ 已实现 |
+| 播完自动续播不弹控制条；全屏横排底部控制条贴底 | ✅ 已实现 |
+| 下一集预取（source URL，允许触发整集下载，淘汰自动回退） | ✅ 已实现（第一档） |
+| 倍速 1.0–3.0x + 全局持久化 + iOS `defaultRate` 修复 | ✅ 已实现 |
+| `mode=cached` 免上游探测（自动缓存集可断网播放） | ✅ 已实现 |
+| `variants=0` 跳过清晰度列表 / 离线路径 IO 优化 | ✅ 已实现 |
+| 离线/下载清晰度上限（默认 720P）+ manifest 档位 + 缓存中心展示 | ✅ 已实现（C0） |
+| **播放中/播放页换清晰度（C1）** | ❌ 未实现，依赖 M1 |
+| **在线播放默认 720P** | ❌ 未生效（在线仍由内核选最高档） |
+| M1 流式起播（边下边播） | ❌ 未实现 |
+| 网络自适应清晰度、清晰度回退提示 UI | ❌ 未实现 |
+| 专用「重新缓存为另一档」入口、预建 controller、`/src` moov 缓存、入口侧离线优先 | ❌ 未实现（P1/P2，见 §1.4） |
+
 ## 1. 问题 1：已缓存的短剧，切集为什么还出现「正在准备视频…」
 
 ### 1.1 先分清两种「已缓存」
@@ -427,7 +444,14 @@ M1 落地后（`open_media_session(url, key_hex)` 可用）：
 - ⬜ `CONTRACTS.md`：补清晰度/倍速入口与播放页测试 seam（`playbackControllerFactoryProvider`）；本次未新增 pubspec 依赖。
 - ⬜ `PATCHES.md`：S2 改动 `rust/` 时登记本地补丁。
 
-## 9. 参考
+## 9. Android 兼容性（2026-11-07 起）
+
+- 主分支已合并 Android 打包（[android-packaging.md](android-packaging.md)）；本分支对内核（`mode=cached` / `variants=0` / `max_height` / marker）和 Dart（播放页、设置页、离线缓存）的改动**平台无关**，Android 走 `video_player_android`（ExoPlayer）。
+- **iOS 专属**：`third_party/video_player_avfoundation` 的 `defaultRate` 补丁只作用于 AVFoundation；Android 不受影响。3x 在 ExoPlayer 上由它自己 clamp 极端速度，未验证。
+- **platformView**：播放页显式用 `VideoViewType.platformView`；Android 插件对该渲染通路的支持/表现尚未真机验证（`docs/android-packaging.md` 也把播放运行时列为待验证）。
+- **Android 真机待验证**：起播/切集、`mode=cached` 断网播放、1.5/2/3x 倍速、720P 离线下载与缓存中心档位、全屏、飞行模式。
+
+## 10. 参考
 
 - [video-playback.md](video-playback.md)：M0 决策、ATS/回环/渲染通路真机记录
 - [offline-cache.md](offline-cache.md)：离线缓存两层架构、明文 mp4、下载流程

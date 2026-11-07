@@ -18,13 +18,13 @@
 | 小说详情页：封面直接作为顶部背景（Hero 从列表飞入后落成背景，顶部不透明、向下渐隐到透明，高度固定不随内容跳动）、书名/作者/评分、简介折叠、标签、目录（前 10 章 + 全部弹层）、底部「开始/继续阅读 + 加入书架」；文字信息等接口就绪后从下方淡入（`lib/app/widgets/cover_hero.dart` / `lib/app/widgets/detail/detail_common.dart`） | ✅ |
 | 短剧详情页：同一套封面背景/简介卡（全 N 集、播放量），选集默认展开、36 集自动分一个 tab、一行 6 个、只显示集数（1000+ 集也不撑爆页面），点集直接进播放页；列表封面同样 Hero 飞入并直接落成背景，正文内容等接口就绪后淡入 | ✅ |
 | 阅读页：TextPainter 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、目录跳章、邻章预取、正文本地缓存（300 章上限、7 天后后台刷新）、章节 + 页首段落进度保存 | ✅ |
-| 播放页：`video_player`（AVPlayer）播放，1.0–3.0x 倍速（全局记忆）、控制条 3.5s 自动隐藏（播完自动续播不弹）、缓冲 spinner、拖动松手才 seek、上下集/播完自动下一集、选集弹层、横屏视频全屏；切集保留上一集末帧、spinner 延迟 250ms、下一集预取（允许整集下载）、自动缓存集切集先查本地 `mode=cached`（不打上游、断网可播）；密文交给内核 `/src` 按 Range 解密；失败给「原因 + 可复制详情 + 重新下载这一集」 | ✅（先整集缓存后播；倍速/切集体验见 [docs/playback-quality-speed.md](docs/playback-quality-speed.md)） |
+| 播放页：`video_player`（iOS AVPlayer / Android ExoPlayer）播放，1.0–3.0x 倍速（全局记忆）、控制条 3.5s 自动隐藏（播完自动续播不弹）、缓冲 spinner、拖动松手才 seek、上下集/播完自动下一集、选集弹层、横屏视频全屏；切集保留上一集末帧、spinner 延迟 250ms、下一集预取（允许整集下载）、自动缓存集切集先查本地 `mode=cached`（不打上游、断网可播）；密文交给内核 `/src` 按 Range 解密；失败给「原因 + 可复制详情 + 重新下载这一集」 | ✅（先整集缓存后播；iOS 真机已验证，Android 播放运行时待验证；倍速/切集/清晰度方案见 [docs/playback-quality-speed.md](docs/playback-quality-speed.md)） |
 | 我的页：**小说 / 短剧** 两块镜像面板——右下角悬浮按钮或左右滑动切换；切换时按「最近阅读/观看 → 标题 → 书架/收藏」三块依次延迟 0/100/200ms 滑出滑入（每块滑 300ms，最近块先走、标题第二拍）；设置入口合并成一个按钮，随面板在屏幕内左右滑动、不会滑出屏幕。小说侧含书架（长按管理）+ 最近阅读 3 条（带段落级续读）；短剧侧含收藏网格（长按管理、点进详情）+ 最近观看 3 条（和最近阅读同一版式：封面在左、箭头在右，点击直接续播对应集） | ✅ |
 | 设置页：主题色（8 个预设 + HSV 自定义取色，全站即时生效并持久化）、存储占用（视频/封面/章节明细）与清理、离线下载清晰度（最高/1080P/720P/480P，默认 720P）；离线缓存不在这里管理，页内提示去「我的 → 缓存」 | ✅ |
 | 离线缓存：小说整本 / 短剧整剧一键下载（默认 720P，可设 1080P/480P/最高）到独立 pinned 区（小说上限 1 GB、短剧 3 GB），断网可读可看；与自动缓存物理隔离，只能在「我的 → 缓存」页删除/清空（M3 确认框）；已缓存的短剧切换秒开。详情底栏「缓存/缓存中/已缓存」三态，缓存中/已缓存点进「我的」右下角悬浮入口的缓存中心看进度/网速（Hero 点回详情）；同时只跑一个任务，其余 FIFO 排队（最多 20 个，完成/失败/取消后自动开始下一个） | ✅ |
 | 流式起播（边下边播）、听书、漫画、评论、段评、登录 | ⬜ 后续 |
 
-> 视频方案与边界见 [docs/video-playback.md](docs/video-playback.md)：本轮不做画中画/HDR/后台播放/AirPlay/锁屏/清晰度切换/弹幕。
+> 视频方案与边界见 [docs/video-playback.md](docs/video-playback.md)：不做画中画/HDR/后台播放/AirPlay/锁屏/在线清晰度切换/弹幕；离线/下载清晰度上限已支持（默认 720P，见 [docs/playback-quality-speed.md](docs/playback-quality-speed.md)）。
 >
 > 书城首页流按 `tab_type` 分类的实测对照见 [docs/bookmall-tabs.md](docs/bookmall-tabs.md)；离线缓存（离线小说/短剧）的方案、存储布局与验收清单见 [docs/offline-cache.md](docs/offline-cache.md)。
 
@@ -194,4 +194,4 @@ App 沙盒里会落盘的东西（iPhone 13 调试期实测：文稿与数据 40
 
 - **加 tab**：`lib/app/shell/home_shell.dart` 的 `_tabs` 表加一项（底栏与页面由同一张表驱动），页面走 `ConsumerWidget`。
 - **加页面**：`lib/app/router.dart` 加一个 `AppRoute` 子类（自带强类型参数 + `toRoute()`），页面里 `context.pushAppRoute(...)`；不要再加字符串路由 / `onGenerateRoute`。
-- **Android**：打包链路已就绪（`android/` 工程 + `scripts/build_rust_android.sh`），构建与签名见 [docs/android-packaging.md](docs/android-packaging.md)；Flutter 业务代码无需为打包改动。视频播放（ExoPlayer）与缓存路径等运行时行为等业务改造后再按真机验证处理。
+- **Android**：打包链路已就绪（`android/` 工程 + `scripts/build_rust_android.sh`），构建与签名见 [docs/android-packaging.md](docs/android-packaging.md)；Flutter 业务代码无需为打包改动。视频播放（ExoPlayer）、缓存路径等运行时行为已随播放增强接入，待 Android 真机验证（见 [docs/playback-quality-speed.md](docs/playback-quality-speed.md) §9）。

@@ -4,6 +4,7 @@
 > 状态：M0 骨架已实现并真机验证（推荐页短剧分类 / 短剧详情 / 播放页），待补流式起播。
 > 本文只记录决策与待确认项，不含代码。
 > 背景：参考同级 `fqapp`（Android ExoPlayer + Windows media_kit，iOS 未实现）补 iOS 视频播放能力。
+> Android（2026-11-07 起）：打包链路已接入，播放走 ExoPlayer；本文 iOS 决策与真机记录仍有效，Android 运行时待验证（见 [android-packaging.md](android-packaging.md) 与 [playback-quality-speed.md](playback-quality-speed.md) §9）。
 
 ## 1. 已定决策
 
