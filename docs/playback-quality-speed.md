@@ -1,7 +1,7 @@
 # 视频播放增强：缓存切集「准备」优化 / 自选清晰度 / 倍速播放
 
 > 分支：`feat/lhy/playback-quality-speed-plan`（从 `main` 切出）
-> 状态：**方案已评审**；播完自动续播控制条、全屏底部控制条贴底两个修复已实现（§4.4），其余按 §5 排期（2026-11-07）
+> 状态：**S0 控制条修复 + S1（切集感知 / 预取下一集 / 倍速）已实现**；S2–S4 待排期（2026-11-07）
 > 关联：[video-playback.md](video-playback.md)（M0 决策与边界）、[offline-cache.md](offline-cache.md)（离线缓存）、`origin/feat/lhy/streaming-media-plan:docs/streaming-media-m1.md`（M1 流式起播，方案定稿未实现）
 > 口径：**已验证**＝当前代码/测试可直接读出；**待实测**＝需要真机或真接口确认。行号以 `main`（`86ff328`）为准。
 
@@ -95,24 +95,21 @@ GET /api/v1/videos/{id}?mode=cached
 - **风险**：探测命中但文件随后被淘汰/半截 → AVPlayer 初始化失败；回退策略是失败后走一次正常 `videoSource(refresh: true)`，不要缓存探测结果。与「清晰度 marker」的衔接见 §3.1。
 - **测试**：Rust mock 上游断言 `mode=cached` 命中时上游请求数为 0；Dart 覆盖命中/未命中/损坏回退。
 
-#### P0-2 切集感知：保留旧画面 + 延迟 spinner + 保留控制条（纯 Dart，约 1~1.5 人天）
+#### P0-2 切集感知：保留旧画面 + 延迟 spinner + 保留控制条（纯 Dart，约 1~1.5 人天）✅ 已实现
 
-- `_open` 不再第一步 dispose 旧 controller：旧 controller 先 `pause()`、留在最底层继续渲染最后一帧；新 controller `initialize()` 成功、赋值后再下一帧移除旧 widget 并 dispose。
-- spinner 延迟 200~300ms 才出现（`Timer`/`AnimatedOpacity`）：本地文件通常在新画面出来前就完成了，用户不再看到「正在准备」闪烁。
-- 加载期间保留顶栏（返回、剧名、集名），`showChrome` 条件从 `!_loading` 放宽为 `_error == null`。
+- **实现**（`video_player_page.dart`）：切集时把旧 controller `pause()` 后存进 `_retained`，新 controller 的 `position` 首次前进后才 dispose；`spinner` 延迟 250ms 出现；顶栏 `showChrome` 放宽为 `_error == null`，加载期间仍显示返回键/剧名。
+- spinner 只在「没有旧画面兜底」时立即出现；有旧帧时先垫着最后一帧，避免本地文件秒开也闪一下。
 - 错误页出现时必须清掉旧画面，避免盖住错误信息；旧 controller 立即 pause 防止双声。
 - **收益**：不减少真实耗时，但**消除「黑屏 + 正在准备」的感知**；对离线命中尤其明显，基本等于「秒切」。
 - **风险**：platformView 短暂叠两层原生视图，需真机验证全屏/转屏合成；多一份 AVPlayer 的瞬时内存。
-- 现有 golden 不含播放页，不影响基线；建议给播放页补一个 FakeController 的 widget 测试（见 §4.4）。
+- **测试**：新增 `test/ui/video_player_page_test.dart`（FakeController），锁「自动续播不弹控制条、旧帧垫底、新集出帧后释放」。
 
-#### P0-3 预取下一集（纯 Dart，约 1~1.5 人天，可与 P0-2 同 PR）
+#### P0-3 预取下一集（纯 Dart，约 1~1.5 人天，可与 P0-2 同 PR）✅ 已实现（第一档）
 
-当前集播放超过 3~5s 或进度 >30% 后，后台预取 `episodes[_index+1]`：
-
-- 第一档：先 `mode=cached` 探测，未命中再 `videoSource(nextId)`，把结果存进页内 LRU（带 TTL），切集时命中则跳过取流；
-- 第二档（可选）：连 `VideoPlayerController` 一起 `initialize()` 预建，切集时只 `play()` + 上屏。要复用现有 `_generation` 竞态保护，跳集/离页时 dispose。
+- **实现**：当前集 `play()` 后起 5s 定时器预取 `episodes[_index+1]`；离线命中跳过；`videoSource` 结果放页内 LRU（最多 2 条），切集时直接用；预取 URL 指向的 `/src` 若已被 128MB 淘汰，初始化失败会 `refresh: true` 重新取流一次。
+- 第二档（预建 controller）暂未做：当前只预取 source URL，切集仍需 `initialize()`；真机看首帧数据后再决定。
 - **收益**：消灭「下一集按钮 / 播完自动下一集」的取流与初始化等待；缓存未命中时把整集下载移出关键路径（-1s~-10s+）。
-- **风险**：流量（已确认允许预取触发整集下载；仍建议只在当前集已播 3~5s 后触发，避免秒退也下整集）、内核 128MB 淘汰（预取可能挤掉别的集，但当前集 mtime 新，风险低）、预取后 URL 失效需 catch 回退。
+- **风险**：流量（已确认允许预取触发整集下载；仍只在当前集已播 5s 后触发，避免秒退也下整集）、内核 128MB 淘汰（预取可能挤掉别的集，但当前集 mtime 新，风险低）、预取后 URL 失效需 catch 回退。
 
 #### P1 顺手项（可与上面合并）
 
@@ -248,14 +245,14 @@ M1 落地后（`open_media_session(url, key_hex)` 可用）：
 
 **结论**：1.5x/2x 直接做；3x 在离线文件上确定可用，在线上回环「大概率可用、需真机验证」；如果被 clamp，产品二选一：在线最高 2x、3x 仅离线，或 fork 插件去掉 clamp（约 10 行，但引入 fork 维护成本，不建议）。**不需要额外原生改动、不需要换插件。**
 
-### 4.2 实现设计
+### 4.2 实现设计 ✅ 已实现（2026-11-07）
 
 1. **状态单一来源**：新增 `lib/features/video/playback_speed.dart`，`NotifierProvider<PlaybackSpeedController, double>`，根 `ProviderScope` 存活；`shared_preferences` 单 key `video_playback_speed_v1`，白名单 `[1.0, 1.25, 1.5, 2.0, 3.0]`，默认 1.0。持久化范式照抄 `reader_settings.dart` / `theme_settings.dart`（`_userChanged` 防异步旧值覆盖）。
 2. **apply 时机**：所有 controller 都只从 `_startController` 创建；在 `await controller.initialize()` 之后、`play()` 之前 `setPlaybackSpeed(provider)`（暂停态 Dart 只存值不下发，`play()` 时必然重新 apply）。换集/自动连播因此自动继承倍速。
 3. **运行中改速**：`ref.listen(playbackSpeedProvider, ...)` 对已初始化 controller 无条件调 `setPlaybackSpeed`（暂停时也要调，否则 controller 内部还是旧值，恢复播放会按旧速）。
 4. **换清晰度/换源**：必须复用 `_startController`（这是两功能唯一强制的共享契约），否则新 controller 会回到 1.0x。
-5. **UI**：底部控制条第三行左侧加 `1.0x` 文字 chip，点击开底部弹层（标题「播放速度」，5 个选项，复用选集弹层的选中/未选样式）；chip 文案来自 provider，不读 controller（换集瞬间旧 controller 已 dispose）。控制条隐藏时可选在右上角显示小 `2.0x` 角标（P2，可先不做）。
-6. **布局**：左「选集 + 倍速」、右「清晰度（有 variants 时）+ 全屏」；390pt/375pt 屏无重叠，320pt 窄屏把清晰度收进「更多」。竖屏/横屏全屏共用同一个 `_buildBottomBar`，一处实现两处生效。
+5. **UI**：倍速 chip 放在**时间行右侧**（时长左边），点击开底部弹层（标题「播放速度」，5 个选项，复用选集弹层的选中/未选样式）。chip 放时间行而不是操作行，是因为 375pt/320pt 窄屏上操作行左侧再塞一个 chip 会和「上一集」按钮重叠。chip 文案来自 provider，不读 controller（换集瞬间旧 controller 已 dispose）。控制条隐藏时是否显示倍速角标：P2，暂未做。
+6. **布局**：时间行 `00:03 — [倍速 chip] 02:28`；操作行左侧选集、中心上/播/下、右侧全屏；竖屏/横屏全屏共用同一个 `_buildBottomBar`，一处实现两处生效。
 
 ### 4.3 风险与真机验证
 
@@ -286,12 +283,33 @@ M1 落地后（`open_media_session(url, key_hex)` 可用）：
 | 阶段 | 内容 | 依赖 | 估时 | 验收 |
 |---|---|---|---|---|
 | **S0（已实现）** | 控制条：播完自动续播不弹控制条；全屏横屏底部控制条贴底、取消底部安全区避让（§4.4） | 无 | — | `flutter analyze` + 相关 UI 测试通过；真机待回归 |
-| **S1（纯 Dart，先做）** | P0-2 切集感知（保留旧画面/延迟 spinner/保留顶栏）+ P0-3 预取下一集（允许整集下载）+ 倍速播放 | 无 | 4~5.5 人天 | 离线命中切集不再出现整屏「正在准备」；3x 真机生效（在线被 clamp 时接受 2x）；`flutter analyze` + `flutter test` 全绿 |
+| **S1（纯 Dart）✅ 已实现** | P0-2 切集感知（保留旧画面/延迟 spinner/保留顶栏）+ P0-3 预取下一集（允许整集下载）+ 倍速播放 | 无 | — | `flutter analyze` + `flutter test` 全绿；真机待回归（首帧/3x/旧帧叠层） |
 | **S2（Rust 小改，根治）** | `mode=cached` 免上游探测 + `variants=0` + 离线路径 IO 缓存 | 无 | 1.5~2.5 人天 | 自动缓存命中切集上游请求数=0；飞行模式可播；坏文件回退正常 |
 | **S3（清晰度第一步）** | C0：内核 `?max_height` 按档下载 + 档位 marker + 全局下载清晰度设置（默认 720P）+ 离线 manifest 档位 + 缓存中心展示 | 无 | 2~2.5 人天 | 离线下载可限高；缓存中心显示实际档；旧缓存/旧 manifest 兼容 |
 | **S4（等 M1）** | M1 流式起播（`streaming-media-m1.md`）→ C1 在线换档（默认 720P、按剧记忆、换档重开会话 + seek 回原位、自动档口径修正） | M1 | M1 2~4 + 2.5~3.5 | 在线换档位置不丢、失败回退原档；默认档与面板一致 |
 
 **S1 建议先合**：它不依赖 Rust、风险最低、直接消除用户报告的两个症状中的第一个（「正在准备」观感）并交付倍速；S2 再根治「自动缓存仍打上游」，两者不会互相阻塞。
+
+### 5.1 S1 实现记录（2026-11-07）
+
+**新增**
+
+- `lib/features/video/playback_speed.dart`：倍速 provider + `shared_preferences` 持久化 + 文案。
+- `lib/features/video/widgets/player_option_chip.dart`：控制条文字 chip（倍速/清晰度共用）。
+- `lib/features/video/widgets/playback_speed_sheet.dart`：倍速底部弹层。
+- `test/playback_speed_test.dart`：偏好默认/白名单/落盘恢复/文案/chip/弹层。
+- `test/ui/video_player_page_test.dart`：FakeController 页面级回归（控制条默认可见、改速下发、自动续播不弹控制条、旧帧垫底与释放、3.5s 自动隐藏 + 点按唤出）。
+
+**修改**
+
+- `lib/features/video/video_player_page.dart`：
+  - `_retained` 旧帧：切集先 pause 留最后一帧，新集 `position` 前进后才 dispose；
+  - spinner 延迟 250ms、顶栏加载期间常驻；
+  - 预取下一集：`play()` 后 5s 触发、离线命中跳过、页内 LRU 2 条、`/src` 被淘汰时 `refresh: true` 回退一次；
+  - 倍速：`_startController` 统一 apply + build 里 `ref.listen` 监听；
+  - `playbackControllerFactoryProvider`：生产走 platformView，测试 override FakeController。
+
+**门禁**：`dart format` 无 diff、`flutter analyze --fatal-infos` 无问题、`flutter test` 全量通过（256+9=265 项）。**未做**：预建 controller（第二档）、控制条隐藏时的倍速角标；**待真机**：首帧/切集耗时、旧帧两层 platformView 的全屏与转屏、2x/3x 在线有效倍速与音频/发热。
 
 ---
 
@@ -303,7 +321,7 @@ M1 落地后（`open_media_session(url, key_hex)` 可用）：
 |---|---|
 | 1 | **3x 接受**：保留 3.0x 选项；在线 `/src` 若被 clamp 按 2x 播（不在 UI 报错、不 fork 插件）。 |
 | 2 | **清晰度默认 720P**：在线与离线下载都不再默认最高档；在线按剧记忆用户选择（只记显示名，会话内），下载清晰度全局持久化、默认 720P。 |
-| 3 | **预取下一集允许整集下载**：缓存未命中时预取可以把整集下载移出关键路径（仍建议当前集已播 3~5s 后触发）。 |
+| 3 | **预取下一集允许整集下载**：缓存未命中时预取可以把整集下载移出关键路径（实现为当前集播放 5s 后触发）。 |
 | 4 | **控制条**：播完自动续播不弹控制条；全屏横屏底部控制条贴底、取消底部安全区避让（已实现，见 §4.4）。 |
 
 ### 6.2 仍待确认
@@ -332,18 +350,22 @@ M1 落地后（`open_media_session(url, key_hex)` 可用）：
 | 12 | 128MB 预算下预取下一集的淘汰行为；离线改档重下的磁盘峰值 | 综合 |
 | 13 | 播完自动续播不弹控制条；手动点屏幕才出现；手动上/下集、选集切集行为不变 | 控制条 |
 | 14 | 全屏横屏底部控制条贴到屏幕最底边（无 Home 指示条空隙）；竖屏仍避让底部安全区 | 控制条 |
+| 15 | 切集瞬间是否看到上一集末帧、spinner 是否只在 >250ms 后出现；旧帧叠两层 platformView 是否遮挡/闪烁 | 准备优化 |
+| 16 | 播完自动下一集是否秒切（预取命中时不再走取流）；预取触发的整集下载是否影响当前集播放 | 准备优化 |
+| 17 | 倍速：跨集/自动续播/退出重进/冷启动保持；2x/3x 有效倍速与音频/发热 | 倍速 |
 
 建议打点方式：Dart `Stopwatch` + `offlineDiag()`（`lib/features/cache/offline_diag.dart`，已有时间戳落盘）；Rust `handle_video` 加 `Instant` 分级日志（上游/变体/下载命中/总耗时）；正式基线用 Instruments（Time Profiler + Points of Interest + Network）。
 
 ---
 
-## 8. 文档与契约同步（实现时）
+## 8. 文档与契约同步
 
-- `docs/video-playback.md`：修正「variants 数据层保留」的口径（非 stream 不返回）；更新「不做清晰度切换」决策记录；补倍速验收。
-- `docs/offline-cache.md` §0 的「已缓存集切换无准备播放」与实现不符：应改为「无网络/内核准备；仍有 AVPlayer 初始化，UI 不应整屏 spinner」。
-- 控制条行为（自动续播不弹、全屏贴底）已随 §4.4 实现，后续改动播放页时不要回退。
-- `README.md` 功能表 / `CONTRACTS.md`：清晰度与倍速入口、依赖白名单（不需要新增 pubspec 依赖）、测试门禁。
-- `PATCHES.md`：改动 `rust/` 时登记本地补丁。
+- ✅ `README.md` 播放页功能表已更新（倍速 / 切集保留末帧 / 预取 / 控制条行为）。
+- ✅ `docs/video-playback.md` 决策记录已补 2026-11-07 的三条（切集体验、倍速、清晰度方向）。
+- ⬜ `docs/offline-cache.md` §0 的「已缓存集切换无准备播放」与实现不符：等 S2 完成后统一改为「无网络/内核准备；仍有 AVPlayer 初始化，UI 不应整屏 spinner」。
+- ✅ 控制条行为（自动续播不弹、全屏贴底）已随 §4.4 实现，后续改动播放页时不要回退。
+- ⬜ `CONTRACTS.md`：补清晰度/倍速入口与播放页测试 seam（`playbackControllerFactoryProvider`）；本次未新增 pubspec 依赖。
+- ⬜ `PATCHES.md`：S2 改动 `rust/` 时登记本地补丁。
 
 ## 9. 参考
 
