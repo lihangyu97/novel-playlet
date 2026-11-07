@@ -15,6 +15,7 @@ import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
+import 'package:novel_playlet/features/cache/offline_queue.dart';
 import 'package:novel_playlet/features/cache/offline_task.dart';
 import 'package:novel_playlet/features/cache/widgets/offline_download_button.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
@@ -163,6 +164,41 @@ void main() {
       ),
       findsNothing,
     );
+
+    await openCacheCenter(tester, find.text('缓存中'));
+    expect(find.byType(CacheCenterPage), findsOneWidget);
+  });
+
+  testWidgets('详情页下载按钮-已排队：显示「缓存中」并进缓存中心页', (tester) async {
+    await pumpDetail(
+      tester,
+      transport: FakePreviewTransport(),
+      bookStore: _MemoryBookStore(),
+      seriesStore: _MemorySeriesStore(),
+    );
+    expect(find.text('缓存'), findsOneWidget);
+
+    // 单任务下载器正跑别的任务时，本书的缓存请求会入队；等它开始前详情按钮
+    // 也要显示「缓存中」，而不是还能重复点「缓存」。
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(DetailPage)),
+    );
+    container
+        .read(offlineQueueProvider.notifier)
+        .enqueue(
+          OfflineQueueJob(
+            kind: OfflineTaskKind.novel,
+            id: '1',
+            title: '离线剑来',
+            cover: '',
+            items: const [],
+          ),
+        );
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(find.text('缓存中'), findsOneWidget, reason: '已排队也算缓存中');
+    expect(find.byIcon(Icons.downloading_outlined), findsOneWidget);
+    expect(find.text('缓存'), findsNothing);
 
     await openCacheCenter(tester, find.text('缓存中'));
     expect(find.byType(CacheCenterPage), findsOneWidget);

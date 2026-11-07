@@ -207,3 +207,23 @@ String offlineTaskStatusLabel(OfflineTaskStatus status) => switch (status) {
   OfflineTaskStatus.done => '已完成',
   OfflineTaskStatus.failed => '下载失败',
 };
+
+/// 排队中的离线任务快照（缓存中心/详情按钮展示用）。
+///
+/// 完整章节/选集列表留在队列内部（[OfflineQueueJob]），UI 只需要展示信息的
+/// 轻量快照，避免队列状态里塞进上千章的列表。
+class OfflineQueuedTask {
+  const OfflineQueuedTask({
+    required this.kind,
+    required this.id,
+    required this.title,
+    required this.cover,
+  });
+
+  final OfflineTaskKind kind;
+
+  /// 小说 bookId / 短剧 seriesId。
+  final String id;
+  final String title;
+  final String cover;
+}

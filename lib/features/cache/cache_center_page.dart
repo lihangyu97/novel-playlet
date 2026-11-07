@@ -12,11 +12,12 @@ import '../../data/models/chapter.dart';
 import '../../data/models/novel_item.dart';
 import '../../data/models/video_series.dart';
 import 'cache_providers.dart';
+import 'offline_queue.dart';
 import 'offline_downloader.dart';
 import 'offline_task.dart';
 
-/// 缓存中心：从「我的」右上角下载图标进入，按小说 / 短剧分区列出正在下载与
-/// 已下载的内容（进度条 + 网速），点条目 Hero 飞进对应详情页。
+/// 缓存中心：从「我的」右下角悬浮缓存按钮进入，按小说 / 短剧分区列出正在下载、
+/// 排队中与已下载的内容（进度条 + 网速），点条目 Hero 飞进对应详情页。
 ///
 /// 与设置页的「离线缓存管理页」（[OfflineCachePage]）分工：那边负责删除/清空
 /// 等管理动作；本页只做浏览与下载控制（暂停 / 继续 / 重试），不提供删除。
@@ -60,21 +61,24 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
     final novelList = ref.watch(offlineNovelListProvider);
     final videoList = ref.watch(offlineVideoListProvider);
     final task = ref.watch(offlineTaskProvider);
+    final queue = ref.watch(offlineQueueProvider);
 
-    final novelEntries = _mergeEntries(
+    final novelEntries = _entriesFor(
       downloaded: [
         for (final summary in novelList.value ?? const <OfflineBookSummary>[])
           _CacheEntry.fromBook(summary),
       ],
       active: task,
+      queue: queue,
       sectionKind: OfflineTaskKind.novel,
     );
-    final videoEntries = _mergeEntries(
+    final videoEntries = _entriesFor(
       downloaded: [
         for (final summary in videoList.value ?? const <OfflineSeriesSummary>[])
           _CacheEntry.fromSeries(summary),
       ],
       active: task,
+      queue: queue,
       sectionKind: OfflineTaskKind.video,
     );
 
@@ -127,35 +131,47 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
         onPause: _pause,
         onContinue: () => _continue(entry),
         onRetry: () => _retry(entry),
+        onCancelQueued: () => _cancelQueued(entry),
       ),
     );
   }
 
-  /// 把「已下载列表」和「当前活动任务」合成一份展示数据。
+  /// 把一个分区的展示数据合成成一条列表：活动任务 → 排队中 → 已下载。
   ///
-  /// 任务条目不在列表里（刚开始下载、还没有 manifest 或被 provider 缓存住了）
-  /// 就补到分区最前；在列表里则用任务的实时 completed/total/bytes/status/speed
-  /// 覆盖，保证进度条随下载推进。
+  /// - 活动任务用实时 completed/total/bytes/status/speed 覆盖 manifest 快照；
+  /// - 排队条目按队列顺序排在活动任务之后、已下载之前，同 id 的 manifest 用于
+  ///   补充「已缓存 x/y」这类已有进度；
+  /// - 同一 id 只出现一次，否则同一路由里会出现重复 Hero tag 直接断言。
   ///
-  /// 只合并与 [sectionKind] 同类型的任务：一个小说任务不能同时出现在小说和
-  /// 短剧分区，否则两处条目会用同一个 Hero tag，同一条路由里重复 Hero 直接
-  /// 触发断言（「multiple heroes that share the same tag」）。
-  List<_CacheEntry> _mergeEntries({
+  /// 只合并与 [sectionKind] 同类型的任务/队列条目：一个小说任务不能同时出现在
+  /// 小说和短剧分区。
+  List<_CacheEntry> _entriesFor({
     required List<_CacheEntry> downloaded,
     required OfflineTask? active,
+    required List<OfflineQueuedTask> queue,
     required OfflineTaskKind sectionKind,
   }) {
-    final entries = <String, _CacheEntry>{
+    final remaining = <String, _CacheEntry>{
       for (final entry in downloaded) entry.id: entry,
     };
-    if (active == null || active.kind != sectionKind) {
-      return entries.values.toList(growable: false);
+    final entries = <_CacheEntry>[];
+
+    if (active != null && active.kind == sectionKind) {
+      entries.add(
+        _CacheEntry.fromTask(active, fallback: remaining.remove(active.id)),
+      );
     }
-    final existing = entries[active.id];
-    final merged = _CacheEntry.fromTask(active, fallback: existing);
-    if (existing == null) return [merged, ...entries.values];
-    entries[active.id] = merged;
-    return entries.values.toList(growable: false);
+    for (final queued in queue) {
+      if (queued.kind != sectionKind) continue;
+      // 防御：队列里理论上不会同时有正在跑的那一条，但 UI 不能因此多出一条
+      // 同 id 条目（重复 Hero tag）。
+      if (entries.any((entry) => entry.id == queued.id)) continue;
+      entries.add(
+        _CacheEntry.fromQueued(queued, fallback: remaining.remove(queued.id)),
+      );
+    }
+    entries.addAll(remaining.values);
+    return entries;
   }
 
   void _openDetail(_CacheEntry entry) {
@@ -193,6 +209,11 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
     await ref.read(offlineDownloaderProvider.notifier).pause();
   }
 
+  /// 取消排队：只把这条从队列里摘掉（没开始下，不碰离线区文件）。
+  void _cancelQueued(_CacheEntry entry) {
+    ref.read(offlineQueueProvider.notifier).remove(entry.kind, entry.id);
+  }
+
   Future<void> _continue(_CacheEntry entry) async {
     try {
       // 本进程内暂停的任务直接接着跑；进程重启后的恢复态没有内存入参，
@@ -220,11 +241,12 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
   /// 从 manifest 重建完整章节/选集列表再开始下载（start* 按文件缺口续传）。
   Future<void> _startFromManifest(_CacheEntry entry) async {
     final downloader = ref.read(offlineDownloaderProvider.notifier);
+    final OfflineStartDisposition disposition;
     switch (entry.kind) {
       case OfflineTaskKind.novel:
         final book = await ref.read(offlineBookStoreProvider).read(entry.id);
         if (book == null || !mounted) return;
-        await downloader.startNovelBook(
+        disposition = await downloader.startNovelBook(
           bookId: book.bookId,
           title: book.title,
           cover: book.cover,
@@ -243,7 +265,7 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
             .read(offlineSeriesStoreProvider)
             .read(entry.id);
         if (series == null || !mounted) return;
-        await downloader.startVideoSeries(
+        disposition = await downloader.startVideoSeries(
           seriesId: series.seriesId,
           title: series.title,
           cover: series.cover,
@@ -257,15 +279,20 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
           ],
         );
     }
+    if (disposition == OfflineStartDisposition.queued && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已加入缓存队列，等前面的任务完成后自动开始')));
+    }
   }
 
-  /// 下载启动失败的提示文案与管理页保持一致（容量 / 单任务 / 其它）。
+  /// 下载启动失败的提示文案与管理页保持一致（容量 / 队列满 / 其它）。
   void _showStartError(Object error) {
     final message = switch (error) {
       OfflineQuotaExceeded() =>
         '离线缓存已满：已用 ${formatBytes(error.usedBytes)}'
             ' / 上限 ${formatBytes(error.capBytes)}，请先到「设置 → 存储」清理。',
-      OfflineTaskBusyException() => '当前已有下载任务，请等它完成或先暂停。',
+      OfflineQueueFullException() =>
+        '缓存队列已满（最多 ${error.maxLength} 个），请先等前面的任务完成。',
       _ => '开始下载失败，请重试',
     };
     ScaffoldMessenger.of(context)
@@ -294,8 +321,9 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-/// 条目展示状态：任务四态之外，多了「已下载但有缺口、当前没有任务」的 partial。
-enum _EntryStatus { running, paused, failed, done, partial }
+/// 条目展示状态：任务四态之外，多了「已下载但有缺口、当前没有任务」的 partial
+/// 与「在下载队列里等待」的 queued。
+enum _EntryStatus { running, paused, failed, done, partial, queued }
 
 /// 一条缓存记录（已下载 manifest 或活动任务）。
 class _CacheEntry {
@@ -336,6 +364,21 @@ class _CacheEntry {
     status: summary.total > 0 && summary.completed >= summary.total
         ? _EntryStatus.done
         : _EntryStatus.partial,
+  );
+
+  /// 排队中条目：标题/封面以队列快照为准，进度沿用已有 manifest（如有）。
+  factory _CacheEntry.fromQueued(
+    OfflineQueuedTask queued, {
+    _CacheEntry? fallback,
+  }) => _CacheEntry(
+    kind: queued.kind,
+    id: queued.id,
+    title: queued.title.isNotEmpty ? queued.title : (fallback?.title ?? ''),
+    cover: queued.cover.isNotEmpty ? queued.cover : (fallback?.cover ?? ''),
+    completed: fallback?.completed ?? 0,
+    total: fallback?.total ?? 0,
+    bytes: fallback?.bytes ?? 0,
+    status: _EntryStatus.queued,
   );
 
   /// 用活动任务的实时数据覆盖 manifest 快照（任务缺失的字段退回 [fallback]）。
@@ -391,6 +434,7 @@ class _CacheTile extends StatelessWidget {
     required this.onPause,
     required this.onContinue,
     required this.onRetry,
+    required this.onCancelQueued,
   });
 
   final _CacheEntry entry;
@@ -398,6 +442,7 @@ class _CacheTile extends StatelessWidget {
   final VoidCallback onPause;
   final VoidCallback onContinue;
   final VoidCallback onRetry;
+  final VoidCallback onCancelQueued;
 
   @override
   Widget build(BuildContext context) {
@@ -496,6 +541,10 @@ class _CacheTile extends StatelessWidget {
     _EntryStatus.done || _EntryStatus.partial =>
       '已缓存 ${entry.completed}/${entry.total} ${entry.unit}'
           ' · ${formatBytes(entry.bytes)}',
+    _EntryStatus.queued =>
+      '排队中'
+          '${entry.total > 0 && entry.completed > 0 ? ' · 已缓存 ${entry.completed}/${entry.total} ${entry.unit}' : ''}'
+          ' · 等前面的任务完成后自动开始',
   };
 
   /// 暂停原因单独一行（失败原因已并进状态行，按需求里的状态行示例口径）。
@@ -521,6 +570,12 @@ class _CacheTile extends StatelessWidget {
         visualDensity: VisualDensity.compact,
         onPressed: onRetry,
         icon: const Icon(Icons.refresh_rounded),
+      ),
+      _EntryStatus.queued => IconButton(
+        tooltip: '取消排队',
+        visualDensity: VisualDensity.compact,
+        onPressed: onCancelQueued,
+        icon: const Icon(Icons.close_rounded),
       ),
       _EntryStatus.done => null,
     };

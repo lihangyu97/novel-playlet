@@ -7,6 +7,7 @@ import '../../core/storage/offline/offline_paths.dart';
 import '../../core/storage/offline/offline_series.dart';
 import '../../core/storage/offline/offline_series_store.dart';
 import 'offline_downloader.dart';
+import 'offline_queue.dart';
 import 'offline_task.dart';
 
 /// 离线区的路径/存储/下载器/统计 providers。
@@ -45,6 +46,10 @@ final offlineNetworkProvider = Provider<OfflineNetwork>(
 /// 进程级单任务下载器（小说整本 / 短剧整剧共用）。
 final offlineDownloaderProvider =
     NotifierProvider<OfflineDownloader, OfflineTask?>(OfflineDownloader.new);
+
+/// 离线下载队列（当前任务完成后自动启动队列里的下一个；只在内存里）。
+final offlineQueueProvider =
+    NotifierProvider<OfflineQueue, List<OfflineQueuedTask>>(OfflineQueue.new);
 
 /// 只读当前任务快照（页面展示进度/状态用）。
 final offlineTaskProvider = Provider<OfflineTask?>(

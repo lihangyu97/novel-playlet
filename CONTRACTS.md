@@ -121,12 +121,17 @@ await series.episodeFile(seriesId, episodeId);          // 已缓存集 → File
 await books.stats();                 // OfflineStats{count, bytes, capBytes}
 await books.delete(bookId);          // 手动删除单本
 
-// 下载（进程级单任务；已有任务时抛 OfflineTaskBusyException，超上限抛 OfflineQuotaExceeded）
+// 下载（进程级单任务；已有任务时返回 OfflineStartDisposition.queued 并入队，
+// 超上限抛 OfflineQuotaExceeded，队列满抛 OfflineQueueFullException）
 final downloader = ref.read(offlineDownloaderProvider.notifier);
 await downloader.startNovelBook(bookId: id, title: t, cover: c, chapters: chapters);
 await downloader.startVideoSeries(seriesId: id, title: t, cover: c, episodes: episodes);
 downloader.pause(); / await downloader.resume(); / downloader.cancel();
-await downloader.clearFor(OfflineTaskKind.novel, bookId);   // 删除前取消任务
+await downloader.clearFor(OfflineTaskKind.novel, bookId);   // 删除前取消任务/取消排队
+
+// 等待队列（只在内存里，最多 20 个；完成/失败/取消后自动启动下一个）
+final queued = ref.watch(offlineQueueProvider);             // List<OfflineQueuedTask>
+ref.read(offlineQueueProvider.notifier).remove(kind, id);   // 取消排队
 
 // UI：详情页底栏按钮（小说/短剧共用）；三态「缓存/缓存中/已缓存」，
 // 缓存 → start*；缓存中/已缓存 → push CacheCenterRoute()（暂停/继续/重试在缓存中心）
@@ -142,7 +147,7 @@ final task = ref.watch(offlineTaskProvider);   // OfflineTask?（含 speedBytesP
 1. 离线区不参与任何自动淘汰/TTL/体积裁剪；`AppCache.clear()` 只枚举自动缓存目录，**永不碰 `offline/`**（`test/cache_test.dart` 有回归用例）。
 2. 小说 / 短剧两个区相互独立：目录、manifest、统计、清空互不影响。
 3. 软上限：小说 1 GiB、短剧 3 GiB（`OfflineBookStore.novelCapBytes` / `OfflineSeriesStore.videoCapBytes`），超限阻止新任务并引导清理。
-4. 下载任务同一时刻只有一个；切后台在当前章/集结束后暂停、回前台不自动继续；删除区/条目之前先 `clearFor` 取消任务。
+4. 下载任务同一时刻只有一个，其余 FIFO 排队（内存队列，上限 20，按 kind+id 去重）；当前任务完成/失败/取消后自动启动下一个，paused 时队列停住；切后台在当前章/集结束后暂停、回前台不自动继续；删除区/条目之前先 `clearFor` 取消任务/排队。队列不持久化（重启后等待项消失，当前任务恢复成 paused）。
 5. manifest schema 读不懂时当"没有缓存"处理，不删文件（交给用户手动清理）。
 
 ## 导航

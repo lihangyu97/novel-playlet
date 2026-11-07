@@ -15,6 +15,7 @@ import '../../data/models/json_utils.dart';
 import '../../data/models/video_source.dart';
 import 'cache_providers.dart';
 import 'offline_diag.dart';
+import 'offline_queue.dart';
 import 'offline_task.dart';
 
 /// 离线区剩余空间不足（软上限），由 UI 弹「已用 / 上限」并引导去管理页清理。
@@ -38,16 +39,11 @@ class OfflineQuotaExceeded implements Exception {
       'OfflineQuotaExceeded(kind=${kind.name}, used=$usedBytes, cap=$capBytes)';
 }
 
-/// 已有任务在跑：单任务队列，后启动的任务直接提示（不排队）。
-class OfflineTaskBusyException implements Exception {
-  const OfflineTaskBusyException(this.current);
-
-  /// 当前进行中的任务（可能为 null：任务刚启动还没发布状态）。
-  final OfflineTask? current;
-
-  @override
-  String toString() => 'OfflineTaskBusyException(${current?.title})';
-}
+/// 一次 `start*` 的结果。
+///
+/// `started`：没有别的任务，立刻开始下载；`queued`：已有任务在跑，本次已排进
+/// 等待队列（当前任务收尾后自动开始）。UI 用这个结果给「已加入队列」提示。
+enum OfflineStartDisposition { started, queued }
 
 /// 下载器需要的网络动作。
 ///
@@ -160,9 +156,10 @@ class OfflineDownloadSettings {
 /// 进程级单任务下载器（小说整本 / 短剧整剧共用）。
 ///
 /// 状态机：`null/idle → running → (paused | done | failed)`；`cancel` 直接清掉
-/// 任务记录（已下载内容保留）。同一时刻只跑一个任务（后启动的抛
-/// [OfflineTaskBusyException]）。不新增自动重试循环：Rust 侧已有重试，这里只
-/// 在"连续 N 章/集失败"时暂停并提示。
+/// 任务记录（已下载内容保留）。同一时刻只跑一个任务：已有任务在跑时新的
+/// `start*` 进 FIFO 等待队列（[OfflineQueue]），当前任务完成/失败/取消后自动
+/// 接上下一个；paused 时不接续（用户主动暂停不能偷偷下别的）。不新增自动重试
+/// 循环：Rust 侧已有重试，这里只在"连续 N 章/集失败"时暂停并提示。
 ///
 /// 前后台：`WidgetsBindingObserver` 监听；切后台在当前章/集结束后暂停并落盘，
 /// 回前台**不自动继续**（只把状态改成 paused，由用户点继续）。纯 Dart 测试
@@ -182,6 +179,14 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
 
   _RunControl? _control;
   _LifecycleObserver? _observer;
+
+  /// 正在启动、还没发布 running 快照的任务（入口占位）。
+  ///
+  /// start* 在设置 [_control] 之前要 await 恢复态和几个读盘动作，对上千章的书
+  /// 这几个 `file.exists()` 可能花掉几十上百毫秒。期间用户再点一次（尤其详情
+  /// 页按钮看起来「没反应」时）会同时通过 `_control == null` 检查、并发跑起
+  /// 两份同一本书。入口先同步占位，第二次点击就会走队列而不是再开一个任务。
+  OfflineQueueJob? _startingJob;
 
   /// 启动恢复的未来：start* 之前 await 它，避免"恢复态把新任务覆盖成 paused"
   /// 的启动竞态（恢复是 build 里的异步动作）。
@@ -252,93 +257,120 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
   // 小说整本
   // ---------------------------------------------------------------------------
 
-  Future<void> startNovelBook({
+  Future<OfflineStartDisposition> startNovelBook({
     required String bookId,
     required String title,
     required String cover,
     required List<Chapter> chapters,
   }) async {
-    if (bookId.isEmpty || chapters.isEmpty) return;
-    await _restoreFuture;
-    if (_control != null) throw OfflineTaskBusyException(state);
-
-    final store = _bookStore;
-    final existing = await store.read(bookId);
-    final missing = await store.missingChapterIds(bookId, chapters);
-    final stats = await store.stats();
-    final estimate = missing.length * novelChapterEstimateBytes;
-    if (stats.bytes + estimate > OfflineBookStore.novelCapBytes) {
-      throw OfflineQuotaExceeded(
-        kind: OfflineTaskKind.novel,
-        usedBytes: stats.bytes,
-        capBytes: OfflineBookStore.novelCapBytes,
-      );
+    if (bookId.isEmpty || chapters.isEmpty) {
+      return OfflineStartDisposition.started;
     }
-
-    final now = DateTime.now();
-    final manifest = OfflineBook(
-      bookId: bookId,
-      title: title.isNotEmpty ? title : (existing?.title ?? ''),
-      cover: cover.isNotEmpty ? cover : (existing?.cover ?? ''),
-      chapters: [
-        for (var i = 0; i < chapters.length; i++)
-          OfflineChapter(
-            id: chapters[i].id,
-            title: chapters[i].title,
-            volumeName: chapters[i].volumeName,
-            index: i,
-          ),
-      ],
-      completed: chapters.length - missing.length,
-      bytes: existing?.bytes ?? 0,
-      createdAt: existing?.createdAt,
-      updatedAt: now,
-    );
-    await store.begin(manifest);
-
-    final control = _RunControl();
-    _control = control;
-    final task = OfflineTask(
+    final job = OfflineQueueJob(
       kind: OfflineTaskKind.novel,
       id: bookId,
-      title: manifest.title,
-      cover: manifest.cover,
-      completed: manifest.completed,
-      total: manifest.total,
-      bytes: manifest.bytes,
-      status: OfflineTaskStatus.running,
-      updatedAt: now,
+      title: title,
+      cover: cover,
+      items: chapters,
     );
-    await _publish(task);
-    _resumable = null;
-
+    // 入口同步占位：已有任务在跑、或另一个 start 还在启动中时，本次直接排队。
+    if (_control != null || _startingJob != null) {
+      return _enqueue(job);
+    }
+    _startingJob = job;
     try {
-      final result = await _runNovel(
-        bookStore: store,
-        chapters: chapters,
-        missing: missing.toSet(),
-        manifest: manifest,
-        control: control,
+      await _restoreFuture;
+
+      // 排队中的同一个任务被直接启动（典型场景：暂停期间用户又点了一次）：
+      // 先把它从队列消费掉，否则本次跑完后 drain 会再把它启动一遍。
+      ref
+          .read(offlineQueueProvider.notifier)
+          .remove(OfflineTaskKind.novel, bookId);
+
+      final store = _bookStore;
+      final existing = await store.read(bookId);
+      final missing = await store.missingChapterIds(bookId, chapters);
+      final stats = await store.stats();
+      final estimate = missing.length * novelChapterEstimateBytes;
+      if (stats.bytes + estimate > OfflineBookStore.novelCapBytes) {
+        throw OfflineQuotaExceeded(
+          kind: OfflineTaskKind.novel,
+          usedBytes: stats.bytes,
+          capBytes: OfflineBookStore.novelCapBytes,
+        );
+      }
+
+      final now = DateTime.now();
+      final manifest = OfflineBook(
+        bookId: bookId,
+        title: title.isNotEmpty ? title : (existing?.title ?? ''),
+        cover: cover.isNotEmpty ? cover : (existing?.cover ?? ''),
+        chapters: [
+          for (var i = 0; i < chapters.length; i++)
+            OfflineChapter(
+              id: chapters[i].id,
+              title: chapters[i].title,
+              volumeName: chapters[i].volumeName,
+              index: i,
+            ),
+        ],
+        completed: chapters.length - missing.length,
+        bytes: existing?.bytes ?? 0,
+        createdAt: existing?.createdAt,
+        updatedAt: now,
       );
-      await _finishNovel(
-        result: result,
-        id: bookId,
-        chapters: chapters,
-        title: manifest.title,
-        cover: manifest.cover,
-      );
-    } catch (error) {
-      await _failTask(
+      await store.begin(manifest);
+
+      final control = _RunControl();
+      _control = control;
+      final task = OfflineTask(
         kind: OfflineTaskKind.novel,
         id: bookId,
         title: manifest.title,
         cover: manifest.cover,
-        error: error,
+        completed: manifest.completed,
+        total: manifest.total,
+        bytes: manifest.bytes,
+        status: OfflineTaskStatus.running,
+        updatedAt: now,
       );
-      rethrow;
+      await _publish(task);
+      _resumable = null;
+
+      try {
+        final result = await _runNovel(
+          bookStore: store,
+          chapters: chapters,
+          missing: missing.toSet(),
+          manifest: manifest,
+          control: control,
+        );
+        await _finishNovel(
+          result: result,
+          id: bookId,
+          chapters: chapters,
+          title: manifest.title,
+          cover: manifest.cover,
+        );
+      } catch (error) {
+        await _failTask(
+          kind: OfflineTaskKind.novel,
+          id: bookId,
+          title: manifest.title,
+          cover: manifest.cover,
+          error: error,
+        );
+        rethrow;
+      } finally {
+        _control = null;
+        control.done.complete();
+      }
+      return OfflineStartDisposition.started;
     } finally {
-      _control = null;
-      control.done.complete();
+      // 先释放入口占位再 drain：否则 drain 里的 start 会把自己当成「并发启动」
+      // 而重新入队。
+      if (identical(_startingJob, job)) _startingJob = null;
+      unawaited(_drainQueue());
     }
   }
 
@@ -564,94 +596,120 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
   // 短剧整剧
   // ---------------------------------------------------------------------------
 
-  Future<void> startVideoSeries({
+  Future<OfflineStartDisposition> startVideoSeries({
     required String seriesId,
     required String title,
     required String cover,
     required List<Chapter> episodes,
   }) async {
-    if (seriesId.isEmpty || episodes.isEmpty) return;
-    await _restoreFuture;
-    if (_control != null) throw OfflineTaskBusyException(state);
-
-    final store = _seriesStore;
-    final existing = await store.read(seriesId);
-    final missing = await store.missingEpisodeIds(seriesId, episodes);
-    // 短剧单集体积差异大（几十 MB 到几百 MB），不能用「集数 × 固定估算」在开始时
-    // 一刀切：一部 40 集的剧按 150MB/集估会直接超过 3GiB 上限，表现为刚点下载
-    // 就报「空间不足」。这里只挡「区已经满了」的情况，下载过程中逐集检查额度。
-    final stats = await store.stats();
-    if (stats.bytes >= store.capBytes) {
-      throw OfflineQuotaExceeded(
-        kind: OfflineTaskKind.video,
-        usedBytes: stats.bytes,
-        capBytes: store.capBytes,
-      );
+    if (seriesId.isEmpty || episodes.isEmpty) {
+      return OfflineStartDisposition.started;
     }
-
-    final now = DateTime.now();
-    final manifest = OfflineSeries(
-      seriesId: seriesId,
-      title: title.isNotEmpty ? title : (existing?.title ?? ''),
-      cover: cover.isNotEmpty ? cover : (existing?.cover ?? ''),
-      episodes: [
-        for (var i = 0; i < episodes.length; i++)
-          OfflineEpisode(
-            id: episodes[i].id,
-            title: episodes[i].title,
-            index: i,
-          ),
-      ],
-      completed: episodes.length - missing.length,
-      bytes: existing?.bytes ?? 0,
-      createdAt: existing?.createdAt,
-      updatedAt: now,
-    );
-    await store.begin(manifest);
-
-    final control = _RunControl();
-    _control = control;
-    final task = OfflineTask(
+    final job = OfflineQueueJob(
       kind: OfflineTaskKind.video,
       id: seriesId,
-      title: manifest.title,
-      cover: manifest.cover,
-      completed: manifest.completed,
-      total: manifest.total,
-      bytes: manifest.bytes,
-      status: OfflineTaskStatus.running,
-      updatedAt: now,
+      title: title,
+      cover: cover,
+      items: episodes,
     );
-    await _publish(task);
-    _resumable = null;
-
+    // 入口同步占位：已有任务在跑、或另一个 start 还在启动中时，本次直接排队。
+    if (_control != null || _startingJob != null) {
+      return _enqueue(job);
+    }
+    _startingJob = job;
     try {
-      final result = await _runVideo(
-        seriesStore: store,
-        episodes: episodes,
-        missing: missing.toSet(),
-        manifest: manifest,
-        control: control,
+      await _restoreFuture;
+
+      // 排队中的同一部剧被直接启动：先消费掉队列项，避免跑完后再重跑一遍。
+      ref
+          .read(offlineQueueProvider.notifier)
+          .remove(OfflineTaskKind.video, seriesId);
+
+      final store = _seriesStore;
+      final existing = await store.read(seriesId);
+      final missing = await store.missingEpisodeIds(seriesId, episodes);
+      // 短剧单集体积差异大（几十 MB 到几百 MB），不能用「集数 × 固定估算」在开始时
+      // 一刀切：一部 40 集的剧按 150MB/集估会直接超过 3GiB 上限，表现为刚点下载
+      // 就报「空间不足」。这里只挡「区已经满了」的情况，下载过程中逐集检查额度。
+      final stats = await store.stats();
+      if (stats.bytes >= store.capBytes) {
+        throw OfflineQuotaExceeded(
+          kind: OfflineTaskKind.video,
+          usedBytes: stats.bytes,
+          capBytes: store.capBytes,
+        );
+      }
+
+      final now = DateTime.now();
+      final manifest = OfflineSeries(
+        seriesId: seriesId,
+        title: title.isNotEmpty ? title : (existing?.title ?? ''),
+        cover: cover.isNotEmpty ? cover : (existing?.cover ?? ''),
+        episodes: [
+          for (var i = 0; i < episodes.length; i++)
+            OfflineEpisode(
+              id: episodes[i].id,
+              title: episodes[i].title,
+              index: i,
+            ),
+        ],
+        completed: episodes.length - missing.length,
+        bytes: existing?.bytes ?? 0,
+        createdAt: existing?.createdAt,
+        updatedAt: now,
       );
-      await _finishVideo(
-        result: result,
-        id: seriesId,
-        episodes: episodes,
-        title: manifest.title,
-        cover: manifest.cover,
-      );
-    } catch (error) {
-      await _failTask(
+      await store.begin(manifest);
+
+      final control = _RunControl();
+      _control = control;
+      final task = OfflineTask(
         kind: OfflineTaskKind.video,
         id: seriesId,
         title: manifest.title,
         cover: manifest.cover,
-        error: error,
+        completed: manifest.completed,
+        total: manifest.total,
+        bytes: manifest.bytes,
+        status: OfflineTaskStatus.running,
+        updatedAt: now,
       );
-      rethrow;
+      await _publish(task);
+      _resumable = null;
+
+      try {
+        final result = await _runVideo(
+          seriesStore: store,
+          episodes: episodes,
+          missing: missing.toSet(),
+          manifest: manifest,
+          control: control,
+        );
+        await _finishVideo(
+          result: result,
+          id: seriesId,
+          episodes: episodes,
+          title: manifest.title,
+          cover: manifest.cover,
+        );
+      } catch (error) {
+        await _failTask(
+          kind: OfflineTaskKind.video,
+          id: seriesId,
+          title: manifest.title,
+          cover: manifest.cover,
+          error: error,
+        );
+        rethrow;
+      } finally {
+        _control = null;
+        control.done.complete();
+      }
+      return OfflineStartDisposition.started;
     } finally {
-      _control = null;
-      control.done.complete();
+      // 先释放入口占位再 drain：否则 drain 里的 start 会把自己当成「并发启动」
+      // 而重新入队。
+      if (identical(_startingJob, job)) _startingJob = null;
+      unawaited(_drainQueue());
     }
   }
 
@@ -923,7 +981,10 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
   /// 只剩持久化的 paused 任务），调用方应重新调用 start*（幂等）。
   Future<bool> resume() async {
     final resumable = _resumable;
-    if (_control != null || resumable == null) return false;
+    // 有任务在跑/正在启动时不能续传（start* 会被排进队列）。
+    if (_control != null || _startingJob != null || resumable == null) {
+      return false;
+    }
     switch (resumable.kind) {
       case OfflineTaskKind.novel:
         await startNovelBook(
@@ -957,10 +1018,14 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
     _setState(null);
     _resumable = null;
     _invalidateOfflineProviders(current.kind, current.id);
+    // 取消当前任务后接着跑队列里的下一个（用户取消 = 不想要这个，不是停整条队列）。
+    unawaited(_drainQueue());
   }
 
   /// 删除某本书/某部剧：先取消它正在跑的任务，再删离线内容与任务记录。
   Future<void> clearFor(OfflineTaskKind kind, String id) async {
+    // 还在队列里等待的同一本/同一部剧：直接取消排队，避免删完又被自动开始。
+    ref.read(offlineQueueProvider.notifier).remove(kind, id);
     final current = state;
     if (current != null && current.kind == kind && current.id == id) {
       if (_control != null) {
@@ -981,6 +1046,92 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
   }
 
   // ---------------------------------------------------------------------------
+  // 队列
+  // ---------------------------------------------------------------------------
+
+  /// 防止多个收尾路径同时 drain（start 的 finally、cancel、删除都可能触发）。
+  bool _draining = false;
+
+  /// 把新任务排进等待队列。当前正在跑的就是同一本/同一部剧时不再重复入队
+  /// （用户重复点「缓存」不该出现两条相同记录）；同一本正在启动（入口占位）
+  /// 时同理。
+  OfflineStartDisposition _enqueue(OfflineQueueJob job) {
+    final running = state;
+    final starting = _startingJob;
+    final sameRunning =
+        running != null && running.kind == job.kind && running.id == job.id;
+    final sameStarting =
+        starting != null && starting.kind == job.kind && starting.id == job.id;
+    if (!sameRunning && !sameStarting) {
+      ref.read(offlineQueueProvider.notifier).enqueue(job);
+    }
+    return OfflineStartDisposition.queued;
+  }
+
+  /// 当前任务收尾后自动启动队列里的下一个。
+  ///
+  /// 只在「完成 / 失败 / 取消」后继续；paused（用户主动暂停或切后台）时停在
+  /// 队列里——用户以为暂停了却偷偷下别的会很怪。
+  Future<void> _drainQueue() async {
+    if (_draining) return;
+    _draining = true;
+    try {
+      // 正在启动（入口占位）时不抢跑：那个 start 的 finally 会再触发一次 drain。
+      while (_control == null && _startingJob == null) {
+        final current = state;
+        if (current != null && current.isPaused) return;
+        final job = ref.read(offlineQueueProvider.notifier).takeFirst();
+        if (job == null) return;
+        // 记录启动前的 state 引用：start* 运行期失败会先发布一条新的 failed
+        // 快照再 rethrow，用它区分「已经发布过失败快照」与「启动前就失败」。
+        final before = state;
+        try {
+          switch (job.kind) {
+            case OfflineTaskKind.novel:
+              await startNovelBook(
+                bookId: job.id,
+                title: job.title,
+                cover: job.cover,
+                chapters: job.items,
+              );
+            case OfflineTaskKind.video:
+              await startVideoSeries(
+                seriesId: job.id,
+                title: job.title,
+                cover: job.cover,
+                episodes: job.items,
+              );
+          }
+        } catch (error) {
+          // 队列任务启动就失败（额度/写盘等）：发布一条失败任务让用户在缓存
+          // 中心看到原因，然后继续下一个，不让一个坏任务堵死整条队列。
+          //
+          // start* 在「运行期」失败时已经发布过同一条 failed 快照再 rethrow，
+          // 这里不能再发一次（一次失败两条 failed、重复失效 provider）。
+          final current = state;
+          final publishedFailure =
+              !identical(current, before) &&
+              current != null &&
+              current.kind == job.kind &&
+              current.id == job.id &&
+              current.status == OfflineTaskStatus.failed;
+          if (!publishedFailure) {
+            await _failTask(
+              kind: job.kind,
+              id: job.id,
+              title: job.title,
+              cover: job.cover,
+              error: error,
+            );
+          }
+        }
+      }
+    } finally {
+      _draining = false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // 内部工具
   // ---------------------------------------------------------------------------
 
@@ -996,14 +1147,22 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
     required String cover,
     required Object error,
   }) async {
+    // 只有「state 就是同一个任务」时才继承进度。队列任务在启动前失败时，
+    // state 还是上一个任务的收尾快照，把它的 completed/total/bytes 搬过来
+    // 会让缓存中心把 B 的失败显示成 A 的进度。
+    final snapshot = state;
+    final sameTask =
+        snapshot != null && snapshot.kind == kind && snapshot.id == id
+        ? snapshot
+        : null;
     final task = OfflineTask(
       kind: kind,
       id: id,
       title: title,
       cover: cover,
-      completed: state?.completed ?? 0,
-      total: state?.total ?? 0,
-      bytes: state?.bytes ?? 0,
+      completed: sameTask?.completed ?? 0,
+      total: sameTask?.total ?? 0,
+      bytes: sameTask?.bytes ?? 0,
       // 失败任务不保留运行中的网速。
       speedBytesPerSecond: 0,
       status: OfflineTaskStatus.failed,

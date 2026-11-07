@@ -6,6 +6,7 @@ import 'package:novel_playlet/core/storage/offline/offline_book.dart';
 import 'package:novel_playlet/core/storage/offline/offline_series.dart';
 import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
+import 'package:novel_playlet/features/cache/offline_queue.dart';
 import 'package:novel_playlet/features/cache/offline_task.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
@@ -124,6 +125,30 @@ void main() {
       ),
     );
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
+  }
+
+  /// 页面 pump 完后用真实 queue notifier 入队，走一遍「排队条目出现→取消排队」
+  /// 的真实状态链路（UI 只依赖 offlineQueueProvider，不存本地状态）。
+  Future<void> enqueueNovel(
+    WidgetTester tester, {
+    String id = 'b3',
+    String title = '排队之书',
+  }) async {
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(CacheCenterPage)),
+    );
+    container
+        .read(offlineQueueProvider.notifier)
+        .enqueue(
+          OfflineQueueJob(
+            kind: OfflineTaskKind.novel,
+            id: id,
+            title: title,
+            cover: '',
+            items: const [],
+          ),
+        );
+    await tester.pumpAndSettle();
   }
 
   testWidgets('分区展示：运行中任务补到小说分区最前，带百分比/网速/体积', (tester) async {
@@ -254,6 +279,39 @@ void main() {
     expect(find.byType(VideoDetailPage), findsOneWidget);
   });
 
+  testWidgets('排队中条目：显示排队状态行与取消排队按钮，取消后消失', (tester) async {
+    await pumpCenter(tester, extra: overrides(books: [book()]));
+    await enqueueNovel(tester);
+
+    expect(find.text('排队之书'), findsOneWidget);
+    expect(find.text('排队中 · 等前面的任务完成后自动开始'), findsOneWidget);
+    expect(find.byTooltip('取消排队'), findsOneWidget);
+    expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.close_rounded));
+    await tester.pumpAndSettle();
+    expect(find.text('排队之书'), findsNothing);
+    expect(find.text('排队中 · 等前面的任务完成后自动开始'), findsNothing);
+    // 已下载条目不受影响。
+    expect(find.text('剑来'), findsOneWidget);
+  });
+
+  testWidgets('排队条目与已下载 summary 同 id：合并展示已有进度且不重复', (tester) async {
+    await pumpCenter(
+      tester,
+      extra: overrides(
+        books: [book(id: 'b3', title: '排队之书', completed: 3, total: 10)],
+      ),
+    );
+    expect(find.text('已缓存 3/10 章 · 48 KB'), findsOneWidget);
+
+    await enqueueNovel(tester);
+    expect(find.text('排队之书'), findsOneWidget, reason: '同一 id 只能有一条');
+    expect(find.text('排队中 · 已缓存 3/10 章 · 等前面的任务完成后自动开始'), findsOneWidget);
+    // 排队条目用已有 manifest 的进度条。
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+  });
+
   testWidgets('缓存中心页', (tester) async {
     await pumpCenter(
       tester,
@@ -263,6 +321,7 @@ void main() {
         active: task(speed: 1258291),
       ),
     );
+    await enqueueNovel(tester, id: 'b3', title: '排队测试书');
     await expectLater(
       find.byType(CacheCenterPage),
       matchesGoldenFile('../goldens/cache_center.png'),

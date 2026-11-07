@@ -34,7 +34,7 @@ class MinePage extends ConsumerStatefulWidget {
   static const dramaPanelKey = Key('mine-panel-drama');
   static const switchButtonKey = Key('mine-panel-switch');
 
-  /// 右上角「缓存」入口（设置按钮左侧）。
+  /// 右下角悬浮「缓存」入口（切换按钮左侧）。
   static const cacheButtonKey = Key('mine-cache-entry');
 
   @override
@@ -158,8 +158,8 @@ class _MinePageState extends ConsumerState<MinePage>
                 ],
               ),
             ),
-            // 右上角两个悬浮入口：缓存 + 设置。小说面板时在右、短剧面板时在左，
-            // 切换过程中整体跟着 _controller 在屏幕内左右移动（不会被滑出屏幕）。
+            // 唯一一个设置按钮：小说面板时在右、短剧面板时在左，切换过程中
+            // 跟着 _controller 在屏幕内左右移动（不会被滑出屏幕）。
             Positioned(
               top: 20,
               left: 16,
@@ -173,39 +173,35 @@ class _MinePageState extends ConsumerState<MinePage>
                     child: child,
                   );
                 },
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      key: MinePage.cacheButtonKey,
-                      onPressed: _openCacheCenter,
-                      tooltip: '缓存',
-                      visualDensity: VisualDensity.compact,
-                      iconSize: 22,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      icon: const Icon(Icons.download_outlined),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      onPressed: _openSettings,
-                      tooltip: '设置',
-                      visualDensity: VisualDensity.compact,
-                      iconSize: 22,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      icon: const Icon(Icons.settings_outlined),
-                    ),
-                  ],
+                child: IconButton(
+                  onPressed: _openSettings,
+                  tooltip: '设置',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 22,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  icon: const Icon(Icons.settings_outlined),
                 ),
               ),
             ),
-            // 右下角悬浮切换按钮：贴在悬浮底栏上方，不遮胶囊。
+            // 右下角两个悬浮按钮：缓存中心 + 小说/短剧切换。都贴在悬浮底栏
+            // 上方，缓存入口固定在切换按钮左侧，不遮胶囊。
             Positioned(
               right: 16,
               bottom: widget.bottomInset + 16,
-              child: _PanelSwitchButton(
-                key: MinePage.switchButtonKey,
-                showingDrama: _showingDrama,
-                onTap: _togglePanel,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _CacheCenterButton(
+                    key: MinePage.cacheButtonKey,
+                    onTap: _openCacheCenter,
+                  ),
+                  const SizedBox(width: 12),
+                  _PanelSwitchButton(
+                    key: MinePage.switchButtonKey,
+                    showingDrama: _showingDrama,
+                    onTap: _togglePanel,
+                  ),
+                ],
               ),
             ),
           ],
@@ -225,6 +221,47 @@ class _MinePageState extends ConsumerState<MinePage>
           child: ExcludeSemantics(excluding: !settled, child: child),
         );
       },
+    );
+  }
+}
+
+/// 悬浮「缓存中心」按钮：与 [_PanelSwitchButton] 同一套圆形悬浮样式，但用
+/// secondaryContainer 配色与主色切换按钮区分开，避免两个按钮抢注意力。
+class _CacheCenterButton extends StatelessWidget {
+  const _CacheCenterButton({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: '缓存中心',
+      child: Semantics(
+        button: true,
+        label: '缓存中心',
+        child: Material(
+          color: scheme.secondaryContainer,
+          shape: const CircleBorder(),
+          elevation: 4,
+          shadowColor: Colors.black38,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: SizedBox(
+              width: 52,
+              height: 52,
+              child: Center(
+                child: Icon(
+                  Icons.download_outlined,
+                  size: 24,
+                  color: scheme.onSecondaryContainer,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

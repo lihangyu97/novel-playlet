@@ -12,6 +12,7 @@ import '../../data/models/chapter.dart';
 import '../mine/widgets/mine_relative_time.dart';
 import 'cache_providers.dart';
 import 'offline_downloader.dart';
+import 'offline_queue.dart';
 import 'offline_task.dart';
 
 /// 离线缓存管理页：小说 / 短剧两个独立 pinned 区的列表、进度、删除。
@@ -93,7 +94,7 @@ class _NovelTabState extends ConsumerState<_NovelTab> {
     final book = await ref.read(offlineBookStoreProvider).read(summary.bookId);
     if (book == null || !mounted) return;
     try {
-      await ref
+      final disposition = await ref
           .read(offlineDownloaderProvider.notifier)
           .startNovelBook(
             bookId: book.bookId,
@@ -109,6 +110,7 @@ class _NovelTabState extends ConsumerState<_NovelTab> {
                 ),
             ],
           );
+      if (mounted) _showQueuedHint(context, disposition);
     } catch (error) {
       if (mounted) _showStartError(context, error);
     }
@@ -239,7 +241,7 @@ class _VideoTabState extends ConsumerState<_VideoTab> {
         .read(summary.seriesId);
     if (series == null || !mounted) return;
     try {
-      await ref
+      final disposition = await ref
           .read(offlineDownloaderProvider.notifier)
           .startVideoSeries(
             seriesId: series.seriesId,
@@ -254,6 +256,7 @@ class _VideoTabState extends ConsumerState<_VideoTab> {
                 ),
             ],
           );
+      if (mounted) _showQueuedHint(context, disposition);
     } catch (error) {
       if (mounted) _showStartError(context, error);
     }
@@ -634,10 +637,22 @@ void _showStartError(BuildContext context, Object error) {
     OfflineQuotaExceeded() =>
       '离线缓存已满：已用 ${formatBytes(error.usedBytes)}'
           ' / 上限 ${formatBytes(error.capBytes)}，请先到「设置 → 存储」清理。',
-    OfflineTaskBusyException() => '当前已有下载任务，请等它完成或先暂停。',
+    OfflineQueueFullException() =>
+      '缓存队列已满（最多 ${error.maxLength} 个），请先等前面的任务完成。',
     _ => '开始下载失败，请重试',
   };
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+}
+
+/// start* 返回 queued 时给用户回执：单任务下载器正跑别的任务，本次点击只是
+/// 入队，不会立刻开始。
+void _showQueuedHint(
+  BuildContext context,
+  OfflineStartDisposition disposition,
+) {
+  if (disposition != OfflineStartDisposition.queued) return;
+  ScaffoldMessenger.of(context)
+      .showSnackBar(const SnackBar(content: Text('已加入缓存队列，等前面的任务完成后自动开始')));
 }
 
 Future<bool?> _confirm(

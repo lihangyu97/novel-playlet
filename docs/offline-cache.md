@@ -214,7 +214,8 @@ if (offlineSeriesStore.hasEpisode(seriesId, episode.id)) {
 
 ## 7. 下载引擎（小说 / 短剧共用）
 
-- **单任务队列**：同一时刻只跑 1 个任务（不同书/剧之间排队；后启动的若已有任务则提示"当前有任务进行中"）。共用一套状态机，任务类型分 `novel` / `video`。
+- **单任务 + 等待队列**：同一时刻只跑 1 个任务，避免设备池/风控与磁盘压力；已有任务在跑时再点「缓存」不再报错，而是**排进 FIFO 队列**（`offline_queue.dart`，最多 20 个，按 kind+id 去重）。当前任务完成/失败/取消后自动 `takeFirst()` 启动下一个；**paused 时队列停住**（用户主动暂停 = 不要偷偷下别的），恢复并完成后才继续。队列只在内存里：进程重启后消失，用户重新点「缓存」即可（离线区按文件缺口续传）。共用一套状态机，任务类型分 `novel` / `video`。
+- **队列任务启动失败**（额度/写盘等）：发布一条失败任务（缓存中心可看到原因），然后继续下一个，不让坏任务堵死整条队列。
 - 状态机：`idle → running → (paused | done | failed)`；`cancel` 保留已下载内容。
 - 持久化：`SharedPreferences` 的 `offline_task_v1`（kind/id/title/status/completed/total/bytes/updatedAt），启动时恢复；`running` 恢复成 `paused` 等用户继续（避免一启动就偷偷下载）。
 - 前后台：`WidgetsBindingObserver`；切后台在当前章/集结束后暂停并落盘，回前台不自动继续（弹一次提示「任务已暂停，点继续」），避免用户不知情耗流量。
@@ -258,7 +259,8 @@ if (offlineSeriesStore.hasEpisode(seriesId, episode.id)) {
   - 暂停 / 失败：状态 + 原因（最多两行）+ 继续/重试按钮（重启后的恢复态按 manifest 重建入参续传）；
   - 已完成：`已缓存 10/10 章 · 800 KB`（短剧用「集」）。
 - 点条目与推荐列表一致：封面 Hero 飞入对应详情页（`CoverHeroTag.novel/video('cache-center', id)`）。
-- 与管理页分工：缓存中心只浏览/控制下载（暂停、继续、重试），删除/清空仍在「设置 → 存储」的管理页。
+- 与管理页分工：缓存中心只浏览/控制下载（暂停、继续、重试、取消排队），删除/清空仍在「设置 → 存储」的管理页。
+- 「我的」入口在右下角：切换按钮左侧的圆形悬浮按钮（下载图标），和面板切换按钮同一套尺寸/阴影。
 
 ## 9. 与现有缓存 / 清理的关系
 
@@ -284,7 +286,8 @@ lib/features/cache/offline_downloader.dart         # 单任务状态机：小说
 lib/features/cache/cache_providers.dart            # stores / downloader / 统计 providers
 lib/features/cache/offline_cache_page.dart         # 管理页（小说 / 短剧两 tab）
 lib/features/cache/widgets/offline_download_button.dart  # 详情页三态按钮（图标+文字）
-lib/features/cache/cache_center_page.dart          # 缓存中心（我的入口：下载中/已下载 + 网速 + Hero 进详情）
+lib/features/cache/cache_center_page.dart          # 缓存中心（我的入口：下载中/排队中/已下载 + 网速 + Hero 进详情）
+lib/features/cache/offline_queue.dart              # 离线下载等待队列（FIFO/去重/上限 20）
 lib/app/widgets/detail_icon_label_button.dart      # 详情底栏「上图标、下文字」共用按钮
 test/offline_book_store_test.dart
 test/offline_series_store_test.dart
@@ -344,7 +347,7 @@ CONTRACTS.md / README.md                      # 功能表/存储约定同步
 | 明文档落盘（内容版权/隐私） | 用户明确要求"能看就行"；App 沙盒本身受 iOS 数据保护；如需加密后续再改（Rust 侧能力已有多数代码） |
 | 两段式下载峰值 ≈ 2×单集 | 临时缓存本就会自动淘汰，稳态只有离线一份；大集下载时提示保持前台 |
 | 离线命中的视频不再触发内核流程 | 播放器需分别处理 `file://` 与 loopback 两路；失败提示区分"未缓存/文件损坏/其他" |
-| 单任务串行（整剧排队） | 符合"点一次就走开"的心智；不做并发下载，避免设备池/风控和磁盘压力 |
+| 单任务串行 + 等待队列 | 符合"点一次就走开"的心智；不做并发下载，避免设备池/风控和磁盘压力。队列只在内存里（重启后丢失），换来零持久化成本 |
 | 前台才能下载 | 明示文案；切后台暂停、回前台提示继续（不做后台下载） |
 | 系统空间不足 | 本期靠写入失败兜底；P2 加 MethodChannel 预检（iOS `volumeAvailableCapacityForImportantUsage`） |
 | iCloud 备份占用 | P2 加 `NSURLIsExcludedFromBackupKey`（需要原生代码或现有依赖的 API） |
@@ -383,8 +386,9 @@ goldens 更新 `detail.png` / `video_detail_episodes.png`（底栏新增按钮�
 1. **小说只做整本下载**：按决策去掉阅读器的 20/50/100 章预设；「继续缓存」按 manifest 缺口续传。
 2. **短剧 API 名称**：`startVideoSeries` 的 `items` 参数叫 `episodes`（与页面模型一致）；短剧落盘用
    `partFile()` → 流式写 → `commitEpisode()`（不先读进内存）。
-3. **单任务不排队**：已有任务时后启动的抛 `OfflineTaskBusyException`，由按钮/UI 提示
-   「当前已有下载任务」；不实现队列排队。
+3. **单任务 + 内存队列**：后续版本加了 FIFO 等待队列（`offline_queue.dart`，最多 20 个，
+   按 kind+id 去重），当前任务完成/失败/取消后自动启动下一个；paused 时队列停住。
+   队列不持久化：进程重启后只剩当前任务被恢复成 paused，等待项需要用户重新点「缓存」。
 4. **离线判定**：项目没有 connectivity 依赖，短剧「未缓存 + 离线」只能从取流失败特征推断
    （timeout / Socket 类 / unknown+连接类消息）；网络在线但上游超时也会落到「该集未离线缓存」
    文案，属可接受的语义偏差。
@@ -412,3 +416,10 @@ goldens 更新 `detail.png` / `video_detail_episodes.png`（底栏新增按钮�
 - **验证**：`dart format` / `flutter analyze --fatal-infos` 干净；`flutter test` **233 passed / 1 skipped**
   （golden 22 张，新增 `cache_center.png`，更新 `detail.png` / `video_detail_episodes.png` / `mine_*.png` / `home_mine.png`）；
   真机（iPhone 13）按新底栏与缓存中心入口安装验收。
+
+### 14.5 迭代：缓存入口悬浮 + 下载队列（2026-11-07）
+
+- **入口**：「我的」的缓存中心入口从右上角设置旁的图标改成右下角悬浮按钮（与小说/短剧切换按钮同尺寸/阴影，固定在切换按钮左侧，`secondaryContainer` 配色区分主次）。
+- **下载队列**：单任务下载器不再"已有任务就报错"，改为 FIFO 等待队列（`offline_queue.dart`，最多 20 个、按 kind+id 去重）。当前任务完成/失败/取消后自动启动下一个；`paused` 时队列停住（用户主动暂停不偷偷下别的）；队列任务启动前失败会发布失败快照后继续下一个；删除/取消会同步出队；连点同一本用 `_startingJob` 入口占位防并发跑两份。队列只在内存里，重启后等待项消失（当前任务恢复成 paused），重新点「缓存」按缺口续传。
+- **UI**：缓存中心新增「排队中」条目与「取消排队」；详情按钮把已排队算作「缓存中」并点进缓存中心；设置里的管理页「继续缓存」若因单任务在跑而入队，同样给「已加入队列」回执。
+- **验证**：`dart format` / `flutter analyze --fatal-infos` 干净；`flutter test` **255 passed / 1 skipped**（golden 22 张，更新 mine_*/home_mine/cache_center；新增队列单测 12+7 条）；真机（iPhone 13）安装验收。

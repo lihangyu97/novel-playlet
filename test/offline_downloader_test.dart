@@ -14,6 +14,7 @@ import 'package:novel_playlet/data/models/json_utils.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
 import 'package:novel_playlet/features/cache/offline_downloader.dart';
+import 'package:novel_playlet/features/cache/offline_queue.dart';
 import 'package:novel_playlet/features/cache/offline_task.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -62,6 +63,7 @@ void main() {
   /// 建容器并等启动恢复跑完，避免恢复态覆盖新任务。
   Future<ProviderContainer> makeContainer({
     OfflineSeriesStore? seriesStoreOverride,
+    OfflineBookStore? bookStoreOverride,
   }) async {
     final container = ProviderContainer(
       overrides: [
@@ -77,6 +79,8 @@ void main() {
         ),
         if (seriesStoreOverride != null)
           offlineSeriesStoreProvider.overrideWithValue(seriesStoreOverride),
+        if (bookStoreOverride != null)
+          offlineBookStoreProvider.overrideWithValue(bookStoreOverride),
       ],
     );
     addTearDown(container.dispose);
@@ -85,7 +89,27 @@ void main() {
     return container;
   }
 
-  Future<void> startNovel(
+  /// 等到条件成立（队列/自动接续都是 unawaited 的异步动作，不能只 await
+  /// start* 的返回值）。超时带上当前状态，方便定位卡在哪一步。
+  Future<void> waitUntil(
+    ProviderContainer container,
+    bool Function() condition, {
+    required String reason,
+  }) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (!condition()) {
+      if (DateTime.now().isAfter(deadline)) {
+        final task = container.read(offlineDownloaderProvider);
+        fail(
+          '等待超时：$reason（当前任务 ${task?.id}/${task?.status}，'
+          '队列 ${container.read(offlineQueueProvider).map((t) => t.id).toList()}）',
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+  }
+
+  Future<OfflineStartDisposition> startNovel(
     ProviderContainer container, {
     String bookId = 'b1',
     List<Chapter>? items,
@@ -199,11 +223,16 @@ void main() {
       final run = startNovel(container, items: chapters(40));
 
       await entered.future;
-      // 有任务在跑时，再启动第二个要被挡下。
-      await expectLater(
-        startNovel(container, bookId: 'b2', items: chapters(1)),
-        throwsA(isA<OfflineTaskBusyException>()),
+      // 新契约：已有任务在跑时再点缓存不报错，而是进等待队列。
+      final disposition = await startNovel(
+        container,
+        bookId: 'b2',
+        items: chapters(1),
       );
+      expect(disposition, OfflineStartDisposition.queued);
+      expect(container.read(offlineQueueProvider).map((t) => t.id), ['b2']);
+      // 本用例只验证取消语义：清掉队列，避免取消后 B 自动接管干扰断言。
+      container.read(offlineQueueProvider.notifier).clear();
       final cancelRun = downloader.cancel();
       gate.complete();
       await Future.wait([run, cancelRun]);
@@ -383,6 +412,461 @@ void main() {
         startVideo(container, items: episodes(1)),
         throwsA(isA<OfflineQuotaExceeded>()),
       );
+    });
+  });
+
+  group('下载队列', () {
+    /// 记录任务进入 running 的先后（自动接续是异步的，靠这个断言顺序）。
+    ({ProviderContainer container, List<String> runs, void Function() close})
+    trackRuns(ProviderContainer container) {
+      final runs = <String>[];
+      final subscription = container.listen(offlineDownloaderProvider, (
+        previous,
+        next,
+      ) {
+        if (next != null && next.isRunning && previous?.isRunning != true) {
+          runs.add(next.id);
+        }
+      });
+      return (container: container, runs: runs, close: subscription.close);
+    }
+
+    test('已有任务在跑时再启动：返回 queued，前一个完成后自动跑下一个', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      final container = await makeContainer();
+
+      final runA = startNovel(container, items: chapters(3));
+      await entered.future;
+
+      final disposition = await startNovel(
+        container,
+        bookId: 'b2',
+        items: chapters(2),
+      );
+      expect(disposition, OfflineStartDisposition.queued);
+      expect(container.read(offlineQueueProvider).map((task) => task.id), [
+        'b2',
+      ]);
+
+      gate.complete();
+      await runA;
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.id == 'b2' &&
+            container.read(offlineDownloaderProvider)?.status ==
+                OfflineTaskStatus.done,
+        reason: 'A 完成后应自动开始并跑完 B',
+      );
+
+      expect(container.read(offlineQueueProvider), isEmpty);
+      expect(await bookStore.readChapter('b2', 'c0'), isNotNull);
+      expect((await bookStore.read('b2'))?.completed, 2);
+    });
+
+    test('同一本重复点：只返回 queued、不重复入队、完成后不重跑', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      final container = await makeContainer();
+      final tracked = trackRuns(container);
+      addTearDown(tracked.close);
+
+      final runA = startNovel(container, items: chapters(3));
+      await entered.future;
+
+      // 同一个 bookId：只告诉 UI「已排队」，不真往队列里塞第二条。
+      final disposition = await startNovel(container);
+      expect(disposition, OfflineStartDisposition.queued);
+      expect(
+        container.read(offlineQueueProvider),
+        isEmpty,
+        reason: '重复点击不重复入队',
+      );
+
+      gate.complete();
+      await runA;
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.status ==
+            OfflineTaskStatus.done,
+        reason: 'A 完成',
+      );
+      // 给自动接续留一拍：若误入队，这里会看到第二次 running。
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(tracked.runs, ['b1'], reason: '完成后不能自动重跑同一本');
+      expect(network.batchCalls, hasLength(1));
+    });
+
+    test('FIFO：A 跑着时入队 B、C，完成后先 B 后 C', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      final container = await makeContainer();
+      final tracked = trackRuns(container);
+      addTearDown(tracked.close);
+
+      final runA = startNovel(container, items: chapters(3));
+      await entered.future;
+      expect(
+        await startNovel(container, bookId: 'b2', items: chapters(2)),
+        OfflineStartDisposition.queued,
+      );
+      expect(
+        await startNovel(container, bookId: 'b3', items: chapters(2)),
+        OfflineStartDisposition.queued,
+      );
+      expect(container.read(offlineQueueProvider).map((task) => task.id), [
+        'b2',
+        'b3',
+      ]);
+
+      gate.complete();
+      await runA;
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.id == 'b3' &&
+            container.read(offlineDownloaderProvider)?.status ==
+                OfflineTaskStatus.done,
+        reason: 'B、C 应依次自动跑完',
+      );
+
+      expect(tracked.runs, ['b1', 'b2', 'b3'], reason: '严格 FIFO');
+      expect(container.read(offlineQueueProvider), isEmpty);
+      expect((await bookStore.read('b2'))?.completed, 2);
+      expect((await bookStore.read('b3'))?.completed, 2);
+    });
+
+    test('暂停时不启动队列任务，resume 跑完后继续', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      final container = await makeContainer();
+      final downloader = container.read(offlineDownloaderProvider.notifier);
+
+      final runA = startNovel(container, items: chapters(40));
+      await entered.future;
+      await startNovel(container, bookId: 'b2', items: chapters(2));
+      await downloader.pause();
+      gate.complete();
+      await runA;
+
+      expect(
+        container.read(offlineDownloaderProvider)?.status,
+        OfflineTaskStatus.paused,
+      );
+      expect(container.read(offlineQueueProvider).map((task) => task.id), [
+        'b2',
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(network.batchCalls, hasLength(1), reason: '暂停期间不能偷偷启动队列里的下一个');
+
+      expect(await downloader.resume(), isTrue);
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.id == 'b2' &&
+            container.read(offlineDownloaderProvider)?.status ==
+                OfflineTaskStatus.done,
+        reason: 'resume 完成后 B 应当接管',
+      );
+      expect((await bookStore.read('b1'))?.completed, 40);
+      expect((await bookStore.read('b2'))?.completed, 2);
+      expect(container.read(offlineQueueProvider), isEmpty);
+    });
+
+    test('取消 A 后队列里的 B 自动启动', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      final container = await makeContainer();
+      final downloader = container.read(offlineDownloaderProvider.notifier);
+
+      final runA = startNovel(container, items: chapters(40));
+      await entered.future;
+      await startNovel(container, bookId: 'b2', items: chapters(2));
+
+      final cancelRun = downloader.cancel();
+      gate.complete();
+      await Future.wait([runA, cancelRun]);
+
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.id == 'b2' &&
+            container.read(offlineDownloaderProvider)?.status ==
+                OfflineTaskStatus.done,
+        reason: '取消当前任务后队列下一个应接管',
+      );
+      expect(container.read(offlineQueueProvider), isEmpty);
+      expect(await bookStore.readChapter('b2', 'c0'), isNotNull);
+      expect(
+        await bookStore.missingChapterIds('b1', chapters(40)),
+        hasLength(40),
+        reason: '被取消的 A 不得继续落章',
+      );
+    });
+
+    test('A 失败（写盘异常 → failed）后 B 仍自动启动', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      // A 的 manifest 落盘失败 → 任务以 failed 收尾（不是 paused），队列必须继续。
+      final failingStore = _ManifestFailingStore(
+        paths: paths,
+        failBookId: 'b1',
+      );
+      final container = await makeContainer(bookStoreOverride: failingStore);
+
+      final runA = startNovel(container, items: chapters(3));
+      await entered.future;
+      await startNovel(container, bookId: 'b2', items: chapters(2));
+      gate.complete();
+
+      await expectLater(runA, throwsA(isA<StateError>()));
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.id == 'b2' &&
+            container.read(offlineDownloaderProvider)?.status ==
+                OfflineTaskStatus.done,
+        reason: 'A 失败后队列里的 B 仍要启动',
+      );
+      expect(container.read(offlineQueueProvider), isEmpty);
+      expect((await bookStore.read('b2'))?.completed, 2);
+    });
+
+    test('队列任务运行失败只发布一条 failed（不重复 _failTask）', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      // A 正常、B 的 manifest 落盘失败：B 由 drain 启动后在运行期失败。
+      final failingStore = _ManifestFailingStore(
+        paths: paths,
+        failBookId: 'b2',
+      );
+      final container = await makeContainer(bookStoreOverride: failingStore);
+      final failedEmissions = <String>[];
+      final subscription = container.listen(offlineDownloaderProvider, (
+        previous,
+        next,
+      ) {
+        if (next?.id == 'b2' && next?.status == OfflineTaskStatus.failed) {
+          failedEmissions.add(next!.id);
+        }
+      });
+      addTearDown(subscription.close);
+
+      final runA = startNovel(container, items: chapters(3));
+      await entered.future;
+      await startNovel(container, bookId: 'b2', items: chapters(2));
+      gate.complete();
+      await runA;
+
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.id == 'b2' &&
+            container.read(offlineDownloaderProvider)?.status ==
+                OfflineTaskStatus.failed,
+        reason: 'B 应失败',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(
+        failedEmissions,
+        hasLength(1),
+        reason: 'start* 与 drain 不能各发布一次 failed',
+      );
+      expect(container.read(offlineQueueProvider), isEmpty);
+    });
+
+    test('队列任务启动失败（额度）发布 0 进度 failed，不继承前一个任务进度', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      final container = await makeContainer();
+
+      final runA = startNovel(container, items: chapters(3));
+      await entered.future;
+      await startNovel(container, bookId: 'b2', items: chapters(1));
+      // A 跑着时把离线区塞满：A 不会复查额度，但 B 启动时会立刻超限。
+      await bookStore.begin(
+        OfflineBook(
+          bookId: 'big',
+          title: '大文件',
+          chapters: const [],
+          bytes: OfflineBookStore.novelCapBytes,
+        ),
+      );
+      gate.complete();
+      await runA;
+
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.id == 'b2' &&
+            container.read(offlineDownloaderProvider)?.status ==
+                OfflineTaskStatus.failed,
+        reason: 'B 启动时额度超限应以 failed 收尾',
+      );
+      final failed = container.read(offlineDownloaderProvider)!;
+      expect(failed.completed, 0, reason: '不能继承 A 的 completed');
+      expect(failed.total, 0, reason: '不能继承 A 的 total');
+      expect(failed.bytes, 0, reason: '不能继承 A 的 bytes');
+      expect(container.read(offlineQueueProvider), isEmpty);
+    });
+
+    test('暂停时手动启动队列里的 B：从队列消费，跑完不会重跑', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      final container = await makeContainer();
+      final tracked = trackRuns(container);
+      addTearDown(tracked.close);
+      final downloader = container.read(offlineDownloaderProvider.notifier);
+
+      final runA = startNovel(container, items: chapters(40));
+      await entered.future;
+      await startNovel(container, bookId: 'b2', items: chapters(2));
+      await downloader.pause();
+      gate.complete();
+      await runA;
+      expect(
+        container.read(offlineDownloaderProvider)?.status,
+        OfflineTaskStatus.paused,
+      );
+      expect(container.read(offlineQueueProvider).map((task) => task.id), [
+        'b2',
+      ]);
+
+      // 暂停期间用户直接点 B 的缓存：应立即启动并从队列移除。
+      await startNovel(container, bookId: 'b2', items: chapters(2));
+      expect(
+        container.read(offlineQueueProvider),
+        isEmpty,
+        reason: '直接启动后必须从队列消费掉，否则跑完会被 drain 再启动一遍',
+      );
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.id == 'b2' &&
+            container.read(offlineDownloaderProvider)?.status ==
+                OfflineTaskStatus.done,
+        reason: 'B 完成',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(tracked.runs, ['b1', 'b2'], reason: 'B 只能跑一次');
+    });
+
+    test('启动读盘窗口内连点两次：第二次只排队，不会并发跑两份', () async {
+      final gate = Completer<void>();
+      final gatedStore = _GatedReadBookStore(paths: paths)..readGate = gate;
+      final container = await makeContainer(bookStoreOverride: gatedStore);
+      final tracked = trackRuns(container);
+      addTearDown(tracked.close);
+
+      // 第一次 start 卡在 manifest 读取（此时 _control 还是 null，正是真实的
+      // 「点了没反应又点一次」窗口）。
+      final first = startNovel(container, items: chapters(3));
+      final second = startNovel(container);
+
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      gate.complete();
+      expect(await second, OfflineStartDisposition.queued);
+      expect(container.read(offlineQueueProvider), isEmpty, reason: '同一本不重复入队');
+
+      await first;
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.status ==
+            OfflineTaskStatus.done,
+        reason: '第一次任务完成',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(tracked.runs, ['b1'], reason: '不能并发跑两份同一本');
+      expect(network.batchCalls, hasLength(1));
+    });
+
+    test('队列满 20 时第 21 个 start 抛 OfflineQueueFullException', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      final container = await makeContainer();
+
+      final runA = startNovel(container, items: chapters(3));
+      await entered.future;
+      for (var i = 0; i < OfflineQueue.maxLength; i++) {
+        expect(
+          await startNovel(container, bookId: 'q$i', items: chapters(1)),
+          OfflineStartDisposition.queued,
+        );
+      }
+      expect(
+        container.read(offlineQueueProvider),
+        hasLength(OfflineQueue.maxLength),
+      );
+      await expectLater(
+        startNovel(container, bookId: 'q-overflow', items: chapters(1)),
+        throwsA(
+          isA<OfflineQueueFullException>().having(
+            (error) => error.maxLength,
+            'maxLength',
+            OfflineQueue.maxLength,
+          ),
+        ),
+      );
+
+      // 收尾：清队列，让 A 完成后不再顺序拉起 20 个任务。
+      container.read(offlineQueueProvider.notifier).clear();
+      gate.complete();
+      await runA;
+      expect(container.read(offlineQueueProvider), isEmpty);
+    });
+
+    test('clearFor 会把排队中的同 id 任务移除，之后不会再被自动启动', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.batchEntered = entered;
+      network.batchGate = gate;
+      final container = await makeContainer();
+      final downloader = container.read(offlineDownloaderProvider.notifier);
+
+      final runA = startNovel(container, items: chapters(3));
+      await entered.future;
+      await startNovel(container, bookId: 'b2', items: chapters(2));
+      expect(container.read(offlineQueueProvider), hasLength(1));
+
+      await downloader.clearFor(OfflineTaskKind.novel, 'b2');
+      expect(container.read(offlineQueueProvider), isEmpty);
+      expect(await bookStore.read('b2'), isNull);
+
+      gate.complete();
+      await runA;
+      await waitUntil(
+        container,
+        () =>
+            container.read(offlineDownloaderProvider)?.id == 'b1' &&
+            container.read(offlineDownloaderProvider)?.status ==
+                OfflineTaskStatus.done,
+        reason: 'A 完成',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(network.batchCalls, hasLength(1), reason: '被移除的任务不能再启动');
     });
   });
 
@@ -625,5 +1109,40 @@ class _FakeNetwork implements OfflineNetwork {
     yield const [1, 2];
     await gate.future;
     yield const [3];
+  }
+}
+
+/// 只让指定 bookId 的 manifest 落盘失败，用来构造「任务真 failed（而不是
+/// paused）」的路径：`_runNovel` 会吞掉网络/写章失败，但 `flush()` 的落盘异常
+/// 会冒泡到 start*，由 `_failTask` 收尾。
+class _ManifestFailingStore extends OfflineBookStore {
+  _ManifestFailingStore({super.paths, required this.failBookId});
+
+  final String failBookId;
+
+  @override
+  Future<void> saveManifest(OfflineBook book) async {
+    if (book.bookId == failBookId) {
+      throw StateError('模拟写盘失败：${book.bookId}');
+    }
+    return super.saveManifest(book);
+  }
+}
+
+/// 在 `read` 上装门闩，把 start* 卡在「入口检查之后、设置 _control 之前」的
+/// 窗口里，复现「点了没反应又点一次」的并发启动场景。
+class _GatedReadBookStore extends OfflineBookStore {
+  _GatedReadBookStore({super.paths});
+
+  Completer<void>? readGate;
+
+  @override
+  Future<OfflineBook?> read(String bookId) async {
+    final gate = readGate;
+    if (gate != null) {
+      readGate = null;
+      await gate.future;
+    }
+    return super.read(bookId);
   }
 }

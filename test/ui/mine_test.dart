@@ -289,20 +289,32 @@ void main() {
     );
   });
 
-  /// 右上角设置按钮左侧新增「缓存」入口：两者在同一 Align 里随面板整体移动。
-  testWidgets('我的页-缓存入口在设置左侧并打开缓存中心', (tester) async {
+  /// 缓存入口是右下角悬浮按钮（与切换按钮同款圆形），固定在切换按钮左侧；
+  /// 右上角只剩设置按钮。
+  testWidgets('我的页-悬浮缓存入口在切换按钮左侧并打开缓存中心', (tester) async {
     await pumpPreview(tester, const MinePage());
     final cacheButton = find.byKey(MinePage.cacheButtonKey);
+    final switchButton = find.byKey(MinePage.switchButtonKey);
     expect(cacheButton, findsOneWidget);
+    expect(switchButton, findsOneWidget);
     expect(find.byIcon(Icons.download_outlined), findsOneWidget);
 
+    // 上图标是悬浮缓存按钮、右上角只剩设置按钮。
+    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
+
     final cacheRect = tester.getRect(cacheButton);
-    final settingsRect = tester.getRect(find.byIcon(Icons.settings_outlined));
+    final switchRect = tester.getRect(switchButton);
     expect(
       cacheRect.right,
-      lessThan(settingsRect.left),
-      reason: '缓存入口应在设置按钮左侧',
+      lessThan(switchRect.left),
+      reason: '缓存悬浮按钮应固定在切换按钮左侧',
     );
+    expect(
+      cacheRect.center.dy,
+      closeTo(switchRect.center.dy, 0.5),
+      reason: '两个悬浮按钮应同一行垂直居中',
+    );
+    expect(cacheRect.size, switchRect.size, reason: '两个悬浮按钮同尺寸（52×52）');
 
     await tester.tap(cacheButton);
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
