@@ -1277,6 +1277,14 @@ const VIDEO_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
 /// transport (`upstream/http.rs`) only exposes a whole-body API, so the
 /// download path keeps its own client; it sends the same unsigned GET with
 /// the same User-Agent as `unsigned_get` (no signing, no device headers).
+///
+/// TLS must be preconfigured with the same webpki roots the shared transport
+/// uses: reqwest's default rustls backend verifies with
+/// `rustls-platform-verifier`, which on Android requires JNI initialization
+/// (`init_with_env`) before the first TLS handshake and panics otherwise.
+/// Reusing `build_tls_config` keeps every HTTPS request on one verifier and
+/// makes the download path behave identically on iOS and Android.
+///
 /// Built lazily so a missing TLS provider (e.g. in a unit-test embedding,
 /// where the transport never installed one) degrades to the whole-body
 /// fallback instead of failing the download.
@@ -1285,7 +1293,10 @@ static STREAMING_CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
 fn streaming_client() -> Option<&'static reqwest::Client> {
     STREAMING_CLIENT
         .get_or_init(|| {
+            crate::upstream::http::ensure_crypto_provider();
+            let tls = crate::upstream::http::build_tls_config().ok()?;
             reqwest::Client::builder()
+                .tls_backend_preconfigured(tls)
                 .timeout(VIDEO_DOWNLOAD_TIMEOUT)
                 .build()
                 .ok()

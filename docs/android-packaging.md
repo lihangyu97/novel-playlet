@@ -107,7 +107,8 @@ keyPassword=***
 | 现象 | 原因 / 处理 |
 |---|---|
 | 启动即停在「阅读环境启动失败」，logcat 有 `UnsatisfiedLinkError` | `.so` 没编或 ABI 不匹配：先跑 `scripts/build_rust_android.sh`，确认 APK 里有 `lib/arm64-v8a/libfqapi_core.so` |
-| release 包能启动但一直失败 | 主清单缺 `INTERNET`（本仓库已补）；用 `adb shell dumpsys package com.lihangyu.novel_playlet | grep INTERNET` 确认 |
+| release 包能启动但一直失败 | 主清单缺 `INTERNET`（本仓库已补）；用 `adb shell dumpsys package com.lihangyu.novel_playlet \| grep INTERNET` 确认 |
+| 播放短剧报 `PanicException(Expect rustls-platform-verifier to be initialized)` | 旧包的视频流式下载用了 reqwest 默认 TLS（Android 上需要 JNI 初始化）；已改为复用 webpki-roots 配置，重新构建安装即可 |
 | 视频黑屏 / 播放报错 | `network_security_config` 没生效，检查 `127.0.0.1` 域名配置和端口 |
 | 装不上、提示签名不一致 | 新旧包签名不同（debug vs release），先卸载再装 |
 | Gradle 报找不到 NDK | `sdkmanager "ndk;28.2.13676358"`，并确认 `ndkVersion` 与脚本 pinned 版本一致 |
