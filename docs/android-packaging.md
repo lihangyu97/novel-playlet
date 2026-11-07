@@ -111,5 +111,6 @@ keyPassword=***
 | 播放短剧报 `PanicException(Expect rustls-platform-verifier to be initialized)` | 旧包的视频流式下载用了 reqwest 默认 TLS（Android 上需要 JNI 初始化）；已改为复用 webpki-roots 配置，重新构建安装即可 |
 | 视频黑屏 / 播放报错 | `network_security_config` 没生效，检查 `127.0.0.1` 域名配置和端口 |
 | 装不上、提示签名不一致 | 新旧包签名不同（debug vs release），先卸载再装 |
+| 小米/HyperOS 上 `adb install` 报 `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user` | 系统拦截了 adb 安装：开发者选项里打开「USB 安装」（可能需要登录小米账号），并在手机弹窗里点允许；临时办法是把 APK 放到 `/sdcard/Download/` 用文件管理手动安装 |
 | Gradle 报找不到 NDK | `sdkmanager "ndk;28.2.13676358"`，并确认 `ndkVersion` 与脚本 pinned 版本一致 |
 | 想上架 Google Play | 还需 targetSdk 合规、16 KiB 对齐、隐私政策；GPL-3.0 与内容授权问题见 README“已知限制” |
