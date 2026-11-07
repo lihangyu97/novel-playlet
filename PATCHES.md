@@ -94,6 +94,12 @@ Dart 侧配套（不在 `rust/` 内，但同属一次改动）：`lib/core/backe
 | `Cargo.lock` | 跟随 `cc` 移除 | 同上 |
 | `src/frb_generated.rs` | 由 `flutter_rust_bridge_codegen` 重新生成（`rust_format: true` 后经过 rustfmt） | CI 的 `cargo fmt --check` / 绑定漂移校验需要 |
 
+### 3.6 真机排障：iOS 也安装落盘 logger（2026-11-07）
+
+| 文件 | 本地改动 | 原因 |
+|---|---|---|
+| `src/api/mod.rs` | `core_log::install()` 从 `#[cfg(target_os = "android")]` 里移到无条件执行（Android 仍额外镜像 logcat） | 真机出问题时 App 容器里没有 `rust.log`，推荐/详情等接口的业务失败（`dispatch.rs` 的 `api ... failed: ...`）只能靠猜；iOS 加上同一份轮转文件后，`xcrun devicectl device copy from --domain-type appDataContainer` 就能直接取日志定位。host/单测也照旧写到各自临时运行目录，不影响行为 |
+
 ## 4. 不在本文件范围内的部分
 
 - `rust/` 之外的 Dart 侧改动（UI/数据层/存储）由 git 历史管理，不需要和上游对齐；

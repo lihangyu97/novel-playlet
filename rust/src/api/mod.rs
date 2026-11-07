@@ -106,15 +106,14 @@ pub async fn init(
     lan_share: bool,
     mock_upstream_origin: String,
 ) -> Result<String, String> {
-    // The shipping core has no console, and an Android app cannot read its own
-    // logcat (READ_LOGS is a system permission), so logs go to a rotating file
-    // beside the runtime files *and* to logcat. Desktop/test builds never
-    // install a logger, where the `log` macros compile to no-ops.
-    #[cfg(target_os = "android")]
-    {
-        crate::core_log::install(&resolve_runtime_dir(&config_path, &runtime_dir));
-        log::info!("core init: port={port} lan_share={lan_share} config={config_path}");
-    }
+    // The shipping core has no console, and mobile apps cannot read their own
+    // system log (Android needs READ_LOGS; iOS os_log is awkward to collect
+    // from CI/真机排障), so logs always go to a rotating file beside the
+    // runtime files; Android additionally mirrors to logcat. Desktop/unit-test
+    // processes write into their temp runtime dir as well - that is fine and
+    // makes host reproduction of real-device failures possible.
+    crate::core_log::install(&resolve_runtime_dir(&config_path, &runtime_dir));
+    log::info!("core init: port={port} lan_share={lan_share} config={config_path}");
     let mock = if mock_upstream_origin.trim().is_empty() {
         None
     } else {

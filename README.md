@@ -105,6 +105,16 @@ cd ~/workspace/ios-sideload
 BUNDLE_ID=com.lihangyu.novelPlaylet IPA=/Users/lihangyu/workspace/novel-playlet/build/ios/novel_playlet_unsigned.ipa ./all.sh --mint
 ```
 
+真机出问题时（接口失败/下载失败），直接把 App 容器里的日志和离线数据取出来，不用重装：
+
+```bash
+xcrun devicectl device copy from --device <UDID> \
+  --domain-type appDataContainer --domain-identifier com.lihangyu.novelPlaylet \
+  --source 'Library/Application Support/backend' --destination /tmp/np-backend
+# /tmp/np-backend/rust.log（内核日志）、/tmp/np-backend/config/device_pool.json（设备池，密文）
+# 离线下载另取 'Library/Application Support/offline'（diag.log + manifest + mp4）
+```
+
 > 本机没有安装 iOS 模拟器 runtime，所以开发验证走「host 测试 + golden 截图 + 真机」。
 
 ## 测试
@@ -147,6 +157,8 @@ App 沙盒里会落盘的东西（iPhone 13 调试期实测：文稿与数据 40
 | `Application Support/offline/video/` | **离线短剧（pinned）**：`<seriesKey>/series.json` + 每集明文 `.mp4` | 上限 **3 GB**；**永不自动清理**，只在「设置 → 存储 → 离线短剧」手动删除 |
 | `Documents/diag.log` | 早期调试探针遗留日志（当前代码不再写入） | 清理时一并删除 |
 | `Application Support/backend/config/` | 上游设备注册池、运行时 `config.json` | **不是缓存**：删了要重新注册设备 |
+| `Application Support/backend/rust.log` | 内核日志：接口失败（`api xxx failed: ...`）、设备池维护、视频缓存迁移 | 单文件 1 MB、轮转 1 份；仅排查用，可随时删 |
+| `Application Support/offline/diag.log` | 离线下载诊断日志（开始/失败/暂停 + 错误文本，不含正文） | 128 KB 轮转一次；仅排查用，可随时删 |
 | `Library/Preferences/*.plist` | 书架、阅读进度（含页首段落下标）、最近阅读、阅读设置、主题色 | **用户数据**：不清理 |
 
 「设置 → 存储」会显示当前缓存占用（视频/封面/章节明细）并提供「清理」：只清上面四类可重建缓存，书架与进度不动；**离线缓存在独立区块，不参与这次清理**（只能手动删）。统计/清理逻辑在 `lib/core/cache/app_cache.dart`，离线区在 `lib/core/storage/offline/`。
