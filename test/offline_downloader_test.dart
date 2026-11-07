@@ -151,7 +151,7 @@ void main() {
 
       final state = container.read(offlineDownloaderProvider)!;
       expect(state.status, OfflineTaskStatus.paused);
-      expect(state.error, '网络异常，任务已暂停');
+      expect(state.error, contains('网络异常，任务已暂停'));
       expect(state.completed, 0);
       expect(network.singleCalls, [
         'c0',

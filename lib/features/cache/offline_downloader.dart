@@ -14,6 +14,7 @@ import '../../data/models/chapter_content.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/video_source.dart';
 import 'cache_providers.dart';
+import 'offline_diag.dart';
 import 'offline_task.dart';
 
 /// 离线区剩余空间不足（软上限），由 UI 弹「已用 / 上限」并引导去管理页清理。
@@ -355,6 +356,7 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
         if (missing.contains(chapter.id)) chapter,
     ];
     final failed = <String>{};
+    String? firstError;
     var completed = manifest.completed;
     var bytes = manifest.bytes;
     var consecutive = 0;
@@ -433,6 +435,12 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
           content = await _fetchSingleChapter(network, chapter);
         }
         if (content == null) {
+          firstError ??= '第 ${chapter.index + 1} 章拉取失败';
+          unawaited(
+            offlineDiag(
+              'novel fail book=${manifest.bookId} chapter=${chapter.id}',
+            ),
+          );
           failed.add(chapter.id);
           consecutive += 1;
           continue;
@@ -441,8 +449,15 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
           bytes += await bookStore.writeChapter(manifest.bookId, content);
           completed += 1;
           consecutive = 0;
-        } catch (_) {
+        } catch (error) {
           // 磁盘写失败按单章失败处理：连续失败会暂停任务并提示。
+          firstError ??= '第 ${chapter.index + 1} 章写入失败：${_briefError(error)}';
+          unawaited(
+            offlineDiag(
+              'novel write fail book=${manifest.bookId} chapter=${chapter.id} '
+              'error=${_briefError(error)}',
+            ),
+          );
           failed.add(chapter.id);
           consecutive += 1;
           continue;
@@ -467,6 +482,7 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       message:
           control.pauseMessage ??
           (failed.isEmpty ? null : '有 ${failed.length} 章下载失败，可点继续重试'),
+      firstError: firstError,
     );
   }
 
@@ -519,7 +535,7 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       status: (result.paused || !complete)
           ? OfflineTaskStatus.paused
           : OfflineTaskStatus.done,
-      error: result.message,
+      error: _errorWithDetail(result),
       updatedAt: DateTime.now(),
     );
     if (task.isPaused) {
@@ -646,6 +662,7 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
         if (missing.contains(episode.id)) episode,
     ];
     final failed = <String>{};
+    String? firstError;
     var completed = manifest.completed;
     var bytes = manifest.bytes;
     var consecutive = 0;
@@ -713,6 +730,11 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
         IOSink? sink;
         OfflineVideoStream? stream;
         try {
+          unawaited(
+            offlineDiag(
+              'video start series=${manifest.seriesId} episode=${episode.id}',
+            ),
+          );
           final source = await network.videoSource(episode.id);
           if (!source.isValid) {
             throw ApiException('这一集没有可下载地址');
@@ -742,6 +764,12 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
             episode.id,
             bytes: received,
           );
+          unawaited(
+            offlineDiag(
+              'video commit series=${manifest.seriesId} episode=${episode.id} '
+              'bytes=$received',
+            ),
+          );
           bytes += received;
           completed += 1;
           consecutive = 0;
@@ -757,7 +785,14 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
           }
           aborted = true;
           break;
-        } catch (_) {
+        } catch (error) {
+          firstError ??= '第 ${episode.index + 1} 集：${_briefError(error)}';
+          unawaited(
+            offlineDiag(
+              'video fail series=${manifest.seriesId} episode=${episode.id} '
+              'attempt=$attempt error=${_briefError(error)}',
+            ),
+          );
           // 半截文件必须清掉，否则下次 resume 会被当成"已缓存"。
           await _closeQuietly(sink);
           sink = null;
@@ -791,6 +826,7 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       message:
           control.pauseMessage ??
           (failed.isEmpty ? null : '有 ${failed.length} 集下载失败，可点继续重试'),
+      firstError: firstError,
     );
   }
 
@@ -821,7 +857,7 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       status: (result.paused || !complete)
           ? OfflineTaskStatus.paused
           : OfflineTaskStatus.done,
-      error: result.message,
+      error: _errorWithDetail(result),
       updatedAt: DateTime.now(),
     );
     if (task.isPaused) {
@@ -1019,6 +1055,7 @@ class _RunResult {
     required this.cancelled,
     required this.paused,
     this.message,
+    this.firstError,
   });
 
   final int completed;
@@ -1026,6 +1063,9 @@ class _RunResult {
   final bool cancelled;
   final bool paused;
   final String? message;
+
+  /// 本轮第一个失败的原始错误（展示/诊断用；连续失败暂停时带给用户看）。
+  final String? firstError;
 }
 
 /// 前后台监听：切后台只打标记，由下载循环在章/集边界暂停。
@@ -1065,4 +1105,22 @@ String _formatBytesShort(int bytes) {
   if (bytes >= mb) return '${(bytes / mb).toStringAsFixed(1)} MB';
   if (bytes >= kb) return '${(bytes / kb).toStringAsFixed(1)} KB';
   return '$bytes B';
+}
+
+/// 把任务的用户可读文案 + 第一条失败原因拼在一起（诊断/继续时能看到具体原因）。
+String? _errorWithDetail(_RunResult result) {
+  final message = result.message;
+  final detail = result.firstError;
+  if (detail == null || detail.isEmpty) return message;
+  if (message == null || message.isEmpty) return detail;
+  if (message.contains(detail)) return message;
+  return '$message（$detail）';
+}
+
+/// 失败原因的简短展示：ApiException 用 message，其它异常截断 toString。
+String _briefError(Object? error) {
+  final text = error is ApiException
+      ? error.message
+      : (error?.toString() ?? '');
+  return text.length <= 120 ? text : '${text.substring(0, 120)}…';
 }

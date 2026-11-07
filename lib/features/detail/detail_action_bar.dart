@@ -59,8 +59,9 @@ class DetailActionBar extends StatelessWidget {
             ),
             child: Row(
               children: [
-                // 只保留图标：底栏空间让给主按钮；文案放 tooltip / 语义标签。
-                IconButton.outlined(
+                // 与离线下载按钮保持同一套「纯图标」风格：无边框、46×46、
+                // 文案放 tooltip / 语义标签，把底栏宽度让给主按钮。
+                IconButton(
                   onPressed: onShelf,
                   tooltip: shelfLabel,
                   icon: Icon(
@@ -71,13 +72,10 @@ class DetailActionBar extends StatelessWidget {
                   ),
                   style: IconButton.styleFrom(
                     minimumSize: const Size(46, 46),
+                    padding: EdgeInsets.zero,
                     foregroundColor: shelfActive
                         ? scheme.primary
-                        : scheme.onSurface,
-                    side: BorderSide(color: scheme.outlineVariant),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                        : scheme.onSurfaceVariant,
                   ),
                 ),
                 if (offlineButton != null) ...[
