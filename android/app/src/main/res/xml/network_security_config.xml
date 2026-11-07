@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 明文流量只允许本机内核回环（127.0.0.1:18931），上游 API/CDN 一律 HTTPS。
+     iOS 对应的是 Info.plist 里的 NSAppTransportSecurity 例外。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>
