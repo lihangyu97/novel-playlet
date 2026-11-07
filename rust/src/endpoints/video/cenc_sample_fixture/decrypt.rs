@@ -168,3 +168,52 @@ fn index_from_moov_slice_matches_whole_file_index() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// ExoPlayer's MP4 parser rejects a zero-size child atom inside a sample
+/// entry. The old `sinf -> free` rewrite wrote a free(8) header and zeroed
+/// the rest of the box, leaving exactly that; the rewrite must instead be a
+/// single `free` box covering the whole original `sinf` box, and the sample
+/// entry type must come from `frma` (not a hardcoded codec).
+#[test]
+fn sinf_rewrite_leaves_one_valid_free_box() {
+    let f = fixture();
+    let c = &f["cenc"];
+    let encrypted = b64(c, "full_sample_b64");
+    let key = hex::decode(c["key_hex"].as_str().unwrap()).unwrap();
+    let mut plain = encrypted.clone();
+    decrypt_cenc_mp4(&mut plain, &key).expect("decrypt");
+
+    let mut seen = 0;
+    for track in mp4_track_boxes(&encrypted) {
+        let Some(entry) = track.get(b"encv").and_then(|v| v.first()).copied() else {
+            continue;
+        };
+        let child_start =
+            box_children_start(b"encv", entry.off, entry.header).expect("encv children");
+        // The fixture's frma is hvc1; the rewrite must restore that instead of
+        // a hardcoded guess.
+        assert_eq!(&plain[entry.off + 4..entry.off + 8], b"hvc1");
+        for child in iter_boxes(&encrypted, child_start, entry.off + entry.size) {
+            if child.typ != *b"sinf" {
+                continue;
+            }
+            seen += 1;
+            assert_eq!(
+                u32_be(&plain, child.off) as usize,
+                child.size,
+                "free box must keep the original sinf size"
+            );
+            assert_eq!(&plain[child.off + 4..child.off + 8], b"free");
+            assert!(
+                plain[child.off + 8..child.off + child.size]
+                    .iter()
+                    .all(|b| *b == 0),
+                "sinf payload must be blanked"
+            );
+        }
+    }
+    assert_eq!(
+        seen, 1,
+        "fixture must have one encrypted video sample entry"
+    );
+}
