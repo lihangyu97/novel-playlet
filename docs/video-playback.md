@@ -145,3 +145,4 @@
 | 2026-11-07 | 播放页切集体验：切集保留上一集最后一帧（新集 position 前进后才释放）、spinner 延迟 250ms、加载期间保留顶栏；当前集播 5s 后预取下一集（允许整集下载，页内 LRU 2 条，`/src` 被淘汰时 `refresh=1` 回退）；播完自动续播不弹控制条；全屏横屏底部控制条贴到最底边（取消底部安全区避让）。新增 FakeController 页面级回归 `test/ui/video_player_page_test.dart` |
 | 2026-11-07 | 倍速播放：1.0/1.25/1.5/2.0/3.0x，全局持久化（`video_playback_speed_v1`），时间行 chip + 底部弹层；新 controller 在 `_startController` 统一 apply，跨集/自动续播/冷启动保持。3x 在线源可能被 AVFoundation 的 `canPlayFastForward` 静默降为 2x，产品已接受（不 fork 插件）；方案与决策见 [playback-quality-speed.md](playback-quality-speed.md) |
 | 2026-11-07 | 清晰度方向定稿：当前默认档为「当次上游最高可解码档」（在线与离线同一档，UI 不可选）；后续默认改 720P，先做离线/下载上限（C0），M1 落地后再做在线换档（C1）。见 [playback-quality-speed.md](playback-quality-speed.md) |
+| 2026-11-07 | 修复「UI 显示 2x、实际 1x」：iOS AVPlayer 在起播/seek 后按 `defaultRate`(默认 1.0) 复位 rate，上游 avfoundation 2.12.3 从不写 defaultRate。改为 vendored 插件（`third_party/video_player_avfoundation`，补 defaultRate）+ Dart 在首帧/seek/恢复时补设倍速；`pubspec.yaml` 用 dependency_overrides |

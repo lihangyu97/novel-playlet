@@ -2,7 +2,7 @@
 
 ## 现在什么已经就绪
 
-- Flutter 工程（iOS-only 目标，但不要改 `ios/` 与 `pubspec.yaml`）
+- Flutter 工程（iOS-only 目标，但不要改 `ios/` 与 `pubspec.yaml`；视频域专项例外见 [docs/playback-quality-speed.md](docs/playback-quality-speed.md) 与 `third_party/README.md`）
 - Rust 内核 `rust/` 已完整拷入，FRB 绑定在 `lib/src/rust/`（**自动生成，不要手改**）
 - 启动链：`lib/main.dart → BootstrapGate → BackendService.start() → Rust init`
 - 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / videoFeed / searchVideos / bookDetail / videoDetail / videoEpisodes / videoSource / directory / chapter）
@@ -25,7 +25,7 @@
 ## 硬性规则
 
 1. **只改自己 feature 目录里的文件**（见各自任务说明）。共享文件（`lib/app/**`、`lib/data/**`、`lib/core/**`、`lib/src/rust/**`、`rust/`、`ios/`、`pubspec.yaml`）一律不要改。缺共享组件就在自己的目录里写。
-2. **不要新增依赖。** 只用 pubspec 里现有的包（flutter_riverpod、cached_network_image、flutter_cache_manager、html、shared_preferences、flutter_secure_storage、path_provider、video_player）。`video_player` 是视频域专用：只允许 `lib/features/video/` 使用，播放器细节见 `docs/video-playback.md`。
+2. **不要新增依赖。** 只用 pubspec 里现有的包（flutter_riverpod、cached_network_image、flutter_cache_manager、html、shared_preferences、flutter_secure_storage、path_provider、video_player）。`video_player` 是视频域专用：只允许 `lib/features/video/` 使用，播放器细节见 `docs/video-playback.md`。`video_player_avfoundation` 通过 `third_party/` 本地补丁覆盖（defaultRate 倍速修复，见 `third_party/README.md`），不要直接改 pub cache。
 3. **不要跑 `flutter build` / `flutter run`**（很慢，由 Lead 统一验证）。用 `flutter analyze lib/features/<你的域>` 自检，必须 0 error 0 warning。
 4. UI 文案用中文；注释写"为什么"，不要写"做了什么"。
 5. 只用 Material 3 + `Theme.of(context).colorScheme`，不要硬编码颜色（阅读页底色用 `ReaderPaper`）。

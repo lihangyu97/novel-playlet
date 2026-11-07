@@ -103,6 +103,13 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   Timer? _spinnerTimer;
   bool _showSpinner = false;
 
+  /// iOS 16+ 的 AVPlayer 会在「真正起播 / seek」后把 rate 复位成 defaultRate
+  /// （1.0）；video_player 在 play() 里补的那次 setPlaybackSpeed 可能抢在起播
+  /// 之前，所以 UI 显示 2x、实际还在 1x。这里在首帧/seek 后补设一次。
+  bool _wasPlaying = false;
+  bool _speedReapplyPending = false;
+  final List<Timer> _speedReapplyTimers = <Timer>[];
+
   /// 预取下一集的取流结果（episodeId → source）。缓存未命中时内核会整集
   /// 下载，把这段耗时移到当前集播放期间，切集只用拿现成的 `/src` 地址。
   final Map<String, VideoSource> _prefetched = {};
@@ -133,6 +140,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _hideTimer?.cancel();
     _spinnerTimer?.cancel();
     _prefetchTimer?.cancel();
+    _cancelSpeedReapplyTimers();
     _disposeController();
     _disposeRetained();
     // 带着全屏状态退出播放页时，下一次进别的页面还在横屏就糟了。
@@ -183,6 +191,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _advancing = false;
     _hideTimer?.cancel();
     _prefetchTimer?.cancel();
+    _cancelSpeedReapplyTimers();
+    _wasPlaying = false;
+    _speedReapplyPending = false;
     // 旧画面先留着垫底，等新集真正出画面再释放（见
     // docs/playback-quality-speed.md §1.4 P0-2）。
     _retainCurrentController();
@@ -391,6 +402,17 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
     final value = controller.value;
+    // 起播 / 缓冲恢复时重新补一次倍速（见 _speedReapplyPending 注释）。
+    if (value.isPlaying != _wasPlaying) {
+      _wasPlaying = value.isPlaying;
+      if (value.isPlaying) _scheduleSpeedReapply(_generation);
+    }
+    if (_speedReapplyPending &&
+        value.isPlaying &&
+        value.position > Duration.zero) {
+      _speedReapplyPending = false;
+      _applyPlaybackSpeedNow();
+    }
     // 新集真正出画面（position 前进）后，把垫底的上一帧释放掉：太早释放会
     // 在平台视图创建前露一下黑屏，太晚则一直多占一个 AVPlayer。
     if (_retained != null &&
@@ -597,6 +619,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         _advancing = false;
       }
       unawaited(controller.play());
+      _scheduleSpeedReapply(_generation);
       _scheduleHide();
     }
   }
@@ -685,7 +708,52 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     final controller = _controller;
     if (controller == null) return;
     _advancing = false;
-    unawaited(controller.seekTo(position));
+    unawaited(_seekAndKeepSpeed(controller, position));
+  }
+
+  /// seek 后补倍速：iOS 16+ 的 AVPlayer 会在 seek 完成后把 rate 复位到
+  /// defaultRate(1.0)，不补的话 UI 还是 2x、实际已经回到 1x。
+  Future<void> _seekAndKeepSpeed(
+    VideoPlayerController controller,
+    Duration position,
+  ) async {
+    await controller.seekTo(position);
+    if (!mounted || _controller != controller) return;
+    _scheduleSpeedReapply(_generation);
+    _applyPlaybackSpeedNow();
+  }
+
+  /// 把当前倍速重新下发给 controller（幂等；暂停时 Dart 层只存值不下发）。
+  void _applyPlaybackSpeedNow() {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    unawaited(controller.setPlaybackSpeed(ref.read(playbackSpeedProvider)));
+  }
+
+  /// 在起播/seek 之后补几次倍速：首帧 tick 一次 + 400ms/1200ms 两个兜底，
+  /// 覆盖 AVFoundation 起播、seek、缓冲恢复等会重置 rate 的时点。
+  void _scheduleSpeedReapply(int generation) {
+    _cancelSpeedReapplyTimers();
+    _speedReapplyPending = true;
+    for (final delay in const [
+      Duration(milliseconds: 400),
+      Duration(milliseconds: 1200),
+    ]) {
+      _speedReapplyTimers.add(
+        Timer(delay, () {
+          if (!mounted || generation != _generation) return;
+          _applyPlaybackSpeedNow();
+        }),
+      );
+    }
+  }
+
+  void _cancelSpeedReapplyTimers() {
+    for (final timer in _speedReapplyTimers) {
+      timer.cancel();
+    }
+    _speedReapplyTimers.clear();
+    _speedReapplyPending = false;
   }
 
   Future<void> _openEpisodePicker() async {

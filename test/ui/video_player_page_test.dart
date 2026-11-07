@@ -47,6 +47,30 @@ void main() {
     await _disposePlayer(tester);
   });
 
+  testWidgets('新集真正出画面后会再补一次倍速（iOS 起播会重置 rate）', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    final container = await _pumpPlayer(tester, store: store, factory: factory);
+    container.read(playbackSpeedProvider.notifier).setSpeed(2.0);
+    await tester.pump();
+
+    final controller = factory.created.single;
+    final callsBeforeFrame = controller.speeds.length;
+    expect(controller.speeds.last, 2.0);
+
+    // 模拟起播后首帧 position 前进：页面必须补设一次倍速，防止 iOS 16+
+    // 把 rate 复位成 1.0（UI 2x、实际 1x 的根因）。
+    controller.value = controller.value.copyWith(
+      position: const Duration(seconds: 1),
+      isPlaying: true,
+    );
+    await tester.pump();
+    expect(controller.speeds.length, greaterThan(callsBeforeFrame));
+    expect(controller.speeds.last, 2.0);
+
+    await _disposePlayer(tester);
+  });
+
   testWidgets('播完自动续播：保留上一帧、倍速继承、控制条不弹出', (tester) async {
     final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
     final factory = _FakeFactory();

@@ -67,6 +67,7 @@ lib/
   features/feed/  列表页通用骨架（FeedState/FeedView：分页、补屏、下拉刷新、底部状态；FeedResultsSliver：搜索结果横向列表）
   src/rust/       flutter_rust_bridge 生成绑定（勿手改）
 rust/             Rust 内核（从 fqapp 整体拷入；fork 基线与本地补丁见 PATCHES.md）
+third_party/      本地打过补丁的 video_player_avfoundation（defaultRate 倍速修复，见 third_party/README.md）
 assets/config/    config.json / device_pool.example.json（启动时部署到 App 沙盒）
 docs/             视频播放方案、书城 tab_type 对照、阅读页分页真机 profile、离线缓存方案
 scripts/          build_rust_ios.sh（先跑 FRB codegen，再编 iOS 静态库）

@@ -274,7 +274,22 @@ M1 落地后（`open_media_session(url, key_hex)` 可用）：
    - 改动：`lib/features/video/video_player_page.dart` 的 `_open` / `_startController` / `_onTick`。
 2. **全屏横屏底部控制条贴底**：底部控制条的 `SafeArea` 改为 `bottom: !_fullscreen`——竖屏仍避让 Home 指示条，横屏全屏不再避让，渐变与控制条直接贴到屏幕最底边；顶部控制条仍避让状态栏/刘海。
    - 改动：`video_player_page.dart` build 里底部 `Positioned` 的 `SafeArea`。
-3. **验证**：`flutter analyze --fatal-infos lib/features/video` 无问题；`flutter test test/ui/mine_test.dart test/ui/video_test.dart test/offline_playback_test.dart` 全绿。播放页目前没有 widget 测试（无 controller 工厂 seam），自动续播与全屏贴底仍需真机回归；后续 S1 加 FakeController seam 时补页面级测试。
+3. **验证**：`flutter analyze --fatal-infos lib/features/video` 无问题；`flutter test test/ui/mine_test.dart test/ui/video_test.dart test/offline_playback_test.dart` 全绿。后续 S1 已加 FakeController seam 与页面级测试（见 §5.1）。
+
+### 4.5 iOS 16+ 倍速复位 bug（2026-11-07 真机反馈后修复）
+
+**现象**：手动/自动切集、退出重进播放页后，倍速 chip 显示 2x，但实际播放仍是 1x；播放过程中手动改速正常。
+
+**真机探针**：在 iPhone 13 / iOS 27.2 上直接用 `video_player` 做对照实验——`initialize → setPlaybackSpeed(2.0) → play()` 后 `controller.value.playbackSpeed == 2.0`，但 3s 墙钟内 `position` 只前进约 1.0x。原因：上游 `video_player_avfoundation` 2.12.3 只写 `AVPlayer.rate`，从不写 `AVPlayer.defaultRate`；AVPlayer 在起播/seek/缓冲恢复时会按 `defaultRate`（默认 1.0）复位 rate。上游 PR flutter/packages#8274 的修法就是补 `defaultRate`（该 PR 未合并）。
+
+**修复（两层）**：
+
+1. **原生（根因）**：把 `video_player_avfoundation` 2.12.3 拷到 `third_party/video_player_avfoundation`，在 `setPlaybackSpeed` / `updateRate` 两处同步 `AVPlayer.defaultRate`（iOS 16+/macOS 13+）；`pubspec.yaml` 用 `dependency_overrides` 指向本地包。改动与升级流程见 [third_party/README.md](../third_party/README.md)。
+2. **Dart 兜底**：`_startController` 仍在 play 前 set；新增「起播首个 `position > 0` / seek 完成后 / 暂停恢复」补设倍速（`_speedReapplyPending` + 400ms/1200ms 两个 Timer），`_seekAndKeepSpeed` 包住 seek。
+
+**回归**：`test/ui/video_player_page_test.dart` 新增「新集首帧后会再补一次倍速」；真机需重测：切集、退出重进、seek 后 UI 与实际一致（2x/3x）。
+
+**代价**：本地插件覆盖需要随 flutter 插件升级手动重放补丁（已写入 `third_party/README.md` 的升级流程）。
 
 ---
 
@@ -309,7 +324,11 @@ M1 落地后（`open_media_session(url, key_hex)` 可用）：
   - 倍速：`_startController` 统一 apply + build 里 `ref.listen` 监听；
   - `playbackControllerFactoryProvider`：生产走 platformView，测试 override FakeController。
 
-**门禁**：`dart format` 无 diff、`flutter analyze --fatal-infos` 无问题、`flutter test` 全量通过（256+9=265 项）。**未做**：预建 controller（第二档）、控制条隐藏时的倍速角标；**待真机**：首帧/切集耗时、旧帧两层 platformView 的全屏与转屏、2x/3x 在线有效倍速与音频/发热。
+**门禁**：`dart format` 无 diff、`flutter analyze --fatal-infos` 无问题、`flutter test` 全量通过（266 项）。
+
+**后续修复（2026-11-07 真机反馈）**：切集/退出重进后 UI 2x 但实际 1x——根因是 AVPlayer 按 `defaultRate` 复位 rate，上游插件不写 defaultRate。已 vendored 插件补 defaultRate + Dart 首帧/seek 兜底，详见 §4.5。
+
+**未做**：预建 controller（第二档）、控制条隐藏时的倍速角标；**待真机**：首帧/切集耗时、旧帧两层 platformView 的全屏与转屏、2x/3x 在线有效倍速与音频/发热。
 
 ---
 
