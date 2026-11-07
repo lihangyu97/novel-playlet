@@ -3,9 +3,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
+import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/core/storage/offline/offline_series_store.dart';
+import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/chapter.dart';
+import 'package:novel_playlet/data/models/video_source.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
 import 'package:novel_playlet/features/video/playback_speed.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
@@ -43,6 +47,33 @@ void main() {
     await tester.pump();
     expect(controller.speeds.last, 2.0);
     expect(find.text('2.0x'), findsOneWidget);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('内核缓存命中：直接播 mode=cached 的 /src，不再正常取流', (tester) async {
+    final store = _FakeSeriesStore();
+    final factory = _FakeFactory();
+    final api = _FakeApi(cachedUrl: 'http://127.0.0.1:18931/src/e1.mp4');
+    await _pumpPlayer(tester, store: store, factory: factory, api: api);
+
+    expect(api.cachedCalls, 1, reason: '切集应先探本地缓存');
+    expect(api.sourceCalls, 0, reason: '缓存命中不应再请求上游');
+    expect(factory.created, hasLength(1));
+    expect(factory.created.single.speeds, contains(1.0));
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('内核缓存未命中：回退正常取流', (tester) async {
+    final store = _FakeSeriesStore();
+    final factory = _FakeFactory();
+    final api = _FakeApi(sourceUrl: 'http://127.0.0.1:18931/src/e1.mp4');
+    await _pumpPlayer(tester, store: store, factory: factory, api: api);
+
+    expect(api.cachedCalls, 1);
+    expect(api.sourceCalls, 1);
+    expect(factory.created, hasLength(1));
 
     await _disposePlayer(tester);
   });
@@ -153,12 +184,14 @@ Future<ProviderContainer> _pumpPlayer(
   WidgetTester tester, {
   required _FakeSeriesStore store,
   required _FakeFactory factory,
+  ApiClient? api,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         offlineSeriesStoreProvider.overrideWithValue(store),
         playbackControllerFactoryProvider.overrideWithValue(factory.call),
+        if (api != null) apiClientProvider.overrideWithValue(api),
       ],
       child: MaterialApp(
         home: VideoPlayerPage(
@@ -194,6 +227,32 @@ class _FakeSeriesStore extends OfflineSeriesStore {
   @override
   Future<File?> episodeFileIfCached(String seriesId, String episodeId) async =>
       cachedFile;
+}
+
+/// ApiClient 测试替身：只关心缓存探测与正常取流的分流。
+class _FakeApi extends ApiClient {
+  _FakeApi({this.cachedUrl, this.sourceUrl})
+    : super(BackendTransport(port: 18931));
+
+  final String? cachedUrl;
+  final String? sourceUrl;
+  int cachedCalls = 0;
+  int sourceCalls = 0;
+
+  @override
+  Future<String?> cachedVideoUrl(String episodeId) async {
+    cachedCalls += 1;
+    return cachedUrl;
+  }
+
+  @override
+  Future<VideoSource> videoSource(
+    String episodeId, {
+    bool refresh = false,
+  }) async {
+    sourceCalls += 1;
+    return VideoSource(url: sourceUrl ?? 'http://127.0.0.1:18931/src/e1.mp4');
+  }
 }
 
 /// controller 工厂测试替身：记录创建次数与倍速下发记录。

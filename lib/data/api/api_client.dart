@@ -157,7 +157,8 @@ class ApiClient {
       '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
       // refresh=1：内核删掉本地缓存文件后重新下载。播放失败（半截/坏缓存）
       // 时用它能真正重来，否则重试只会拿回同一份坏文件。
-      {if (refresh) 'refresh': '1'},
+      // variants=0：播放页不需要清晰度列表，别让内核为它多拉一次 fallback。
+      {if (refresh) 'refresh': '1', 'variants': '0'},
       // 首次播放要等整集下载 + 写密钥 sidecar，默认 20s 不够。
       timeout: const Duration(seconds: 120),
     );
@@ -179,6 +180,25 @@ class ApiClient {
       keyHex: source.keyHex,
       variants: source.variants,
     );
+  }
+
+  /// 只查内核本地 `/src` 缓存（`mode=cached`），**不请求上游**。
+  ///
+  /// 命中返回可播放的绝对地址；未命中/内核不可用返回 null，调用方回退到
+  /// [videoSource] 正常取流。切集先探它，自动缓存命中的集就不用再付一次
+  /// 上游往返；断网时也能播。
+  Future<String?> cachedVideoUrl(String episodeId) async {
+    if (episodeId.isEmpty) return null;
+    final payload = await _getJson(
+      '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
+      const {'mode': 'cached'},
+      // 只 stat 本地文件，正常是毫秒级；超时按 miss 处理。
+      timeout: const Duration(seconds: 5),
+    );
+    final data = unwrapEnvelope(payload);
+    if (data['cached'] != true) return null;
+    final url = absoluteUrl(firstString(data, ['video_url']));
+    return url.isEmpty ? null : url;
   }
 
   /// 把内核给的相对资源地址（`/src/xxx.mp4`）拼成播放器能直接拉取的绝对地址。

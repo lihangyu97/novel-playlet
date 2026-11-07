@@ -92,9 +92,11 @@ class OfflineSeriesStore {
   Future<File?> episodeFileIfCached(String seriesId, String episodeId) async {
     try {
       final file = await episodeFilePath(seriesId, episodeId);
-      if (!await file.exists()) return null;
-      return await file.length() > 0 ? file : null;
+      // 一次 stat 同时判断存在与大小（exists + length 是两次 syscall）。
+      final stat = await file.stat();
+      return stat.size > 0 ? file : null;
     } catch (_) {
+      // stat 失败包含「不存在」与权限错误，都按 miss 处理。
       return null;
     }
   }

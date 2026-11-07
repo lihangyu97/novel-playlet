@@ -244,37 +244,53 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       }
 
       final api = ref.read(apiClientProvider);
-      // 当前集播放期间预取的下一集：命中就省掉一次取流（缓存未命中时那次
-      // 会整集下载，是切集等待的大头）。
-      final cachedSource = _prefetched.remove(episode.id);
-      final prefetched = refresh ? null : cachedSource;
-      final source =
-          prefetched ?? await api.videoSource(episode.id, refresh: refresh);
-      sourceUrl = source.url;
-      if (!mounted || generation != _generation) return;
-
       final factory = ref.read(playbackControllerFactoryProvider);
-      final controller = factory(networkUrl: Uri.parse(source.url));
-      try {
+
+      Future<void> playUrl(String url) async {
+        sourceUrl = url;
         await _startController(
-          controller,
-          index: index,
-          generation: generation,
-          autoAdvance: autoAdvance,
-        );
-      } catch (error) {
-        // 预取的 `/src` 可能已被内核 128MB 预算淘汰：回退到正常取流一次。
-        if (prefetched == null) rethrow;
-        final fresh = await api.videoSource(episode.id, refresh: true);
-        if (!mounted || generation != _generation) return;
-        sourceUrl = fresh.url;
-        await _startController(
-          factory(networkUrl: Uri.parse(fresh.url)),
+          factory(networkUrl: Uri.parse(url)),
           index: index,
           generation: generation,
           autoAdvance: autoAdvance,
         );
       }
+
+      // 当前集播放期间预取的下一集：命中就省掉一次取流（缓存未命中时那次
+      // 会整集下载，是切集等待的大头）。
+      final cachedSource = _prefetched.remove(episode.id);
+      final prefetched = refresh ? null : cachedSource;
+      if (prefetched != null) {
+        try {
+          await playUrl(prefetched.url);
+          return;
+        } catch (_) {
+          // 预取的 `/src` 可能已被内核 128MB 预算淘汰：回退正常取流。
+        }
+      }
+
+      // 先探内核本地缓存（mode=cached）：命中就不打上游，断网也能播自动缓存集。
+      if (!refresh) {
+        String? cachedUrl;
+        try {
+          cachedUrl = await api.cachedVideoUrl(episode.id);
+        } catch (_) {
+          // 探测失败当 miss，错误交给正常取流路径展示。
+        }
+        if (!mounted || generation != _generation) return;
+        if (cachedUrl != null) {
+          try {
+            await playUrl(cachedUrl);
+            return;
+          } catch (_) {
+            // 缓存条目可能刚被淘汰/半截：继续走正常取流。
+          }
+        }
+      }
+
+      final source = await api.videoSource(episode.id, refresh: refresh);
+      if (!mounted || generation != _generation) return;
+      await playUrl(source.url);
     } catch (error, stack) {
       if (!mounted || generation != _generation) return;
       _spinnerTimer?.cancel();
@@ -473,7 +489,18 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     if (!mounted || _prefetching.contains(episode.id)) return;
     _prefetching.add(episode.id);
     try {
-      final source = await ref.read(apiClientProvider).videoSource(episode.id);
+      final api = ref.read(apiClientProvider);
+      // 先探本地缓存：命中就不用为预取再触发整集下载。
+      String? cachedUrl;
+      try {
+        cachedUrl = await api.cachedVideoUrl(episode.id);
+      } catch (_) {
+        // 探测失败当 miss。
+      }
+      if (!mounted) return;
+      final source = cachedUrl != null
+          ? VideoSource(url: cachedUrl)
+          : await api.videoSource(episode.id);
       if (!mounted) return;
       // 页内只留最近两条：追剧时无限积累没有意义。
       while (_prefetched.length >= 2) {

@@ -103,8 +103,41 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         }
 
         let stream_mode = params.get_str("mode") == "stream";
+        // `mode=cached`：只查本地 `/src` 缓存，完全不打上游。播放页切集先探它，
+        // 命中就不必再为「拿 URL/key」付一次上游往返，断网也能播自动缓存集。
+        let cached_mode = params.get_str("mode") == "cached";
         // 显式重新下载：客户端播放失败（缓存文件损坏/半截）时用它绕过缓存。
         let force_refresh = params.get_str("refresh") == "1";
+        // 播放页不消费 variants；默认播放传 `variants=0`，省掉为合并清晰度列表
+        // 而额外请求 fallback_api 的那一个 RTT。需要面板时再显式要。
+        let want_variants = params.get_str("variants") != "0";
+
+        if cached_mode && !force_refresh {
+            let src_dir = if ctx.src_dir.is_empty() {
+                "src".to_string()
+            } else {
+                ctx.src_dir.clone()
+            };
+            let lookup_id = video_id.clone();
+            let cached =
+                tokio::task::spawn_blocking(move || cached_src_filename(&src_dir, &lookup_id))
+                    .await
+                    .ok()
+                    .flatten();
+            return Ok(match cached {
+                Some(filename) => json!({
+                    "video_url": format!("/src/{filename}"),
+                    "video_id": video_id,
+                    "cached": true,
+                    "variants": [],
+                }),
+                None => json!({
+                    "video_id": video_id,
+                    "cached": false,
+                    "variants": [],
+                }),
+            });
+        }
         // 短剧 stream 仍以 shortplay 模型选流，但清晰度列表要合并两条接口：
         // 顶档（1080p）只出现在 phoenix 模型的 `fallback_api` 列表里，而两条
         // 接口的编码分布并不相同——shortplay 各档是 h265，phoenix 的低档是解不
@@ -177,6 +210,11 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             }
         };
 
+        let variants = if want_variants {
+            extract_stream_variants(ctx, &parsed, phoenix_parsed.as_ref()).await
+        } else {
+            Vec::new()
+        };
         let source = json!({
             "video_url": video_url,
             "key_hex": hex::encode(&content_key),
@@ -185,8 +223,8 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             // 据此保持旧行为（显示「全屏观看」）。
             "vertical": vertical,
             // 全量兼容档（高→低）。官方面板按该列表渲染清晰度行；空数组
-            // 表示单流，客户端隐藏清晰度入口。
-            "variants": extract_stream_variants(ctx, &parsed, phoenix_parsed.as_ref()).await,
+            // 表示单流，客户端隐藏清晰度入口。播放页传 variants=0 时为空。
+            "variants": variants,
         });
         if stream_mode {
             return Ok(source);
@@ -1677,6 +1715,28 @@ fn write_key_sidecar(fp: &Path, content_key: &[u8]) -> Result<(), String> {
     let tmp = PathBuf::from(format!("{}.tmp", sidecar.display()));
     std::fs::write(&tmp, hex::encode(content_key)).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &sidecar).map_err(|e| e.to_string())
+}
+
+/// `mode=cached` 的本地缓存查找：只 stat `src/<id>{.mp4,.m4s,.ts}`，不请求
+/// 上游。密文文件必须有可读的 key sidecar，否则 `/src` 会 503——这种条目
+/// 按 miss 处理，让调用方重新取流把 sidecar 修回来。
+fn cached_src_filename(src_dir: &str, video_id: &str) -> Option<String> {
+    for ext in [".mp4", ".m4s", ".ts"] {
+        let filename = format!("{video_id}{ext}");
+        let path = Path::new(src_dir).join(&filename);
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        if meta.len() == 0 {
+            continue;
+        }
+        if cache_cenc_state(&path) == CacheCencState::Encrypted && read_key_sidecar(&path).is_none()
+        {
+            continue;
+        }
+        return Some(filename);
+    }
+    None
 }
 
 fn read_key_sidecar(fp: &Path) -> Option<Vec<u8>> {

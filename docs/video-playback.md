@@ -146,3 +146,4 @@
 | 2026-11-07 | 倍速播放：1.0/1.25/1.5/2.0/3.0x，全局持久化（`video_playback_speed_v1`），时间行 chip + 底部弹层；新 controller 在 `_startController` 统一 apply，跨集/自动续播/冷启动保持。3x 在线源可能被 AVFoundation 的 `canPlayFastForward` 静默降为 2x，产品已接受（不 fork 插件）；方案与决策见 [playback-quality-speed.md](playback-quality-speed.md) |
 | 2026-11-07 | 清晰度方向定稿：当前默认档为「当次上游最高可解码档」（在线与离线同一档，UI 不可选）；后续默认改 720P，先做离线/下载上限（C0），M1 落地后再做在线换档（C1）。见 [playback-quality-speed.md](playback-quality-speed.md) |
 | 2026-11-07 | 修复「UI 显示 2x、实际 1x」：iOS AVPlayer 在起播/seek 后按 `defaultRate`(默认 1.0) 复位 rate，上游 avfoundation 2.12.3 从不写 defaultRate。改为 vendored 插件（`third_party/video_player_avfoundation`，补 defaultRate）+ Dart 在首帧/seek/恢复时补设倍速；`pubspec.yaml` 用 dependency_overrides |
+| 2026-11-07 | 内核 `/api/v1/videos/{id}` 新增 `mode=cached`（只查本地 `/src` + key sidecar，不打上游，断网可播自动缓存集）与 `variants=0`（播放页不需要清晰度列表，省 fallback 请求）；播放页顺序改为 离线 → 预取 → cached → 正常取流，并顺手缓存离线路径 root、合并 stat |

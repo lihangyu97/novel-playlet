@@ -1,7 +1,7 @@
 # 视频播放增强：缓存切集「准备」优化 / 自选清晰度 / 倍速播放
 
 > 分支：`feat/lhy/playback-quality-speed-plan`（从 `main` 切出）
-> 状态：**S0 控制条修复 + S1（切集感知 / 预取下一集 / 倍速）已实现**；S2–S4 待排期（2026-11-07）
+> 状态：**S0 控制条修复 + S1（切集感知 / 预取下一集 / 倍速）+ S2（mode=cached / variants=0 / 离线 IO）已实现**；S3–S4 待排期（2026-11-07）
 > 关联：[video-playback.md](video-playback.md)（M0 决策与边界）、[offline-cache.md](offline-cache.md)（离线缓存）、`origin/feat/lhy/streaming-media-plan:docs/streaming-media-m1.md`（M1 流式起播，方案定稿未实现）
 > 口径：**已验证**＝当前代码/测试可直接读出；**待实测**＝需要真机或真接口确认。行号以 `main`（`86ff328`）为准。
 
@@ -78,22 +78,22 @@
 
 ### 1.4 优化方案（按收益/成本排序）
 
-#### P0-1 内核加 `mode=cached`：缓存命中不再打上游（Rust + Dart，约 0.7~1 人天）
+#### P0-1 内核加 `mode=cached`：缓存命中不再打上游（Rust + Dart）✅ 已实现
 
-给 `/api/v1/videos/{id}` 增加只查本地、**完全不请求上游**的分支：
+给 `/api/v1/videos/{id}` 增加只查本地、**完全不请求上游**的分支（已实现）：
 
 ```text
 GET /api/v1/videos/{id}?mode=cached
-命中：{ "video_url": "/src/<id>.<ext>", "cached": true,  "variant": {...} | null }
-未命中：{ "cached": false }
+命中：{ "video_url": "/src/<id>.<ext>", "video_id": "…", "cached": true,  "variants": [] }
+未命中：{ "video_id": "…", "cached": false, "variants": [] }
 ```
 
-- 查找规则：按 `<id>.mp4/.m4s/.ts` 找 `src/` 文件（文件名规则与 `download_and_save` 一致，`video.rs:1375-1388`）；密文文件必须有可读 `.key` sidecar（否则 `/src` 会 503，`:1801-1813`）。
-- Dart 播放顺序改为：离线 pinned → `mode=cached` 探测 → 命中直接播 `/src`；未命中才 `api.videoSource`（miss 时多一次进程内 FRB 调用，<1ms）。
+- 查找规则：按 `<id>.mp4/.m4s/.ts` 找 `src/` 文件（文件名规则与 `download_and_save` 一致）；密文文件必须有可读 `.key` sidecar（否则 `/src` 会 503，按 miss 处理）。
+- Dart 播放顺序：离线 pinned → 预取 → `mode=cached` 探测 → 命中直接播 `/src`；未命中才 `api.videoSource`（miss 时多一次进程内 FRB 调用，<1ms）。
 - **收益**：自动缓存命中路径去掉 1~3 个 RTT（-200ms~-1s+），坏网络下从「超时/错误」变成秒开；**同时让自动缓存区断网可播**。
-- **不改 FRB 绑定、不改 pubspec/插件**。参考 M1 方案 §4.4（`origin/feat/lhy/streaming-media-plan:docs/streaming-media-m1.md`）。
-- **风险**：探测命中但文件随后被淘汰/半截 → AVPlayer 初始化失败；回退策略是失败后走一次正常 `videoSource(refresh: true)`，不要缓存探测结果。与「清晰度 marker」的衔接见 §3.1。
-- **测试**：Rust mock 上游断言 `mode=cached` 命中时上游请求数为 0；Dart 覆盖命中/未命中/损坏回退。
+- **不改 FRB 绑定**。参考 M1 方案 §4.4（`origin/feat/lhy/streaming-media-plan:docs/streaming-media-m1.md`）。
+- **风险**：探测命中但文件随后被淘汰/半截 → AVPlayer 初始化失败；回退策略是失败后继续走正常 `videoSource`。
+- **测试**：`rust/tests/video_cached_mode.rs` 断言命中/未命中时上游请求数均为 0；Dart `test/video_cached_source_test.dart` + 播放页 FakeApi 覆盖命中/未命中分流。
 
 #### P0-2 切集感知：保留旧画面 + 延迟 spinner + 保留控制条（纯 Dart，约 1~1.5 人天）✅ 已实现
 
@@ -115,7 +115,7 @@ GET /api/v1/videos/{id}?mode=cached
 
 | 项 | 做法 | 收益 |
 |---|---|---|
-| 取流跳过 variants | `handle_video` 支持 `variants=0`（或 `mode=cached` 天然跳过）；播放页调用时带上 | 非缓存首次播放 -1 个 RTT |
+| 取流跳过 variants ✅ | `handle_video` 支持 `variants=0`；播放页调用时带上 | 非缓存首次播放 -1 个 RTT |
 | 离线路径内存缓存 | `OfflinePaths` 缓存 root 路径；`episodeFileIfCached` 用一次 `stat()` 替代 `exists+length` | -1~5ms/切集 |
 | `/src` 请求级 CENC 状态缓存 | 把 `cache_cenc_state` 并入现有索引缓存（按 path+len+mtime 失效） | seek 手感，几 ms/请求 |
 | 入口侧离线优先 | 详情页 `series.json` manifest-first、最近观看用 manifest 组装 episodes 再 push | 弱网/离线入口 -数秒 |
@@ -299,11 +299,32 @@ M1 落地后（`open_media_session(url, key_hex)` 可用）：
 |---|---|---|---|---|
 | **S0（已实现）** | 控制条：播完自动续播不弹控制条；全屏横屏底部控制条贴底、取消底部安全区避让（§4.4） | 无 | — | `flutter analyze` + 相关 UI 测试通过；真机待回归 |
 | **S1（纯 Dart）✅ 已实现** | P0-2 切集感知（保留旧画面/延迟 spinner/保留顶栏）+ P0-3 预取下一集（允许整集下载）+ 倍速播放 | 无 | — | `flutter analyze` + `flutter test` 全绿；真机待回归（首帧/3x/旧帧叠层） |
-| **S2（Rust 小改，根治）** | `mode=cached` 免上游探测 + `variants=0` + 离线路径 IO 缓存 | 无 | 1.5~2.5 人天 | 自动缓存命中切集上游请求数=0；飞行模式可播；坏文件回退正常 |
+| **S2（Rust 小改，根治）✅ 已实现** | `mode=cached` 免上游探测 + `variants=0` + 离线路径 IO 缓存 | 无 | — | Rust/Dart 单测断言命中/未命中上游请求数=0；飞行模式与真机耗时待回归 |
 | **S3（清晰度第一步）** | C0：内核 `?max_height` 按档下载 + 档位 marker + 全局下载清晰度设置（默认 720P）+ 离线 manifest 档位 + 缓存中心展示 | 无 | 2~2.5 人天 | 离线下载可限高；缓存中心显示实际档；旧缓存/旧 manifest 兼容 |
 | **S4（等 M1）** | M1 流式起播（`streaming-media-m1.md`）→ C1 在线换档（默认 720P、按剧记忆、换档重开会话 + seek 回原位、自动档口径修正） | M1 | M1 2~4 + 2.5~3.5 | 在线换档位置不丢、失败回退原档；默认档与面板一致 |
 
 **S1 建议先合**：它不依赖 Rust、风险最低、直接消除用户报告的两个症状中的第一个（「正在准备」观感）并交付倍速；S2 再根治「自动缓存仍打上游」，两者不会互相阻塞。
+
+### 5.2 S2 实现记录（2026-11-07）
+
+**新增/接口**
+
+- `rust/src/endpoints/video.rs`：`handle_video` 新增 `mode=cached` 分支（`cached_src_filename` 只 stat 本地文件 + 校验 `.key` sidecar，`spawn_blocking` 执行）；`variants=0` 时跳过 `extract_stream_variants`，不再为播放页多拉一次 fallback。
+- `lib/data/api/api_client.dart`：新增 `cachedVideoUrl(episodeId)`（`mode=cached`，5s 超时，命中返回绝对 `/src` 地址）；`videoSource` 默认带 `variants=0`。
+- `lib/features/video/video_player_page.dart`：播放顺序改为 预取 → `mode=cached` → 正常取流；缓存条目被淘汰时继续正常取流；预取下一集也先探本地缓存。
+- `lib/core/storage/offline/offline_paths.dart`：`root` 进程内只解析一次（不再每切一集走一次 path_provider + mkdir）。
+- `lib/core/storage/offline/offline_series_store.dart`：`episodeFileIfCached` 用一次 `stat()` 替代 `exists()+length()` 两次 syscall。
+
+**测试**
+
+- `rust/tests/video_cached_mode.rs`：命中/未命中都不打上游；`variants=0` 不拉 fallback，默认仍拉。
+- `test/video_cached_source_test.dart`：`mode=cached` 解析、miss、空地址；`variants=0` / `refresh=1` 查询参数。
+- `test/ui/video_player_page_test.dart`：缓存命中不调 `videoSource`；未命中回退正常取流。
+- `test/offline_paths_test.dart`：root 只解析一次。
+
+**门禁**：`cargo fmt --check`、`cargo clippy -D warnings`、`cargo test --test video_cached_mode`、`dart format`、`flutter analyze --fatal-infos`、`flutter test`（274 项）全绿。
+
+**待真机**：自动缓存集切集耗时（对比 S1）、飞行模式播自动缓存集、缓存被淘汰时的回退。
 
 ### 5.1 S1 实现记录（2026-11-07）
 

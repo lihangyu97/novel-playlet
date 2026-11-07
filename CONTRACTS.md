@@ -5,7 +5,7 @@
 - Flutter 工程（iOS-only 目标，但不要改 `ios/` 与 `pubspec.yaml`；视频域专项例外见 [docs/playback-quality-speed.md](docs/playback-quality-speed.md) 与 `third_party/README.md`）
 - Rust 内核 `rust/` 已完整拷入，FRB 绑定在 `lib/src/rust/`（**自动生成，不要手改**）
 - 启动链：`lib/main.dart → BootstrapGate → BackendService.start() → Rust init`
-- 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / videoFeed / searchVideos / bookDetail / videoDetail / videoEpisodes / videoSource / directory / chapter）
+- 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / videoFeed / searchVideos / bookDetail / videoDetail / videoEpisodes / videoSource / cachedVideoUrl / directory / chapter）
 - 模型：`lib/data/models/`（`NovelItem`、`BookDetail`、`Chapter`、`ChapterContent`、`FeedPage`、`VideoSeries`、`VideoDetail`、`VideoSource`、`json_utils`（含 `ApiErrorKind`））。卡片解析不在 model 层：统一在 `lib/data/parsers/`（`card_walker.dart` 的 `walkCards` / `CardAdapter` 骨架 + `novel_parsers.dart` / `video_parsers.dart`）
 - 分类策略：`lib/features/recommend/content_source.dart` 的 `ContentSource`（`NovelSource` / `DramaSource` / `ManjuSource`）。上游 `tab_type`、搜索 tab、漫剧搜索兜底都在策略对象里；`lib/features/recommend/recommend_category.dart` 只留 label / searchHint / emptyIcon / source，页面不再按分类写 if
 - 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读、短剧收藏/观看进度）；阅读进度表按最近 200 本做 LRU 上限（`progressLimit`）。缓存：`lib/core/cache/`（封面缓存 `AppImageCache`、占用统计与清理 `AppCache`，入口在「我的 → 设置 → 存储」）
@@ -55,7 +55,8 @@ Future<VideoDetail> videoDetail(String seriesId);
 Future<List<Chapter>> directory(String bookId);           // 已摊平，Chapter{id,title,volumeName,index}
 Future<List<Chapter>> videoEpisodes(String seriesId);     // 与 directory 同一条路由
 Future<ChapterContent> chapter(String itemId, {String title = ''});
-Future<VideoSource> videoSource(String episodeId, {bool refresh = false}); // refresh=1 删缓存重下
+Future<VideoSource> videoSource(String episodeId, {bool refresh = false}); // refresh=1 删缓存重下；默认带 variants=0
+Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 /src，不打上游
 // 以上错误统一抛 ApiException（message 可直接展示）
 ```
 
