@@ -98,6 +98,16 @@ cd build/ios && rm -rf Payload novel_playlet_unsigned.ipa \
 
 Bundle ID `com.lihangyu.novelPlaylet`，显示名「摆烂盒子」。Rust 静态库靠 `ios/Flutter/Release.xcconfig` 的 `-force_load` + `DEAD_CODE_STRIPPING=NO` 链进主二进制，`Info.plist` 已为 `127.0.0.1` 开 ATS 例外（视频回环）。
 
+Android 打包（arm64 单 ABI，出可安装的 release APK；细节见 [docs/android-packaging.md](docs/android-packaging.md)）：
+
+```bash
+./scripts/build_rust_android.sh              # 内核 .so → android/app/src/main/jniLibs/arm64-v8a/
+flutter build apk --release --target-platform android-arm64
+# 产物：build/app/outputs/flutter-apk/app-release.apk
+```
+
+`android/` 工程、Manifest 的 `INTERNET` 与 `127.0.0.1` 明文回环、备份排除规则、图标和签名配置都已补好；视频/缓存等 Android 运行时行为等业务改造后再按真机验证处理。
+
 真机安装（免费 Apple ID 自签，7 天有效；复用本机已有工具）：
 
 ```bash
@@ -183,4 +193,4 @@ App 沙盒里会落盘的东西（iPhone 13 调试期实测：文稿与数据 40
 
 - **加 tab**：`lib/app/shell/home_shell.dart` 的 `_tabs` 表加一项（底栏与页面由同一张表驱动），页面走 `ConsumerWidget`。
 - **加页面**：`lib/app/router.dart` 加一个 `AppRoute` 子类（自带强类型参数 + `toRoute()`），页面里 `context.pushAppRoute(...)`；不要再加字符串路由 / `onGenerateRoute`。
-- **Android**：内核已是 `cdylib`，需补 `android/app/src/main/jniLibs/{arm64-v8a,armeabi-v7a}/libfqapi_core.so`（参照 fqapp 的 `scripts/build_rust_backend.sh`），NDK 与 ABI 的坑见 fqapp `DEVELOPMENT.md`；Flutter 侧代码无需改动。
+- **Android**：打包链路已就绪（`android/` 工程 + `scripts/build_rust_android.sh`），构建与签名见 [docs/android-packaging.md](docs/android-packaging.md)；Flutter 业务代码无需为打包改动。视频播放（ExoPlayer）与缓存路径等运行时行为等业务改造后再按真机验证处理。

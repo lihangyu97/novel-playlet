@@ -1277,6 +1277,14 @@ const VIDEO_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
 /// transport (`upstream/http.rs`) only exposes a whole-body API, so the
 /// download path keeps its own client; it sends the same unsigned GET with
 /// the same User-Agent as `unsigned_get` (no signing, no device headers).
+///
+/// TLS must be preconfigured with the same webpki roots the shared transport
+/// uses: reqwest's default rustls backend verifies with
+/// `rustls-platform-verifier`, which on Android requires JNI initialization
+/// (`init_with_env`) before the first TLS handshake and panics otherwise.
+/// Reusing `build_tls_config` keeps every HTTPS request on one verifier and
+/// makes the download path behave identically on iOS and Android.
+///
 /// Built lazily so a missing TLS provider (e.g. in a unit-test embedding,
 /// where the transport never installed one) degrades to the whole-body
 /// fallback instead of failing the download.
@@ -1285,7 +1293,10 @@ static STREAMING_CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
 fn streaming_client() -> Option<&'static reqwest::Client> {
     STREAMING_CLIENT
         .get_or_init(|| {
+            crate::upstream::http::ensure_crypto_provider();
+            let tls = crate::upstream::http::build_tls_config().ok()?;
             reqwest::Client::builder()
+                .tls_backend_preconfigured(tls)
                 .timeout(VIDEO_DOWNLOAD_TIMEOUT)
                 .build()
                 .ok()
@@ -2253,47 +2264,75 @@ fn build_cenc_index(
 }
 
 /// Records the rewrites `rewrite_encrypted_sample_entries` used to apply in
-/// place (encv -> hvc1, enca -> mp4a, `sinf` blanked into a `free` box) as
-/// offset patches instead, so the file on disk keeps its original bytes.
+/// place (encv/enca -> the format named by `sinf/frma`, `sinf` blanked into a
+/// `free` box) as offset patches instead, so the file on disk keeps its
+/// original bytes.
 fn collect_sample_entry_patches(
     data: &[u8],
     boxes: &HashMap<[u8; 4], Vec<Mp4Box>>,
     base_off: u64,
     out: &mut Vec<CencPatch>,
 ) {
-    for (typ, replacement) in [(b"encv", b"hvc1"), (b"enca", b"mp4a")] {
+    for (typ, fallback) in [(b"encv", b"hvc1"), (b"enca", b"mp4a")] {
         let Some(list) = boxes.get(typ) else {
             continue;
         };
         for b in list {
-            if b.off + 8 <= data.len() {
-                out.push(CencPatch {
-                    off: base_off + (b.off + 4) as u64,
-                    bytes: replacement.to_vec(),
-                });
-            }
             let Some(child_start) = box_children_start(typ, b.off, b.header) else {
                 continue;
             };
+            let mut sinf = None;
             for child in iter_boxes(data, child_start, b.off + b.size) {
                 if child.typ == *b"sinf" {
-                    let mut header = Vec::with_capacity(8);
-                    header.extend_from_slice(&8u32.to_be_bytes());
-                    header.extend_from_slice(b"free");
-                    out.push(CencPatch {
-                        off: base_off + child.off as u64,
-                        bytes: header,
-                    });
-                    let start = child.off + 8;
-                    let end = (child.off + child.size).min(data.len());
-                    if start < end {
-                        out.push(CencPatch {
-                            off: base_off + start as u64,
-                            bytes: vec![0u8; end - start],
-                        });
-                    }
+                    sinf = Some(child);
                     break;
                 }
+            }
+            // The encrypted sample entry still carries the original codec
+            // config (hvcC/avcC/esds), and `sinf/frma` names the format it
+            // belongs to. Restore that instead of assuming HEVC/AAC: an H.264
+            // CENC entry patched to `hvc1` would advertise a decoder config it
+            // does not have.
+            let original_format = sinf.and_then(|sinf| {
+                let start = sinf.off + sinf.header;
+                let frma = iter_boxes(data, start, sinf.off + sinf.size)
+                    .into_iter()
+                    .find(|child| child.typ == *b"frma")?;
+                let at = frma.off + frma.header;
+                (at + 4 <= data.len()).then(|| [data[at], data[at + 1], data[at + 2], data[at + 3]])
+            });
+            if b.off + 8 <= data.len() {
+                out.push(CencPatch {
+                    off: base_off + (b.off + 4) as u64,
+                    bytes: original_format.unwrap_or(*fallback).to_vec(),
+                });
+            }
+            // Replace the whole `sinf` box with a single `free` box of the
+            // same size. A free(8) header plus zeroed tail leaves trailing
+            // zero bytes inside the sample entry; strict parsers (ExoPlayer's
+            // Mp4Extractor) read those as a zero-size child atom and reject
+            // the file ("childAtomSize must be positive"), even though
+            // AVFoundation tolerates them.
+            let Some(sinf) = sinf else {
+                continue;
+            };
+            if sinf.size < 8 || sinf.size > u32::MAX as usize {
+                continue;
+            }
+            let mut header = Vec::with_capacity(8);
+            header.extend_from_slice(&(sinf.size as u32).to_be_bytes());
+            header.extend_from_slice(b"free");
+            out.push(CencPatch {
+                off: base_off + sinf.off as u64,
+                bytes: header,
+            });
+            let start = sinf.off + 8;
+            let end = (sinf.off + sinf.size).min(data.len());
+            if start < end {
+                out.push(CencPatch {
+                    off: base_off + start as u64,
+                    bytes: vec![0u8; end - start],
+                });
             }
         }
     }
