@@ -4,6 +4,7 @@
 > 状态：M0 骨架已实现并真机验证（推荐页短剧分类 / 短剧详情 / 播放页），待补流式起播。
 > 本文只记录决策与待确认项，不含代码。
 > 背景：参考同级 `fqapp`（Android ExoPlayer + Windows media_kit，iOS 未实现）补 iOS 视频播放能力。
+> Android（2026-11-07 起）：打包链路已接入，播放走 ExoPlayer；本文 iOS 决策与真机记录仍有效，Android 运行时待验证（见 [android-packaging.md](android-packaging.md) 与 [playback-quality-speed.md](playback-quality-speed.md) §9）。
 
 ## 1. 已定决策
 
@@ -142,3 +143,9 @@
 | 2026-11-04 | UI 细节：封面比例统一走 `kCoverAspect`（11:8）——小说 240×320 与短剧 400×571 原生比例不同，此前各写 1.38 / 4/3，切 tab 短剧封面矮 5pt；现在两条推荐流、搜索结果、书架、最近阅读、详情封面同宽同高。两个 tab 的搜索态统一成横向列表（新增 `lib/features/feed/feed_results.dart`：`FeedResultsSliver` + `FeedResultTile`，封面 64×88）；搜索结果不再显示副标题（搜索词与已加载条数），短剧卡圆角对齐 `AppTheme.cardRadius`；回归见 `test/ui/`（按页面拆分：recommend / home / detail / video / reader / mine / settings）的封面尺寸断言 |
 | 2026-11-04 | 存储治理：真机检查发现 App 沙盒 400 MB——视频缓存 339 MB（旧上限 512 MB，27 集就撑到 339 MB）+ 封面缓存 40 MB。「我的」加「存储」区块：显示缓存占用（视频/封面明细）并可一键清理（只清可重建缓存，书架/进度/设备池不动）；内核视频缓存上限 512 MB → **128 MB**（约 5–10 集，重看会重新下载）；顺带清掉早期调试探针遗留的 `Documents/diag.log`。统计/清理见 `lib/core/cache/app_cache.dart`，回归 `test/cache_test.dart` |
 | 2026-11-04 | 方向：App 全局锁竖屏；只有播放页的横屏视频（宽高比 >1.05）给「全屏」按钮，点击才临时开横屏，退出全屏/返回/离开播放页/切到竖屏视频都恢复竖屏 |
+| 2026-11-07 | 播放页切集体验：切集保留上一集最后一帧（新集 position 前进后才释放）、spinner 延迟 250ms、加载期间保留顶栏；当前集播 5s 后预取下一集（允许整集下载，页内 LRU 2 条，`/src` 被淘汰时 `refresh=1` 回退）；播完自动续播不弹控制条；全屏横屏底部控制条贴到最底边（取消底部安全区避让）。新增 FakeController 页面级回归 `test/ui/video_player_page_test.dart` |
+| 2026-11-07 | 倍速播放：1.0/1.25/1.5/2.0/3.0x，全局持久化（`video_playback_speed_v1`），时间行 chip + 底部弹层；新 controller 在 `_startController` 统一 apply，跨集/自动续播/冷启动保持。3x 在线源可能被 AVFoundation 的 `canPlayFastForward` 静默降为 2x，产品已接受（不 fork 插件）；方案与决策见 [playback-quality-speed.md](playback-quality-speed.md) |
+| 2026-11-07 | 清晰度方向定稿：当前默认档为「当次上游最高可解码档」（在线与离线同一档，UI 不可选）；后续默认改 720P，先做离线/下载上限（C0），M1 落地后再做在线换档（C1）。见 [playback-quality-speed.md](playback-quality-speed.md) |
+| 2026-11-07 | 修复「UI 显示 2x、实际 1x」：iOS AVPlayer 在起播/seek 后按 `defaultRate`(默认 1.0) 复位 rate，上游 avfoundation 2.12.3 从不写 defaultRate。改为 vendored 插件（`third_party/video_player_avfoundation`，补 defaultRate）+ Dart 在首帧/seek/恢复时补设倍速；`pubspec.yaml` 用 dependency_overrides |
+| 2026-11-07 | 内核 `/api/v1/videos/{id}` 新增 `mode=cached`（只查本地 `/src` + key sidecar，不打上游，断网可播自动缓存集）与 `variants=0`（播放页不需要清晰度列表，省 fallback 请求）；播放页顺序改为 离线 → 预取 → cached → 正常取流，并顺手缓存离线路径 root、合并 stat |
+| 2026-11-07 | 下载清晰度上限（C0）：内核 `?max_height=` 按短边选档、单文件缓存 + `.variant.json` marker；离线整剧默认 720P（设置页可选最高/1080P/480P），manifest 记录请求上限与每集实际档位，缓存中心展示。在线播放默认档不变，等 M1 后做 C1 在线换档 |

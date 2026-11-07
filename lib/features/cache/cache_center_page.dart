@@ -534,6 +534,7 @@ class _CacheEntry {
     required this.status,
     this.speedBytesPerSecond = 0,
     this.error,
+    this.qualityLabel = '',
   });
 
   factory _CacheEntry.fromBook(OfflineBookSummary summary) => _CacheEntry(
@@ -560,6 +561,7 @@ class _CacheEntry {
     status: summary.total > 0 && summary.completed >= summary.total
         ? _EntryStatus.done
         : _EntryStatus.partial,
+    qualityLabel: summary.qualityLabel,
   );
 
   /// 排队中条目：标题/封面以队列快照为准，进度沿用已有 manifest（如有）。
@@ -575,6 +577,7 @@ class _CacheEntry {
     total: fallback?.total ?? 0,
     bytes: fallback?.bytes ?? 0,
     status: _EntryStatus.queued,
+    qualityLabel: fallback?.qualityLabel ?? '',
   );
 
   /// 用活动任务的实时数据覆盖 manifest 快照（任务缺失的字段退回 [fallback]）。
@@ -596,6 +599,7 @@ class _CacheEntry {
         },
         speedBytesPerSecond: task.speedBytesPerSecond,
         error: task.error,
+        qualityLabel: fallback?.qualityLabel ?? '',
       );
 
   final OfflineTaskKind kind;
@@ -604,6 +608,9 @@ class _CacheEntry {
   final String cover;
   final int completed;
   final int total;
+
+  /// 实际缓存清晰度（如 `720P`）；未知为空。
+  final String qualityLabel;
   final int bytes;
   final _EntryStatus status;
 
@@ -738,6 +745,7 @@ class _CacheTile extends StatelessWidget {
       '下载失败${entry.error == null ? '' : ' · ${entry.error}'}',
     _EntryStatus.done || _EntryStatus.partial =>
       '已缓存 ${entry.completed}/${entry.total} ${entry.unit}'
+          '${entry.qualityLabel.isEmpty ? '' : ' · ${entry.qualityLabel}'}'
           ' · ${formatBytes(entry.bytes)}',
     _EntryStatus.queued =>
       '排队中'

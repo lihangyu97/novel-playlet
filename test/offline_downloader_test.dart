@@ -13,6 +13,7 @@ import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/data/models/json_utils.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
+import 'package:novel_playlet/features/cache/download_quality.dart';
 import 'package:novel_playlet/features/cache/offline_downloader.dart';
 import 'package:novel_playlet/features/cache/offline_queue.dart';
 import 'package:novel_playlet/features/cache/offline_task.dart';
@@ -319,6 +320,33 @@ void main() {
       expect(state.status, OfflineTaskStatus.done);
       expect(state.completed, 2);
       expect(state.bytes, 6);
+    });
+
+    test('默认 720P：下载带 maxHeight=720，manifest 记录实际档位', () async {
+      network.videoBytes['e0'] = [1, 2, 3];
+      final container = await makeContainer();
+      await startVideo(container, items: episodes(1));
+
+      expect(network.videoSourceMaxHeights, [720]);
+      final manifest = (await seriesStore.read('s1'))!;
+      expect(manifest.qualityMaxHeight, 720);
+      expect(manifest.episodes.single.variantName, '720P');
+      expect(manifest.episodes.single.shortEdge, 720);
+      final summaries = await seriesStore.summaries();
+      expect(summaries.single.qualityLabel, '720P');
+    });
+
+    test('选「最高」时不传 maxHeight，manifest 不设上限', () async {
+      network.videoBytes['e0'] = [1, 2, 3];
+      final container = await makeContainer();
+      container
+          .read(videoDownloadQualityProvider.notifier)
+          .setQuality(VideoDownloadQuality.best);
+      await startVideo(container, items: episodes(1));
+
+      expect(network.videoSourceMaxHeights, [null]);
+      final manifest = (await seriesStore.read('s1'))!;
+      expect(manifest.qualityMaxHeight, 0);
     });
 
     test('单集失败重试 1 次后暂停，且不留下 .part', () async {
@@ -993,6 +1021,7 @@ class _FakeNetwork implements OfflineNetwork {
   final batchCalls = <List<String>>[];
   final singleCalls = <String>[];
   final videoSourceCalls = <String>[];
+  final videoSourceMaxHeights = <int?>[];
   final streamCalls = <String>[];
 
   /// 批响应里"缺失"的章（触发单章回退）。
@@ -1057,9 +1086,18 @@ class _FakeNetwork implements OfflineNetwork {
   }
 
   @override
-  Future<VideoSource> videoSource(String episodeId) async {
+  Future<VideoSource> videoSource(String episodeId, {int? maxHeight}) async {
     videoSourceCalls.add(episodeId);
-    return VideoSource(url: 'http://127.0.0.1:9/$episodeId.mp4');
+    videoSourceMaxHeights.add(maxHeight);
+    final shortEdge = maxHeight ?? 1080;
+    return VideoSource(
+      url: 'http://127.0.0.1:9/$episodeId.mp4',
+      appliedVariant: VideoVariant(
+        name: '${shortEdge}P',
+        url: '',
+        shortEdge: shortEdge,
+      ),
+    );
   }
 
   @override

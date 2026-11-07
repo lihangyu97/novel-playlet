@@ -2,10 +2,10 @@
 
 ## 现在什么已经就绪
 
-- Flutter 工程（iOS-only 目标，但不要改 `ios/` 与 `pubspec.yaml`）
+- Flutter 工程（iOS-only 目标，但不要改 `ios/` 与 `pubspec.yaml`；视频域专项例外见 [docs/playback-quality-speed.md](docs/playback-quality-speed.md) 与 `third_party/README.md`）
 - Rust 内核 `rust/` 已完整拷入，FRB 绑定在 `lib/src/rust/`（**自动生成，不要手改**）
 - 启动链：`lib/main.dart → BootstrapGate → BackendService.start() → Rust init`
-- 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / videoFeed / searchVideos / bookDetail / videoDetail / videoEpisodes / videoSource / directory / chapter）
+- 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / videoFeed / searchVideos / bookDetail / videoDetail / videoEpisodes / videoSource / cachedVideoUrl / directory / chapter）
 - 模型：`lib/data/models/`（`NovelItem`、`BookDetail`、`Chapter`、`ChapterContent`、`FeedPage`、`VideoSeries`、`VideoDetail`、`VideoSource`、`json_utils`（含 `ApiErrorKind`））。卡片解析不在 model 层：统一在 `lib/data/parsers/`（`card_walker.dart` 的 `walkCards` / `CardAdapter` 骨架 + `novel_parsers.dart` / `video_parsers.dart`）
 - 分类策略：`lib/features/recommend/content_source.dart` 的 `ContentSource`（`NovelSource` / `DramaSource` / `ManjuSource`）。上游 `tab_type`、搜索 tab、漫剧搜索兜底都在策略对象里；`lib/features/recommend/recommend_category.dart` 只留 label / searchHint / emptyIcon / source，页面不再按分类写 if
 - 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读、短剧收藏/观看进度）；阅读进度表按最近 200 本做 LRU 上限（`progressLimit`）。缓存：`lib/core/cache/`（封面缓存 `AppImageCache`、占用统计与清理 `AppCache`，入口在「我的 → 设置 → 存储」）
@@ -25,7 +25,7 @@
 ## 硬性规则
 
 1. **只改自己 feature 目录里的文件**（见各自任务说明）。共享文件（`lib/app/**`、`lib/data/**`、`lib/core/**`、`lib/src/rust/**`、`rust/`、`ios/`、`pubspec.yaml`）一律不要改。缺共享组件就在自己的目录里写。
-2. **不要新增依赖。** 只用 pubspec 里现有的包（flutter_riverpod、cached_network_image、flutter_cache_manager、html、shared_preferences、flutter_secure_storage、path_provider、video_player）。`video_player` 是视频域专用：只允许 `lib/features/video/` 使用，播放器细节见 `docs/video-playback.md`。
+2. **不要新增依赖。** 只用 pubspec 里现有的包（flutter_riverpod、cached_network_image、flutter_cache_manager、html、shared_preferences、flutter_secure_storage、path_provider、video_player）。`video_player` 是视频域专用：只允许 `lib/features/video/` 使用，播放器细节见 `docs/video-playback.md`。`video_player_avfoundation` 通过 `third_party/` 本地补丁覆盖（defaultRate 倍速修复，见 `third_party/README.md`），不要直接改 pub cache。
 3. **不要跑 `flutter build` / `flutter run`**（很慢，由 Lead 统一验证）。用 `flutter analyze lib/features/<你的域>` 自检，必须 0 error 0 warning。
 4. UI 文案用中文；注释写"为什么"，不要写"做了什么"。
 5. 只用 Material 3 + `Theme.of(context).colorScheme`，不要硬编码颜色（阅读页底色用 `ReaderPaper`）。
@@ -55,7 +55,8 @@ Future<VideoDetail> videoDetail(String seriesId);
 Future<List<Chapter>> directory(String bookId);           // 已摊平，Chapter{id,title,volumeName,index}
 Future<List<Chapter>> videoEpisodes(String seriesId);     // 与 directory 同一条路由
 Future<ChapterContent> chapter(String itemId, {String title = ''});
-Future<VideoSource> videoSource(String episodeId, {bool refresh = false}); // refresh=1 删缓存重下
+Future<VideoSource> videoSource(String episodeId, {bool refresh = false, int? maxHeight}); // refresh=1 删缓存重下；默认带 variants=0；maxHeight=下载清晰度上限
+Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 /src，不打上游
 // 以上错误统一抛 ApiException（message 可直接展示）
 ```
 

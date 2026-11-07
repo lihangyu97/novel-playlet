@@ -18,13 +18,17 @@ class OfflinePaths {
 
   final Future<Directory> Function() _rootDirectory;
 
+  /// 进程内 root 只算一次：`getApplicationSupportDirectory()` 每次都会走平台
+  /// 通道（还会顺手 mkdir），而播放页每切一集都要算一次路径。
+  Future<Directory>? _rootCache;
+
   static Future<Directory> _defaultRootDirectory() async {
     final support = await getApplicationSupportDirectory();
     return Directory('${support.path}/offline');
   }
 
   /// 离线区根目录（`.../offline`）；可能存在也可能不存在。
-  Future<Directory> root() => _rootDirectory();
+  Future<Directory> root() => _rootCache ??= _rootDirectory();
 
   /// 小说离线区根目录（`offline/novel`）。
   Future<Directory> novelDir() async =>

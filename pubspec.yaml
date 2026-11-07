@@ -29,6 +29,13 @@ dependencies:
   # 视频播放：底层 AVPlayer（iOS）。方案与边界见 docs/video-playback.md。
   video_player: ^2.14.1
 
+# AVPlayer 起播/seek 后会把 rate 复位成 defaultRate；上游 2.12.3 没有同步
+# defaultRate，导致 UI 显示 2x、实际播放 1x。这里用本地打过补丁的插件实现
+# （改动与升级流程见 third_party/README.md）。
+dependency_overrides:
+  video_player_avfoundation:
+    path: third_party/video_player_avfoundation
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

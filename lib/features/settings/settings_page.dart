@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/theme_settings.dart';
 import '../../core/cache/app_cache.dart';
+import '../cache/download_quality.dart';
 import 'settings_providers.dart';
 import 'widgets/theme_color_picker.dart';
 
@@ -29,6 +30,8 @@ class SettingsPage extends StatelessWidget {
             _SectionTitle('存储'),
             _StorageCard(),
             _StorageHint(),
+            _SectionTitle('视频'),
+            _VideoDownloadQualityCard(),
           ],
         ),
       ),
@@ -228,6 +231,64 @@ class _PresetDot extends StatelessWidget {
                 ? Icon(Icons.check_rounded, size: 20, color: checkColor)
                 : null,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 视频
+// ---------------------------------------------------------------------------
+
+/// 离线整剧下载的清晰度上限（默认 720P）。
+///
+/// 只影响「下一部开始下载」的剧：已下完的内容不自动重下，需要用户删掉重新
+/// 缓存；在线播放不受这里影响（默认档由内核选流，后续清晰度面板再开）。
+class _VideoDownloadQualityCard extends ConsumerWidget {
+  const _VideoDownloadQualityCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final quality = ref.watch(videoDownloadQualityProvider);
+    return _Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '离线下载清晰度',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '默认 720P，只影响之后开始的整剧下载；已缓存内容不会自动重下。',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final option in VideoDownloadQuality.values)
+                  ChoiceChip(
+                    label: Text(option.label),
+                    selected: option == quality,
+                    onSelected: (_) => ref
+                        .read(videoDownloadQualityProvider.notifier)
+                        .setQuality(option),
+                  ),
+              ],
+            ),
+          ],
         ),
       ),
     );
