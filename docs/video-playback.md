@@ -147,3 +147,4 @@
 | 2026-11-07 | 清晰度方向定稿：当前默认档为「当次上游最高可解码档」（在线与离线同一档，UI 不可选）；后续默认改 720P，先做离线/下载上限（C0），M1 落地后再做在线换档（C1）。见 [playback-quality-speed.md](playback-quality-speed.md) |
 | 2026-11-07 | 修复「UI 显示 2x、实际 1x」：iOS AVPlayer 在起播/seek 后按 `defaultRate`(默认 1.0) 复位 rate，上游 avfoundation 2.12.3 从不写 defaultRate。改为 vendored 插件（`third_party/video_player_avfoundation`，补 defaultRate）+ Dart 在首帧/seek/恢复时补设倍速；`pubspec.yaml` 用 dependency_overrides |
 | 2026-11-07 | 内核 `/api/v1/videos/{id}` 新增 `mode=cached`（只查本地 `/src` + key sidecar，不打上游，断网可播自动缓存集）与 `variants=0`（播放页不需要清晰度列表，省 fallback 请求）；播放页顺序改为 离线 → 预取 → cached → 正常取流，并顺手缓存离线路径 root、合并 stat |
+| 2026-11-07 | 下载清晰度上限（C0）：内核 `?max_height=` 按短边选档、单文件缓存 + `.variant.json` marker；离线整剧默认 720P（设置页可选最高/1080P/480P），manifest 记录请求上限与每集实际档位，缓存中心展示。在线播放默认档不变，等 M1 后做 C1 在线换档 |

@@ -249,6 +249,7 @@ class _FakeApi extends ApiClient {
   Future<VideoSource> videoSource(
     String episodeId, {
     bool refresh = false,
+    int? maxHeight,
   }) async {
     sourceCalls += 1;
     return VideoSource(url: sourceUrl ?? 'http://127.0.0.1:18931/src/e1.mp4');

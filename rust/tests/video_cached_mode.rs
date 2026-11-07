@@ -127,3 +127,111 @@ async fn variants_zero_skips_fallback_quality_list() {
     );
     assert!(!body["variants"].as_array().unwrap_or(&vec![]).is_empty());
 }
+
+fn quality_payload() -> Value {
+    json!({
+        "data": {
+            "video_model": {
+                "key_seed": "AAAA",
+                "video_list": {
+                    "video_1": {
+                        "main_url": "https://example.invalid/360.mp4",
+                        "codec_type": "h264", "vwidth": 640, "vheight": 360
+                    },
+                    "video_2": {
+                        "main_url": "https://example.invalid/720.mp4",
+                        "codec_type": "h264", "vwidth": 1280, "vheight": 720
+                    },
+                    "video_3": {
+                        "main_url": "https://example.invalid/1080.mp4",
+                        "codec_type": "h264", "vwidth": 1920, "vheight": 1080
+                    }
+                }
+            }
+        }
+    })
+}
+
+#[tokio::test]
+async fn max_height_picks_highest_tier_not_above_the_cap() {
+    let upstream = MockUpstream::start(|_| MockReply::json(quality_payload())).await;
+    let dir = TempDir::new("video-max-height");
+    let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
+
+    let (status, body) = request_video(&server, "mode=stream&max_height=720").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["video_url"], "https://example.invalid/720.mp4",
+        "{body}"
+    );
+    assert_eq!(body["variant"]["name"], "720P", "{body}");
+    assert_eq!(body["variant"]["short_edge"], 720, "{body}");
+    assert_eq!(body["quality_fallback"], false, "{body}");
+}
+
+#[tokio::test]
+async fn max_height_without_lower_tier_falls_back_to_lowest_available() {
+    let payload = json!({
+        "data": {"video_model": {
+            "key_seed": "AAAA",
+            "video_list": {
+                "video_1": {
+                    "main_url": "https://example.invalid/1080.mp4",
+                    "codec_type": "h264", "vwidth": 1920, "vheight": 1080
+                },
+                "video_2": {
+                    "main_url": "https://example.invalid/720.mp4",
+                    "codec_type": "h264", "vwidth": 1280, "vheight": 720
+                }
+            }
+        }}
+    });
+    let upstream = MockUpstream::start(move |_| MockReply::json(payload.clone())).await;
+    let dir = TempDir::new("video-max-height-fallback");
+    let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
+
+    let (status, body) = request_video(&server, "mode=stream&max_height=480").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["video_url"], "https://example.invalid/720.mp4",
+        "{body}"
+    );
+    assert_eq!(body["variant"]["name"], "720P", "{body}");
+    assert_eq!(body["quality_fallback"], true, "{body}");
+}
+
+#[tokio::test]
+async fn download_mode_uses_requested_tier_and_writes_marker() {
+    let upstream = MockUpstream::start(|req| {
+        if req.path.ends_with(".mp4") {
+            return MockReply {
+                status: 200,
+                headers: vec![("content-type".to_string(), "video/mp4".to_string())],
+                body: b"fake-mp4".to_vec(),
+            };
+        }
+        MockReply::json(quality_payload())
+    })
+    .await;
+    let dir = TempDir::new("video-max-height-download");
+    let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
+
+    let (status, body) = request_video(&server, "max_height=720&variants=0").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["video_url"], "/src/episode.mp4", "{body}");
+    assert_eq!(body["variant"]["name"], "720P", "{body}");
+    assert!(
+        upstream
+            .requests()
+            .iter()
+            .any(|r| r.path.ends_with("/720.mp4")),
+        "应下载 720P 档：{:?}",
+        upstream.requests()
+    );
+
+    // 缓存命中时 `mode=cached` 能读到档位 marker。
+    let (status, body) = request_video(&server, "mode=cached").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["cached"], true, "{body}");
+    assert_eq!(body["variant"]["name"], "720P", "{body}");
+}

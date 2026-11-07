@@ -152,13 +152,19 @@ class ApiClient {
   Future<VideoSource> videoSource(
     String episodeId, {
     bool refresh = false,
+    int? maxHeight,
   }) async {
     final payload = await _getJson(
       '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
       // refresh=1：内核删掉本地缓存文件后重新下载。播放失败（半截/坏缓存）
       // 时用它能真正重来，否则重试只会拿回同一份坏文件。
       // variants=0：播放页不需要清晰度列表，别让内核为它多拉一次 fallback。
-      {if (refresh) 'refresh': '1', 'variants': '0'},
+      // max_height：离线/下载清晰度上限（短边 ≤ N 的最高档）。
+      {
+        if (refresh) 'refresh': '1',
+        if (maxHeight != null && maxHeight > 0) 'max_height': '$maxHeight',
+        'variants': '0',
+      },
       // 首次播放要等整集下载 + 写密钥 sidecar，默认 20s 不够。
       timeout: const Duration(seconds: 120),
     );
@@ -179,6 +185,8 @@ class ApiClient {
       url: url,
       keyHex: source.keyHex,
       variants: source.variants,
+      appliedVariant: source.appliedVariant,
+      qualityFallback: source.qualityFallback,
     );
   }
 

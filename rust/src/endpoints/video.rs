@@ -111,6 +111,10 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         // 播放页不消费 variants；默认播放传 `variants=0`，省掉为合并清晰度列表
         // 而额外请求 fallback_api 的那一个 RTT。需要面板时再显式要。
         let want_variants = params.get_str("variants") != "0";
+        // 离线/下载清晰度上限：按短边取 ≤ max_height 的最高档；没有更低的档
+        // 时回退到最低可用档（quality_fallback=true）。0/缺省 = 现状最高档。
+        let requested_max_height = int_default(&params.get_str("max_height"), 0).max(0);
+        let want_quality = requested_max_height > 0;
 
         if cached_mode && !force_refresh {
             let src_dir = if ctx.src_dir.is_empty() {
@@ -118,19 +122,28 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             } else {
                 ctx.src_dir.clone()
             };
+            let lookup_dir = src_dir.clone();
             let lookup_id = video_id.clone();
             let cached =
-                tokio::task::spawn_blocking(move || cached_src_filename(&src_dir, &lookup_id))
+                tokio::task::spawn_blocking(move || cached_src_filename(&lookup_dir, &lookup_id))
                     .await
                     .ok()
                     .flatten();
             return Ok(match cached {
-                Some(filename) => json!({
-                    "video_url": format!("/src/{filename}"),
-                    "video_id": video_id,
-                    "cached": true,
-                    "variants": [],
-                }),
+                Some(filename) => {
+                    let fp = Path::new(&src_dir).join(&filename);
+                    let variant = tokio::task::spawn_blocking(move || read_variant_marker(&fp))
+                        .await
+                        .ok()
+                        .flatten();
+                    json!({
+                        "video_url": format!("/src/{filename}"),
+                        "video_id": video_id,
+                        "cached": true,
+                        "variant": variant,
+                        "variants": [],
+                    })
+                }
                 None => json!({
                     "video_id": video_id,
                     "cached": false,
@@ -144,7 +157,7 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         // 了的 bytevc2（实测 2026-10-12 同一集对拍）。二选一必然少档：只信
         // shortplay 会丢 1080P，只信 phoenix 会让低档被编码门整片丢掉。
         // 两个请求互不依赖，并发发出，不额外占用一个往返。
-        let (parsed, phoenix_parsed, resolved) = if stream_mode {
+        let (parsed, phoenix_parsed, resolved) = if stream_mode || want_quality {
             // Resolve the primary source while quality metadata is loading.
             // A primary failure cancels the auxiliary work, but auxiliary
             // failure remains non-fatal and successful tiers are never cut off.
@@ -200,7 +213,7 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
                 .and_then(|extra| episode_vertical_value(&extra.root))
         });
 
-        let (video_url, content_key) = match resolved {
+        let (mut video_url, mut content_key) = match resolved {
             VideoSourceResolution::Found(url, key) => (url, key),
             VideoSourceResolution::CodecRejected => {
                 return Err(ApiError::Internal("该视频暂不支持播放".to_string()));
@@ -210,11 +223,32 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             }
         };
 
-        let variants = if want_variants {
+        // 只要请求了清晰度（或客户端要面板）就需要合并后的全量档位。
+        let variants = if want_variants || want_quality {
             extract_stream_variants(ctx, &parsed, phoenix_parsed.as_ref()).await
         } else {
             Vec::new()
         };
+        let mut applied_variant: Option<Value> = None;
+        let mut quality_fallback = false;
+        if want_quality {
+            if let Some((row, fallback)) =
+                pick_variant_for_max_height(&variants, requested_max_height)
+            {
+                if let Some(url) = row.get("url").and_then(Value::as_str) {
+                    if !url.is_empty() {
+                        video_url = url.to_string();
+                        content_key = row
+                            .get("key_hex")
+                            .and_then(Value::as_str)
+                            .and_then(|hex_key| hex::decode(hex_key).ok())
+                            .unwrap_or_default();
+                        applied_variant = Some(variant_marker_value(row));
+                        quality_fallback = fallback;
+                    }
+                }
+            }
+        }
         let source = json!({
             "video_url": video_url,
             "key_hex": hex::encode(&content_key),
@@ -222,6 +256,11 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             // 分集方向（官方 `VideoInfo.vertical`）：缺字段时 null，客户端
             // 据此保持旧行为（显示「全屏观看」）。
             "vertical": vertical,
+            // 实际选中的档位（请求了 max_height 时有值）；前端据此在离线
+            // manifest 里记录真实清晰度。
+            "variant": applied_variant,
+            // 请求档不存在时回退到了可用档（如要 480P 只有 720P）。
+            "quality_fallback": quality_fallback,
             // 全量兼容档（高→低）。官方面板按该列表渲染清晰度行；空数组
             // 表示单流，客户端隐藏清晰度入口。播放页传 variants=0 时为空。
             "variants": variants,
@@ -230,13 +269,39 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             return Ok(source);
         }
 
-        match download_and_save(ctx, &video_id, &video_url, &content_key, force_refresh).await {
+        match download_and_save(
+            ctx,
+            &video_id,
+            &video_url,
+            &content_key,
+            force_refresh,
+            applied_variant.as_ref(),
+            want_quality.then_some(requested_max_height),
+        )
+        .await
+        {
             Ok(local_path) => {
                 let main_url = local_path.clone();
+                // 下载/命中后会写档位 marker；以磁盘上的为准（缓存命中时可能
+                // 是之前下载的同档或更高档）。
+                let src_dir = if ctx.src_dir.is_empty() {
+                    "src".to_string()
+                } else {
+                    ctx.src_dir.clone()
+                };
+                let filename = local_path.trim_start_matches("/src/").to_string();
+                let fp = Path::new(&src_dir).join(filename);
+                let variant = tokio::task::spawn_blocking(move || read_variant_marker(&fp))
+                    .await
+                    .ok()
+                    .flatten()
+                    .or(applied_variant.clone());
                 Ok(json!({
                     "video_url": local_path,
                     "video_id": video_id,
                     "vertical": vertical,
+                    "variant": variant,
+                    "quality_fallback": quality_fallback,
                     "video_info": {
                         "data": {
                             "video_list": {
@@ -1405,12 +1470,15 @@ async fn stream_download_to_file_with_cap(
 }
 
 /// Downloads the MP4, saves it to src/, and returns the served path.
+#[allow(clippy::too_many_arguments)]
 async fn download_and_save(
     ctx: &Ctx,
     video_id: &str,
     video_url: &str,
     content_key: &[u8],
     force_refresh: bool,
+    applied_variant: Option<&Value>,
+    requested_max_height: Option<i64>,
 ) -> Result<String, String> {
     let src_dir = if ctx.src_dir.is_empty() {
         "src".to_string()
@@ -1443,32 +1511,44 @@ async fn download_and_save(
         // 「重试」永远修不好。
         let _ = tokio::fs::remove_file(&fp).await;
         let _ = tokio::fs::remove_file(key_sidecar_path(&fp)).await;
+        let _ = tokio::fs::remove_file(variant_marker_path(&fp)).await;
     }
 
     if let Ok(info) = tokio::fs::metadata(&fp).await {
         if info.len() > 0 {
-            // The cache keeps the downloaded bytes exactly as they arrived
-            // (CENC-encrypted when the source is encrypted); the serve path
-            // decrypts ranges on demand. All this path has to do is keep the
-            // key sidecar in place — which also repairs a sidecar lost to a
-            // crash between the download's rename and its sidecar write.
-            // The moov/sidecar reads are blocking file I/O, so they run on
-            // the blocking pool instead of an async worker.
-            let cache_path = fp.clone();
-            let cache_key = content_key.to_vec();
-            tokio::task::spawn_blocking(move || {
-                let _guard = guard;
-                if !cache_key.is_empty()
-                    && cache_cenc_state(&cache_path) == CacheCencState::Encrypted
-                    && read_key_sidecar(&cache_path).as_deref() != Some(cache_key.as_slice())
-                {
-                    write_key_sidecar(&cache_path, &cache_key)?;
-                }
-                Ok::<(), String>(())
-            })
-            .await
-            .map_err(|e| e.to_string())??;
-            return Ok(format!("/src/{filename}"));
+            // 显式要求「≤max_height」时，缓存档位必须已知且不超过上限，否则
+            // 这次下载会把已有文件覆盖成请求档位（单文件 + marker 方案）。
+            let quality_ok = match requested_max_height {
+                Some(max) => read_variant_marker(&fp)
+                    .as_ref()
+                    .and_then(|marker| marker.get("short_edge").and_then(Value::as_i64))
+                    .is_some_and(|short_edge| short_edge <= max),
+                None => true,
+            };
+            if quality_ok {
+                // The cache keeps the downloaded bytes exactly as they arrived
+                // (CENC-encrypted when the source is encrypted); the serve path
+                // decrypts ranges on demand. All this path has to do is keep the
+                // key sidecar in place — which also repairs a sidecar lost to a
+                // crash between the download's rename and its sidecar write.
+                // The moov/sidecar reads are blocking file I/O, so they run on
+                // the blocking pool instead of an async worker.
+                let cache_path = fp.clone();
+                let cache_key = content_key.to_vec();
+                tokio::task::spawn_blocking(move || {
+                    let _guard = guard;
+                    if !cache_key.is_empty()
+                        && cache_cenc_state(&cache_path) == CacheCencState::Encrypted
+                        && read_key_sidecar(&cache_path).as_deref() != Some(cache_key.as_slice())
+                    {
+                        write_key_sidecar(&cache_path, &cache_key)?;
+                    }
+                    Ok::<(), String>(())
+                })
+                .await
+                .map_err(|e| e.to_string())??;
+                return Ok(format!("/src/{filename}"));
+            }
         }
     }
 
@@ -1524,6 +1604,7 @@ async fn download_and_save(
     // of leaving a dead cache file behind.
     let key_path = fp.clone();
     let key = content_key.to_vec();
+    let marker = applied_variant.cloned();
     tokio::task::spawn_blocking(move || {
         // Finalization owns both guards even if the request is cancelled.
         let _guard = guard;
@@ -1536,6 +1617,12 @@ async fn download_and_save(
             if let Err(err) = write_key_sidecar(&key_path, &key) {
                 let _ = std::fs::remove_file(&key_path);
                 return Err(err);
+            }
+        }
+        if let Some(marker) = marker {
+            // marker 只影响「档位显示/按档命中」，写失败不影响文件可播。
+            if let Err(err) = write_variant_marker(&key_path, &marker) {
+                log::warn!("write variant marker failed: {err}");
             }
         }
         Ok(())
@@ -1618,7 +1705,12 @@ fn prune_src_cache_with_budget(src_dir: &str, keep: &Path, max_bytes: i64) {
     // Key sidecars (`<video>.key`, P1-7) belong to their video entry: one
     // whose video (or in-flight `.part`) is gone can never serve again.
     for (name, path) in &entries {
-        if let Some(stem) = name.strip_suffix(".key") {
+        let orphan_stem = if let Some(stem) = name.strip_suffix(".key") {
+            Some(stem)
+        } else {
+            name.strip_suffix(".variant.json")
+        };
+        if let Some(stem) = orphan_stem {
             if !names.contains(stem) && !names.contains(format!("{stem}.part").as_str()) {
                 let video = Path::new(src_dir).join(stem);
                 let Ok(_guard) = cache_entry_lock(&video).try_lock_owned() else {
@@ -1680,9 +1772,10 @@ fn prune_src_cache_with_budget(src_dir: &str, keep: &Path, max_bytes: i64) {
             continue;
         };
         if std::fs::remove_file(&item.path).is_ok() {
-            // A video's key sidecar (P1-7) is part of the entry, not a
-            // separate cache citizen.
+            // A video's key/档位 sidecar is part of the entry, not a separate
+            // cache citizen.
             let _ = std::fs::remove_file(key_sidecar_path(&item.path));
+            let _ = std::fs::remove_file(variant_marker_path(&item.path));
             total -= item.size as i64;
         }
     }
@@ -1708,6 +1801,67 @@ const MAX_MOOV_BYTES: u64 = 16 * 1024 * 1024;
 
 fn key_sidecar_path(fp: &Path) -> PathBuf {
     PathBuf::from(format!("{}.key", fp.display()))
+}
+
+fn variant_marker_path(fp: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.variant.json", fp.display()))
+}
+
+/// 缓存文件对应的档位信息（`{name,width,height,short_edge}`，JSON sidecar）。
+fn read_variant_marker(fp: &Path) -> Option<Value> {
+    let raw = std::fs::read_to_string(variant_marker_path(fp)).ok()?;
+    serde_json::from_str::<Value>(&raw).ok()
+}
+
+fn write_variant_marker(fp: &Path, marker: &Value) -> Result<(), String> {
+    let body = serde_json::to_vec(marker).map_err(|e| e.to_string())?;
+    std::fs::write(variant_marker_path(fp), body).map_err(|e| e.to_string())
+}
+
+/// 档位语义按短边：竖屏 720×1280 是 720P 而不是 2K。
+fn short_edge_of(width: i64, height: i64) -> i64 {
+    if width > 0 && height > 0 {
+        width.min(height)
+    } else {
+        width.max(height)
+    }
+}
+
+fn variant_short_edge(row: &Value) -> i64 {
+    let width = row.get("width").and_then(Value::as_i64).unwrap_or(0);
+    let height = row.get("height").and_then(Value::as_i64).unwrap_or(0);
+    short_edge_of(width, height)
+}
+
+fn variant_marker_value(row: &Value) -> Value {
+    json!({
+        "name": row.get("name").cloned().unwrap_or(Value::String(String::new())),
+        "width": row.get("width").cloned().unwrap_or(Value::Number(0.into())),
+        "height": row.get("height").cloned().unwrap_or(Value::Number(0.into())),
+        "short_edge": variant_short_edge(row),
+    })
+}
+
+/// 选「短边 ≤ max_height 的最高档」；一档都没有时回退到最低可用档，
+/// 并返回 `true` 表示发生了回退（客户端可提示「该剧没有更低的档」）。
+fn pick_variant_for_max_height(rows: &[Value], max_height: i64) -> Option<(&Value, bool)> {
+    let mut best: Option<(&Value, i64)> = None;
+    for row in rows {
+        let short_edge = variant_short_edge(row);
+        if short_edge <= 0 || short_edge > max_height {
+            continue;
+        }
+        if best.is_none_or(|(_, best_edge)| short_edge > best_edge) {
+            best = Some((row, short_edge));
+        }
+    }
+    if let Some((row, _)) = best {
+        return Some((row, false));
+    }
+    rows.iter()
+        .rev()
+        .find(|row| variant_short_edge(row) > 0)
+        .map(|row| (row, true))
 }
 
 fn write_key_sidecar(fp: &Path, content_key: &[u8]) -> Result<(), String> {

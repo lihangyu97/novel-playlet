@@ -10,6 +10,8 @@ class OfflineEpisode {
     this.index = 0,
     this.bytes = 0,
     this.cached = false,
+    this.variantName = '',
+    this.shortEdge = 0,
   });
 
   final String id;
@@ -22,18 +24,31 @@ class OfflineEpisode {
   /// 文件是否已落盘（reconcile 按文件存在校正）。
   final bool cached;
 
+  /// 下载时实际命中/请求到的清晰度（如 `720P`）；旧 manifest 为空。
+  final String variantName;
+
+  /// 实际档位的短边（360/480/720/1080）；0 表示未知。
+  final int shortEdge;
+
   factory OfflineEpisode.fromChapter(Chapter chapter) => OfflineEpisode(
     id: chapter.id,
     title: chapter.title,
     index: chapter.index,
   );
 
-  OfflineEpisode copyWith({int? bytes, bool? cached}) => OfflineEpisode(
+  OfflineEpisode copyWith({
+    int? bytes,
+    bool? cached,
+    String? variantName,
+    int? shortEdge,
+  }) => OfflineEpisode(
     id: id,
     title: title,
     index: index,
     bytes: bytes ?? this.bytes,
     cached: cached ?? this.cached,
+    variantName: variantName ?? this.variantName,
+    shortEdge: shortEdge ?? this.shortEdge,
   );
 
   Map<String, dynamic> toJson() => {
@@ -42,6 +57,8 @@ class OfflineEpisode {
     'index': index,
     'bytes': bytes,
     'cached': cached,
+    if (variantName.isNotEmpty) 'variantName': variantName,
+    if (shortEdge > 0) 'shortEdge': shortEdge,
   };
 
   static OfflineEpisode? tryFromJson(Object? raw) {
@@ -55,6 +72,8 @@ class OfflineEpisode {
       index: asInt(json['index']),
       bytes: asInt(json['bytes']),
       cached: json['cached'] == true,
+      variantName: asString(json['variantName']),
+      shortEdge: asInt(json['shortEdge']),
     );
   }
 }
@@ -70,6 +89,7 @@ class OfflineSeries {
     required List<OfflineEpisode> episodes,
     this.completed = 0,
     this.bytes = 0,
+    this.qualityMaxHeight = 0,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) : episodes = List<OfflineEpisode>.unmodifiable(episodes),
@@ -89,6 +109,10 @@ class OfflineSeries {
   /// 明文 mp4 字节数之和。
   final int bytes;
 
+  /// 下载时请求的清晰度上限（0 = 最高档；720 = 默认）。实际档位以每集
+  /// `variantName` 为准（同剧不同集可能有差异）。
+  final int qualityMaxHeight;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -102,6 +126,7 @@ class OfflineSeries {
     List<OfflineEpisode>? episodes,
     int? completed,
     int? bytes,
+    int? qualityMaxHeight,
     DateTime? updatedAt,
   }) => OfflineSeries(
     schema: schema,
@@ -112,6 +137,7 @@ class OfflineSeries {
     episodes: episodes ?? this.episodes,
     completed: completed ?? this.completed,
     bytes: bytes ?? this.bytes,
+    qualityMaxHeight: qualityMaxHeight ?? this.qualityMaxHeight,
     createdAt: createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -126,6 +152,7 @@ class OfflineSeries {
     'completed': completed,
     'total': total,
     'bytes': bytes,
+    if (qualityMaxHeight > 0) 'qualityMaxHeight': qualityMaxHeight,
     'createdAt': createdAt.millisecondsSinceEpoch,
     'updatedAt': updatedAt.millisecondsSinceEpoch,
   };
@@ -150,6 +177,7 @@ class OfflineSeries {
       episodes: episodes,
       completed: asInt(json['completed']),
       bytes: asInt(json['bytes']),
+      qualityMaxHeight: asInt(json['qualityMaxHeight']),
       createdAt: _dateTime(json['createdAt']),
       updatedAt: _dateTime(json['updatedAt']),
     );
@@ -166,6 +194,7 @@ class OfflineSeriesSummary {
     required this.total,
     required this.bytes,
     required this.updatedAt,
+    this.qualityLabel = '',
   });
 
   final String seriesId;
@@ -176,6 +205,9 @@ class OfflineSeriesSummary {
   final int bytes;
   final DateTime updatedAt;
 
+  /// 缓存实际清晰度（如 `720P`）；旧 manifest/未知为空。
+  final String qualityLabel;
+
   factory OfflineSeriesSummary.fromSeries(OfflineSeries series) =>
       OfflineSeriesSummary(
         seriesId: series.seriesId,
@@ -185,7 +217,21 @@ class OfflineSeriesSummary {
         total: series.total,
         bytes: series.bytes,
         updatedAt: series.updatedAt,
+        qualityLabel: qualityLabelOf(series),
       );
+}
+
+/// 缓存清晰度展示文案：优先用第一集的实际档位，其次用请求上限。
+String qualityLabelOf(OfflineSeries series) {
+  for (final episode in series.episodes) {
+    if (episode.variantName.isNotEmpty) return episode.variantName;
+  }
+  final maxHeight = series.qualityMaxHeight;
+  if (maxHeight <= 0) return '';
+  if (maxHeight <= 480) return '480P';
+  if (maxHeight <= 720) return '720P';
+  if (maxHeight <= 1080) return '1080P';
+  return '${maxHeight}P';
 }
 
 DateTime _dateTime(Object? value) {

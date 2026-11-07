@@ -55,7 +55,7 @@ Future<VideoDetail> videoDetail(String seriesId);
 Future<List<Chapter>> directory(String bookId);           // 已摊平，Chapter{id,title,volumeName,index}
 Future<List<Chapter>> videoEpisodes(String seriesId);     // 与 directory 同一条路由
 Future<ChapterContent> chapter(String itemId, {String title = ''});
-Future<VideoSource> videoSource(String episodeId, {bool refresh = false}); // refresh=1 删缓存重下；默认带 variants=0
+Future<VideoSource> videoSource(String episodeId, {bool refresh = false, int? maxHeight}); // refresh=1 删缓存重下；默认带 variants=0；maxHeight=下载清晰度上限
 Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 /src，不打上游
 // 以上错误统一抛 ApiException（message 可直接展示）
 ```

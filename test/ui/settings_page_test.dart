@@ -26,6 +26,28 @@ void main() {
   });
 
   /// 离线缓存不再是设置页的入口：只保留「到我的缓存页删除」的提示。
+  testWidgets('设置页-离线下载清晰度默认 720P，可切换并落盘', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+
+    expect(find.text('离线下载清晰度'), findsOneWidget);
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '720P'))
+          .selected,
+      isTrue,
+      reason: '离线下载默认 720P',
+    );
+
+    await tester.tap(find.text('1080P'));
+    await tester.pump();
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '1080P'))
+          .selected,
+      isTrue,
+    );
+  });
+
   testWidgets('设置页-不再有离线缓存区块，存储提示指向缓存页', (tester) async {
     await pumpPreview(tester, const SettingsPage());
 

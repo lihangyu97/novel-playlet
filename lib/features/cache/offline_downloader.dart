@@ -14,6 +14,7 @@ import '../../data/models/chapter_content.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/video_source.dart';
 import 'cache_providers.dart';
+import 'download_quality.dart';
 import 'offline_diag.dart';
 import 'offline_queue.dart';
 import 'offline_task.dart';
@@ -60,7 +61,8 @@ abstract interface class OfflineNetwork {
   Future<ChapterContent> chapter(String chapterId, {String title = ''});
 
   /// 取一集的明文流地址（内核下载整集密文到临时缓存后返回 `/src/...`）。
-  Future<VideoSource> videoSource(String episodeId);
+  /// [maxHeight] 为下载清晰度上限（短边 ≤ N 的最高档）。
+  Future<VideoSource> videoSource(String episodeId, {int? maxHeight});
 
   /// 拉取明文流（不整集读进内存）。
   Future<OfflineVideoStream> openVideoStream(String url);
@@ -103,8 +105,8 @@ class ApiOfflineNetwork implements OfflineNetwork {
       _api.chapter(chapterId, title: title);
 
   @override
-  Future<VideoSource> videoSource(String episodeId) =>
-      _api.videoSource(episodeId);
+  Future<VideoSource> videoSource(String episodeId, {int? maxHeight}) =>
+      _api.videoSource(episodeId, maxHeight: maxHeight);
 
   @override
   Future<OfflineVideoStream> openVideoStream(String url) async {
@@ -641,6 +643,13 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       }
 
       final now = DateTime.now();
+      // 本次下载的清晰度上限（默认 720P）：整剧按同一口径取流；已下载集的
+      // 实际档位从旧 manifest 继承，避免重下/续传时丢清晰度信息。
+      final downloadQuality = ref.read(videoDownloadQualityProvider);
+      final existingEpisodes = {
+        for (final episode in existing?.episodes ?? const <OfflineEpisode>[])
+          episode.id: episode,
+      };
       final manifest = OfflineSeries(
         seriesId: seriesId,
         title: title.isNotEmpty ? title : (existing?.title ?? ''),
@@ -651,10 +660,15 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
               id: episodes[i].id,
               title: episodes[i].title,
               index: i,
+              bytes: existingEpisodes[episodes[i].id]?.bytes ?? 0,
+              cached: existingEpisodes[episodes[i].id]?.cached ?? false,
+              variantName: existingEpisodes[episodes[i].id]?.variantName ?? '',
+              shortEdge: existingEpisodes[episodes[i].id]?.shortEdge ?? 0,
             ),
         ],
         completed: episodes.length - missing.length,
         bytes: existing?.bytes ?? 0,
+        qualityMaxHeight: downloadQuality.maxHeight,
         createdAt: existing?.createdAt,
         updatedAt: now,
       );
@@ -735,10 +749,13 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
     var lastFlush = DateTime.now();
     final meter = _SpeedMeter();
 
+    // 每集实际档位写回 manifest（旧数据/失败集保持原值）。
+    final qualityEpisodes = manifest.episodes.toList();
     Future<void> flush({bool force = false}) async {
       final next = manifest.copyWith(
         completed: completed,
         bytes: bytes,
+        episodes: qualityEpisodes,
         updatedAt: DateTime.now(),
       );
       if (!force &&
@@ -803,7 +820,12 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
               'video start series=${manifest.seriesId} episode=${episode.id}',
             ),
           );
-          final source = await network.videoSource(episode.id);
+          final source = await network.videoSource(
+            episode.id,
+            maxHeight: manifest.qualityMaxHeight > 0
+                ? manifest.qualityMaxHeight
+                : null,
+          );
           if (!source.isValid) {
             throw ApiException('这一集没有可下载地址');
           }
@@ -843,6 +865,19 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
           bytes += received;
           completed += 1;
           consecutive = 0;
+          final applied = source.appliedVariant;
+          final qualityIndex = qualityEpisodes.indexWhere(
+            (item) => item.id == episode.id,
+          );
+          if (qualityIndex >= 0) {
+            qualityEpisodes[qualityIndex] = qualityEpisodes[qualityIndex]
+                .copyWith(
+                  bytes: received,
+                  cached: true,
+                  variantName: applied?.name ?? '',
+                  shortEdge: applied?.shortEdge ?? 0,
+                );
+          }
           // 提交后再采一次，把累计口径从「已提交 + 集内已收」切回已提交。
           meter.sample(bytes, DateTime.now());
           finished = true;

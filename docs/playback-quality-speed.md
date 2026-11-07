@@ -1,7 +1,7 @@
 # 视频播放增强：缓存切集「准备」优化 / 自选清晰度 / 倍速播放
 
 > 分支：`feat/lhy/playback-quality-speed-plan`（从 `main` 切出）
-> 状态：**S0 控制条修复 + S1（切集感知 / 预取下一集 / 倍速）+ S2（mode=cached / variants=0 / 离线 IO）已实现**；S3–S4 待排期（2026-11-07）
+> 状态：**S0 控制条修复 + S1（切集感知 / 预取下一集 / 倍速）+ S2（mode=cached / variants=0 / 离线 IO）+ S3/C0（下载清晰度上限，默认 720P）已实现**；S4/C1 等 M1（2026-11-07）
 > 关联：[video-playback.md](video-playback.md)（M0 决策与边界）、[offline-cache.md](offline-cache.md)（离线缓存）、`origin/feat/lhy/streaming-media-plan:docs/streaming-media-m1.md`（M1 流式起播，方案定稿未实现）
 > 口径：**已验证**＝当前代码/测试可直接读出；**待实测**＝需要真机或真接口确认。行号以 `main`（`86ff328`）为准。
 
@@ -300,10 +300,30 @@ M1 落地后（`open_media_session(url, key_hex)` 可用）：
 | **S0（已实现）** | 控制条：播完自动续播不弹控制条；全屏横屏底部控制条贴底、取消底部安全区避让（§4.4） | 无 | — | `flutter analyze` + 相关 UI 测试通过；真机待回归 |
 | **S1（纯 Dart）✅ 已实现** | P0-2 切集感知（保留旧画面/延迟 spinner/保留顶栏）+ P0-3 预取下一集（允许整集下载）+ 倍速播放 | 无 | — | `flutter analyze` + `flutter test` 全绿；真机待回归（首帧/3x/旧帧叠层） |
 | **S2（Rust 小改，根治）✅ 已实现** | `mode=cached` 免上游探测 + `variants=0` + 离线路径 IO 缓存 | 无 | — | Rust/Dart 单测断言命中/未命中上游请求数=0；飞行模式与真机耗时待回归 |
-| **S3（清晰度第一步）** | C0：内核 `?max_height` 按档下载 + 档位 marker + 全局下载清晰度设置（默认 720P）+ 离线 manifest 档位 + 缓存中心展示 | 无 | 2~2.5 人天 | 离线下载可限高；缓存中心显示实际档；旧缓存/旧 manifest 兼容 |
+| **S3（清晰度第一步）✅ 已实现** | C0：内核 `?max_height` 按档下载 + 档位 marker + 全局下载清晰度设置（默认 720P）+ 离线 manifest 档位 + 缓存中心展示 | 无 | — | Rust/Dart 单测覆盖选档/marker/默认 720P；旧 manifest 兼容；真机待回归 |
 | **S4（等 M1）** | M1 流式起播（`streaming-media-m1.md`）→ C1 在线换档（默认 720P、按剧记忆、换档重开会话 + seek 回原位、自动档口径修正） | M1 | M1 2~4 + 2.5~3.5 | 在线换档位置不丢、失败回退原档；默认档与面板一致 |
 
 **S1 建议先合**：它不依赖 Rust、风险最低、直接消除用户报告的两个症状中的第一个（「正在准备」观感）并交付倍速；S2 再根治「自动缓存仍打上游」，两者不会互相阻塞。
+
+### 5.3 S3/C0 实现记录（2026-11-07）
+
+**内核**
+
+- `handle_video` 新增 `max_height`：请求清晰度时并发 shortplay+phoenix 取合并档位，按**短边 ≤ N 的最高档**选流（没有更低档时回退最低可用档并标 `quality_fallback=true`）；下载模式把选中的 `url/key_hex` 交给 `download_and_save`。
+- 缓存单文件 + `<file>.variant.json` marker（`{name,width,height,short_edge}`）：显式请求档位时，marker 缺失或档位高于上限会覆盖重下；默认播放（无 max_height）接受已有缓存。`mode=cached` 返回 marker 里的实际档位；`refresh=1` 连同 marker 一起删；淘汰/孤立清理会删 marker。
+- `frontend` 响应新增 `variant` / `quality_fallback`（stream 与下载模式都带）。
+
+**Dart**
+
+- `ApiClient.videoSource(..., maxHeight)` 透传 `max_height`；`VideoSource` 新增 `appliedVariant` / `qualityFallback`，`VideoVariant` 补 `width/shortEdge`。
+- 新增 `lib/features/cache/download_quality.dart`：全局下载清晰度偏好（最高/1080P/**720P 默认**/480P，`shared_preferences` 持久化）。
+- 离线下载器：整剧按 manifest 的 `qualityMaxHeight` 取流（默认 720P），每集把实际 `variantName/shortEdge` 写回 manifest；续传/重下继承旧档位。
+- 设置页新增「视频 → 离线下载清晰度」；缓存中心「已缓存 x/y 集」后显示实际档位（如 `720P`）。
+- 旧 manifest 缺 quality 字段按「最高/未知」解析，不 bump schema；已缓存内容不自动重下。
+
+**测试**：`rust/tests/video_cached_mode.rs`（≤上限最高档/无更低档回退/下载写 marker）、`test/download_quality_test.dart`、`test/offline_quality_test.dart`、`test/offline_downloader_test.dart`（默认 720P 透传 + manifest 记录）、`test/ui/settings_page_test.dart`（默认 720P/可切换）；设置页 3 张 golden 已更新。
+
+**待真机**：整剧下载实际档位与体积、缓存中心显示、切清晰度后重下覆盖、旧 manifest 兼容。
 
 ### 5.2 S2 实现记录（2026-11-07）
 
