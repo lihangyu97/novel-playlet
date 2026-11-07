@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
+import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -286,6 +287,26 @@ void main() {
       lessThan(pageWidth / 2),
       reason: '同一个设置按钮应过渡到左侧',
     );
+  });
+
+  /// 右上角设置按钮左侧新增「缓存」入口：两者在同一 Align 里随面板整体移动。
+  testWidgets('我的页-缓存入口在设置左侧并打开缓存中心', (tester) async {
+    await pumpPreview(tester, const MinePage());
+    final cacheButton = find.byKey(MinePage.cacheButtonKey);
+    expect(cacheButton, findsOneWidget);
+    expect(find.byIcon(Icons.download_outlined), findsOneWidget);
+
+    final cacheRect = tester.getRect(cacheButton);
+    final settingsRect = tester.getRect(find.byIcon(Icons.settings_outlined));
+    expect(
+      cacheRect.right,
+      lessThan(settingsRect.left),
+      reason: '缓存入口应在设置按钮左侧',
+    );
+
+    await tester.tap(cacheButton);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(CacheCenterPage), findsOneWidget);
   });
 
   testWidgets('我的页（短剧）', (tester) async {

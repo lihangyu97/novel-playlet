@@ -226,10 +226,13 @@ if (offlineSeriesStore.hasEpisode(seriesId, episode.id)) {
 
 ### 8.1 详情页
 
-- 小说详情底部操作栏：新增「缓存整本」按钮（三态：未缓存 / 进行中（环形进度，点击暂停/继续）/ 已缓存（点击进管理页））。
-- 短剧详情底部操作栏：新增「缓存整剧」按钮，状态同上。
-- 下载完成：`SnackBar`「《书名》缓存完成，共 N 章」/「《剧名》缓存完成，共 N 集」；部分失败给「重试失败章/集」。
-- 超容量：弹窗提示本区已用/上限，按钮跳「设置 → 存储 → 离线缓存」管理页。
+- 底栏统一为三颗「上图标、下文字」的线条风格按钮：左「收藏/已收藏」、中间主按钮（开始阅读/继续阅读）、右「缓存/缓存中/已缓存」；左右等宽，主按钮居中。
+- 缓存按钮三态（图标统一用 outlined 线条风格）：
+  - `缓存`（`download_outlined`）：没有离线内容或上次任务失败，点击开始/重试整本（整剧）下载；
+  - `缓存中`（`downloading_outlined`）：任务进行中/暂停，或 manifest 只完成一部分，点击进「缓存中心」；
+  - `已缓存`（`download_done_outlined`）：整本/整剧已下完，点击进「缓存中心」。
+- 暂停 / 继续 / 重试集中在缓存中心页（§8.4）：详情页点「缓存中」不再原地暂停，避免一个按钮承担「跳转 + 暂停」两件事。
+- 下载完成/失败/超容量的提示仍由下载器侧 `SnackBar` 与缓存中心页承担；超容量时文案引导去「设置 → 存储」清理。
 
 ### 8.2 设置 → 存储
 
@@ -246,7 +249,16 @@ if (offlineSeriesStore.hasEpisode(seriesId, episode.id)) {
   操作同上。
 - 顶部：本区总占用、本区上限、[清空本区]（二次确认）。
 - 空态用现有 `EmptyView`；文案统一「离线缓存只在手动删除时释放」。
-- 我的页可以放一行汇总入口（可选，P2）。
+
+### 8.4 缓存中心页（我的右上角 → 下载图标）
+
+- 入口：「我的」右上角悬浮设置按钮左侧的下载图标（两个按钮成组，随小说/短剧面板切换整体左右移动）。
+- 页面按「小说」「短剧」两个分区列出**正在下载 + 已下载**条目（有内容才显示分区）：
+  - 运行中：`下载中 37% · 1.2 MB/s · 152 MB` + 进度条 + 右侧暂停按钮（网速来自下载器 EMA 采样，只在运行中且 >0 时显示）；
+  - 暂停 / 失败：状态 + 原因（最多两行）+ 继续/重试按钮（重启后的恢复态按 manifest 重建入参续传）；
+  - 已完成：`已缓存 10/10 章 · 800 KB`（短剧用「集」）。
+- 点条目与推荐列表一致：封面 Hero 飞入对应详情页（`CoverHeroTag.novel/video('cache-center', id)`）。
+- 与管理页分工：缓存中心只浏览/控制下载（暂停、继续、重试），删除/清空仍在「设置 → 存储」的管理页。
 
 ## 9. 与现有缓存 / 清理的关系
 
@@ -271,11 +283,14 @@ lib/features/cache/offline_task.dart               # 任务模型 + 持久化
 lib/features/cache/offline_downloader.dart         # 单任务状态机：小说批次 / 短剧整剧
 lib/features/cache/cache_providers.dart            # stores / downloader / 统计 providers
 lib/features/cache/offline_cache_page.dart         # 管理页（小说 / 短剧两 tab）
-lib/features/cache/widgets/offline_download_button.dart  # 详情页三态按钮
+lib/features/cache/widgets/offline_download_button.dart  # 详情页三态按钮（图标+文字）
+lib/features/cache/cache_center_page.dart          # 缓存中心（我的入口：下载中/已下载 + 网速 + Hero 进详情）
+lib/app/widgets/detail_icon_label_button.dart      # 详情底栏「上图标、下文字」共用按钮
 test/offline_book_store_test.dart
 test/offline_series_store_test.dart
 test/offline_downloader_test.dart
-test/ui/offline_cache_test.dart                    # 设置区块 / 管理页 / 按钮态（golden 可选）
+test/ui/offline_cache_test.dart                    # 管理页（设置入口）
+test/ui/cache_center_test.dart                     # 缓存中心（分区/进度/网速/暂停失败态/Hero）
 ```
 
 **修改**
@@ -284,13 +299,16 @@ test/ui/offline_cache_test.dart                    # 设置区块 / 管理页 / 
 lib/data/api/api_client.dart                  # + chaptersBatch()
 lib/data/models/chapter_content.dart          # + parseBatchChapterContents()
 lib/features/reader/reader_controller.dart    # 离线优先 bootstrap + 正文读取顺序
-lib/features/detail/detail_action_bar.dart    # + 缓存整本按钮
-lib/features/detail/detail_page.dart          # 下载状态/入口
+lib/features/detail/detail_action_bar.dart    # 左收藏 / 中主按钮 / 右缓存（图标+文字）
+lib/features/detail/detail_page.dart          # 下载状态/入口 + 收藏文案
 lib/features/detail/detail_providers.dart     # 详情离线兜底
 lib/features/video/video_detail_page.dart     # + 缓存整剧按钮 + 离线兜底
 lib/features/video/video_detail_providers.dart
 lib/features/video/video_player_page.dart     # 已缓存集用 file:// 秒开；离线未缓存提示
+lib/features/mine/mine_page.dart              # 右上角缓存中心入口
 lib/features/settings/settings_page.dart      # 存储区块 + 两个离线入口
+lib/features/cache/offline_task.dart          # + 瞬态 speedBytesPerSecond（不持久化）
+lib/app/router.dart                           # + CacheCenterRoute
 lib/core/cache/app_cache.dart                 # 明确排除 offline/；统计不变
 CONTRACTS.md / README.md                      # 功能表/存储约定同步
 ```
@@ -344,6 +362,8 @@ CONTRACTS.md / README.md                      # 功能表/存储约定同步
 额度上限；manifest 节流）、`cache_providers.dart`、`widgets/offline_download_button.dart`
 
 **页面**：`lib/features/cache/offline_cache_page.dart`（管理页两 tab）、
+`lib/features/cache/cache_center_page.dart`（我的入口的缓存中心：下载中/已下载 + 进度/网速 + Hero 进详情）、
+`lib/app/widgets/detail_icon_label_button.dart`（详情底栏共用按钮）、
 `lib/features/settings/settings_page.dart`（存储 + 两个离线区块）、
 `lib/features/detail/*`（详情离线兜底 + 底栏按钮）、
 `lib/features/reader/reader_controller.dart`（offline → 自动缓存 → 网络的读链路）、
@@ -353,7 +373,8 @@ CONTRACTS.md / README.md                      # 功能表/存储约定同步
 
 **测试**：`test/offline_book_store_test.dart`、`test/offline_series_store_test.dart`、
 `test/offline_downloader_test.dart`、`test/api_batch_test.dart`、`test/reader_offline_test.dart`、
-`test/detail_offline_test.dart`、`test/offline_playback_test.dart`、`test/ui/offline_cache_test.dart`；
+`test/detail_offline_test.dart`、`test/offline_playback_test.dart`、`test/ui/offline_cache_test.dart`、
+`test/ui/cache_center_test.dart`；
 goldens 更新 `detail.png` / `video_detail_episodes.png`（底栏新增按钮，正文 0 像素变化）、
 `settings*.png`（新增离线区块）。
 
@@ -379,3 +400,15 @@ goldens 更新 `detail.png` / `video_detail_episodes.png`（底栏新增按钮�
   含 21 张 golden 与新增 51+ 条离线用例）、`cargo` 侧本轮未改。
 - 真机验收（M3）：按 §12 清单在 iPhone 13 上过一遍——整本下载/暂停/续传/杀进程恢复、
   飞行模式阅读与选集播放、已缓存短剧切集秒开、离线区独立清空、清理自动缓存不影响离线区。
+
+### 14.4 迭代：详情底栏统一 + 缓存中心（2026-11-07）
+
+- **详情底栏改版**：左右两个入口改成与「收藏」同一套 outlined 线条风格 + 「上图标、下文字」；
+  文案 `收藏/已收藏`、`缓存/缓存中/已缓存`。缓存三态改为：`缓存` → 开始下载；
+  `缓存中/已缓存` → 进缓存中心（暂停/继续/重试集中到那里）。
+- **缓存中心页**：我的右上角新增下载图标入口；分「小说 / 短剧」列出下载中 + 已下载，展示
+  进度条与实时网速（`OfflineTask.speedBytesPerSecond`，下载器按累计字节差 + EMA 采样，仅进程内有效），
+  点条目 Hero 进详情。删除/清空仍走设置里的管理页。
+- **验证**：`dart format` / `flutter analyze --fatal-infos` 干净；`flutter test` **233 passed / 1 skipped**
+  （golden 22 张，新增 `cache_center.png`，更新 `detail.png` / `video_detail_episodes.png` / `mine_*.png` / `home_mine.png`）；
+  真机（iPhone 13）按新底栏与缓存中心入口安装验收。

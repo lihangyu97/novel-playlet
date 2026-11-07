@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/models/chapter.dart';
 import '../data/models/novel_item.dart';
 import '../data/models/video_series.dart';
+import '../features/cache/cache_center_page.dart';
 import '../features/cache/offline_cache_page.dart';
 import '../features/cache/offline_task.dart';
 import '../features/detail/detail_page.dart';
@@ -61,6 +62,18 @@ final class OfflineCacheRoute extends AppRoute<void> {
   Route<void> toRoute() => MaterialPageRoute<void>(
     builder: (_) => OfflineCachePage(initialKind: initialKind),
   );
+}
+
+/// 缓存中心页（「我的」右上角下载图标 / 详情页「缓存中·已缓存」进入）。
+///
+/// 与 [OfflineCacheRoute] 的区别：那个是设置里的管理页（删除/清空），这个只
+/// 展示下载中 + 已下载的条目，供浏览与跳详情。
+final class CacheCenterRoute extends AppRoute<void> {
+  const CacheCenterRoute();
+
+  @override
+  Route<void> toRoute() =>
+      MaterialPageRoute<void>(builder: (_) => const CacheCenterPage());
 }
 
 /// 短剧详情页。[preview] 同样用于接口返回前先画封面/标题。

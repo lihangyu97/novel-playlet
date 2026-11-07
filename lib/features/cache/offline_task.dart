@@ -24,6 +24,7 @@ class OfflineTask {
     this.completed = 0,
     this.total = 0,
     this.bytes = 0,
+    this.speedBytesPerSecond = 0,
     this.status = OfflineTaskStatus.idle,
     this.error,
     DateTime? updatedAt,
@@ -38,6 +39,11 @@ class OfflineTask {
   final int completed;
   final int total;
   final int bytes;
+
+  /// 当前下载速度（字节/秒）。仅运行中有意义，**不持久化**：重启后为 0，
+  /// 由下载器在下一批/下一集完成时重新采样。列表页用它展示「网速」。
+  final int speedBytesPerSecond;
+
   final OfflineTaskStatus status;
 
   /// 暂停/失败时给用户看的一句原因；运行中/完成时为 null。
@@ -59,6 +65,7 @@ class OfflineTask {
     int? completed,
     int? total,
     int? bytes,
+    int? speedBytesPerSecond,
     OfflineTaskStatus? status,
     String? error,
     bool clearError = false,
@@ -71,6 +78,7 @@ class OfflineTask {
     completed: completed ?? this.completed,
     total: total ?? this.total,
     bytes: bytes ?? this.bytes,
+    speedBytesPerSecond: speedBytesPerSecond ?? this.speedBytesPerSecond,
     status: status ?? this.status,
     error: clearError ? null : (error ?? this.error),
     updatedAt: updatedAt ?? this.updatedAt,

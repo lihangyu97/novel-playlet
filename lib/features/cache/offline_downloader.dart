@@ -363,6 +363,7 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
     var index = 0;
     var lastProgress = DateTime.fromMillisecondsSinceEpoch(0);
     var lastFlush = DateTime.now();
+    final meter = _SpeedMeter();
 
     Future<void> flush({bool force = false}) async {
       final next = manifest.copyWith(
@@ -388,6 +389,8 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
           completed: completed,
           total: manifest.total,
           bytes: bytes,
+          // 网速是瞬态值：只在 running 的 emit 里带，收尾状态一律归 0。
+          speedBytesPerSecond: meter.bps,
           status: OfflineTaskStatus.running,
           updatedAt: DateTime.now(),
         ),
@@ -449,6 +452,8 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
           bytes += await bookStore.writeChapter(manifest.bookId, content);
           completed += 1;
           consecutive = 0;
+          // 一章一次采样：小说批量下载的节奏比视频粗，用累计 bytes 算瞬时速度。
+          meter.sample(bytes, DateTime.now());
         } catch (error) {
           // 磁盘写失败按单章失败处理：连续失败会暂停任务并提示。
           firstError ??= '第 ${chapter.index + 1} 章写入失败：${_briefError(error)}';
@@ -532,6 +537,8 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       completed: result.completed,
       total: chapters.length,
       bytes: result.bytes,
+      // 收尾状态不保留运行中的网速。
+      speedBytesPerSecond: 0,
       status: (result.paused || !complete)
           ? OfflineTaskStatus.paused
           : OfflineTaskStatus.done,
@@ -668,6 +675,7 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
     var consecutive = 0;
     var lastProgress = DateTime.fromMillisecondsSinceEpoch(0);
     var lastFlush = DateTime.now();
+    final meter = _SpeedMeter();
 
     Future<void> flush({bool force = false}) async {
       final next = manifest.copyWith(
@@ -694,6 +702,8 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
           total: manifest.total,
           // 集内进度：已提交字节 + 当前集已收字节（仅展示用，不落 manifest）。
           bytes: bytes + partialBytes,
+          // 网速是瞬态值：只在 running 的 emit 里带，收尾状态一律归 0。
+          speedBytesPerSecond: meter.bps,
           status: OfflineTaskStatus.running,
           updatedAt: DateTime.now(),
         ),
@@ -749,6 +759,8 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
             sink.add(chunk);
             received += chunk.length;
             final now = DateTime.now();
+            // 每个 chunk 采样一次（很便宜）：集合内字节进度算实时网速。
+            meter.sample(bytes + received, now);
             if (now.difference(lastProgress) >= settings.progressInterval) {
               lastProgress = now;
               emit(partialBytes: received);
@@ -773,6 +785,8 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
           bytes += received;
           completed += 1;
           consecutive = 0;
+          // 提交后再采一次，把累计口径从「已提交 + 集内已收」切回已提交。
+          meter.sample(bytes, DateTime.now());
           finished = true;
         } on _DownloadCancelled {
           // 集内取消：清掉半截文件，不当成"失败集"计数。
@@ -854,6 +868,8 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       completed: result.completed,
       total: episodes.length,
       bytes: result.bytes,
+      // 收尾状态不保留运行中的网速。
+      speedBytesPerSecond: 0,
       status: (result.paused || !complete)
           ? OfflineTaskStatus.paused
           : OfflineTaskStatus.done,
@@ -891,6 +907,8 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
     if (current == null || !current.isRunning) return;
     final paused = current.copyWith(
       status: OfflineTaskStatus.paused,
+      // copyWith 会透传旧字段，这里显式把运行中的网速清掉。
+      speedBytesPerSecond: 0,
       error: '任务已暂停',
       updatedAt: DateTime.now(),
     );
@@ -986,6 +1004,8 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       completed: state?.completed ?? 0,
       total: state?.total ?? 0,
       bytes: state?.bytes ?? 0,
+      // 失败任务不保留运行中的网速。
+      speedBytesPerSecond: 0,
       status: OfflineTaskStatus.failed,
       error: apiErrorCopy(error, fallback: '离线缓存失败，请重试'),
       updatedAt: DateTime.now(),
@@ -1027,6 +1047,39 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
   @visibleForTesting
   void handleAppLifecycleForTest(AppLifecycleState lifecycle) =>
       _onLifecycle(lifecycle);
+}
+
+/// 下载速度采样器：累计字节差 / 时间差，再用 EMA 平滑。
+///
+/// 单次采样（尤其小说一章）跨度大、瞬时值抖动；`0.7×旧 + 0.3×新` 的指数
+/// 滑动平均让缓存中心页的「网速」更稳。首个样本只记基准（没有时间差），
+/// 间隔 <=0ms 或字节回绕时不动 EMA，避免除零/跳动。
+class _SpeedMeter {
+  DateTime? _lastTime;
+  int _lastBytes = 0;
+  double _ema = 0;
+
+  /// 最近一次平滑后的速度（字节/秒）。
+  int get bps => _ema.round();
+
+  void reset() {
+    _lastTime = null;
+    _lastBytes = 0;
+    _ema = 0;
+  }
+
+  void sample(int totalBytes, DateTime now) {
+    final lastTime = _lastTime;
+    final lastBytes = _lastBytes;
+    _lastTime = now;
+    _lastBytes = totalBytes;
+    if (lastTime == null) return;
+    final elapsedMs = now.difference(lastTime).inMilliseconds;
+    if (elapsedMs <= 0) return;
+    if (totalBytes < lastBytes) return;
+    final instant = (totalBytes - lastBytes) * 1000 / elapsedMs;
+    _ema = _ema == 0 ? instant : _ema * 0.7 + instant * 0.3;
+  }
 }
 
 /// 集内取消：只用于从流式下载的中途跳出，不当成失败。

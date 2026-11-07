@@ -210,8 +210,10 @@ void main() {
       expect(find.text('全 2 集'), findsOneWidget);
       expect(find.text('选集'), findsOneWidget);
       expect(find.text('第 1 集'), findsNothing, reason: '选集只显示集数，不显示「第 x 集」');
-      // 底栏：缓存整剧入口 + 主按钮（可播）。
+      // 底栏：缓存整剧入口（未缓存态，文字在按钮里）+ 主按钮（可播）。
       expect(find.byType(OfflineDownloadButton), findsOneWidget);
+      expect(find.text('缓存'), findsOneWidget);
+      expect(find.text('收藏'), findsOneWidget);
       expect(find.text('播放'), findsOneWidget);
     });
   });

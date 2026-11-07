@@ -1,22 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/router.dart';
+import '../../../app/widgets/detail_icon_label_button.dart';
 import '../../../data/models/chapter.dart';
 import '../../../data/models/json_utils.dart';
 import '../cache_providers.dart';
 import '../offline_downloader.dart';
 import '../offline_task.dart';
 
-/// 通用的「离线缓存」三态按钮（小说详情"缓存整本" / 短剧详情"缓存整剧"共用）。
+/// 通用的「离线缓存」入口（小说详情「缓存整本」/ 短剧详情「缓存整剧」共用）。
 ///
-/// 只依赖 `features/cache` 的公开 API，不 import 任何具体页面：
-/// - 未缓存：下载图标，点击开始；
-/// - 进行中：环形进度 + 百分比，点击暂停；暂停态再点继续；
-/// - 已缓存：勾选图标，点击提示去「设置 → 存储」管理。
+/// 与左侧收藏按钮同一套线条风格（[DetailIconLabelButton]），三态：
+/// - `缓存`（download_outlined）：没有离线内容，或上次任务失败；点击开始/重试。
+/// - `缓存中`（downloading_outlined）：任务进行中/暂停，或 manifest 只完成一部分；
+///   点击进缓存中心看进度（暂停/继续都由缓存中心负责）。
+/// - `已缓存`（download_done_outlined）：manifest 完整或任务完成；点击进缓存中心。
 ///
 /// [items] 是整本的章节列表 / 整剧的选集列表（`start*` 需要完整列表才能算
 /// 缺口与总进度）。缓存状态来自离线区 manifest（而非任务表），因此进程重启后
-/// 依然能正确显示"已缓存/继续缓存"。
+/// 依然能正确显示「已缓存/缓存中」。
 class OfflineDownloadButton extends ConsumerWidget {
   const OfflineDownloadButton({
     super.key,
@@ -44,42 +47,38 @@ class OfflineDownloadButton extends ConsumerWidget {
     final cachedTotal = kind == OfflineTaskKind.novel
         ? (ref.watch(offlineNovelProvider(id)).value?.total ?? 0)
         : (ref.watch(offlineSeriesProvider(id)).value?.total ?? 0);
-    final isCached = cachedTotal > 0 && cachedCompleted >= cachedTotal;
+    final manifestComplete = cachedTotal > 0 && cachedCompleted >= cachedTotal;
     final active = task != null && task.kind == kind && task.id == id;
+    // done 直接算已缓存：manifest 可能还没被 provider 刷新，不能只依赖 isCached。
+    final isCached = manifestComplete || (active && task.isDone);
+    // 任务失败回到「缓存」态（点击即重新 start，下载器会按文件缺口续传）；
+    // 没有活动任务但 manifest 只完成了一部分（取消/重启残留）也算缓存中。
+    final inProgress =
+        !isCached &&
+        (active
+            ? (task.isRunning || task.isPaused)
+            : (cachedTotal > 0 && cachedCompleted > 0));
 
-    if (active && task.isRunning) {
-      return _ProgressButton(
-        task: task,
-        onPressed: () => ref.read(offlineDownloaderProvider.notifier).pause(),
-        tooltip: '暂停缓存',
-      );
-    }
-    if (active && task.isPaused) {
-      return _ProgressButton(
-        task: task,
-        onPressed: () => _resume(context, ref),
-        tooltip: '继续缓存',
-      );
-    }
-    // done 直接显示勾选（manifest 可能还没被 provider 刷新，不能只依赖 isCached）。
-    if (active && task.isDone) {
-      return IconButton(
-        tooltip: '已离线缓存',
-        onPressed: () => _showMessage(context, '已离线缓存，可在 设置 → 存储 管理'),
-        icon: const Icon(Icons.offline_pin_rounded),
-      );
-    }
+    final IconData icon;
+    final String label;
     if (isCached) {
-      return IconButton(
-        tooltip: '已离线缓存',
-        onPressed: () => _showMessage(context, '已离线缓存，可在 设置 → 存储 管理'),
-        icon: const Icon(Icons.offline_pin_rounded),
-      );
+      icon = Icons.download_done_outlined;
+      label = '已缓存';
+    } else if (inProgress) {
+      icon = Icons.downloading_outlined;
+      label = '缓存中';
+    } else {
+      icon = Icons.download_outlined;
+      label = '缓存';
     }
-    return IconButton(
-      tooltip: '离线缓存',
-      onPressed: () => _start(context, ref),
-      icon: const Icon(Icons.download_rounded),
+    return DetailIconLabelButton(
+      icon: icon,
+      label: label,
+      active: isCached || inProgress,
+      // 缓存中/已缓存都交给缓存中心：那里能看进度，也能暂停/继续/重试。
+      onTap: isCached || inProgress
+          ? () => context.pushAppRoute(const CacheCenterRoute())
+          : () => _start(context, ref),
     );
   }
 
@@ -118,60 +117,9 @@ class OfflineDownloadButton extends ConsumerWidget {
     }
   }
 
-  Future<void> _resume(BuildContext context, WidgetRef ref) async {
-    final downloader = ref.read(offlineDownloaderProvider.notifier);
-    // 本进程内暂停：resume() 直接接着跑；进程重启后的恢复态任务没有内存里的
-    // 入参，重新调用 start（幂等，按文件缺口续传）。
-    final resumed = await downloader.resume();
-    if (resumed || !context.mounted) return;
-    await _start(context, ref);
-  }
-
   void _showMessage(BuildContext context, String message) {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
-  }
-}
-
-class _ProgressButton extends StatelessWidget {
-  const _ProgressButton({
-    required this.task,
-    required this.onPressed,
-    required this.tooltip,
-  });
-
-  final OfflineTask task;
-  final VoidCallback onPressed;
-  final String tooltip;
-
-  @override
-  Widget build(BuildContext context) {
-    final percent = (task.progress * 100).round();
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  value: task.total > 0 ? task.progress : null,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text('$percent%', style: Theme.of(context).textTheme.labelSmall),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
 

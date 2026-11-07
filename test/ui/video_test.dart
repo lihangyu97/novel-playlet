@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
+import 'package:novel_playlet/features/detail/detail_action_bar.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/features/video/video_detail_page.dart';
 import 'package:novel_playlet/features/video/widgets/episode_picker.dart';
@@ -171,10 +172,18 @@ void main() {
       expect(bundleCalls(), 2, reason: '进入详情时详情与选集各拉一次');
 
       // 收藏走 provider 乐观更新（按钮立即回显），页面因此重建一次。
-      // 底栏书架按钮是「纯图标 + tooltip」，用 tooltip 定位。
-      await tester.tap(find.byTooltip('收藏'));
+      // 底栏收藏按钮是「图标 + 文字」，按文字定位；SnackBar 里也有「已收藏」，
+      // 所以 finder 收敛到底栏内。
+      final actionBar = find.byType(DetailActionBar);
+      await tester.tap(
+        find.descendant(of: actionBar, matching: find.text('收藏')),
+      );
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
-      expect(find.byTooltip('已收藏'), findsOneWidget, reason: '收藏应乐观回显，不等落盘');
+      expect(
+        find.descendant(of: actionBar, matching: find.text('已收藏')),
+        findsOneWidget,
+        reason: '收藏应乐观回显，不等落盘',
+      );
 
       // 播放页返回存进度会 bump videoRevision，进度 provider 刷新又让页面重建。
       await store.saveVideoProgress(
@@ -196,21 +205,32 @@ void main() {
       const VideoDetailPage(seriesId: 'v1', preview: preview),
       transport: FakePreviewTransport(),
     );
-    expect(find.byTooltip('收藏'), findsOneWidget);
+    final actionBar = find.byType(DetailActionBar);
+    final favoriteButton = find.descendant(
+      of: actionBar,
+      matching: find.text('收藏'),
+    );
+    expect(favoriteButton, findsOneWidget);
     expect(find.text('播放'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('收藏'));
+    await tester.tap(favoriteButton);
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    final favoriteButton = find.byTooltip('已收藏');
-    expect(favoriteButton, findsOneWidget, reason: '底部收藏按钮应变成「已收藏」');
+    final favoriteActive = find.descendant(
+      of: actionBar,
+      matching: find.text('已收藏'),
+    );
+    expect(favoriteActive, findsOneWidget, reason: '底部收藏按钮应变成「已收藏」');
     final store = ReadingStore();
     expect(await store.isVideoOnShelf('v1'), isTrue);
 
     // 等「已收藏」snackbar 消失，避免它挡住底部按钮。
     await tester.pumpAndSettle(const Duration(seconds: 5));
-    await tester.tap(favoriteButton);
+    await tester.tap(favoriteActive);
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    expect(find.byTooltip('收藏'), findsOneWidget);
+    expect(
+      find.descendant(of: actionBar, matching: find.text('收藏')),
+      findsOneWidget,
+    );
     expect(await store.isVideoOnShelf('v1'), isFalse);
   });
 

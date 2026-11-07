@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
@@ -554,6 +555,13 @@ Future<void> pumpPreview(
   FakePreviewTransport? transport,
   bool settle = true,
   Brightness brightness = Brightness.light,
+
+  /// 页面专属的 provider 覆写（追加在预览默认覆写之后）。
+  ///
+  /// 注意不能与下面已覆写的 provider 重复：Riverpod 3 同一个 container 不允许
+  /// 重复 override，重复会直接断言。需要换掉列表类 provider 的页面请自建
+  /// ProviderScope（示例见 test/ui/cache_center_test.dart 的 pumpCenter）。
+  List<Override> extraOverrides = const [],
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
@@ -589,6 +597,7 @@ Future<void> pumpPreview(
           (ref) async => <OfflineSeriesSummary>[],
         ),
         if (store != null) readingStoreProvider.overrideWithValue(store),
+        ...extraOverrides,
       ],
       child: PreviewApp(home: page, brightness: brightness),
     ),

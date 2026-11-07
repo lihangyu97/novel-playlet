@@ -236,7 +236,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                           : 0,
                     )
                   : null,
-              shelfLabel: onShelf ? '已在书架' : '加入书架',
+              shelfLabel: onShelf ? '已收藏' : '收藏',
               shelfActive: onShelf,
               onShelf: shelfItem == null || shelfBusy
                   ? null

@@ -34,6 +34,9 @@ class MinePage extends ConsumerStatefulWidget {
   static const dramaPanelKey = Key('mine-panel-drama');
   static const switchButtonKey = Key('mine-panel-switch');
 
+  /// 右上角「缓存」入口（设置按钮左侧）。
+  static const cacheButtonKey = Key('mine-cache-entry');
+
   @override
   ConsumerState<MinePage> createState() => _MinePageState();
 }
@@ -59,6 +62,10 @@ class _MinePageState extends ConsumerState<MinePage>
 
   void _openSettings() {
     context.pushAppRoute(const SettingsRoute());
+  }
+
+  void _openCacheCenter() {
+    context.pushAppRoute(const CacheCenterRoute());
   }
 
   void _togglePanel() => _animateTo(_panel == 1 ? 0 : 1);
@@ -151,8 +158,8 @@ class _MinePageState extends ConsumerState<MinePage>
                 ],
               ),
             ),
-            // 唯一一个设置按钮：小说面板时在右、短剧面板时在左，切换过程中
-            // 跟着 _controller 在屏幕内左右移动（不会被滑出屏幕）。
+            // 右上角两个悬浮入口：缓存 + 设置。小说面板时在右、短剧面板时在左，
+            // 切换过程中整体跟着 _controller 在屏幕内左右移动（不会被滑出屏幕）。
             Positioned(
               top: 20,
               left: 16,
@@ -166,13 +173,28 @@ class _MinePageState extends ConsumerState<MinePage>
                     child: child,
                   );
                 },
-                child: IconButton(
-                  onPressed: _openSettings,
-                  tooltip: '设置',
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 22,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  icon: const Icon(Icons.settings_outlined),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      key: MinePage.cacheButtonKey,
+                      onPressed: _openCacheCenter,
+                      tooltip: '缓存',
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 22,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      icon: const Icon(Icons.download_outlined),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: _openSettings,
+                      tooltip: '设置',
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 22,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      icon: const Icon(Icons.settings_outlined),
+                    ),
+                  ],
                 ),
               ),
             ),

@@ -386,6 +386,90 @@ void main() {
     });
   });
 
+  group('测速', () {
+    test('短剧下载中采样到网速，完成后速度归 0', () async {
+      network.chunkedBytes = [
+        List<int>.filled(8192, 1),
+        List<int>.filled(8192, 1),
+        List<int>.filled(8192, 1),
+        List<int>.filled(8192, 1),
+      ];
+      network.chunkDelay = const Duration(milliseconds: 25);
+      final container = await makeContainer();
+
+      final speedSeen = Completer<int>();
+      final subscription = container.listen(offlineDownloaderProvider, (
+        previous,
+        next,
+      ) {
+        final speed = next?.speedBytesPerSecond ?? 0;
+        if (speed > 0 && !speedSeen.isCompleted) speedSeen.complete(speed);
+      });
+      addTearDown(subscription.close);
+
+      final run = container
+          .read(offlineDownloaderProvider.notifier)
+          .startVideoSeries(
+            seriesId: 's1',
+            title: '测试短剧',
+            cover: '',
+            episodes: episodes(1),
+          );
+      final speed = await speedSeen.future.timeout(const Duration(seconds: 2));
+      expect(speed, greaterThan(0), reason: '下载中必须能采样到正网速');
+
+      await run;
+      final done = container.read(offlineDownloaderProvider)!;
+      expect(done.status, OfflineTaskStatus.done);
+      expect(done.speedBytesPerSecond, 0, reason: '完成后不能残留运行中网速');
+    });
+
+    test('暂停 / 恢复后的任务速度归 0', () async {
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      network.streamEntered = entered;
+      network.streamGate = gate;
+      final container = await makeContainer();
+      final downloader = container.read(offlineDownloaderProvider.notifier);
+      final run = downloader.startVideoSeries(
+        seriesId: 's1',
+        title: '测试短剧',
+        cover: '',
+        episodes: episodes(1),
+      );
+
+      await entered.future;
+      await downloader.pause();
+      gate.complete();
+      await run;
+
+      final paused = container.read(offlineDownloaderProvider)!;
+      expect(paused.status, OfflineTaskStatus.paused);
+      expect(paused.speedBytesPerSecond, 0, reason: '暂停态不保留网速');
+
+      expect(await downloader.resume(), isTrue);
+      final done = container.read(offlineDownloaderProvider)!;
+      expect(done.status, OfflineTaskStatus.done);
+      expect(done.speedBytesPerSecond, 0, reason: '恢复并完成后同样归 0');
+    });
+
+    test('speedBytesPerSecond 是瞬态字段：不进 JSON、回读为 0', () {
+      final task = OfflineTask(
+        kind: OfflineTaskKind.video,
+        id: 's1',
+        title: '剧',
+        speedBytesPerSecond: 123456,
+        status: OfflineTaskStatus.running,
+      );
+      expect(task.toJson().containsKey('speedBytesPerSecond'), isFalse);
+      final decoded = OfflineTask.tryFromJson(
+        Map<String, dynamic>.from(task.toJson()),
+      );
+      expect(decoded, isNotNull);
+      expect(decoded!.speedBytesPerSecond, 0);
+    });
+  });
+
   group('任务模型', () {
     test('done 的状态文案是「已完成」，不能显示成「已暂停」', () {
       expect(offlineTaskStatusLabel(OfflineTaskStatus.done), '已完成');
@@ -441,6 +525,10 @@ class _FakeNetwork implements OfflineNetwork {
   /// 视频集内取消用例：卡住一集的流，等到用例放行。
   Completer<void>? streamGate;
   Completer<void>? streamEntered;
+
+  /// 测速用例：把流拆成多块、块间加延迟，模拟真实下载节奏。
+  List<List<int>>? chunkedBytes;
+  Duration chunkDelay = Duration.zero;
 
   ChapterContent _content(Chapter chapter) => ChapterContent(
     id: chapter.id,
@@ -505,11 +593,26 @@ class _FakeNetwork implements OfflineNetwork {
       streamGate = null;
       return OfflineVideoStream(bytes: _gatedBytes(gate), contentLength: 3);
     }
+    final chunks = chunkedBytes;
+    if (chunks != null) {
+      return OfflineVideoStream(
+        bytes: _delayedChunks(chunks),
+        contentLength: chunks.fold<int>(0, (sum, chunk) => sum + chunk.length),
+      );
+    }
     final bytes = videoBytes[id] ?? const [1, 2, 3];
     return OfflineVideoStream(
       bytes: Stream<List<int>>.fromIterable([bytes]),
       contentLength: bytes.length,
     );
+  }
+
+  /// 分块 + 块间延迟，用于验证下载中的网速采样。
+  Stream<List<int>> _delayedChunks(List<List<int>> chunks) async* {
+    for (final chunk in chunks) {
+      await Future<void>.delayed(chunkDelay);
+      yield chunk;
+    }
   }
 
   /// 第一块后卡住，用于验证"集内取消：删 part、不 commit"。
