@@ -92,9 +92,15 @@ keyPassword=***
 - 备份/迁移排除（避免恢复后设备池与 Keystore 密钥对不上）；
 - 图标、显示名、版本号（`pubspec.yaml` 的 `0.6.0+14`）。
 
+已在真机验证（Xiaomi 24129PN74C / Android 17 / HyperOS，arm64-v8a）：
+
+- 冷启动、设备注册、推荐/详情/阅读等主流程正常；
+- 视频播放：ExoPlayer 经 loopback `/src` 播放 CENC 解密流正常，连续多集起播没有 `Source error`。
+  途中修掉两个 Android 独有的内核问题（TLS 平台验证器未初始化、`sinf -> free` 重写留下零尺寸子盒）。
+
 留给业务改造后再处理（本次刻意不改）：
 
-- 视频播放：Android 走 ExoPlayer；loopback `/src` 的兼容性、全屏/横竖屏切换、退后台行为需要真机验证。
+- 视频播放体验：全屏/横竖屏切换、退后台行为、进度记忆仍需按真机结果调整。
 - 缓存路径：当前代码全部走 `path_provider` 的 `getApplicationSupportDirectory()` /
   `getTemporaryDirectory()`，Android 对应 App 私有目录，**无需平台分支**；只有真机上的占用统计
   和清理体验需要复验。
