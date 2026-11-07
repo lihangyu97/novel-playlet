@@ -453,7 +453,8 @@ class _StorageHint extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Text(
-        '清理只删除可重新下载的缓存（视频、封面、章节、遗留日志），书架与阅读进度不会动。',
+        '清理只删除可重新下载的缓存（视频、封面、章节、遗留日志），书架与阅读进度不会动。'
+        '离线缓存不在这里清理，到「我的」右下角「缓存」页查看和删除。',
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
           height: 1.5,

@@ -9,6 +9,8 @@ import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/video_detail.dart';
 import '../../data/models/video_series.dart';
+import '../cache/offline_task.dart';
+import '../cache/widgets/offline_download_button.dart';
 import '../detail/detail_action_bar.dart';
 import 'video_detail_providers.dart';
 import 'video_library_providers.dart';
@@ -114,6 +116,16 @@ class VideoDetailPage extends ConsumerWidget {
       onShelf: detail == null || shelfBusy
           ? null
           : () => _toggleShelf(context, ref, detail),
+      // 缓存整剧：选集未就绪时不给入口（按钮要完整集列表算缺口/进度）。
+      offlineButton: episodes == null || episodes.isEmpty
+          ? null
+          : OfflineDownloadButton(
+              kind: OfflineTaskKind.video,
+              id: seriesId,
+              title: _titleOf(detail),
+              cover: _coverOf(detail),
+              items: episodes,
+            ),
     );
   }
 

@@ -68,6 +68,9 @@ void main() {
             ApiClient(FakePreviewTransport()),
           ),
           readerChapterCacheProvider.overrideWithValue(PreviewChapterCache()),
+          // 离线区同样不碰真实磁盘（path_provider 在 widget test 下没有平台实现，
+          // 真实 IO 的 Future 不会完成，会让阅读页 bootstrap 挂住）。
+          ...previewOfflineOverrides(),
         ],
         child: MaterialApp(
           theme: AppTheme.light(),

@@ -1,18 +1,26 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/core/cache/app_cache.dart';
+import 'package:novel_playlet/core/storage/offline/offline_book.dart';
+import 'package:novel_playlet/core/storage/offline/offline_book_store.dart';
+import 'package:novel_playlet/core/storage/offline/offline_paths.dart';
+import 'package:novel_playlet/core/storage/offline/offline_series.dart';
+import 'package:novel_playlet/core/storage/offline/offline_series_store.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
+import 'package:novel_playlet/features/cache/cache_providers.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/settings/settings_providers.dart';
 
@@ -425,6 +433,55 @@ class PreviewChapterCache extends ReaderChapterCache {
 Future<Directory> unsupportedDirectory() async =>
     throw UnsupportedError('预览缓存不应访问磁盘');
 
+/// 组件测试用的空离线区存储。
+///
+/// 与 [PreviewChapterCache] 同因：path_provider 在 widget test 里没有平台实现，
+/// 真实离线目录的真实 IO Future 永远不会完成，页面只要 watch 离线 manifest
+/// 或任务，pumpAndSettle 就会卡死。预览夹具统一注入"没有离线内容"的存储：
+/// 读 manifest / 正文立即 miss，阅读页退回 自动缓存 → 网络，等价于未下载过。
+///
+/// stats 故意保持 pending：设置页 golden 记录的是现有"统计中…"形态，离线统计
+/// 不在当前任务范围，换成 0 个会无故改动 settings golden。
+class EmptyOfflineBookStore extends OfflineBookStore {
+  EmptyOfflineBookStore()
+    : super(paths: OfflinePaths(rootDirectory: unsupportedDirectory));
+
+  @override
+  Future<OfflineBook?> read(String bookId) async => null;
+
+  @override
+  Future<ChapterContent?> readChapter(String bookId, String chapterId) async =>
+      null;
+
+  @override
+  Future<void> cleanupPartFiles() async {}
+
+  @override
+  Future<OfflineStats> stats() => Completer<OfflineStats>().future;
+}
+
+/// 短剧离线区的空实现；用途与 [EmptyOfflineBookStore] 相同。
+class EmptyOfflineSeriesStore extends OfflineSeriesStore {
+  EmptyOfflineSeriesStore()
+    : super(paths: OfflinePaths(rootDirectory: unsupportedDirectory));
+
+  @override
+  Future<OfflineSeries?> read(String seriesId) async => null;
+
+  @override
+  Future<void> cleanupPartFiles() async {}
+
+  @override
+  Future<OfflineStats> stats() => Completer<OfflineStats>().future;
+}
+
+/// 预览页面的离线依赖覆写：pumpPreview 的页面一律不碰真实离线目录。
+// ignore: strict_top_level_inference
+previewOfflineOverrides() => [
+  offlineBookStoreProvider.overrideWithValue(EmptyOfflineBookStore()),
+  offlineSeriesStoreProvider.overrideWithValue(EmptyOfflineSeriesStore()),
+];
+
 /// 测试环境默认没有中文字体（渲染成豆腐块）。加载系统里的 Arial Unicode
 /// 作为预览字体，让 golden 能真实反映中文排版与断行。
 const previewFontFamily = 'PreviewCJK';
@@ -498,6 +555,13 @@ Future<void> pumpPreview(
   FakePreviewTransport? transport,
   bool settle = true,
   Brightness brightness = Brightness.light,
+
+  /// 页面专属的 provider 覆写（追加在预览默认覆写之后）。
+  ///
+  /// 注意不能与下面已覆写的 provider 重复：Riverpod 3 同一个 container 不允许
+  /// 重复 override，重复会直接断言。需要换掉列表类 provider 的页面请自建
+  /// ProviderScope（示例见 test/ui/cache_center_test.dart 的 pumpCenter）。
+  List<Override> extraOverrides = const [],
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
@@ -508,8 +572,32 @@ Future<void> pumpPreview(
       overrides: [
         apiClientProvider.overrideWithValue(api),
         readerChapterCacheProvider.overrideWithValue(PreviewChapterCache()),
+        ...previewOfflineOverrides(),
         cacheUsageProvider.overrideWith((ref) async => previewCacheUsage),
+        // 离线缓存：widget 测试没有 path_provider，给一组确定性的空数据，
+        // 避免设置页/管理页停在「统计中…」（真实数据由离线管理页测试单独注入）。
+        offlineNovelStatsProvider.overrideWith(
+          (ref) async => const OfflineStats(
+            count: 0,
+            bytes: 0,
+            capBytes: OfflineBookStore.novelCapBytes,
+          ),
+        ),
+        offlineVideoStatsProvider.overrideWith(
+          (ref) async => const OfflineStats(
+            count: 0,
+            bytes: 0,
+            capBytes: OfflineSeriesStore.videoCapBytes,
+          ),
+        ),
+        offlineNovelListProvider.overrideWith(
+          (ref) async => <OfflineBookSummary>[],
+        ),
+        offlineVideoListProvider.overrideWith(
+          (ref) async => <OfflineSeriesSummary>[],
+        ),
         if (store != null) readingStoreProvider.overrideWithValue(store),
+        ...extraOverrides,
       ],
       child: PreviewApp(home: page, brightness: brightness),
     ),

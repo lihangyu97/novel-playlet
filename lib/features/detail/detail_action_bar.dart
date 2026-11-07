@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../app/widgets/detail_icon_label_button.dart';
 import 'detail_style.dart';
 
-/// 底部固定操作栏：左侧书架切换，右侧主按钮「开始阅读 / 继续阅读」。
+/// 底部固定操作栏：左「收藏/已收藏」、中间主按钮「开始阅读 / 继续阅读」、
+/// 右「缓存/缓存中/已缓存」，三颗按钮统一成「上图标、下文字」的线条风格。
 ///
 /// 用 Scaffold.bottomNavigationBar 挂在 body 外面，滚动时始终可见；
-/// 传入 null 回调即按钮禁用（数据未就绪）。
+/// 传入 null 回调即按钮禁用（数据未就绪）。左右两侧等宽（见
+/// [DetailIconLabelButton.width]），主按钮因此天然居中，不会被挤偏。
 class DetailActionBar extends StatelessWidget {
   const DetailActionBar({
     super.key,
@@ -14,17 +17,26 @@ class DetailActionBar extends StatelessWidget {
     required this.shelfLabel,
     required this.shelfActive,
     required this.onShelf,
+    this.offlineButton,
   });
 
   final String primaryLabel;
 
   /// null 表示禁用（没有任何章节可读，且没有 preview 兜底）。
   final VoidCallback? onPrimary;
+
+  /// 左侧「收藏 / 已收藏」文案。
   final String shelfLabel;
 
-  /// true = 已在书架，点击会移出。
+  /// true = 已收藏，点击会取消收藏。
   final bool shelfActive;
   final VoidCallback? onShelf;
+
+  /// 右侧「缓存」入口（[OfflineDownloadButton]）；目录未就绪时为 null。
+  ///
+  /// 做成注入的 Widget 而不是在本组件里拼 provider：操作栏只负责布局，下载
+  /// 状态由详情页自己决定要不要展示。
+  final Widget? offlineButton;
 
   @override
   Widget build(BuildContext context) {
@@ -51,31 +63,15 @@ class DetailActionBar extends StatelessWidget {
             ),
             child: Row(
               children: [
-                OutlinedButton.icon(
-                  onPressed: onShelf,
-                  icon: Icon(
-                    shelfActive
-                        ? Icons.check_rounded
-                        : Icons.bookmark_add_outlined,
-                    size: 18,
-                  ),
-                  label: Text(
-                    shelfLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 46),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    foregroundColor: shelfActive
-                        ? scheme.primary
-                        : scheme.onSurface,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
+                DetailIconLabelButton(
+                  icon: shelfActive
+                      ? Icons.bookmark_added_outlined
+                      : Icons.bookmark_add_outlined,
+                  label: shelfLabel,
+                  active: shelfActive,
+                  onTap: onShelf,
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton(
                     onPressed: onPrimary,
@@ -86,6 +82,10 @@ class DetailActionBar extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                // 没有缓存入口时留同宽空位：左右对称，主按钮仍然居中。
+                offlineButton ??
+                    const SizedBox(width: DetailIconLabelButton.width),
               ],
             ),
           ),

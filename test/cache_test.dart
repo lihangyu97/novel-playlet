@@ -48,6 +48,18 @@ void main() {
     // 早期调试探针遗留的日志。
     File('${docs.path}/diag.log').writeAsStringSync('x');
 
+    // 离线缓存区（offline/）：用户主动下载的数据，不是可重建缓存。
+    // clear() 绝不能碰它（docs/offline-cache.md 的隔离不变式）。
+    final offlineNovel = Directory('${support.path}/offline/novel/b1')
+      ..createSync(recursive: true);
+    File('${offlineNovel.path}/book.json').writeAsStringSync('{"bookId":"b1"}');
+    File('${offlineNovel.path}/c1.json').writeAsStringSync('{"id":"c1"}');
+    final offlineVideo = Directory('${support.path}/offline/video/s1')
+      ..createSync(recursive: true);
+    File('${offlineVideo.path}/series.json')
+        .writeAsStringSync('{"seriesId":"s1"}');
+    File('${offlineVideo.path}/e1.mp4').writeAsBytesSync(List.filled(700, 7));
+
     final cache = AppCache(
       supportDirectory: () async => support,
       temporaryDirectory: () async => tmp,
@@ -78,6 +90,13 @@ void main() {
     // 用户数据/设备池必须还在（否则要重新注册设备、丢书架）。
     expect(File('${configDir.path}/device_pool.json').existsSync(), isTrue);
     expect(File('${configDir.path}/config.json').existsSync(), isTrue);
+
+    // 离线缓存区必须原样保留：体积不进「自动缓存」统计、文件不被清理。
+    expect(File('${offlineNovel.path}/book.json').existsSync(), isTrue);
+    expect(File('${offlineNovel.path}/c1.json').existsSync(), isTrue);
+    expect(File('${offlineVideo.path}/series.json').existsSync(), isTrue);
+    expect(File('${offlineVideo.path}/e1.mp4').existsSync(), isTrue);
+    expect(usage.total, 1600 + 510 + 2 + 1, reason: '离线区不计入自动缓存占用');
     expect(videoDir.existsSync(), isTrue, reason: '目录本身保留，内核还要往里写');
   });
 

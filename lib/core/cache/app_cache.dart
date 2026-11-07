@@ -7,8 +7,10 @@ import 'app_image_cache.dart';
 
 /// 各类「可重建缓存」的占用（字节）。
 ///
-/// 只统计缓存，不包含书架/阅读进度（`shared_preferences`）与内核的设备注册池
-/// （`backend/config/`）——那些删了就要重新注册或丢用户数据，不属于缓存。
+/// 只统计缓存，不包含书架/阅读进度（`shared_preferences`）、内核的设备注册池
+/// （`backend/config/`），也不包含**离线缓存区**（`offline/`，见
+/// docs/offline-cache.md）——离线缓存是用户主动下载的数据，永不自动清理，
+/// 由「我的 → 缓存」页单独统计与手动删除。
 @immutable
 class CacheUsage {
   const CacheUsage({
@@ -40,6 +42,10 @@ class CacheUsage {
 /// 这些目录都在 App 沙盒里，删掉后按需重新下载/重新请求即可，所以统一收在这里
 /// 做「看占用 + 手动清」。视频缓存的上限由内核控制（`MAX_VIDEO_CACHE_BYTES`，
 /// 128 MB，每次下载后按最旧优先淘汰），这里只负责展示和手动清空。
+///
+/// **隔离约定**：`clear()` 只枚举下面这些已知的自动缓存目录，绝不触碰
+/// `<AppSupport>/offline/`（离线小说/短剧）。离线缓存只能由用户在缓存中心页
+/// 显式删除——`test/cache_test.dart` 有回归用例锁住这条约定。
 class AppCache {
   AppCache({
     Future<Directory> Function()? supportDirectory,

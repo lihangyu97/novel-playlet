@@ -238,6 +238,25 @@ class ApiClient {
     }
   }
 
+  /// 批量取正文（内核 `/api/v1/chapters/batch`，约 20 章/批）。
+  ///
+  /// 返回 `itemId → 正文`；整包失败/未解密/空正文的章不会出现在结果里，
+  /// 调用方逐章回退 [chapter]（离线下载器就是这样做的）。
+  Future<Map<String, ChapterContent>> chaptersBatch(
+    List<Chapter> chapters, {
+    Duration timeout = const Duration(seconds: 40),
+  }) async {
+    final ids = [
+      for (final chapter in chapters)
+        if (chapter.id.isNotEmpty) chapter.id,
+    ];
+    if (ids.isEmpty) return const <String, ChapterContent>{};
+    final payload = await _getJson('/api/v1/chapters/batch', {
+      'item_ids': ids.join(','),
+    }, timeout: timeout);
+    return parseBatchChapterContents(payload);
+  }
+
   Future<Map<String, dynamic>> _getJson(
     String path,
     Map<String, String> query, {

@@ -25,6 +25,16 @@ void main() {
     );
   });
 
+  /// 离线缓存不再是设置页的入口：只保留「到我的缓存页删除」的提示。
+  testWidgets('设置页-不再有离线缓存区块，存储提示指向缓存页', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+
+    expect(find.text('离线小说'), findsNothing);
+    expect(find.text('离线短剧'), findsNothing);
+    expect(find.textContaining('离线缓存不在这里清理'), findsOneWidget);
+    expect(find.textContaining('到「我的」右下角「缓存」页查看和删除'), findsOneWidget);
+  });
+
   testWidgets('设置页-自定义颜色弹层', (tester) async {
     await pumpPreview(tester, const SettingsPage());
     await tester.tap(find.text('自定义颜色'));

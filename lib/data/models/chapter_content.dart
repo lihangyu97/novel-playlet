@@ -50,6 +50,45 @@ ChapterContent parseChapterContent(
   );
 }
 
+/// 批量正文响应（`/api/v1/chapters/batch`）的解析结果：`itemId → 正文`。
+///
+/// 上游把每一章的正文放在 `data[itemId]` 里，内核已就地解密。这里做防御性
+/// 解析：整包失败 / 某章未解密 / 正文为空的章**不出现**在结果里，由下载器
+/// 逐章回退单章接口，避免一批里一章坏导致整批失败。
+///
+/// 章节标题优先取响应里的 title；缺失时由下载器用目录里的标题补齐。
+Map<String, ChapterContent> parseBatchChapterContents(
+  Map<String, dynamic> payload,
+) {
+  final out = <String, ChapterContent>{};
+  Map<String, dynamic> data;
+  try {
+    data = unwrapEnvelope(payload);
+  } catch (_) {
+    // 整包失败 = 这批都没拿到；返回空表让调用方逐章回退。
+    return out;
+  }
+  // 正常形态是 data 直接按 itemId 分组；兼容包了一层 item_infos 的响应。
+  final items = asMap(data['item_infos']) ?? data;
+  for (final entry in items.entries) {
+    final json = asMap(entry.value);
+    if (json == null) continue;
+    // 内核 batch 接口会就地解密并写回 content；显式 false 才代表没解开。
+    if (json['content_decrypted'] == false) continue;
+    final html = firstString(json, ['content', 'chapter_content', 'text']);
+    if (html.trim().isEmpty) continue;
+    final title = firstString(json, ['title', 'chapter_title', 'name']);
+    final paragraphs = _stripLeadingTitle(htmlToParagraphs(html), title);
+    if (paragraphs.isEmpty) continue;
+    out[entry.key] = ChapterContent(
+      id: entry.key,
+      title: title,
+      paragraphs: List<String>.unmodifiable(paragraphs),
+    );
+  }
+  return out;
+}
+
 /// 把正文 HTML 拍平成段落。
 ///
 /// 上游正文是 `<p>` 段落 + `<br>` 换行的混合结构，还可能夹带 `<img>` 插图与

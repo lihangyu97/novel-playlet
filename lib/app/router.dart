@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/models/chapter.dart';
 import '../data/models/novel_item.dart';
 import '../data/models/video_series.dart';
+import '../features/cache/cache_center_page.dart';
 import '../features/detail/detail_page.dart';
 import '../features/reader/reader_page.dart';
 import '../features/settings/settings_page.dart';
@@ -47,6 +48,18 @@ final class DetailRoute extends AppRoute<void> {
     builder: (_) =>
         DetailPage(bookId: bookId, preview: preview, heroTag: heroTag),
   );
+}
+
+/// 缓存中心页（「我的」右下角悬浮缓存按钮 / 详情页「缓存中·已缓存」进入）。
+///
+/// 兼下载队列展示与离线缓存管理：暂停/继续/取消排队、单条删除、按区清空都
+/// 在这里，不再有单独的管理页。
+final class CacheCenterRoute extends AppRoute<void> {
+  const CacheCenterRoute();
+
+  @override
+  Route<void> toRoute() =>
+      MaterialPageRoute<void>(builder: (_) => const CacheCenterPage());
 }
 
 /// 短剧详情页。[preview] 同样用于接口返回前先画封面/标题。

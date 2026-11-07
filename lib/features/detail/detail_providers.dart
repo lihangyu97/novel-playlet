@@ -1,10 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/storage/offline/offline_book.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/book_detail.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/novel_item.dart';
+import '../cache/cache_providers.dart';
 
 /// 详情页一屏所需的全部数据：详情 + 目录。
 class DetailBundle {
@@ -29,20 +31,52 @@ class DetailBundle {
 /// 加载态、一份错误态，不会出现「详情已出、目录还在转」的割裂感。
 ///
 /// 用 autoDispose：目录可能有几百章，退出详情页后没必要长期驻留内存。
+///
+/// 网络失败时回退到离线 manifest（整本下载时落盘的书名/封面/目录）：断网也
+/// 能从书架进详情看目录、点章节进阅读；没有离线内容才把原错误抛给页面。
 final detailBundleProvider = FutureProvider.autoDispose
     .family<DetailBundle, String>((ref, bookId) async {
       final api = ref.watch(apiClientProvider);
-      // Future.wait 会原样抛出第一个失败（ApiException），页面才能拿到
-      // 可直接展示的 message，而不是被 ParallelWaitError 包一层。
-      final values = await Future.wait<Object>([
-        api.bookDetail(bookId),
-        api.directory(bookId),
-      ]);
-      return DetailBundle(
-        detail: values[0] as BookDetail,
-        chapters: values[1] as List<Chapter>,
-      );
+      try {
+        // Future.wait 会原样抛出第一个失败（ApiException），页面才能拿到
+        // 可直接展示的 message，而不是被 ParallelWaitError 包一层。
+        final values = await Future.wait<Object>([
+          api.bookDetail(bookId),
+          api.directory(bookId),
+        ]);
+        return DetailBundle(
+          detail: values[0] as BookDetail,
+          chapters: values[1] as List<Chapter>,
+        );
+      } catch (_) {
+        final offline = await _readOfflineBook(ref, bookId);
+        if (offline == null || offline.chapters.isEmpty) rethrow;
+        return _bundleFromOffline(offline);
+      }
     });
+
+/// 读离线 manifest；读不到（没缓存/存储不可用）返回 null，不覆盖原错误。
+Future<OfflineBook?> _readOfflineBook(Ref ref, String bookId) async {
+  try {
+    return await ref.read(offlineNovelProvider(bookId).future);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 用 manifest 拼一份最小的详情数据：字段能空就空，够页面渲染目录即可。
+DetailBundle _bundleFromOffline(OfflineBook book) => DetailBundle(
+  detail: BookDetail(bookId: book.bookId, title: book.title, cover: book.cover),
+  chapters: [
+    for (var i = 0; i < book.chapters.length; i++)
+      Chapter(
+        id: book.chapters[i].id,
+        title: book.chapters[i].title,
+        volumeName: book.chapters[i].volumeName,
+        index: i,
+      ),
+  ],
+);
 
 /// 上次阅读进度，用来把主按钮切成「继续阅读 · 第N章」。
 ///
