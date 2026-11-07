@@ -96,7 +96,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     }
   }
 
-  Future<void> _open(int index, {bool refresh = false}) async {
+  Future<void> _open(
+    int index, {
+    bool refresh = false,
+    bool autoAdvance = false,
+  }) async {
     if (_episodes.isEmpty) return;
     final episode = _episodes[index];
     final generation = ++_generation;
@@ -109,7 +113,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       _index = index;
       _loading = true;
       _error = null;
-      _controlsVisible = true;
+      // 控制条只在首次进入播放页、或用户点屏幕后出现；播完自动切下一集
+      // 是「被动续播」，不应该再把控制条弹出来打断观看（见
+      // docs/playback-quality-speed.md §4.4）。
+      _controlsVisible = !autoAdvance;
       _dragValue = null;
     });
 
@@ -136,6 +143,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           controller,
           index: index,
           generation: generation,
+          autoAdvance: autoAdvance,
         );
         return;
       }
@@ -151,7 +159,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         Uri.parse(source.url),
         viewType: VideoViewType.platformView,
       );
-      await _startController(controller, index: index, generation: generation);
+      await _startController(
+        controller,
+        index: index,
+        generation: generation,
+        autoAdvance: autoAdvance,
+      );
     } catch (error, stack) {
       if (!mounted || generation != _generation) return;
       // 没有离线副本、失败又像「网络不可达」：换成明确文案；网络在线时保留
@@ -195,6 +208,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     VideoPlayerController controller, {
     required int index,
     required int generation,
+    bool autoAdvance = false,
   }) async {
     try {
       await controller.initialize();
@@ -215,7 +229,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     }
     controller.addListener(_onTick);
     await controller.play();
-    _scheduleHide();
+    // 自动续播不弹控制条，自然也不需要自动隐藏计时（它本来就是隐藏的）。
+    if (!autoAdvance) _scheduleHide();
     // 真正播起来才记历史：取流失败/初始化失败的那一集不应该进最近观看。
     // 离线播放也算看过，进度照存。
     final args = widget.args;
@@ -272,7 +287,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         !value.isPlaying) {
       _advancing = true;
       if (_index + 1 < _episodes.length) {
-        unawaited(_open(_index + 1));
+        // 播完自动续播：不要像首次进入那样弹出控制条。
+        unawaited(_open(_index + 1, autoAdvance: true));
       }
     }
   }
@@ -539,8 +555,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         body: Stack(
           children: [
             // 视频铺满整屏：全屏横屏时也要盖住底部安全区（Home 指示条那一条），
-            // 否则画面下方会留一道黑边。避让交给各自的 SafeArea 处理：
-            // 视频不避让、控制条避让。
+            // 否则画面下方会留一道黑边。顶部控制条始终避让状态栏；底部控制条
+            // 只在竖屏避让安全区——全屏横屏时贴到屏幕最底边，否则 Home 指示条
+            // 那一条会在控件下面留出空隙。
             Positioned.fill(child: _buildVideo()),
             // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
             if (showChrome)
@@ -565,7 +582,13 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                child: SafeArea(top: false, child: _chrome(_buildBottomBar())),
+                child: SafeArea(
+                  top: false,
+                  // 全屏横屏时不再避让底部安全区：控制条要完全贴底，
+                  // 否则 Home 指示条那一条会在控件下方留出空隙。
+                  bottom: !_fullscreen,
+                  child: _chrome(_buildBottomBar()),
+                ),
               ),
           ],
         ),
