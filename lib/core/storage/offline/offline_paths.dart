@@ -59,7 +59,7 @@ Future<Directory> ensureDirectory(Directory directory) async {
 
 /// 原子写 JSON：先写 `.part` 临时文件，flush 后 rename；失败删临时文件再抛。
 ///
-/// 半截文件只会以 `.part` 形态存在（启动/管理页可清理），目标文件要么是旧
+/// 半截文件只会以 `.part` 形态存在（启动/缓存中心可清理），目标文件要么是旧
 /// 版本要么是新版本，不会出现坏 JSON。
 Future<void> writeJsonAtomically(File file, Map<String, dynamic> json) =>
     _writeAtomically(

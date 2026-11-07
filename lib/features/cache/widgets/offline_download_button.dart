@@ -116,7 +116,7 @@ class OfflineDownloadButton extends ConsumerWidget {
       _showMessage(
         context,
         '离线区空间不足（已用 ${_formatBytes(error.usedBytes)} / 上限 '
-        '${_formatBytes(error.capBytes)}），请先在 设置 → 存储 清理',
+        '${_formatBytes(error.capBytes)}），请先在「我的 → 缓存」页删除不需要的缓存',
       );
     } on OfflineQueueFullException catch (error) {
       if (!context.mounted) return;

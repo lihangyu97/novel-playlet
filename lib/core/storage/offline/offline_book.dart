@@ -151,7 +151,7 @@ class OfflineBook {
   }
 }
 
-/// 离线列表的一行（管理页 / 设置页统计用，只来自 manifest，不扫盘）。
+/// 离线列表的一行（缓存中心列表用，只来自 manifest，不扫盘）。
 class OfflineBookSummary {
   const OfflineBookSummary({
     required this.bookId,

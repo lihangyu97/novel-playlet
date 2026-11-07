@@ -155,7 +155,7 @@ class OfflineSeriesStore {
 
   /// 按文件存在校正 episodes[].cached/bytes 与 completed/bytes。
   ///
-  /// 管理页/恢复任务时调用；比小说多一步：把每集的实际文件大小写回 manifest。
+  /// 缓存中心/恢复任务时调用；比小说多一步：把每集的实际文件大小写回 manifest。
   Future<void> reconcile(String seriesId) async {
     final series = await read(seriesId);
     if (series == null) return;
@@ -246,7 +246,7 @@ class OfflineSeriesStore {
 
   /// 清理离线区里残留的 `.part` 文件（半截 mp4 / 原子写临时文件）。
   ///
-  /// 启动恢复时调用；孤立目录由管理页的 [pruneOrphans] 处理。
+  /// 启动恢复时调用；孤立目录由缓存中心的 [pruneOrphans] 处理。
   Future<void> cleanupPartFiles() async {
     await _deletePartFiles(await _paths.videoDir(), recursive: true);
   }

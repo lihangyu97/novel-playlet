@@ -3,7 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book.dart';
+import 'package:novel_playlet/core/storage/offline/offline_book_store.dart';
+import 'package:novel_playlet/core/storage/offline/offline_paths.dart';
 import 'package:novel_playlet/core/storage/offline/offline_series.dart';
+import 'package:novel_playlet/core/storage/offline/offline_series_store.dart';
+import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
 import 'package:novel_playlet/features/cache/offline_queue.dart';
@@ -107,6 +111,8 @@ void main() {
     WidgetTester tester, {
     required List<Override> extra,
     FakePreviewTransport? transport,
+    OfflineBookStore? bookStore,
+    OfflineSeriesStore? seriesStore,
   }) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -118,7 +124,14 @@ void main() {
             ApiClient(transport ?? FakePreviewTransport()),
           ),
           readerChapterCacheProvider.overrideWithValue(PreviewChapterCache()),
-          ...previewOfflineOverrides(),
+          // 默认就用记录型 store：它不碰真实磁盘，也不会在页面进入时的自愈
+          // 逻辑里打出「预览缓存不应访问磁盘」的噪音日志。
+          offlineBookStoreProvider.overrideWithValue(
+            bookStore ?? _RecordingBookStore(),
+          ),
+          offlineSeriesStoreProvider.overrideWithValue(
+            seriesStore ?? _RecordingSeriesStore(),
+          ),
           ...extra,
         ],
         child: const PreviewApp(home: CacheCenterPage()),
@@ -312,6 +325,135 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
   });
 
+  testWidgets('删除入口：取消不删，确认后 clearFor 删除并弹 SnackBar', (tester) async {
+    final bookStore = _RecordingBookStore();
+    await pumpCenter(
+      tester,
+      extra: overrides(books: [book()]),
+      bookStore: bookStore,
+    );
+    expect(find.byTooltip('删除缓存'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('删除缓存'));
+    await tester.pumpAndSettle();
+    expect(find.text('删除离线缓存？'), findsOneWidget);
+    expect(find.textContaining('已缓存 3/10 章'), findsWidgets);
+    expect(find.textContaining('（48 KB）'), findsWidgets);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(find.text('删除离线缓存？'), findsNothing);
+    expect(bookStore.deleted, isEmpty, reason: '取消不应删除');
+
+    await tester.tap(find.byTooltip('删除缓存'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+    expect(bookStore.deleted, ['b1']);
+    expect(find.text('已删除《剑来》的离线缓存'), findsOneWidget);
+  });
+
+  testWidgets('删除运行中的任务：对话框说明会先停止当前任务', (tester) async {
+    await pumpCenter(
+      tester,
+      extra: overrides(
+        active: task(id: 'b2', title: '雪中悍刀行'),
+      ),
+      bookStore: _RecordingBookStore(),
+    );
+    await tester.tap(find.byTooltip('删除缓存'));
+    await tester.pumpAndSettle();
+    expect(find.text('删除离线缓存？'), findsOneWidget);
+    expect(find.textContaining('会先停止当前任务'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('清空菜单：分区为空时置灰，取消不调用 clearAll', (tester) async {
+    final bookStore = _RecordingBookStore();
+    final seriesStore = _RecordingSeriesStore();
+    await pumpCenter(
+      tester,
+      extra: overrides(books: [book()]),
+      bookStore: bookStore,
+      seriesStore: seriesStore,
+    );
+
+    await tester.tap(find.byTooltip('清空缓存'));
+    await tester.pumpAndSettle();
+    expect(find.text('清空小说缓存'), findsOneWidget);
+    expect(find.text('清空短剧缓存'), findsOneWidget);
+    final menuItems = tester
+        .widgetList<PopupMenuItem<OfflineTaskKind>>(
+          find.byType(PopupMenuItem<OfflineTaskKind>),
+        )
+        .toList();
+    expect(menuItems, hasLength(2));
+    expect(menuItems[0].enabled, isTrue, reason: '小说分区有内容');
+    expect(menuItems[1].enabled, isFalse, reason: '短剧分区为空应置灰');
+
+    await tester.tap(find.text('清空小说缓存'));
+    await tester.pumpAndSettle();
+    expect(find.text('清空小说离线缓存？'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(bookStore.clearAllCalls, 0);
+    expect(seriesStore.clearAllCalls, 0);
+  });
+
+  testWidgets('清空确认：clearAll 只清本区、撤掉同区排队项并弹 SnackBar', (tester) async {
+    final bookStore = _RecordingBookStore();
+    final seriesStore = _RecordingSeriesStore();
+    await pumpCenter(
+      tester,
+      extra: overrides(books: [book()], series: [drama()]),
+      bookStore: bookStore,
+      seriesStore: seriesStore,
+    );
+    // 预先排一个小说等待项，清空时应该一起被撤掉。
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(CacheCenterPage)),
+    );
+    container
+        .read(offlineQueueProvider.notifier)
+        .enqueue(
+          OfflineQueueJob(
+            kind: OfflineTaskKind.novel,
+            id: 'b9',
+            title: '排队待清空',
+            cover: '',
+            items: const [],
+          ),
+        );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('清空缓存'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清空小说缓存'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('共 1 本'), findsOneWidget);
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+
+    expect(bookStore.clearAllCalls, 1);
+    expect(seriesStore.clearAllCalls, 0, reason: '短剧区不受影响');
+    expect(container.read(offlineQueueProvider), isEmpty);
+    expect(find.text('已清空离线小说缓存'), findsOneWidget);
+  });
+
+  testWidgets('删除确认对话框', (tester) async {
+    await pumpCenter(
+      tester,
+      extra: overrides(books: [book()]),
+      bookStore: _RecordingBookStore(),
+    );
+    await tester.tap(find.byTooltip('删除缓存'));
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('../goldens/cache_center_delete_dialog.png'),
+    );
+  });
+
   testWidgets('缓存中心页', (tester) async {
     await pumpCenter(
       tester,
@@ -327,4 +469,84 @@ void main() {
       matchesGoldenFile('../goldens/cache_center.png'),
     );
   });
+}
+
+/// 记录型小说离线区：删除/清空只记调用，不碰真实磁盘。
+class _RecordingBookStore extends OfflineBookStore {
+  _RecordingBookStore()
+    : super(paths: OfflinePaths(rootDirectory: unsupportedDirectory));
+
+  final List<String> deleted = <String>[];
+  int clearAllCalls = 0;
+
+  @override
+  Future<void> delete(String bookId) async => deleted.add(bookId);
+
+  @override
+  Future<void> clearAll() async => clearAllCalls += 1;
+
+  @override
+  Future<List<OfflineBookSummary>> summaries() async =>
+      const <OfflineBookSummary>[];
+
+  @override
+  Future<void> reconcile(String bookId) async {}
+
+  @override
+  Future<int> pruneOrphans() async => 0;
+
+  @override
+  Future<void> cleanupPartFiles() async {}
+
+  @override
+  Future<OfflineBook?> read(String bookId) async => null;
+
+  @override
+  Future<ChapterContent?> readChapter(String bookId, String chapterId) async =>
+      null;
+
+  @override
+  Future<OfflineStats> stats() async => const OfflineStats(
+    count: 0,
+    bytes: 0,
+    capBytes: OfflineBookStore.novelCapBytes,
+  );
+}
+
+/// 记录型短剧离线区：用途同上。
+class _RecordingSeriesStore extends OfflineSeriesStore {
+  _RecordingSeriesStore()
+    : super(paths: OfflinePaths(rootDirectory: unsupportedDirectory));
+
+  final List<String> deleted = <String>[];
+  int clearAllCalls = 0;
+
+  @override
+  Future<void> delete(String seriesId) async => deleted.add(seriesId);
+
+  @override
+  Future<void> clearAll() async => clearAllCalls += 1;
+
+  @override
+  Future<List<OfflineSeriesSummary>> summaries() async =>
+      const <OfflineSeriesSummary>[];
+
+  @override
+  Future<void> reconcile(String seriesId) async {}
+
+  @override
+  Future<int> pruneOrphans() async => 0;
+
+  @override
+  Future<void> cleanupPartFiles() async {}
+
+  @override
+  Future<OfflineSeries?> read(String seriesId) async => null;
+
+  @override
+  Future<OfflineStats> stats() async => const OfflineStats(
+    count: 0,
+    bytes: 0,
+    capBytes: OfflineSeriesStore.videoCapBytes,
+  );
 }

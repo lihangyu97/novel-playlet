@@ -14,7 +14,7 @@
 | 2 | 短剧下载粒度 | **整剧一键下载**，不做选集多选 |
 | 3 | 小说下载粒度 | **整本下载**（不做阅读器的 20/50/100 章预设，后续需要再说） |
 | 4 | 容量上限 | 小说 **1 GiB**、短剧 **3 GiB**（软上限，超限阻止新任务并引导清理） |
-| 5 | 清理入口 | 「设置 → 存储」下新增两个独立区块 + 管理页；「清理缓存」不碰离线区 |
+| 5 | 清理入口 | 「我的 → 缓存」页负责查看/删除/清空（M3 确认框）；「设置 → 存储」只保留自动缓存清理，并提示离线缓存去缓存页处理；「清理缓存」不碰离线区 |
 
 补充假设（实现时按此执行，若要改再说）：
 
@@ -96,7 +96,7 @@ Caches/封面缓存             └──────►  （只手动清理）
 - `bookKey` / `chapterKey` / `seriesKey` / `episodeKey`：沿用
   `reader_chapter_cache.dart` 的 Base64URL 编码（去掉 `=`），避免 id 里的 `/`、`:` 变路径。
 - 写入一律「临时文件 + rename」原子落盘；读取遇到损坏/半截文件直接删掉当 miss（自愈）。
-- 无 manifest 的孤立目录：进入缓存管理页时整体清理（崩溃残留）。
+- 无 manifest 的孤立目录：进入缓存中心页时整体清理（崩溃残留）。
 
 ### 4.2 章节文件 / 剧集文件
 
@@ -155,7 +155,7 @@ Caches/封面缓存             └──────►  （只手动清理）
   - 短剧：单集体积差异大（几十 MB 到几百 MB），**不能按集数估算**（40 集 × 150MB
     会误判超 3GiB 直接拒绝）。改为只在「区已满」时拒绝开始，下载过程中逐集检查：
     到上限就暂停并提示清理，允许当前这一集把区间小幅顶过上限。
-- 统计：`book.json`/`series.json` 的 `bytes` 之和（列表页不扫盘；进入管理页时后台扫盘校正一次）。
+- 统计：`book.json`/`series.json` 的 `bytes` 之和（列表页不扫盘；进入缓存中心时后台扫盘校正一次）。
 - 体积展示格式沿用设置页的「xx MB / xx GB」。
 
 ## 5. 小说离线（整本）
@@ -233,39 +233,31 @@ if (offlineSeriesStore.hasEpisode(seriesId, episode.id)) {
   - `缓存中`（`downloading_outlined`）：任务进行中/暂停，或 manifest 只完成一部分，点击进「缓存中心」；
   - `已缓存`（`download_done_outlined`）：整本/整剧已下完，点击进「缓存中心」。
 - 暂停 / 继续 / 重试集中在缓存中心页（§8.4）：详情页点「缓存中」不再原地暂停，避免一个按钮承担「跳转 + 暂停」两件事。
-- 下载完成/失败/超容量的提示仍由下载器侧 `SnackBar` 与缓存中心页承担；超容量时文案引导去「设置 → 存储」清理。
+- 下载完成/失败/超容量的提示仍由下载器侧 `SnackBar` 与缓存中心页承担；超容量时文案引导去「我的 → 缓存」页删除。
 
 ### 8.2 设置 → 存储
 
-- 「自动缓存」区块维持现状（视频/封面/章节 + 清理按钮），文案补一句「清理不会删除离线缓存」。
-- 新增两个独立区块（上下两块，互不影响）：
-  - **离线小说**：N 本 · X MB · [管理]
-  - **离线短剧**：M 部 · Y MB · [管理]
+- 「自动缓存」区块维持现状（视频/封面/章节 + 清理按钮），提示文案说明「清理不会删除离线缓存」。
+- **不再有离线缓存区块**：下方提示「离线缓存不在这里清理，到「我的」右下角「缓存」页查看和删除」。
 
-### 8.3 离线缓存管理页（两 tab：小说 / 短剧）
+### 8.3 缓存中心页（我的右下角悬浮入口）
 
-- 小说列表项：封面 / 书名 / 「已缓存 320/1024 章 · 4.8MB」/ 最近更新时间；
-  操作：继续缓存（有缺口时）/ 删除（二次确认）。
-- 短剧列表项：封面 / 剧名 / 「已缓存 12/40 集 · 300MB」/ 最近更新时间；
-  操作同上。
-- 顶部：本区总占用、本区上限、[清空本区]（二次确认）。
-- 空态用现有 `EmptyView`；文案统一「离线缓存只在手动删除时释放」。
-
-### 8.4 缓存中心页（我的右上角 → 下载图标）
-
-- 入口：「我的」右上角悬浮设置按钮左侧的下载图标（两个按钮成组，随小说/短剧面板切换整体左右移动）。
-- 页面按「小说」「短剧」两个分区列出**正在下载 + 已下载**条目（有内容才显示分区）：
-  - 运行中：`下载中 37% · 1.2 MB/s · 152 MB` + 进度条 + 右侧暂停按钮（网速来自下载器 EMA 采样，只在运行中且 >0 时显示）；
+- 入口：「我的」右下角、小说/短剧切换按钮左侧的圆形悬浮按钮（下载图标），与切换按钮同尺寸/阴影。
+- 页面按「小说」「短剧」两个分区列出**下载中 / 排队中 / 已下载**条目（有内容才显示分区）：
+  - 运行中：`下载中 37% · 1.2 MB/s · 152 MB` + 进度条 + 暂停按钮（网速来自下载器 EMA 采样，只在运行中且 >0 时显示）；
+  - 排队中：`排队中 · 等前面的任务完成后自动开始`，右侧「取消排队」；
   - 暂停 / 失败：状态 + 原因（最多两行）+ 继续/重试按钮（重启后的恢复态按 manifest 重建入参续传）；
   - 已完成：`已缓存 10/10 章 · 800 KB`（短剧用「集」）。
 - 点条目与推荐列表一致：封面 Hero 飞入对应详情页（`CoverHeroTag.novel/video('cache-center', id)`）。
-- 与管理页分工：缓存中心只浏览/控制下载（暂停、继续、重试、取消排队），删除/清空仍在「设置 → 存储」的管理页。
-- 「我的」入口在右下角：切换按钮左侧的圆形悬浮按钮（下载图标），和面板切换按钮同一套尺寸/阴影。
+- **删除（M3）**：条目右侧 `delete_outline`（error 色）→ `AlertDialog`「删除离线缓存？」（内容带已缓存章/集与大小；运行中/暂停会提示先停任务）→ 文本按钮「取消 / 删除（error 色）」→ `OfflineDownloader.clearFor()` 停任务+删目录。删除只影响离线 pinned 区，不碰自动缓存。
+- **清空（M3）**：AppBar 溢出菜单（more_vert）「清空小说缓存 / 清空短剧缓存」，对应分区为空时置灰；同款确认框（N 本/部 · 大小；排队项会一并取消）→ 先撤同区排队项、停同区任务，再 `clearAll()`；另一区不受影响。
+- 进入页面时后台自愈（reconcile / 清理孤立目录与 `.part`）一次；空态用 `EmptyView`。
+- 旧的两 tab「离线缓存管理页」已并入本页，`OfflineCachePage` / `OfflineCacheRoute` 已删除。
 
 ## 9. 与现有缓存 / 清理的关系
 
 - `AppCache`：新增「不碰 offline/」的显式约束（清理函数只枚举已知自动目录），并补测试；
-  自动缓存的统计入口不动，设置页把离线统计单独读 `OfflineStores.stats()`。
+  自动缓存的统计入口不动，离线缓存的统计/删除统一在缓存中心页。
 - 阅读器自动层（`ReaderChapterCache`）：不动，继续负责 ±1 章预取与非离线阅读加速。
 - 播放临时层（Rust `src/`）：不动；离线命中时播放器不再触发内核下载，反而降低临时缓存压力。
 - 同一章/同一集可能 auto 与 offline 各一份：正文很小；视频离线命中后不会走临时下载。
@@ -284,7 +276,6 @@ lib/core/storage/offline/offline_series_store.dart # 短剧 manifest/集文件�
 lib/features/cache/offline_task.dart               # 任务模型 + 持久化
 lib/features/cache/offline_downloader.dart         # 单任务状态机：小说批次 / 短剧整剧
 lib/features/cache/cache_providers.dart            # stores / downloader / 统计 providers
-lib/features/cache/offline_cache_page.dart         # 管理页（小说 / 短剧两 tab）
 lib/features/cache/widgets/offline_download_button.dart  # 详情页三态按钮（图标+文字）
 lib/features/cache/cache_center_page.dart          # 缓存中心（我的入口：下载中/排队中/已下载 + 网速 + Hero 进详情）
 lib/features/cache/offline_queue.dart              # 离线下载等待队列（FIFO/去重/上限 20）
@@ -292,7 +283,6 @@ lib/app/widgets/detail_icon_label_button.dart      # 详情底栏「上图标、
 test/offline_book_store_test.dart
 test/offline_series_store_test.dart
 test/offline_downloader_test.dart
-test/ui/offline_cache_test.dart                    # 管理页（设置入口）
 test/ui/cache_center_test.dart                     # 缓存中心（分区/进度/网速/暂停失败态/Hero）
 ```
 
@@ -309,7 +299,7 @@ lib/features/video/video_detail_page.dart     # + 缓存整剧按钮 + 离线兜
 lib/features/video/video_detail_providers.dart
 lib/features/video/video_player_page.dart     # 已缓存集用 file:// 秒开；离线未缓存提示
 lib/features/mine/mine_page.dart              # 右上角缓存中心入口
-lib/features/settings/settings_page.dart      # 存储区块 + 两个离线入口
+lib/features/settings/settings_page.dart      # 存储区块 + 离线缓存指向缓存页的提示
 lib/features/cache/offline_task.dart          # + 瞬态 speedBytesPerSecond（不持久化）
 lib/app/router.dart                           # + CacheCenterRoute
 lib/core/cache/app_cache.dart                 # 明确排除 offline/；统计不变
@@ -364,10 +354,9 @@ CONTRACTS.md / README.md                      # 功能表/存储约定同步
 回环 `/src` 明文流 → `.part` → `commitEpisode`；pause/resume/cancel/clearFor；前后台暂停；
 额度上限；manifest 节流）、`cache_providers.dart`、`widgets/offline_download_button.dart`
 
-**页面**：`lib/features/cache/offline_cache_page.dart`（管理页两 tab）、
 `lib/features/cache/cache_center_page.dart`（我的入口的缓存中心：下载中/已下载 + 进度/网速 + Hero 进详情）、
 `lib/app/widgets/detail_icon_label_button.dart`（详情底栏共用按钮）、
-`lib/features/settings/settings_page.dart`（存储 + 两个离线区块）、
+`lib/features/settings/settings_page.dart`（存储清理 + 离线缓存的去向提示）、
 `lib/features/detail/*`（详情离线兜底 + 底栏按钮）、
 `lib/features/reader/reader_controller.dart`（offline → 自动缓存 → 网络的读链路）、
 `lib/features/video/offline_playback.dart` + `video_player_page.dart`（已缓存集 `file://` 秒开）、
@@ -394,7 +383,7 @@ goldens 更新 `detail.png` / `video_detail_episodes.png`（底栏新增按钮�
    文案，属可接受的语义偏差。
 5. **详情离线兜底字段**：小说只回退书名/封面/目录，短剧回退剧名/封面/选集；简介、标签、评分等
    不在 manifest 里（离线详情呈现精简形态）。
-6. **`pruneOrphans()` / `cleanupPartFiles()`**：进入管理页时做一次自愈；下载器启动时清理残留 `.part`。
+6. **`pruneOrphans()` / `cleanupPartFiles()`**：进入缓存中心页时做一次自愈；下载器启动时清理残留 `.part`。
 7. **封面**：manifest 只存封面 URL，下载时未额外落盘封面文件（离线管理列表的封面可能显示占位块；
    如需离线缩略图可后续在下载时顺带保存，属 M3/P2）。
 
@@ -412,7 +401,7 @@ goldens 更新 `detail.png` / `video_detail_episodes.png`（底栏新增按钮�
   `缓存中/已缓存` → 进缓存中心（暂停/继续/重试集中到那里）。
 - **缓存中心页**：我的右上角新增下载图标入口；分「小说 / 短剧」列出下载中 + 已下载，展示
   进度条与实时网速（`OfflineTask.speedBytesPerSecond`，下载器按累计字节差 + EMA 采样，仅进程内有效），
-  点条目 Hero 进详情。删除/清空仍走设置里的管理页。
+  点条目 Hero 进详情；删除/清空直接在本页用 M3 确认框完成。
 - **验证**：`dart format` / `flutter analyze --fatal-infos` 干净；`flutter test` **233 passed / 1 skipped**
   （golden 22 张，新增 `cache_center.png`，更新 `detail.png` / `video_detail_episodes.png` / `mine_*.png` / `home_mine.png`）；
   真机（iPhone 13）按新底栏与缓存中心入口安装验收。
@@ -421,5 +410,12 @@ goldens 更新 `detail.png` / `video_detail_episodes.png`（底栏新增按钮�
 
 - **入口**：「我的」的缓存中心入口从右上角设置旁的图标改成右下角悬浮按钮（与小说/短剧切换按钮同尺寸/阴影，固定在切换按钮左侧，`secondaryContainer` 配色区分主次）。
 - **下载队列**：单任务下载器不再"已有任务就报错"，改为 FIFO 等待队列（`offline_queue.dart`，最多 20 个、按 kind+id 去重）。当前任务完成/失败/取消后自动启动下一个；`paused` 时队列停住（用户主动暂停不偷偷下别的）；队列任务启动前失败会发布失败快照后继续下一个；删除/取消会同步出队；连点同一本用 `_startingJob` 入口占位防并发跑两份。队列只在内存里，重启后等待项消失（当前任务恢复成 paused），重新点「缓存」按缺口续传。
-- **UI**：缓存中心新增「排队中」条目与「取消排队」；详情按钮把已排队算作「缓存中」并点进缓存中心；设置里的管理页「继续缓存」若因单任务在跑而入队，同样给「已加入队列」回执。
+- **UI**：缓存中心新增「排队中」条目与「取消排队」；详情按钮把已排队算作「缓存中」并点进缓存中心；管理页「继续缓存」若因单任务在跑而入队，同样给「已加入队列」回执。
 - **验证**：`dart format` / `flutter analyze --fatal-infos` 干净；`flutter test` **255 passed / 1 skipped**（golden 22 张，更新 mine_*/home_mine/cache_center；新增队列单测 12+7 条）；真机（iPhone 13）安装验收。
+
+### 14.6 迭代：清理入口收口到缓存页（2026-11-07）
+
+- 设置页删除「离线缓存」区块（含两个统计/管理入口），「存储」下新增提示：离线缓存不在这里清理，到「我的」右下角「缓存」页查看和删除；`OfflineCachePage` / `OfflineCacheRoute` 及旧测试一并删除。
+- 缓存中心补上管理能力（M3 风格）：条目右侧 `delete_outline`（error 色）+ `AlertDialog` 文本按钮确认（取消 / 红色删除）；AppBar 溢出菜单提供「清空小说缓存 / 清空短剧缓存」（空分区置灰）+ 同款确认框；删除/清空会先停任务、撤队列，再删离线目录；进入页面时的 reconcile 自愈也搬到这里。
+- 容量不足/引导清理的文案统一改指「我的 → 缓存」页。
+- **验证**：`dart format` / `flutter analyze --fatal-infos` 干净；`flutter test` **256 passed / 1 skipped**（golden 23 张，更新 settings*/cache_center，新增 `cache_center_delete_dialog.png`）；真机（iPhone 13）安装验收。

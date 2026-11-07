@@ -66,12 +66,12 @@ final offlineVideoStatsProvider = FutureProvider<OfflineStats>(
   (ref) => ref.watch(offlineSeriesStoreProvider).stats(),
 );
 
-/// 小说离线列表（管理页用；只读 manifest，不扫盘）。
+/// 小说离线列表（缓存中心用；只读 manifest，不扫盘）。
 final offlineNovelListProvider = FutureProvider<List<OfflineBookSummary>>(
   (ref) => ref.watch(offlineBookStoreProvider).summaries(),
 );
 
-/// 短剧离线列表（管理页用）。
+/// 短剧离线列表（缓存中心用）。
 final offlineVideoListProvider = FutureProvider<List<OfflineSeriesSummary>>(
   (ref) => ref.watch(offlineSeriesStoreProvider).summaries(),
 );

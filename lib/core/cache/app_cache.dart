@@ -10,7 +10,7 @@ import 'app_image_cache.dart';
 /// 只统计缓存，不包含书架/阅读进度（`shared_preferences`）、内核的设备注册池
 /// （`backend/config/`），也不包含**离线缓存区**（`offline/`，见
 /// docs/offline-cache.md）——离线缓存是用户主动下载的数据，永不自动清理，
-/// 由「设置 → 存储」的独立离线区块单独统计与手动删除。
+/// 由「我的 → 缓存」页单独统计与手动删除。
 @immutable
 class CacheUsage {
   const CacheUsage({
@@ -44,7 +44,7 @@ class CacheUsage {
 /// 128 MB，每次下载后按最旧优先淘汰），这里只负责展示和手动清空。
 ///
 /// **隔离约定**：`clear()` 只枚举下面这些已知的自动缓存目录，绝不触碰
-/// `<AppSupport>/offline/`（离线小说/短剧）。离线缓存只能由用户在离线管理页
+/// `<AppSupport>/offline/`（离线小说/短剧）。离线缓存只能由用户在缓存中心页
 /// 显式删除——`test/cache_test.dart` 有回归用例锁住这条约定。
 class AppCache {
   AppCache({

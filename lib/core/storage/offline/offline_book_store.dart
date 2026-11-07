@@ -127,7 +127,7 @@ class OfflineBookStore {
     return out;
   }
 
-  /// 按文件存在校正 manifest 的 completed / bytes（进入管理页、恢复任务时调）。
+  /// 按文件存在校正 manifest 的 completed / bytes（进入缓存中心、恢复任务时调）。
   Future<void> reconcile(String bookId) async {
     final book = await read(bookId);
     if (book == null) return;
@@ -183,7 +183,7 @@ class OfflineBookStore {
   }
 
   /// 清理没有 manifest（崩溃残留/半截目录）的孤立目录，以及残留 `.part`
-  /// 文件；返回删除的目录数。管理页打开时调用（此时不应有进行中的任务）。
+  /// 文件；返回删除的目录数。缓存中心打开时调用（此时不应有进行中的任务）。
   Future<int> pruneOrphans() async {
     var removed = 0;
     for (final directory in await listChildDirectories(
@@ -213,7 +213,7 @@ class OfflineBookStore {
   /// 清理离线区里残留的 `.part` 文件（半截写/下载中断）。
   ///
   /// 启动恢复时调用：只删半截文件，不碰正式内容，也不删孤立目录
-  /// （孤立目录由管理页的 [pruneOrphans] 处理）。
+  /// （孤立目录由缓存中心的 [pruneOrphans] 处理）。
   Future<void> cleanupPartFiles() async {
     await _deletePartFiles(await _paths.novelDir(), recursive: true);
   }

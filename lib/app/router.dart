@@ -4,8 +4,6 @@ import '../data/models/chapter.dart';
 import '../data/models/novel_item.dart';
 import '../data/models/video_series.dart';
 import '../features/cache/cache_center_page.dart';
-import '../features/cache/offline_cache_page.dart';
-import '../features/cache/offline_task.dart';
 import '../features/detail/detail_page.dart';
 import '../features/reader/reader_page.dart';
 import '../features/settings/settings_page.dart';
@@ -52,22 +50,10 @@ final class DetailRoute extends AppRoute<void> {
   );
 }
 
-/// 离线缓存管理页。[initialKind] 决定先落在小说还是短剧 tab。
-final class OfflineCacheRoute extends AppRoute<void> {
-  const OfflineCacheRoute({this.initialKind = OfflineTaskKind.novel});
-
-  final OfflineTaskKind initialKind;
-
-  @override
-  Route<void> toRoute() => MaterialPageRoute<void>(
-    builder: (_) => OfflineCachePage(initialKind: initialKind),
-  );
-}
-
-/// 缓存中心页（「我的」右上角下载图标 / 详情页「缓存中·已缓存」进入）。
+/// 缓存中心页（「我的」右下角悬浮缓存按钮 / 详情页「缓存中·已缓存」进入）。
 ///
-/// 与 [OfflineCacheRoute] 的区别：那个是设置里的管理页（删除/清空），这个只
-/// 展示下载中 + 已下载的条目，供浏览与跳详情。
+/// 兼下载队列展示与离线缓存管理：暂停/继续/取消排队、单条删除、按区清空都
+/// 在这里，不再有单独的管理页。
 final class CacheCenterRoute extends AppRoute<void> {
   const CacheCenterRoute();
 

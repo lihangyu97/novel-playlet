@@ -786,7 +786,7 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
         control.pauseMessage ??=
             '离线区空间不足（已用 ${_formatBytesShort(bytes)} / 上限 '
             '${_formatBytesShort(seriesStore.capBytes)}），任务已暂停，'
-            '请先在「设置 → 存储」清理';
+            '请先在「我的 → 缓存」页删除不需要的缓存';
         control.pauseRequested = true;
         break;
       }

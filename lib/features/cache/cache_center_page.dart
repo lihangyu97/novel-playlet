@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -19,8 +21,8 @@ import 'offline_task.dart';
 /// 缓存中心：从「我的」右下角悬浮缓存按钮进入，按小说 / 短剧分区列出正在下载、
 /// 排队中与已下载的内容（进度条 + 网速），点条目 Hero 飞进对应详情页。
 ///
-/// 与设置页的「离线缓存管理页」（[OfflineCachePage]）分工：那边负责删除/清空
-/// 等管理动作；本页只做浏览与下载控制（暂停 / 继续 / 重试），不提供删除。
+/// 离线缓存只在手动删除时释放，所以本页同时是唯一的管理入口：单条删除（运行中
+/// 的先停任务再删）与按区清空；删除只影响离线 pinned 区，不碰自动缓存。
 class CacheCenterPage extends ConsumerStatefulWidget {
   const CacheCenterPage({super.key});
 
@@ -32,17 +34,51 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
   @override
   void initState() {
     super.initState();
-    // 进页面刷新一次列表：这两个 provider 是进程级缓存，上次下载完成时页面
-    // 不一定还活着，重进时要以磁盘上的 manifest 为准重新读一遍。
+    // 进页面先自愈一次再刷新列表：按文件存在校正 manifest、清掉崩溃残留的
+    // .part 与无 manifest 的孤立目录。不阻塞首帧（postFrame + 失败静默），
+    // 列表照现有 manifest 展示，最多进度/体积略偏小。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _invalidateLists();
+      unawaited(_reconcileAndRefresh());
     });
   }
 
   void _invalidateLists() {
     ref.invalidate(offlineNovelListProvider);
     ref.invalidate(offlineVideoListProvider);
+  }
+
+  Future<void> _reconcileAndRefresh() async {
+    await _reconcileNovelStore();
+    await _reconcileVideoStore();
+    if (!mounted) return;
+    _invalidateLists();
+  }
+
+  Future<void> _reconcileNovelStore() async {
+    try {
+      final store = ref.read(offlineBookStoreProvider);
+      for (final summary in await store.summaries()) {
+        await store.reconcile(summary.bookId);
+      }
+      await store.pruneOrphans();
+      await store.cleanupPartFiles();
+    } catch (error) {
+      debugPrint('[offline] novel reconcile failed: $error');
+    }
+  }
+
+  Future<void> _reconcileVideoStore() async {
+    try {
+      final store = ref.read(offlineSeriesStoreProvider);
+      for (final summary in await store.summaries()) {
+        await store.reconcile(summary.seriesId);
+      }
+      await store.pruneOrphans();
+      await store.cleanupPartFiles();
+    } catch (error) {
+      debugPrint('[offline] video reconcile failed: $error');
+    }
   }
 
   @override
@@ -92,7 +128,34 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
         (novelList.hasError || videoList.hasError);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('缓存')),
+      appBar: AppBar(
+        title: const Text('缓存'),
+        actions: [
+          // 批量清空：M3 里最常见的「AppBar 溢出菜单」入口，分区为空时置灰。
+          PopupMenuButton<OfflineTaskKind>(
+            tooltip: '清空缓存',
+            icon: const Icon(Icons.more_vert),
+            onSelected: (kind) => _clearAll(
+              kind: kind,
+              entries: kind == OfflineTaskKind.novel
+                  ? novelEntries
+                  : videoEntries,
+            ),
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: OfflineTaskKind.novel,
+                enabled: novelEntries.isNotEmpty,
+                child: const Text('清空小说缓存'),
+              ),
+              PopupMenuItem(
+                value: OfflineTaskKind.video,
+                enabled: videoEntries.isNotEmpty,
+                child: const Text('清空短剧缓存'),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: SafeArea(
         top: false,
         child: loading
@@ -132,6 +195,7 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
         onContinue: () => _continue(entry),
         onRetry: () => _retry(entry),
         onCancelQueued: () => _cancelQueued(entry),
+        onDelete: () => _delete(entry),
       ),
     );
   }
@@ -214,6 +278,138 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
     ref.read(offlineQueueProvider.notifier).remove(entry.kind, entry.id);
   }
 
+  /// 单条删除：先确认，再交给下载器 `clearFor`（会取消同 id 的任务/排队项，
+  /// 再删离线目录，避免留下孤立 .part）。
+  Future<void> _delete(_CacheEntry entry) async {
+    final confirmed = await _confirmDialog(
+      title: '删除离线缓存？',
+      message: _deleteMessage(entry),
+    );
+    if (confirmed != true || !mounted) return;
+    await ref
+        .read(offlineDownloaderProvider.notifier)
+        .clearFor(entry.kind, entry.id);
+    if (!mounted) return;
+    _invalidateLists();
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('已删除《${entry.title}》的离线缓存')));
+  }
+
+  String _deleteMessage(_CacheEntry entry) {
+    final buffer = StringBuffer('《${entry.title}》');
+    if (entry.total > 0) {
+      buffer.write('已缓存 ${entry.completed}/${entry.total} ${entry.unit}');
+    } else {
+      buffer.write('尚未缓存任何内容');
+    }
+    buffer.write('（${formatBytes(entry.bytes)}）。');
+    if (entry.status == _EntryStatus.running ||
+        entry.status == _EntryStatus.paused) {
+      buffer.write('会先停止当前任务，再删除已缓存的内容。');
+    }
+    buffer.write('删除后需要重新下载。');
+    return buffer.toString();
+  }
+
+  /// 按分区清空：先停同类型任务、撤掉同类型排队项，再清空该区（另一区不动）。
+  Future<void> _clearAll({
+    required OfflineTaskKind kind,
+    required List<_CacheEntry> entries,
+  }) async {
+    if (entries.isEmpty) return;
+    final confirmed = await _confirmDialog(
+      title: '清空${_kindLabel(kind)}离线缓存？',
+      message: _clearMessage(kind, entries),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final downloader = ref.read(offlineDownloaderProvider.notifier);
+    // 先撤队列里同类型的等待项，再停当前任务：取消当前任务会触发下载器
+    // 自动接续队列，如果队列里还有同区的剧/书，它会在 clearAll 删文件时
+    // 正好开始下载。顺序反过来就不会有这种竞争。
+    final queuedIds = ref
+        .read(offlineQueueProvider)
+        .where((item) => item.kind == kind)
+        .map((item) => item.id)
+        .toList(growable: false);
+    for (final id in queuedIds) {
+      ref.read(offlineQueueProvider.notifier).remove(kind, id);
+    }
+    final current = ref.read(offlineTaskProvider);
+    if (current != null && current.kind == kind) {
+      // 停掉进行中的同类型任务（clearFor 会取消并删除当前那一条）。
+      await downloader.clearFor(kind, current.id);
+      if (!mounted) return;
+    }
+    switch (kind) {
+      case OfflineTaskKind.novel:
+        await ref.read(offlineBookStoreProvider).clearAll();
+      case OfflineTaskKind.video:
+        await ref.read(offlineSeriesStoreProvider).clearAll();
+    }
+    if (!mounted) return;
+    _invalidateLists();
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('已清空离线${_kindLabel(kind)}缓存')));
+  }
+
+  String _clearMessage(OfflineTaskKind kind, List<_CacheEntry> entries) {
+    final label = _kindLabel(kind);
+    final other = kind == OfflineTaskKind.novel ? '短剧' : '小说';
+    final countUnit = kind == OfflineTaskKind.novel ? '本' : '部';
+    // 排队中的条目还没有离线内容，不计入「N 本 · 大小」，只提一句会被取消。
+    final cached = [
+      for (final entry in entries)
+        if (entry.status != _EntryStatus.queued) entry,
+    ];
+    final bytes = cached.fold<int>(0, (sum, entry) => sum + entry.bytes);
+    final queued = entries.length - cached.length;
+    final buffer = StringBuffer();
+    if (cached.isEmpty) {
+      buffer.write('将取消离线$label排队中的请求。');
+    } else {
+      buffer.write(
+        '将删除全部离线$label（共 ${cached.length} $countUnit · '
+        '${formatBytes(bytes)}），$other离线缓存不受影响。删除后需要重新下载。',
+      );
+    }
+    if (queued > 0 && cached.isNotEmpty) {
+      buffer.write('排队中的 $queued 个请求也会一并取消。');
+    }
+    return buffer.toString();
+  }
+
+  String _kindLabel(OfflineTaskKind kind) =>
+      kind == OfflineTaskKind.novel ? '小说' : '短剧';
+
+  /// M3 确认对话框：取消 + 红色「删除」文本按钮，单条删除与清空共用。
+  Future<bool?> _confirmDialog({
+    required String title,
+    required String message,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final scheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: TextButton.styleFrom(foregroundColor: scheme.error),
+              child: const Text('删除'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _continue(_CacheEntry entry) async {
     try {
       // 本进程内暂停的任务直接接着跑；进程重启后的恢复态没有内存入参，
@@ -285,12 +481,12 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
     }
   }
 
-  /// 下载启动失败的提示文案与管理页保持一致（容量 / 队列满 / 其它）。
+  /// 下载启动失败的提示文案（容量 / 队列满 / 其它）。
   void _showStartError(Object error) {
     final message = switch (error) {
       OfflineQuotaExceeded() =>
         '离线缓存已满：已用 ${formatBytes(error.usedBytes)}'
-            ' / 上限 ${formatBytes(error.capBytes)}，请先到「设置 → 存储」清理。',
+            ' / 上限 ${formatBytes(error.capBytes)}，请先在本页删除不需要的缓存。',
       OfflineQueueFullException() =>
         '缓存队列已满（最多 ${error.maxLength} 个），请先等前面的任务完成。',
       _ => '开始下载失败，请重试',
@@ -435,6 +631,7 @@ class _CacheTile extends StatelessWidget {
     required this.onContinue,
     required this.onRetry,
     required this.onCancelQueued,
+    required this.onDelete,
   });
 
   final _CacheEntry entry;
@@ -443,6 +640,7 @@ class _CacheTile extends StatelessWidget {
   final VoidCallback onContinue;
   final VoidCallback onRetry;
   final VoidCallback onCancelQueued;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -518,9 +716,9 @@ class _CacheTile extends StatelessWidget {
                   ],
                 ),
               ),
-              if (_actionOf() case final action?) ...[
+              if (_actionsOf(context) case final actions?) ...[
                 const SizedBox(width: 4),
-                action,
+                actions,
               ],
             ],
           ),
@@ -551,8 +749,18 @@ class _CacheTile extends StatelessWidget {
   String? _reasonOf(_CacheEntry entry) =>
       entry.status == _EntryStatus.paused ? entry.error : null;
 
-  Widget? _actionOf() {
-    return switch (entry.status) {
+  /// 右侧操作区：主操作（暂停/继续/重试）+ 删除。排队中的条目只给「取消
+  /// 排队」（还没开始下载，没有可删的离线内容）。
+  Widget? _actionsOf(BuildContext context) {
+    if (entry.status == _EntryStatus.queued) {
+      return IconButton(
+        tooltip: '取消排队',
+        visualDensity: VisualDensity.compact,
+        onPressed: onCancelQueued,
+        icon: const Icon(Icons.close_rounded),
+      );
+    }
+    final primary = switch (entry.status) {
       _EntryStatus.running => IconButton(
         tooltip: '暂停缓存',
         visualDensity: VisualDensity.compact,
@@ -571,13 +779,18 @@ class _CacheTile extends StatelessWidget {
         onPressed: onRetry,
         icon: const Icon(Icons.refresh_rounded),
       ),
-      _EntryStatus.queued => IconButton(
-        tooltip: '取消排队',
-        visualDensity: VisualDensity.compact,
-        onPressed: onCancelQueued,
-        icon: const Icon(Icons.close_rounded),
-      ),
-      _EntryStatus.done => null,
+      _EntryStatus.done || _EntryStatus.queued => null,
     };
+    // 删除入口：M3 常用 error 色的 outline 图标，与下载控制区分开。
+    final delete = IconButton(
+      tooltip: '删除缓存',
+      visualDensity: VisualDensity.compact,
+      style: IconButton.styleFrom(
+        foregroundColor: Theme.of(context).colorScheme.error,
+      ),
+      onPressed: onDelete,
+      icon: const Icon(Icons.delete_outline),
+    );
+    return Row(mainAxisSize: MainAxisSize.min, children: [?primary, delete]);
   }
 }

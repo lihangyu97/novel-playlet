@@ -246,7 +246,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       final cached = await store.episodeFileIfCached(seriesId, episodeId);
       if (cached == null || !refresh) return cached;
       // 用户点「重新下载这一集」：本地副本可能已损坏，删掉后走网络重新取流。
-      // 顺带按文件存在校正 manifest，否则详情页/管理页会继续显示这一集「已缓存」。
+      // 顺带按文件存在校正 manifest，否则详情页/缓存中心会继续显示这一集「已缓存」。
       await cached.delete();
       await store.reconcile(seriesId);
     } catch (_) {
