@@ -254,6 +254,57 @@ void main() {
     expect(session.chapters, isEmpty);
     expect(session.error, isNotNull);
   });
+
+  test('切章失败保留正在显示的正文，错误降级为提示条', () async {
+    transport
+      ..directoryIds = ['c0', 'c1', 'c2']
+      ..chapterParagraphs['c0'] = ['网络正文 c0']
+      ..chapterParagraphs['c1'] = ['网络正文 c1']
+      ..failingChapterIds = {'c2'};
+    final container = makeContainer();
+    const args = ReaderArgs(bookId: '1', bookTitle: '在线书');
+
+    final first = await openSession(
+      container,
+      args,
+      ready: (state) => state.content != null && !state.loading,
+    );
+    expect(first.displayedChapter!.id, 'c0');
+
+    final controller = container.read(readerSessionProvider(args).notifier);
+    await controller.nextChapter();
+    final second = await openSession(
+      container,
+      args,
+      ready: (state) => state.contentIndex == 1 && !state.loading,
+    );
+    expect(second.displayedChapter!.id, 'c1');
+
+    // 切到 c2 失败：正文仍是 c1，index 退回 1，失败目标单独记在 failedIndex。
+    await controller.nextChapter();
+    final failed = await openSession(
+      container,
+      args,
+      ready: (state) => state.error != null && !state.loading,
+    );
+    expect(failed.displayedChapter!.id, 'c1', reason: '不能把正在读的章清掉');
+    expect(failed.content!.paragraphs, ['网络正文 c1']);
+    expect(failed.index, 1, reason: 'index 要跟实际正文一致');
+    expect(failed.failedIndex, 2, reason: '重试要能定位到失败的那一章');
+
+    // 失败原因恢复后点重试：重试的是 failedIndex，而不是退回后的 index。
+    transport.failingChapterIds = <String>{};
+    await controller.retry();
+    final recovered = await openSession(
+      container,
+      args,
+      ready: (state) =>
+          state.contentIndex == 2 && state.error == null && !state.loading,
+    );
+    expect(recovered.displayedChapter!.id, 'c2');
+    expect(recovered.index, 2);
+    expect(recovered.failedIndex, -1);
+  });
 }
 
 /// 可编排的网络：目录/详情/正文分别返回，`failing` 时全部 500（模拟断网）。
@@ -263,6 +314,9 @@ class _OfflineTransport extends BackendTransport {
   bool failing = false;
   List<String> directoryIds = const ['c0', 'c1', 'c2'];
   Duration directoryDelay = Duration.zero;
+
+  /// 只让指定章节返回 500：用于验证「切章失败保留旧正文」。
+  Set<String> failingChapterIds = <String>{};
   final Map<String, List<String>> chapterParagraphs = <String, List<String>>{};
   final List<String> directoryCalls = <String>[];
   final List<String> chapterCalls = <String>[];
@@ -309,6 +363,9 @@ class _OfflineTransport extends BackendTransport {
         path.split('/chapters/')[1].split('/').first,
       );
       chapterCalls.add(id);
+      if (failingChapterIds.contains(id)) {
+        return _json(500, {'message': 'chapter down'});
+      }
       final paragraphs = chapterParagraphs[id] ?? ['网络正文 $id'];
       return _json(200, {
         'code': 0,
