@@ -18,14 +18,17 @@ Future<void> main() async {
   SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
   // 封面缓存按体积兜底裁剪：不阻塞启动，失败静默。
   unawaited(AppImageCache.trimOnStart());
-  // 主题色在首帧之前读出来：否则自定义过主题色的用户会先看到一下天蓝的
-  // Splash 图标再变色。读盘失败/挂起就走默认色，不能因此卡住启动。
-  final seed = await _restoreThemeSeed();
+  // 主题色与深浅色模式在首帧之前读出来：否则自定义过主题的用户会先看到
+  // 一下默认观感再切换。读盘失败/挂起就走默认值，不能因此卡住启动。
+  final appearance = await _restoreAppearance();
   runApp(
     ProviderScope(
       overrides: [
         themeSeedProvider.overrideWith(
-          () => ThemeSeedController(initialSeed: seed),
+          () => ThemeSeedController(initialSeed: appearance.seed),
+        ),
+        themeModeProvider.overrideWith(
+          () => ThemeModeController(initialMode: appearance.mode),
         ),
       ],
       child: const NovelPlayletApp(),
@@ -33,15 +36,25 @@ Future<void> main() async {
   );
 }
 
-Future<Color> _restoreThemeSeed() async {
+/// 一次读盘同时取回主题色与深浅色模式；读不到/超时都用默认值。
+Future<({Color seed, ThemeMode mode})> _restoreAppearance() async {
   try {
     final prefs = await SharedPreferences.getInstance().timeout(
       const Duration(milliseconds: 300),
     );
     final argb = prefs.getInt(ThemeSeedController.seedKey);
-    return argb == null ? appSeedColor : Color(argb);
+    final modeIndex = prefs.getInt(ThemeModeController.modeKey);
+    return (
+      seed: argb == null ? appSeedColor : Color(argb),
+      mode:
+          modeIndex == null ||
+              modeIndex < 0 ||
+              modeIndex >= ThemeMode.values.length
+          ? ThemeMode.system
+          : ThemeMode.values[modeIndex],
+    );
   } catch (_) {
-    // 读不到或超过 300ms 还没返回：按默认色走，别让首帧被磁盘 IO 挡住。
-    return appSeedColor;
+    // 读不到或超过 300ms 还没返回：按默认观感走，别让首帧被磁盘 IO 挡住。
+    return (seed: appSeedColor, mode: ThemeMode.system);
   }
 }

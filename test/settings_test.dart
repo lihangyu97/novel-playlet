@@ -271,7 +271,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('自定义颜色'));
+    await tester.tap(find.byKey(themeCustomColorKey));
     await tester.pumpAndSettle();
 
     expect(find.byType(ThemeColorPickerSheet), findsOneWidget);
@@ -301,7 +301,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('自定义颜色'));
+    await tester.tap(find.byKey(themeCustomColorKey));
     await tester.pumpAndSettle();
 
     final before = tester.widget<Text>(_hexFinder).data!;
@@ -456,5 +456,80 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(SettingsPage), findsOneWidget);
+  });
+
+  test('默认深浅色模式跟随系统', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    expect(container.read(themeModeProvider), ThemeMode.system);
+  });
+
+  test('深浅色模式落盘，新容器能从偏好恢复', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container.read(themeModeProvider.notifier).setMode(ThemeMode.dark);
+    await pumpEventQueue();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt(ThemeModeController.modeKey), ThemeMode.dark.index);
+
+    final restored = ProviderContainer();
+    addTearDown(restored.dispose);
+    expect(
+      restored.read(themeModeProvider),
+      ThemeMode.system,
+      reason: '首帧先跟随系统',
+    );
+    await pumpEventQueue();
+    expect(restored.read(themeModeProvider), ThemeMode.dark);
+  });
+
+  test('启动时预读的深浅色模式首帧就生效，且不再异步改回', () async {
+    SharedPreferences.setMockInitialValues({
+      ThemeModeController.modeKey: ThemeMode.light.index,
+    });
+    final container = ProviderContainer(
+      overrides: [
+        themeModeProvider.overrideWith(
+          () => ThemeModeController(initialMode: ThemeMode.dark),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    expect(container.read(themeModeProvider), ThemeMode.dark);
+    await pumpEventQueue();
+    expect(
+      container.read(themeModeProvider),
+      ThemeMode.dark,
+      reason: '预读后不应再被磁盘值覆盖',
+    );
+  });
+
+  /// 根组件接线：MaterialApp 的 themeMode 必须跟着 provider 走。
+  testWidgets('根组件 MaterialApp 跟着深浅色模式重建', (tester) async {
+    final never = Completer<void>();
+    final container = ProviderContainer(
+      overrides: [bootstrapProvider.overrideWith((ref) => never.future)],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const NovelPlayletApp(),
+      ),
+    );
+    await tester.pump();
+
+    final gateContext = tester.element(find.byType(BootstrapGate));
+    expect(Theme.of(gateContext).brightness, Brightness.light);
+
+    container.read(themeModeProvider.notifier).setMode(ThemeMode.dark);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final context = tester.element(find.byType(BootstrapGate));
+    expect(Theme.of(context).brightness, Brightness.dark);
   });
 }

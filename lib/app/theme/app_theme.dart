@@ -157,6 +157,17 @@ class AppTheme {
           textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
         ),
       ),
+      // OutlinedButton 以前用 M3 默认的 StadiumBorder，和 FilledButton 的 12
+      // 圆角并排（取色弹层的「取消 / 确定」）会一大一小；统一成同一套小圆角。
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 46),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+      ),
     );
   }
 
