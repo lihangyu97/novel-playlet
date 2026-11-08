@@ -97,6 +97,36 @@ void main() {
     );
   });
 
+  testWidgets('阅读页-工具栏打开时左右滑动不翻页且无压暗遮罩', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    final indicatorBefore = _pageIndicator(tester);
+    expect(indicatorBefore, isNotEmpty, reason: '底部信息条应显示页码');
+
+    // 点中间 1/3 呼出工具栏。
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    // 工具栏打开时横向拖 PageView：手势要留给「收工具栏/点按钮」，不能翻页。
+    await tester.drag(find.byType(PageView), const Offset(-300, 0));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(_pageIndicator(tester), indicatorBefore, reason: '工具栏打开时左右滑动不应翻页');
+
+    // 压暗遮罩已彻底移除（工具栏打开时也不该出现）。
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is ColoredBox && widget.color == const Color(0x33000000),
+      ),
+      findsNothing,
+      reason: '工具栏打开时不应再有压暗正文的遮罩层',
+    );
+  });
+
   testWidgets('阅读页-入口带 blockIndex 时恢复到对应页', (tester) async {
     // 假数据每章 18 段，第 9 段一定不在第 1 页。
     await pumpPreview(
@@ -180,4 +210,15 @@ void main() {
       matchesGoldenFile('../goldens/reader_settings_sheet.png'),
     );
   });
+}
+
+/// 底部常驻信息条里的页码文案（`n/m`）。
+String _pageIndicator(WidgetTester tester) {
+  return tester
+      .widgetList<Text>(find.byType(Text))
+      .map((text) => text.data ?? '')
+      .firstWhere(
+        (data) => RegExp(r'^\d+/\d+$').hasMatch(data),
+        orElse: () => '',
+      );
 }

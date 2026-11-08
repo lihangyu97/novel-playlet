@@ -155,6 +155,10 @@ class _DetailPageState extends ConsumerState<DetailPage> {
           ),
         ),
       // 加载阶段只保留封面背景：不再转圈，内容就绪后直接淡入。
+      // 内容最下方展示资源 ID：一键复制，反馈问题时方便报出。
+      SliverToBoxAdapter(
+        child: DetailIdFooter(id: bookId, label: '书籍 ID'),
+      ),
     ];
 
     final scheme = Theme.of(context).colorScheme;

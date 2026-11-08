@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
@@ -310,6 +311,47 @@ void main() {
     });
   });
 
+  testWidgets('短剧详情最下方展示短剧 ID，可一键复制', (tester) async {
+    // 拦截系统通道，捕获 Clipboard.setData 写入的文本。
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
+    await pumpPreview(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: FakePreviewTransport(),
+    );
+    // 滚到内容最下方：ID 行位于选集之后、底部操作栏之上。
+    final footerText = find.text('短剧 ID：v1');
+    await tester.scrollUntilVisible(
+      footerText,
+      240,
+      scrollable: _verticalScrollable,
+    );
+    await tester.pumpAndSettle();
+    expect(footerText, findsOneWidget);
+
+    await tester.tap(find.byTooltip('复制 ID'));
+    await tester.pumpAndSettle();
+    expect(copied, 'v1', reason: '复制的是完整 ID');
+    expect(find.text('ID 已复制'), findsOneWidget, reason: '复制后弹浮动 SnackBar');
+  });
+
   testWidgets('短剧详情-选集展开（36 集一个 tab、一行 6 个）', (tester) async {
     final fake = FakePreviewTransport()..directoryChapterCount = 80;
     const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 80);
@@ -324,3 +366,11 @@ void main() {
     );
   });
 }
+
+/// 详情页外层 CustomScrollView 的纵向滚动；选集 tab 里还有横向 Scrollable。
+final Finder _verticalScrollable = find
+    .byWidgetPredicate(
+      (widget) =>
+          widget is Scrollable && widget.axisDirection == AxisDirection.down,
+    )
+    .first;

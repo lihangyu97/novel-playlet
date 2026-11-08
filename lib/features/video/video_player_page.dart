@@ -55,8 +55,8 @@ final playbackControllerFactoryProvider = Provider<PlaybackControllerFactory>((
 /// 暂停，回前台仍在播放就继续。
 ///
 /// 方向：App 全局竖屏（`main.dart` 锁定），只有横屏视频（宽高比 > 1.05）才在
-/// 播放页给出「全屏」按钮，点了才临时放开横屏；退出全屏或离开播放页立刻恢复
-/// 竖屏，避免横屏状态漏到其它页面。
+/// 播放页视频画面下方给出「全屏观看」提示，点了才临时放开横屏；退出全屏或
+/// 离开播放页立刻恢复竖屏，避免横屏状态漏到其它页面。
 class VideoPlayerPage extends ConsumerStatefulWidget {
   const VideoPlayerPage({super.key, required this.args});
 
@@ -740,14 +740,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     return _isLandscapeVideo(controller.value);
   }
 
-  Future<void> _toggleFullscreen() async {
-    if (_fullscreen) {
-      await _exitFullscreen();
-    } else {
-      await _enterFullscreen();
-    }
-  }
-
   Future<void> _enterFullscreen() async {
     if (!_canFullscreen) return;
     setState(() => _fullscreen = true);
@@ -883,6 +875,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         : '第 ${_index + 1} 集';
     // 加载期间也保留顶栏（返回键/剧名），不要整屏只剩 spinner。
     final showChrome = _error == null;
+    // 全屏提示只给横屏视频：视频已经铺满整屏时（全屏）不需要，竖屏视频全屏
+    // 只会更小，也不给入口。
+    final showFullscreenHint = showChrome && !_fullscreen && _canFullscreen;
     final speed = ref.watch(playbackSpeedProvider);
     ref.listen<double>(playbackSpeedProvider, (_, next) {
       final controller = _controller;
@@ -899,45 +894,69 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            // 视频铺满整屏：全屏横屏时也要盖住底部安全区（Home 指示条那一条），
-            // 否则画面下方会留一道黑边。顶部控制条始终避让状态栏；底部控制条
-            // 只在竖屏避让安全区——全屏横屏时贴到屏幕最底边，否则 Home 指示条
-            // 那一条会在控件下面留出空隙。
-            Positioned.fill(child: _buildVideo()),
-            // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
-            if (showChrome)
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _toggleControls,
-                ),
-              ),
-            if (showChrome)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: SafeArea(
-                  bottom: false,
-                  child: _chrome(_buildTopBar(episodeTitle)),
-                ),
-              ),
-            if (showChrome)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: SafeArea(
-                  top: false,
-                  // 全屏横屏时不再避让底部安全区：控制条要完全贴底，
-                  // 否则 Home 指示条那一条会在控件下方留出空隙。
-                  bottom: !_fullscreen,
-                  child: _chrome(_buildBottomBar(speed)),
-                ),
-              ),
-          ],
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            // 视频在 Center + AspectRatio 里居中铺开，画面高度 = 屏宽 / 宽高比，
+            // 上下各留一条黑边。「全屏观看」提示要贴在真实画面下边缘 8px 处，
+            // 不能按整屏底部摆，否则 16:9 视频下方会说远不近。
+            final controller = _controller;
+            final aspect = controller == null
+                ? 16 / 9
+                : _aspectOf(controller.value);
+            final videoHeight = constraints.maxWidth / aspect;
+            final hintTop =
+                (constraints.maxHeight - videoHeight) / 2 + videoHeight + 8;
+            return Stack(
+              children: [
+                // 视频铺满整屏：全屏横屏时也要盖住底部安全区（Home 指示条那一条），
+                // 否则画面下方会留一道黑边。顶部控制条始终避让状态栏；底部控制条
+                // 只在竖屏避让安全区——全屏横屏时贴到屏幕最底边，否则 Home 指示条
+                // 那一条会在控件下面留出空隙。
+                Positioned.fill(child: _buildVideo()),
+                // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
+                if (showChrome)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _toggleControls,
+                    ),
+                  ),
+                if (showChrome)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: SafeArea(
+                      bottom: false,
+                      child: _chrome(_buildTopBar(episodeTitle)),
+                    ),
+                  ),
+                if (showChrome)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: SafeArea(
+                      top: false,
+                      // 全屏横屏时不再避让底部安全区：控制条要完全贴底，
+                      // 否则 Home 指示条那一条会在控件下方留出空隙。
+                      bottom: !_fullscreen,
+                      child: _chrome(_buildBottomBar(speed)),
+                    ),
+                  ),
+                // 全屏入口放在视频下方：控制条隐藏时一起淡出且不接收点击
+                // （点画面应该唤出控制条，而不是误进全屏）。放在控制条之后，
+                // 窄屏上提示与底部渐变区重叠时也能点到、不会被盖住。
+                if (showFullscreenHint)
+                  Positioned(
+                    top: hintTop,
+                    left: 0,
+                    right: 0,
+                    child: _chrome(Center(child: _buildFullscreenHint())),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -951,6 +970,38 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         opacity: _controlsVisible ? 1 : 0,
         duration: const Duration(milliseconds: 180),
         child: child,
+      ),
+    );
+  }
+
+  /// 视频画面下方的全屏入口：图标 + 「全屏观看」，半透明胶囊。
+  ///
+  /// 竖屏下 16:9 画面只占屏幕中间一条，底部控制条离画面很远；入口贴着画面
+  /// 下边缘更符合「放大这块画面」的直觉。
+  Widget _buildFullscreenHint() {
+    return Semantics(
+      button: true,
+      label: '全屏观看',
+      child: GestureDetector(
+        onTap: () => unawaited(_enterFullscreen()),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.fullscreen_rounded, color: Colors.white70, size: 18),
+              SizedBox(width: 6),
+              Text(
+                '全屏观看',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1227,15 +1278,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                       ),
                     ),
                     const Spacer(),
-                    // 倍速入口放在时间行而不是操作行：375pt/320pt 窄屏上
-                    // 操作行左侧再塞一个 chip 会和「上一集」按钮重叠。
-                    PlayerOptionChip(
-                      label: playbackSpeedLabel(speed),
-                      active: speed != 1.0,
-                      tooltip: '播放速度',
-                      onTap: () => unawaited(_openPlaybackSpeedSheet()),
-                    ),
-                    const SizedBox(width: 10),
                     Text(
                       _formatDuration(duration),
                       style: const TextStyle(
@@ -1297,22 +1339,22 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                         ),
                       ),
                     ),
-                    // 只有横屏视频才给全屏入口：竖屏内容全屏只会更小。
-                    if (_isLandscapeVideo(value))
-                      Positioned(
-                        right: 0,
-                        child: IconButton(
-                          onPressed: () => unawaited(_toggleFullscreen()),
-                          icon: Icon(
-                            _fullscreen
-                                ? Icons.fullscreen_exit_rounded
-                                : Icons.fullscreen_rounded,
-                          ),
-                          color: Colors.white,
-                          iconSize: 28,
-                          tooltip: _fullscreen ? '退出全屏' : '全屏',
+                    // 倍速入口放在操作行最右（原全屏图标的位置）：时间行只留
+                    // 「当前/总时长」，左侧选集、中间播放控制、右侧倍速，一眼
+                    // 就能找到高频操作。全屏入口见视频下方的「全屏观看」。
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: PlayerOptionChip(
+                          label: playbackSpeedLabel(speed),
+                          active: speed != 1.0,
+                          tooltip: '播放速度',
+                          onTap: () => unawaited(_openPlaybackSpeedSheet()),
                         ),
                       ),
+                    ),
                   ],
                 ),
               ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
@@ -180,6 +181,44 @@ void main() {
     });
   });
 
+  group('资源 ID 行', () {
+    testWidgets('详情页最下方展示书籍 ID，可一键复制', (tester) async {
+      // 拦截系统通道，捕获 Clipboard.setData 写入的文本。
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied = (call.arguments as Map)['text'] as String?;
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+
+      await pumpPreview(tester, const DetailPage(bookId: '1'));
+      // 滚到内容最下方：ID 行位于目录之后、底部操作栏之上。
+      final footerText = find.text('书籍 ID：1');
+      await tester.scrollUntilVisible(
+        footerText,
+        240,
+        scrollable: _verticalScrollable,
+      );
+      await tester.pumpAndSettle();
+      expect(footerText, findsOneWidget);
+
+      await tester.tap(find.byTooltip('复制 ID'));
+      await tester.pumpAndSettle();
+      expect(copied, '1', reason: '复制的是完整 ID');
+      expect(find.text('ID 已复制'), findsOneWidget, reason: '复制后弹浮动 SnackBar');
+    });
+  });
+
   testWidgets('详情页', (tester) async {
     await pumpPreview(tester, const DetailPage(bookId: '1'));
     await expectLater(
@@ -188,3 +227,11 @@ void main() {
     );
   });
 }
+
+/// 详情页外层 CustomScrollView 的纵向滚动；选集 tab 里还有横向 Scrollable。
+final Finder _verticalScrollable = find
+    .byWidgetPredicate(
+      (widget) =>
+          widget is Scrollable && widget.axisDirection == AxisDirection.down,
+    )
+    .first;

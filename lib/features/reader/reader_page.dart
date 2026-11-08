@@ -149,17 +149,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 ),
               ),
             ),
-            // 工具栏打开时压暗正文，让浮层上的文字更清楚；本身不接收点击，
-            // 点击穿透到正文的手势识别器，交给 _handleTap 收起工具栏。
-            Positioned.fill(
-              child: IgnorePointer(
-                child: AnimatedOpacity(
-                  opacity: _toolbarVisible ? 1 : 0,
-                  duration: _toolbarDuration,
-                  child: const ColoredBox(color: Color(0x33000000)),
-                ),
-              ),
-            ),
             Positioned(
               top: 0,
               left: 0,
@@ -332,7 +321,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                           // 不用 iOS 回弹物理：回弹不产生 OverscrollNotification，
                           // 章边界继续滑动就检测不到。Clamping 既保留 PageView
                           // 的贴页回弹吸附，又能拿到越界量。
-                          physics: const ClampingScrollPhysics(),
+                          // 工具栏打开时锁死横向滑动：这个状态下手势用来收工具栏/
+                          // 点按钮，再翻页会误触（setState 切换后立即重建生效）。
+                          physics: _toolbarVisible
+                              ? const NeverScrollableScrollPhysics()
+                              : const ClampingScrollPhysics(),
                           itemCount: pages.length,
                           onPageChanged: _onPageChanged,
                           itemBuilder: (context, index) => RepaintBoundary(

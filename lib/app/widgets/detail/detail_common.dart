@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/cache/app_image_cache.dart';
 import '../cover_hero.dart';
@@ -525,6 +526,83 @@ class DetailTagWrap extends StatelessWidget {
       spacing: 8,
       runSpacing: 8,
       children: [for (final tag in tags) DetailTagChip(label: tag)],
+    );
+  }
+}
+
+/// 详情页最下方的资源 ID + 一键复制。
+///
+/// 小说详情展示 `书籍 ID`、短剧详情展示 `短剧 ID`；放在内容最后、底部操作栏
+/// 之上，反馈问题时能直接报出资源 ID。整行置灰小字，只有右侧复制按钮响应，
+/// 避免误触。ID 可能很长：单行 + 省略号，复制拿到的始终是完整值。
+class DetailIdFooter extends StatelessWidget {
+  const DetailIdFooter({
+    super.key,
+    required this.id,
+    required this.label,
+    this.bottomPadding = 26,
+  });
+
+  /// 完整资源 ID（复制用）。
+  final String id;
+
+  /// 展示用前缀：`书籍 ID` / `短剧 ID`。
+  final String label;
+
+  /// 与下方底部操作栏之间的留白。
+  final double bottomPadding;
+
+  /// 复制完整 ID 并给浮动 SnackBar 反馈。
+  Future<void> _copy(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: id));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('ID 已复制'),
+          duration: Duration(milliseconds: 1200),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      // 右侧少留 8：IconButton 自带内边距，图标视觉上仍与正文对齐。
+      padding: EdgeInsets.fromLTRB(
+        detailGutter,
+        6,
+        detailGutter - 8,
+        bottomPadding,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '$label：$id',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            tooltip: '复制 ID',
+            onPressed: () => _copy(context),
+            icon: const Icon(Icons.copy_rounded, size: 16),
+            color: scheme.onSurfaceVariant,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
     );
   }
 }
