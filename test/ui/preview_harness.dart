@@ -318,6 +318,7 @@ class FakePreviewTransport extends BackendTransport {
             'episode_cnt': '40',
             'category_schema': '[{"name":"都市"}]',
             'series_play_cnt': '12345',
+            'score': '8.2',
           },
         },
       };

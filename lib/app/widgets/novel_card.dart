@@ -42,18 +42,19 @@ class NovelGridCard extends StatelessWidget {
       cover: item.cover,
       title: item.title,
       meta: _metaOf(head),
+      // 评分从作者行拿出来，单独放封面右上角角标（白字 + 半透明底）。
+      cornerText: showRecommendMeta ? scoreLabel(item.score) : null,
       width: width,
       onTap: onTap,
       heroTag: heroTag,
     );
   }
 
+  /// 元信息行：推荐理由 → 热度 → 作者/分类；评分开到封面角标，不再占这一行。
   String _metaOf(String head) {
     if (!showRecommendMeta) return head;
     if (item.recommendReason.isNotEmpty) return item.recommendReason;
     if (item.rankScore.isNotEmpty) return item.rankScore;
-    final score = scoreLabel(item.score);
-    if (score.isEmpty) return head;
-    return head.isEmpty ? score : '$head · $score';
+    return head;
   }
 }

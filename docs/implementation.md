@@ -15,7 +15,7 @@
 页面：
 
 - **推荐**：顶部搜索框 + 分类 tabs（小说 / 短剧 / 漫剧），每个分类独立推荐流与搜索结果，翻页、下拉刷新、首屏不足自动补页。
-  推荐卡元信息行按优先级展示：`recommend_reason_list` 第一条（小说是数组元素 `content`，如「巅峰榜No.3」；短剧是 JSON 串里的 `rec_tags[0].content` / `tag_info.text`）→ `rank_score`（小说）/ `rec_text`（短剧热度，如「4691万热度」）→「作者 · 评分」（短剧为「全 N 集 · 评分」）；`score` 为空/0 时只显示作者或分类。
+  推荐卡元信息行按优先级展示：`recommend_reason_list` 第一条（小说是数组元素 `content`，如「巅峰榜No.3」；短剧是 JSON 串里的 `rec_tags[0].content` / `tag_info.text`）→ `rank_score`（小说）/ `rec_text`（短剧热度，如「4691万热度」）→ 作者（短剧为「全 N 集」+ 理由/热度）。**评分不再进元信息行**，而是封面右上角角标（白字 + 半透明深色底 + 轻阴影，`9.3分`），小说与短剧/漫剧一致；短剧详情页也会展示星标评分。
 - **详情**：小说与短剧共用一套「封面头 + 简介卡 + 标签」版式；小说有目录，短剧有选集（36 集/组）。
 - **阅读页**：`TextPainter` 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、目录跳章、邻章预取、进度保存。
 - **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下集/播完自动下一集、选集弹层、横屏全屏、失败分类与「重新下载这一集」。
@@ -561,8 +561,8 @@ flutter drive --profile -d <iPhone UDID> \
 
 | 链路 | 优先级 1 | 优先级 2 | 优先级 3（兜底） |
 |---|---|---|---|
-| 小说（`NovelGridCard`） | `recommend_reason_list` 第一条的 `content`（如「巅峰榜No.3」「19个老书虫在看」「细糠」） | `rank_score`（热度，如「8479万热度」） | 「作者 · 评分」（`score` 空/0 时只显示作者，作者空退回分类） |
-| 短剧/漫剧（`VideoCard`） | 「全 N 集」+ `recommend_reason_list`（JSON 串）里 `rec_tags[0].content` → `tag_info.text`（上新/热门/爆款）→ `sub_title_list` / `secondary_info_list` | 「全 N 集」+ `rec_text`（热度，如「4691万热度」；`show_rec_text=false` 时不展示） | 「全 N 集 · 评分」 |
+| 小说（`NovelGridCard`） | `recommend_reason_list` 第一条的 `content`（如「巅峰榜No.3」「19个老书虫在看」「细糠」） | `rank_score`（热度，如「8479万热度」） | 作者（作者空退回分类） |
+| 短剧/漫剧（`VideoCard`） | 「全 N 集」+ `recommend_reason_list`（JSON 串）里 `rec_tags[0].content` → `tag_info.text`（上新/热门/爆款）→ `sub_title_list` / `secondary_info_list` | 「全 N 集」+ `rec_text`（热度，如「4691万热度」；`show_rec_text=false` 时不展示） | 「全 N 集」 |
 
 - 代码：统一提取 `lib/data/models/json_utils.dart::firstReasonText()`；模型字段
   `NovelItem.{recommendReason,rankScore,score}`、`VideoSeries.{score,recommendReason,rankScore}`
@@ -571,13 +571,15 @@ flutter drive --profile -d <iPhone UDID> \
 - 两种 `recommend_reason_list` 形态必须分别处理：**小说是数组**（元素对象取 `content`），
   **短剧/漫剧是 JSON 字符串**（解析后取 `rec_tags` / `tag_info` / `sub_title_list`）。
 - 评分：`score` 是字符串；`0` / `0.0` / 空都算未评分，展示时统一补「分」。
+  推荐卡评分固定在封面右上角角标（`MediaCard.cornerText`，白字 + 半透明深色底 + 轻阴影），
+  不再混进作者/集数行；短剧详情页也在标题下用「星标 + 8.2分」展示。
 
 ### 11.2 小说列表 `book_data` 关键字段（27 本样本）
 
 | 字段 | 样例 | 现状 / 可用位置 |
 |---|---|---|
 | `book_id` / `book_name` / `author` / `thumb_url` | — | 列表卡片已渲染 |
-| `score` | `9.0`（样本 27/27，6.9–9.5） | 元信息兜底 + 详情页星标 |
+| `score` | `9.0`（样本 27/27，6.9–9.5） | 推荐卡封面右上角角标 + 详情页星标 |
 | `rank_score` | `8479万热度`（16/27） | 元信息第二优先级 |
 | `recommend_reason_list` | `[{content:"巅峰榜No.3", can_click:true, ...}]`（7/27） | 元信息第一优先级 |
 | `category` / `tags` | `传统玄幻` / `传统玄幻,玄幻` | 卡片分类兜底、详情标签 |
@@ -598,7 +600,7 @@ flutter drive --profile -d <iPhone UDID> \
 | 字段 | 样例 | 现状 / 可用位置 |
 |---|---|---|
 | `series_id` / `title` / `cover` / `episode_cnt` | — | 列表卡片已渲染 |
-| `score` | `8.2`（tab 8/24 全有，8.0–8.3） | 元信息兜底 |
+| `score` | `8.2`（tab 8/24 全有，8.0–8.3） | 推荐卡封面右上角角标（与小说一致）+ 短剧详情页星标 |
 | `recommend_reason_list` | JSON 串：`{tag_info:{text:"上新"}, rec_tags:[{content:"系列剧·40万人在追"}], sub_title_list:[{content:"剧情"}]}` | 元信息第一优先级 |
 | `rec_text` / `show_rec_text` | `4691万热度` / `true` | 元信息第二优先级（热度） |
 | `play_cnt` | `5862787` | 播放量，候选（可格式化成「586万」） |

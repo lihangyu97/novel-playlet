@@ -15,6 +15,7 @@ class VideoDetail {
     this.categories = const [],
     this.playCount = 0,
     this.followerCount = 0,
+    this.score = '',
   });
 
   final String id;
@@ -25,6 +26,9 @@ class VideoDetail {
   final List<String> categories;
   final int playCount;
   final int followerCount;
+
+  /// 评分（上游 `score`，如「8.2」）；空 / 0 表示未评分。
+  final String score;
 
   bool get isEmpty => title.isEmpty && cover.isEmpty;
 
@@ -49,6 +53,7 @@ class VideoDetail {
       categories: _categoryNames(video['category_schema']),
       playCount: asInt(video['series_play_cnt']),
       followerCount: asInt(video['followed_cnt']),
+      score: firstString(video, ['score']),
     );
   }
 }

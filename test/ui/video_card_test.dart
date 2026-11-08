@@ -39,20 +39,23 @@ void main() {
     );
     expect(find.text('全 40 集 · 系列剧·40万人在追'), findsOneWidget);
     expect(find.textContaining('4691万热度'), findsNothing);
-    expect(find.textContaining('8.2分'), findsNothing);
+    expect(find.text('8.2分'), findsOneWidget, reason: '评分在封面角标');
   });
 
   testWidgets('没有推荐理由时：集数 + 热度（rec_text）', (tester) async {
     await tester.pumpWidget(wrap(card(rank: '4691万热度', score: '8.2')));
     expect(find.text('全 40 集 · 4691万热度'), findsOneWidget);
+    expect(find.text('8.2分'), findsOneWidget);
   });
 
-  testWidgets('没有理由/热度时退回「全 N 集 · 评分」', (tester) async {
+  testWidgets('没有理由/热度时只显示集数；评分只进角标', (tester) async {
     await tester.pumpWidget(wrap(card(score: '8.2')));
-    expect(find.text('全 40 集 · 8.2分'), findsOneWidget);
+    expect(find.text('全 40 集'), findsOneWidget);
+    expect(find.text('全 40 集 · 8.2分'), findsNothing);
+    expect(find.text('8.2分'), findsOneWidget);
   });
 
-  testWidgets('没有评分时只显示集数', (tester) async {
+  testWidgets('没有评分时只显示集数、无角标', (tester) async {
     await tester.pumpWidget(wrap(card(score: '0')));
     expect(find.text('全 40 集'), findsOneWidget);
     expect(find.textContaining('分'), findsNothing);
@@ -64,5 +67,6 @@ void main() {
     );
     expect(find.text('全 40 集'), findsOneWidget);
     expect(find.text('系列剧·40万人在追'), findsNothing);
+    expect(find.text('8.2分'), findsNothing, reason: '书架等入口不显示评分角标');
   });
 }

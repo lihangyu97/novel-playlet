@@ -36,23 +36,23 @@ class VideoCard extends StatelessWidget {
       cover: item.cover,
       title: item.title,
       meta: _metaOf(),
+      // 评分和小说一致：移到封面右上角角标，不占元信息行。
+      cornerText: showRecommendMeta ? scoreLabel(item.score) : null,
       width: width,
       onTap: onTap,
       heroTag: heroTag,
     );
   }
 
+  /// 元信息行 =「全 N 集」+ 推荐理由 / 热度（集数永远最前）。
   String? _metaOf() {
     final episodes = item.episodeCount > 0 ? '全 ${item.episodeCount} 集' : '';
     if (!showRecommendMeta) return episodes.isEmpty ? null : episodes;
-    // 集数永远排最前（短剧卡片的固有信息），后面再接推荐理由 / 热度 / 评分。
     final tail = <String>[
       if (item.recommendReason.isNotEmpty)
         item.recommendReason
       else if (item.rankScore.isNotEmpty)
-        item.rankScore
-      else if (scoreLabel(item.score).isNotEmpty)
-        scoreLabel(item.score),
+        item.rankScore,
     ];
     final parts = [if (episodes.isNotEmpty) episodes, ...tail];
     return parts.isEmpty ? null : parts.join(' · ');

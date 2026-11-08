@@ -166,7 +166,11 @@ class VideoDetailPage extends ConsumerWidget {
         if (ready) ...[
           SliverToBoxAdapter(
             child: DetailFadeIn(
-              child: DetailTitleSection(title: title, subtitle: subtitle),
+              child: DetailTitleSection(
+                title: title,
+                subtitle: subtitle,
+                extra: _buildScoreRow(context, detail),
+              ),
             ),
           ),
           SliverToBoxAdapter(
@@ -218,6 +222,26 @@ class VideoDetailPage extends ConsumerWidget {
               child: DetailIdFooter(id: seriesId, label: '短剧 ID'),
             ),
           ),
+      ],
+    );
+  }
+
+  /// 评分行（与小说详情的「星标 + 分数」同款）；未评分返回 null 不占位。
+  Widget? _buildScoreRow(BuildContext context, VideoDetail? detail) {
+    final raw = detail?.score.trim() ?? '';
+    if (raw.isEmpty || raw == '0' || raw == '0.0') return null;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Row(
+      children: [
+        Icon(Icons.star_rounded, size: 16, color: scheme.primary),
+        const SizedBox(width: 3),
+        Text(
+          '$raw分',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ],
     );
   }
