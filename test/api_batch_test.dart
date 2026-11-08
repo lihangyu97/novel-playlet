@@ -8,7 +8,7 @@ import 'package:novel_playlet/data/models/chapter.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 
 /// `chaptersBatch` 的解析契约：批量接口里失败/未解密/空正文的章要"消失"，
-/// 由离线下载器逐章回退单章接口（docs/offline-cache.md §5）。
+/// 由离线下载器逐章回退单章接口（docs/implementation.md）。
 
 class _FakeTransport extends BackendTransport {
   _FakeTransport(this.payload) : super(port: 0);

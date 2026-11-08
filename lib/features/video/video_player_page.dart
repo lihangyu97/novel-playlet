@@ -33,7 +33,7 @@ final playbackControllerFactoryProvider = Provider<PlaybackControllerFactory>((
     if (file != null) {
       // 无弹幕叠加需求，平台视图底层就是 AVPlayerLayer：少一次逐帧纹理
       // 拷贝，发热和功耗更好。若真机上发现浮层被原生视图遮挡，可退回默认
-      // 的 textureView（见 docs/video-playback.md 4.1）。
+      // 的 textureView（见 docs/implementation.md）。
       return VideoPlayerController.file(
         file,
         viewType: VideoViewType.platformView,
@@ -51,7 +51,7 @@ final playbackControllerFactoryProvider = Provider<PlaybackControllerFactory>((
 /// 一集一个 controller：切集就换 controller（换档/换集都走同一条路），
 /// 播放中的 controller 不跨集复用——AVPlayer 对同一 item 换源不如重建稳。
 ///
-/// 后台/画中画/HDR 本轮不做（见 docs/video-playback.md）：退后台不做显式
+/// 后台/画中画/HDR 本轮不做（见 docs/implementation.md）：退后台不做显式
 /// 暂停，回前台仍在播放就继续。
 ///
 /// 方向：App 全局竖屏（`main.dart` 锁定），只有横屏视频（宽高比 > 1.05）才在
@@ -195,7 +195,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _wasPlaying = false;
     _speedReapplyPending = false;
     // 旧画面先留着垫底，等新集真正出画面再释放（见
-    // docs/playback-quality-speed.md §1.4 P0-2）。
+    // docs/implementation.md）。
     _retainCurrentController();
     String sourceUrl = '';
     String localPath = '';
@@ -205,7 +205,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       _error = null;
       // 控制条只在首次进入播放页、或用户点屏幕后出现；播完自动切下一集
       // 是「被动续播」，不应该再把控制条弹出来打断观看（见
-      // docs/playback-quality-speed.md §4.4）。
+      // docs/implementation.md）。
       _controlsVisible = !autoAdvance;
       _dragValue = null;
       // 有上一帧兜底时先不闪 spinner：本地文件往往 200ms 内就绪。
@@ -221,7 +221,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
 
     try {
       // 离线副本优先：命中就直接开本地明文 mp4，不请求内核、不等待
-      // 「准备播放」。未命中才走原来的在线流程（见 docs/offline-cache.md §6.2）。
+      // 「准备播放」。未命中才走原来的在线流程（见 docs/implementation.md）。
       final offlineFile = await _offlineFile(episode.id, refresh: refresh);
       if (!mounted || generation != _generation) return;
       // 「确认离线」只能在取流失败后推断，所以这里先按在线尝试。

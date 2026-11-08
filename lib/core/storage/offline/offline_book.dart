@@ -2,7 +2,7 @@ import '../../../data/models/chapter.dart';
 import '../../../data/models/json_utils.dart';
 
 /// 离线 manifest 的 schema 版本。读不懂的版本一律当没有（不删文件，交给用户
-/// 手动清理），见 docs/offline-cache.md §4.3 / §9。
+/// 手动清理），见 docs/implementation.md。
 const int offlineSchema = 1;
 
 /// manifest 的 kind 取值（与文件名/目录布局对应）。

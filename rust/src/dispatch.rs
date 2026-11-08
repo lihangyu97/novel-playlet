@@ -2,7 +2,7 @@
 //! HTTP adapter. Port of `router.go` `Server.ServeHTTP`.
 //!
 //! Architecture decision and consequences: see `CONTRACTS.md` and
-//! `docs/architecture-review.md`.
+//! `docs/implementation.md`.
 //!
 //! There is exactly one business implementation: Flutter reaches it over
 //! flutter_rust_bridge and external HTTP clients (local tooling) reach it over

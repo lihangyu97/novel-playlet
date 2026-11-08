@@ -148,7 +148,7 @@ class ApiClient {
   ///
   /// 当前走默认（非 stream）模式：内核把整集下载进加密缓存后返回
   /// `/src/<id>.mp4`，播放器只需按普通 HTTP 拉明文分片。流式回环（边下边播）
-  /// 见 docs/video-playback.md 的 M1，接入后这里换成 `mode=stream`。
+  /// 见 docs/implementation.md 的 M1 流式起播，接入后这里换成 `mode=stream`。
   Future<VideoSource> videoSource(
     String episodeId, {
     bool refresh = false,
