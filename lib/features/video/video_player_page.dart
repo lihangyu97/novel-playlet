@@ -56,8 +56,8 @@ final playbackControllerFactoryProvider = Provider<PlaybackControllerFactory>((
 /// 暂停，回前台仍在播放就继续。
 ///
 /// 方向：App 全局竖屏（`main.dart` 锁定），只有横屏视频（宽高比 > 1.05）才在
-/// 播放页给出「全屏」按钮，点了才临时放开横屏；退出全屏或离开播放页立刻恢复
-/// 竖屏，避免横屏状态漏到其它页面。
+/// 播放页视频画面下方给出「全屏观看」提示，点了才临时放开横屏；退出全屏或
+/// 离开播放页立刻恢复竖屏，避免横屏状态漏到其它页面。
 class VideoPlayerPage extends ConsumerStatefulWidget {
   const VideoPlayerPage({super.key, required this.args});
 
@@ -192,10 +192,14 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     if (retained != null) unawaited(retained.dispose());
   }
 
+  /// [recovered] 只用于「回环监听被系统回收」的一次性恢复：调用方第一次
+  /// 恢复重试时传 true，避免恢复本身失败后无限自愈。CONTRACTS 把自动重试
+  /// 循环留给内核，页面这里只做一次有界恢复，不是退避重试。
   Future<void> _open(
     int index, {
     bool refresh = false,
     bool autoAdvance = false,
+    bool recovered = false,
   }) async {
     if (_episodes.isEmpty) return;
     final episode = _episodes[index];
@@ -276,8 +280,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         try {
           await playUrl(prefetched.url);
           return;
-        } catch (_) {
+        } catch (error) {
           // 预取的 `/src` 可能已被内核 128MB 预算淘汰：回退正常取流。
+          // 但「回环监听被回收」不是地址问题，回退只会再失败一次；抛给外层
+          // 走一次有界自愈（见下面 catch）。
+          if (_isLoopbackConnectRefused(error)) rethrow;
         }
       }
 
@@ -294,8 +301,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           try {
             await playUrl(cachedUrl);
             return;
-          } catch (_) {
-            // 缓存条目可能刚被淘汰/半截：继续走正常取流。
+          } catch (error) {
+            // 缓存条目可能刚被淘汰/半截：继续走正常取流。回环监听被回收时
+            // 同理不能回退（下一次取流也播不了），交给外层自愈。
+            if (_isLoopbackConnectRefused(error)) rethrow;
           }
         }
       }
@@ -313,6 +322,22 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       await playUrl(source.url);
     } catch (error, stack) {
       if (!mounted || generation != _generation) return;
+      // iOS 长时间挂起后会回收回环监听（Apple TN2277）：内核 FFI 还活着，
+      // 但 AVPlayer 连 127.0.0.1 被拒（-1004）。先探活/必要时整核重启，
+      // 服务回来后把这一集重新打开一次；[recovered] 保证最多恢复一次。
+      if (!recovered && _isLoopbackConnectRefused(error)) {
+        final restored = await ref.read(backendEnsureLoopbackProvider)();
+        if (!mounted || generation != _generation) return;
+        if (restored) {
+          await _open(
+            index,
+            refresh: refresh,
+            autoAdvance: autoAdvance,
+            recovered: true,
+          );
+          return;
+        }
+      }
       _spinnerTimer?.cancel();
       _disposeRetained();
       // 没有离线副本、失败又像「网络不可达」：换成明确文案；网络在线时保留
@@ -556,6 +581,32 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     }
   }
 
+  /// 这次失败是不是「回环监听已死」——connect refused。
+  ///
+  /// iOS 长时间挂起后会回收 listening socket（Apple TN2277），内核 FFI 照常
+  /// 可用，但 127.0.0.1 上已经没人 accept；AVPlayer 把它报成
+  /// NSURLErrorCannotConnectToHost(-1004, "Could not connect to the server")。
+  /// vendored video_player_avfoundation 只把 localizedDescription 传上来
+  /// （没有数字 code），所以以英文文案为主、数字 code 只作兜底。
+  bool _isLoopbackConnectRefused(Object error) {
+    if (error is SocketException) {
+      final code = error.osError?.errorCode;
+      return code == 61 || // Darwin ECONNREFUSED
+          code == 111 || // Linux ECONNREFUSED
+          error.message.toLowerCase().contains('connection refused');
+    }
+    if (error is! PlatformException) return false;
+    final text = [
+      error.code,
+      error.message ?? '',
+      error.details?.toString() ?? '',
+    ].join(' ').toLowerCase();
+    return text.contains('could not connect to the server') ||
+        text.contains('cannot connect to host') ||
+        text.contains('connection refused') ||
+        text.contains('-1004');
+  }
+
   /// 把播放异常翻译成"人话原因 + 可复制的技术详情"。
   ///
   /// 失败发生在两段：`videoSource`（内核取流/整集下载，抛 ApiException；
@@ -615,6 +666,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       } else if (RegExp(r'403|404|410').hasMatch(text)) {
         title = '本地视频地址失效';
         reason = '回环服务对 /src 返回了 4xx，多半是缓存被清理或内核重启过。重新下载这一集即可。';
+      } else if (_isLoopbackConnectRefused(error)) {
+        title = '本地视频服务未响应';
+        reason =
+            '播放器连不上 App 内的本地视频服务（127.0.0.1）：App 长时间在后台后，'
+            '系统回收了本机回环监听（iOS TN2277）。已尝试自动重启播放服务；'
+            '如果仍然失败，请重启 App。';
       } else {
         title = 'AVPlayer 播放失败';
         reason = '播放器内部错误，具体信息见下方。';
@@ -723,14 +780,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     final controller = _controller;
     if (controller == null) return false;
     return _isLandscapeVideo(controller.value);
-  }
-
-  Future<void> _toggleFullscreen() async {
-    if (_fullscreen) {
-      await _exitFullscreen();
-    } else {
-      await _enterFullscreen();
-    }
   }
 
   Future<void> _enterFullscreen() async {
@@ -868,6 +917,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         : '第 ${_index + 1} 集';
     // 加载期间也保留顶栏（返回键/剧名），不要整屏只剩 spinner。
     final showChrome = _error == null;
+    // 全屏提示只给横屏视频：视频已经铺满整屏时（全屏）不需要，竖屏视频全屏
+    // 只会更小，也不给入口。
+    final showFullscreenHint = showChrome && !_fullscreen && _canFullscreen;
     final speed = ref.watch(playbackSpeedProvider);
     ref.listen<double>(playbackSpeedProvider, (_, next) {
       final controller = _controller;
@@ -884,45 +936,69 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            // 视频铺满整屏：全屏横屏时也要盖住底部安全区（Home 指示条那一条），
-            // 否则画面下方会留一道黑边。顶部控制条始终避让状态栏；底部控制条
-            // 只在竖屏避让安全区——全屏横屏时贴到屏幕最底边，否则 Home 指示条
-            // 那一条会在控件下面留出空隙。
-            Positioned.fill(child: _buildVideo()),
-            // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
-            if (showChrome)
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _toggleControls,
-                ),
-              ),
-            if (showChrome)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: SafeArea(
-                  bottom: false,
-                  child: _chrome(_buildTopBar(episodeTitle)),
-                ),
-              ),
-            if (showChrome)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: SafeArea(
-                  top: false,
-                  // 全屏横屏时不再避让底部安全区：控制条要完全贴底，
-                  // 否则 Home 指示条那一条会在控件下方留出空隙。
-                  bottom: !_fullscreen,
-                  child: _chrome(_buildBottomBar(speed)),
-                ),
-              ),
-          ],
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            // 视频在 Center + AspectRatio 里居中铺开，画面高度 = 屏宽 / 宽高比，
+            // 上下各留一条黑边。「全屏观看」提示要贴在真实画面下边缘 8px 处，
+            // 不能按整屏底部摆，否则 16:9 视频下方会说远不近。
+            final controller = _controller;
+            final aspect = controller == null
+                ? 16 / 9
+                : _aspectOf(controller.value);
+            final videoHeight = constraints.maxWidth / aspect;
+            final hintTop =
+                (constraints.maxHeight - videoHeight) / 2 + videoHeight + 8;
+            return Stack(
+              children: [
+                // 视频铺满整屏：全屏横屏时也要盖住底部安全区（Home 指示条那一条），
+                // 否则画面下方会留一道黑边。顶部控制条始终避让状态栏；底部控制条
+                // 只在竖屏避让安全区——全屏横屏时贴到屏幕最底边，否则 Home 指示条
+                // 那一条会在控件下面留出空隙。
+                Positioned.fill(child: _buildVideo()),
+                // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
+                if (showChrome)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _toggleControls,
+                    ),
+                  ),
+                if (showChrome)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: SafeArea(
+                      bottom: false,
+                      child: _chrome(_buildTopBar(episodeTitle)),
+                    ),
+                  ),
+                if (showChrome)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: SafeArea(
+                      top: false,
+                      // 全屏横屏时不再避让底部安全区：控制条要完全贴底，
+                      // 否则 Home 指示条那一条会在控件下方留出空隙。
+                      bottom: !_fullscreen,
+                      child: _chrome(_buildBottomBar(speed)),
+                    ),
+                  ),
+                // 全屏入口放在视频下方：控制条隐藏时一起淡出且不接收点击
+                // （点画面应该唤出控制条，而不是误进全屏）。放在控制条之后，
+                // 窄屏上提示与底部渐变区重叠时也能点到、不会被盖住。
+                if (showFullscreenHint)
+                  Positioned(
+                    top: hintTop,
+                    left: 0,
+                    right: 0,
+                    child: _chrome(Center(child: _buildFullscreenHint())),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -936,6 +1012,38 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         opacity: _controlsVisible ? 1 : 0,
         duration: const Duration(milliseconds: 180),
         child: child,
+      ),
+    );
+  }
+
+  /// 视频画面下方的全屏入口：图标 + 「全屏观看」，半透明胶囊。
+  ///
+  /// 竖屏下 16:9 画面只占屏幕中间一条，底部控制条离画面很远；入口贴着画面
+  /// 下边缘更符合「放大这块画面」的直觉。
+  Widget _buildFullscreenHint() {
+    return Semantics(
+      button: true,
+      label: '全屏观看',
+      child: GestureDetector(
+        onTap: () => unawaited(_enterFullscreen()),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.fullscreen_rounded, color: Colors.white70, size: 18),
+              SizedBox(width: 6),
+              Text(
+                '全屏观看',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1209,15 +1317,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                       ),
                     ),
                     const Spacer(),
-                    // 倍速入口放在时间行而不是操作行：375pt/320pt 窄屏上
-                    // 操作行左侧再塞一个 chip 会和「上一集」按钮重叠。
-                    PlayerOptionChip(
-                      label: playbackSpeedLabel(speed),
-                      active: speed != 1.0,
-                      tooltip: '播放速度',
-                      onTap: () => unawaited(_openPlaybackSpeedSheet()),
-                    ),
-                    const SizedBox(width: 10),
                     Text(
                       _formatDuration(duration),
                       style: const TextStyle(
@@ -1279,22 +1378,22 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                         ),
                       ),
                     ),
-                    // 只有横屏视频才给全屏入口：竖屏内容全屏只会更小。
-                    if (_isLandscapeVideo(value))
-                      Positioned(
-                        right: 0,
-                        child: IconButton(
-                          onPressed: () => unawaited(_toggleFullscreen()),
-                          icon: Icon(
-                            _fullscreen
-                                ? Icons.fullscreen_exit_rounded
-                                : Icons.fullscreen_rounded,
-                          ),
-                          color: Colors.white,
-                          iconSize: 28,
-                          tooltip: _fullscreen ? '退出全屏' : '全屏',
+                    // 倍速入口放在操作行最右（原全屏图标的位置）：时间行只留
+                    // 「当前/总时长」，左侧选集、中间播放控制、右侧倍速，一眼
+                    // 就能找到高频操作。全屏入口见视频下方的「全屏观看」。
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: PlayerOptionChip(
+                          label: playbackSpeedLabel(speed),
+                          active: speed != 1.0,
+                          tooltip: '播放速度',
+                          onTap: () => unawaited(_openPlaybackSpeedSheet()),
                         ),
                       ),
+                    ),
                   ],
                 ),
               ),

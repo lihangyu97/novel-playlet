@@ -208,6 +208,16 @@ class VideoDetailPage extends ConsumerWidget {
             ),
           ),
         // 加载阶段只保留封面背景：不再转圈，内容就绪后直接淡入。
+        // 内容最下方展示资源 ID：一键复制，反馈问题时方便报出。数据没回来前
+        // 不渲染（否则会先出现在封面下面，等内容淡入后再被顶下去）；和内容
+        // 一起淡入，延迟排在简介/选集之后。
+        if (ready || error != null)
+          SliverToBoxAdapter(
+            child: DetailFadeIn(
+              delay: const Duration(milliseconds: 180),
+              child: DetailIdFooter(id: seriesId, label: '短剧 ID'),
+            ),
+          ),
       ],
     );
   }

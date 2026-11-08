@@ -102,6 +102,17 @@ Android 是 `.so`，FRB 走默认 `DynamicLibrary.open('libfqapi_core.so')`。
 - `/src/*` 支持 200 / 206 / 416：既服务明文静态文件（漫画图等），也服务 CENC 密文视频的按 Range 解密。
 - 每次启动随机 32B token；Host/Origin 校验防 DNS rebinding 与跨站写。
 - iOS 需 ATS 例外放行 127.0.0.1；Android 用 `network_security_config` 放行明文回环。
+- **监听自愈（iOS，Apple TN2277）**：App 被挂起时系统可能回收 `listen()` socket 的底层资源，
+  回到前台 listener 已不再监听且没有可靠通知（`accept` 返回 `EBADF`）；axum 的 accept 循环
+  对错误无限重试、永不返回，所以监听任务既不会退出也不会重建。`server.rs` 改为监督任务：
+  每 2s 用 TCP connect 自探活（间隔必须小：Apple `Instant` 基于 `mach_absolute_time`，
+  熄屏睡眠期间不前进），探测被拒即 abort accept 循环、丢弃旧 socket、**同端口立即重绑**
+  （失败才 250ms→5s 退避；绑定统一走 `TcpSocket + SO_REUSEADDR`，避免旧连接 TIME_WAIT
+  造成 EADDRINUSE）。端口 / capability token / `baseUrl()` 全部不变，已发出的 `/src` URL
+  继续有效；只在 accepting / reclaimed+rebinding / rebound / stopped 四个状态转换打日志。
+- **App 侧兜底**：`BackendTransport.waitForLoopbackHealthy()` 用 `dart:io` 发真实 HTTP
+  `GET /health` 探活（FFI 请求不经过回环 adapter，探不出来），`BackendService.ensureLoopback()`
+  串行兜底整核 `shutdown` + `init`；播放页对 -1004 只做一次有界恢复重试（见 §5.7）。
 
 ### 3.3 上游接口与分类
 
@@ -152,6 +163,7 @@ Rust 内核注册了 50 个 fqapp/Legado 兼容路由，App 实际只用 7 个 e
 
 续读入口带 `blockIndex`（页首段落下标），显式点章不带（从页首开始）。
 `chapter()` 首选 `/chapters/{id}/novel`，失败回退 `/chapters/{id}`；详情/目录不做持久缓存。
+详情最下方展示「书籍 ID」并支持一键复制：数据就绪后才渲染、随内容一起淡入（避免先出现再被简介/目录顶下去）。
 
 ### 4.2 打开阅读页（bootstrap）
 
@@ -218,13 +230,16 @@ ChapterContent{id,title,paragraphs}
 - 分页进度存「本页真正开头的段落下标」，不是跨页段落号；恢复时找包含该段的第一页。
 - 字号/行距/系统缩放变化 → 进 key，重新分页并按旧页锚点回位；换底色只改颜色，不重排。
 - 空章显示「本章暂无正文」+ 上/下一章。
+- 工具栏：点中间 1/3 区域呼出；打开时横向翻页锁定（PageView `NeverScrollableScrollPhysics`），
+  压暗遮罩保留但不接收点击（点击穿透到正文，用于收起工具栏）。
 
 ### 4.6 进度与设置
 
 - 进度：`{chapterId, chapterIndex, blockIndex, updatedAt}`，`blockIndex` 是页首段落下标。
 - 写入：翻页 400ms 防抖、切章立即 flush、页面 dispose 再兜一次。
 - 表：`reading_progress_v1`（最近 200 本 LRU）+ `recent_reading_v1`（3 条）+ `last_read_book_v1`。
-- 设置：字号 15–30、行距 1.3–2.0、4 种底色，落 `reader_font_size_v1 / reader_line_height_v1 / reader_paper_v1`。
+- 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、4 种底色，落
+  `reader_font_size_v1 / reader_line_height_v1 / reader_paper_v1`；已落盘偏好优先，默认值只影响无历史偏好的用户。
 
 ---
 
@@ -236,12 +251,14 @@ ChapterContent{id,title,paragraphs}
 推荐卡 → VideoDetailRoute
   → videoDetailBundleProvider = Future.wait([videoDetail, videoEpisodes])
        失败 → 读 offline/video/<seriesKey>/series.json 兜底（剧名/封面/选集）
-  → 选集（详情页 36 集/组、播放页 6 列弹层、我的最近观看先拉目录）
+  → 选集（详情页 36 集/组、播放页 78 集/tab 弹层、我的最近观看先拉目录）
   → VideoPlayRoute{seriesId, seriesTitle, cover, episodes, index}
   → 播放页 initState → _open(index)
 ```
 
 整份 `episodes` 带进播放页，换集不再回源目录。
+详情最下方展示「短剧 ID」并支持一键复制（数据就绪后才随内容淡入）；播放页「选集」弹层
+按 78 集/tab 分组（区间标签，打开定位当前集所在 tab，每 tab 内 6 列网格可滚动）。
 
 ### 5.2 `_open`：四段来源，顺序固定
 
@@ -302,8 +319,11 @@ AVPlayer/ExoPlayer
 - 切集：保留上一帧 + spinner 延迟 250ms；新集 `position>0` 后才释放旧帧。
 - 预取：当前集播 5s 后预取下一集；离线命中跳过；先探 `mode=cached` 再 `videoSource`；页内 LRU 2 条；失败静默。
 - 倍速：1.0–3.0x 全局持久化（`video_playback_speed_v1`）；`_startController` 统一 apply，首帧/seek/恢复再补设一次；
-  iOS 根因修复在 `third_party/video_player_avfoundation`（补 `AVPlayer.defaultRate`）。
-- 全屏：只有横屏视频（aspectRatio > 1.05）给按钮；进入放开横屏 + 隐藏状态栏；退出/返回/离开/切到竖屏视频都恢复竖屏。
+  iOS 根因修复在 `third_party/video_player_avfoundation`（补 `AVPlayer.defaultRate`）。chip 放在
+  操作行最右（右下角）；时间行只留「当前位置 — 总时长」。
+- 全屏：只有横屏视频（aspectRatio > 1.05）才给入口，且**不在控制条里**——入口是视频画面下方 8px 的
+  「全屏观看」提示（图标 + 文案，半透明胶囊，随控制条淡出；全屏时与竖屏视频不显示）。进入放开横屏 +
+  隐藏状态栏；退出/返回/离开/切到竖屏视频都恢复竖屏（全屏时顶栏返回键先退全屏）。
 - 进度：**只记到集**，`play()` 成功后才写 `video_progress_v1` + `video_history_v1`（最近 3 条）。
 
 ### 5.6 离线整剧下载（第二条独立链路）
@@ -326,8 +346,12 @@ api.videoSource(episodeId, maxHeight=默认720P)
 
 ### 5.7 错误分类
 
-取流超时 / 取流失败 / ATS 拦截 / 回环连接中断 / 解码失败 / 本地地址失效 / 未离线缓存。
+取流超时 / 取流失败 / ATS 拦截 / 回环连接中断 / -1004「本地视频服务未响应」/ 解码失败 / 本地地址失效 / 未离线缓存。
 技术详情可复制，「重新下载这一集」= `refresh=1`。
+
+-1004（`NSURLErrorCannotConnectToHost`，「Could not connect to the server.」）就是回环监听被系统回收
+（§3.2）：单独归类，并且先做**一次**有界恢复——`ensureLoopback()` 探活/必要时整核重启，成功后重开这一集；
+恢复仍失败才显示错误页（不是通用自动重试循环）。
 
 断网时：`mode=cached` 命中可播（FRB 不走 socket，`/src` 是本机文件）。
 cached miss 时第一次取流仍会按内核重试预算耗一段时间，失败后进入**会话级「疑似离线」**

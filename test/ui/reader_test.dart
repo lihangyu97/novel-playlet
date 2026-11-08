@@ -97,6 +97,43 @@ void main() {
     );
   });
 
+  testWidgets('阅读页-工具栏打开时左右滑动不翻页，压暗遮罩保留', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    final indicatorBefore = _pageIndicator(tester);
+    expect(indicatorBefore, isNotEmpty, reason: '底部信息条应显示页码');
+
+    // 点中间 1/3 呼出工具栏。
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    // 工具栏打开时横向拖 PageView：手势要留给「收工具栏/点按钮」，不能翻页。
+    await tester.drag(find.byType(PageView), const Offset(-300, 0));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(_pageIndicator(tester), indicatorBefore, reason: '工具栏打开时左右滑动不应翻页');
+
+    // 压暗遮罩保留：视觉上压暗正文，但不接收点击（IgnorePointer），
+    // 不抢手势，也不影响上面的「不翻页」。
+    final scrim = find.byWidgetPredicate(
+      (widget) =>
+          widget is ColoredBox && widget.color == const Color(0x33000000),
+    );
+    expect(scrim, findsOneWidget, reason: '工具栏打开时应保留压暗正文的遮罩层');
+    final opacity = tester.widget<AnimatedOpacity>(
+      find.ancestor(of: scrim, matching: find.byType(AnimatedOpacity)).first,
+    );
+    expect(opacity.opacity, 1.0, reason: '工具栏打开时遮罩应为可见状态');
+    expect(
+      find.ancestor(of: scrim, matching: find.byType(IgnorePointer)),
+      findsWidgets,
+      reason: '遮罩不能抢手势，点击要穿透到正文',
+    );
+  });
+
   testWidgets('阅读页-入口带 blockIndex 时恢复到对应页', (tester) async {
     // 假数据每章 18 段，第 9 段一定不在第 1 页。
     await pumpPreview(
@@ -212,4 +249,15 @@ void main() {
     expect(find.textContaining('加载失败'), findsNothing);
     expect(find.textContaining('第二章'), findsWidgets);
   });
+}
+
+/// 底部常驻信息条里的页码文案（`n/m`）。
+String _pageIndicator(WidgetTester tester) {
+  return tester
+      .widgetList<Text>(find.byType(Text))
+      .map((text) => text.data ?? '')
+      .firstWhere(
+        (data) => RegExp(r'^\d+/\d+$').hasMatch(data),
+        orElse: () => '',
+      );
 }

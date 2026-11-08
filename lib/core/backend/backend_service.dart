@@ -34,6 +34,7 @@ class BackendService {
 
   Future<Directory>? _dirFuture;
   Future<String>? _startFuture;
+  Future<bool>? _ensureLoopbackFuture;
   File? _configFile;
 
   /// 后端运行时目录：`<AppSupport>/backend`，内含 config/ 与内核的 src/、日志。
@@ -49,7 +50,56 @@ class BackendService {
   }
 
   /// 启动内核（幂等：并发/重复调用共用同一次启动）。
-  Future<String> start() => _startFuture ??= _start();
+  ///
+  /// 失败不进 memo：内核起不来时「重试」必须能重新部署资源、重新 init；
+  /// 早先的 `??=` 写法会把失败的 Future 永久缓存，导致启动页的重试按钮
+  /// 每次都拿到同一个旧异常、永远起不来。
+  Future<String> start() async {
+    final cached = _startFuture;
+    if (cached != null) return cached;
+    final future = _start();
+    _startFuture = future;
+    try {
+      return await future;
+    } catch (_) {
+      // 只清掉自己这一次失败的 memo（并发调用可能已经换上新的）。
+      if (identical(_startFuture, future)) _startFuture = null;
+      rethrow;
+    }
+  }
+
+  /// 确保回环适配器还在监听；必要时整核重启（同端口重绑）。
+  ///
+  /// iOS 会在 App 长时间挂起后回收 listening socket 的资源（Apple TN2277），
+  /// 内核 FFI 还活着但 127.0.0.1 上已经没人 accept，播放器报 -1004。这里探活
+  /// 失败就 `shutdown` 旧内核再 `init`：Rust 侧的 supervisor 已经在自愈，
+  /// 这一层是防御性兜底；重绑仍是同一端口，baseUrl 不变，`/src` 又免
+  /// capability，所以已经发给播放器的 URL 继续有效。
+  ///
+  /// 并发调用共用同一次修复；memo 只覆盖这一次，finally 里清掉，不做永久缓存。
+  Future<bool> ensureLoopback() {
+    final existing = _ensureLoopbackFuture;
+    if (existing != null) return existing;
+    final future = _ensureLoopback();
+    _ensureLoopbackFuture = future;
+    return future;
+  }
+
+  Future<bool> _ensureLoopback() async {
+    try {
+      if (!isRunning) await start();
+      if (await _transport.waitForLoopbackHealthy()) return true;
+      debugPrint('[backend] loopback probe failed, restarting kernel');
+      await stop();
+      await start();
+      return await _transport.waitForLoopbackHealthy();
+    } catch (error) {
+      debugPrint('[backend] loopback self-heal failed: $error');
+      return false;
+    } finally {
+      _ensureLoopbackFuture = null;
+    }
+  }
 
   Future<String> _start() async {
     final dir = await backendDir();

@@ -11,8 +11,8 @@ import '../../app/theme/app_theme.dart';
 @immutable
 class ReaderSettings {
   const ReaderSettings({
-    this.fontSize = 19,
-    this.lineHeight = 1.65,
+    this.fontSize = 21,
+    this.lineHeight = 1.8,
     this.paper = ReaderPaper.parchment,
   });
 
