@@ -87,6 +87,13 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () => Navigator.of(context).pop(),
+                    // 与「确定」用同一套小圆角：M3 默认 OutlinedButton 是
+                    // StadiumBorder，和 FilledButton 的 12 圆角并排会一大一小。
+                    style: OutlinedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                     child: const Text('取消'),
                   ),
                 ),
@@ -94,6 +101,11 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
                 Expanded(
                   child: FilledButton(
                     onPressed: () => Navigator.of(context).pop(_color),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                     child: const Text('确定'),
                   ),
                 ),

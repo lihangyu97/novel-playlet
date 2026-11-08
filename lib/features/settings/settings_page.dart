@@ -25,8 +25,10 @@ class SettingsPage extends StatelessWidget {
           physics: const ClampingScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 28),
           children: const [
-            _SectionTitle('主题色'),
+            _SectionTitle('主题'),
             _ThemeColorCard(),
+            SizedBox(height: 12),
+            _AppearanceCard(),
             _SectionTitle('存储'),
             _StorageCard(),
             _StorageHint(),
@@ -58,20 +60,24 @@ class _SectionTitle extends StatelessWidget {
 }
 
 /// 通用卡片容器：与列表页的 Card 圆角/底色保持一致。
+///
+/// [padding] 可调：只含一行标题 + 控件的卡片用更紧凑的上下边距，否则
+/// 卡片内的小标题上下会空出两块 16pt，显得又高又散。
 class _Card extends StatelessWidget {
-  const _Card({required this.child});
+  const _Card({
+    required this.child,
+    this.padding = const EdgeInsets.fromLTRB(16, 16, 16, 16),
+  });
 
   final Widget child;
+  final EdgeInsetsGeometry padding;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-          child: child,
-        ),
+        child: Padding(padding: padding, child: child),
       ),
     );
   }
@@ -81,90 +87,51 @@ class _Card extends StatelessWidget {
 // 主题色
 // ---------------------------------------------------------------------------
 
+/// 「自定义颜色」色块的 key：测试用它点开取色弹层。
+const Key themeCustomColorKey = Key('theme-color-custom');
+
 class _ThemeColorCard extends ConsumerWidget {
   const _ThemeColorCard();
-
-  /// 一行四个：8 个预设正好两行，不会出现「6 + 2」这种歪掉的收尾。
-  static const _perRow = 4;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final seed = ref.watch(themeSeedProvider);
     final controller = ref.read(themeSeedProvider.notifier);
-    final scheme = Theme.of(context).colorScheme;
+    final customSelected = !isPresetColor(seed);
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (var row = 0; row < themeColorOptions.length; row += _perRow) ...[
-            if (row > 0) const SizedBox(height: 12),
-            Row(
-              children: [
-                for (var column = 0; column < _perRow; column++)
-                  Expanded(
-                    child: Center(
-                      child: row + column < themeColorOptions.length
-                          ? _PresetDot(
-                              option: themeColorOptions[row + column],
-                              selected:
-                                  themeColorOptions[row + column].color == seed,
-                              onTap: () => controller.setSeed(
-                                themeColorOptions[row + column].color,
-                              ),
-                            )
-                          : const SizedBox.shrink(),
+          Row(
+            children: [
+              for (final option in themeColorOptions)
+                Expanded(
+                  child: Center(
+                    child: _PresetDot(
+                      option: option,
+                      selected: option.color == seed,
+                      onTap: () => controller.setSeed(option.color),
                     ),
                   ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 16),
-          Divider(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-          InkWell(
-            borderRadius: BorderRadius.circular(10),
-            onTap: () async {
-              final picked = await showThemeColorPicker(context, initial: seed);
-              if (picked == null) return;
-              controller.setSeed(picked);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Row(
-                children: [
-                  Container(
-                    width: 26,
-                    height: 26,
-                    decoration: BoxDecoration(
-                      color: seed,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: scheme.outlineVariant,
-                        width: 1,
-                      ),
-                    ),
+                ),
+              Expanded(
+                child: Center(
+                  child: _CustomDot(
+                    key: themeCustomColorKey,
+                    selected: customSelected,
+                    tooltip: '自定义 · ${themeColorName(seed)}',
+                    onTap: () async {
+                      final picked = await showThemeColorPicker(
+                        context,
+                        initial: seed,
+                      );
+                      if (picked == null) return;
+                      controller.setSeed(picked);
+                    },
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      '自定义颜色',
-                      style: Theme.of(context).textTheme.bodyMedium
-                          ?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  Text(
-                    themeColorName(seed),
-                    style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                  const SizedBox(width: 2),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    size: 20,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
           if (seed != appSeedColor)
             Align(
@@ -237,6 +204,181 @@ class _PresetDot extends StatelessWidget {
   }
 }
 
+/// 第四个色块：自定义取色入口。
+///
+/// 永远显示彩虹渐变 + 调色板图标（不跟随当前 seed），避免和预设色画出两个
+/// 一模一样的圆点；当前主题色不是预设色时用选中描边表示「自定义正在生效」。
+class _CustomDot extends StatelessWidget {
+  const _CustomDot({
+    super.key,
+    required this.selected,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: '自定义',
+        child: InkResponse(
+          onTap: onTap,
+          radius: 30,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const SweepGradient(
+                colors: [
+                  Color(0xFFEF5350),
+                  Color(0xFFFFA726),
+                  Color(0xFF66BB6A),
+                  Color(0xFF4FC3F7),
+                  Color(0xFF5C6BC0),
+                  Color(0xFFAB47BC),
+                  Color(0xFFEF5350),
+                ],
+              ),
+              border: Border.all(
+                color: selected ? scheme.onSurface : Colors.transparent,
+                width: 2,
+              ),
+            ),
+            child: Center(
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: scheme.surface,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.palette_outlined,
+                  size: 14,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 深浅色模式
+// ---------------------------------------------------------------------------
+
+/// 跟随系统 + 手动深色开关。
+///
+/// 两个开关都保持可点：开着「跟随系统」时直接点「深色模式」会退出跟随、
+/// 固定成手动模式，比把开关置灰更符合直觉。
+class _AppearanceCard extends ConsumerWidget {
+  const _AppearanceCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(themeModeProvider);
+    final controller = ref.read(themeModeProvider.notifier);
+    final platformDark =
+        MediaQuery.platformBrightnessOf(context) == Brightness.dark;
+    final following = mode == ThemeMode.system;
+    final dark = following ? platformDark : mode == ThemeMode.dark;
+    return _Card(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Column(
+        children: [
+          // 跟随系统时深色由系统决定，这一项没有意义，直接收起。
+          if (!following) ...[
+            _SwitchRow(
+              title: '深色模式',
+              subtitle: '关闭后固定使用浅色外观',
+              value: dark,
+              onChanged: (value) =>
+                  controller.setMode(value ? ThemeMode.dark : ThemeMode.light),
+            ),
+            Divider(
+              color: Theme.of(context).colorScheme.outlineVariant
+                  .withValues(alpha: 0.5),
+            ),
+          ],
+          _SwitchRow(
+            title: '跟随系统',
+            subtitle: '深色 / 浅色由系统外观决定',
+            value: following,
+            onChanged: (value) => controller.setMode(
+              value
+                  ? ThemeMode.system
+                  : (platformDark ? ThemeMode.dark : ThemeMode.light),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SwitchRow extends StatelessWidget {
+  const _SwitchRow({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Switch(value: value, onChanged: onChanged),
+        ],
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 视频
 // ---------------------------------------------------------------------------
@@ -251,45 +393,36 @@ class _VideoDownloadQualityCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final quality = ref.watch(videoDownloadQualityProvider);
+    // 这张卡只有「小标题 + 一排 chip」：上下用 12pt，去掉说明文字，
+    // 避免小标题上下各空一块 16pt 显得又高又散。
     return _Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '离线下载清晰度',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '离线下载清晰度',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
             ),
-            const SizedBox(height: 4),
-            Text(
-              '默认 720P，只影响之后开始的整剧下载；已缓存内容不会自动重下。',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final option in VideoDownloadQuality.values)
-                  ChoiceChip(
-                    label: Text(option.label),
-                    selected: option == quality,
-                    onSelected: (_) => ref
-                        .read(videoDownloadQualityProvider.notifier)
-                        .setQuality(option),
-                  ),
-              ],
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final option in VideoDownloadQuality.values)
+                ChoiceChip(
+                  label: Text(option.label),
+                  selected: option == quality,
+                  onSelected: (_) => ref
+                      .read(videoDownloadQualityProvider.notifier)
+                      .setQuality(option),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -514,8 +647,7 @@ class _StorageHint extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Text(
-        '清理只删除可重新下载的缓存（视频、封面、章节、遗留日志），书架与阅读进度不会动。'
-        '离线缓存不在这里清理，到「我的」右下角「缓存」页查看和删除。',
+        '离线缓存不在此列，请到「我的 → 缓存」页清理。',
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
           height: 1.5,
