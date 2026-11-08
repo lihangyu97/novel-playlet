@@ -426,6 +426,8 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
                 width: width,
                 onTap: onTap,
                 heroTag: heroTag,
+                // 推荐流展示「作者 · 评分」；书架等入口不传，保持原元信息。
+                showScore: true,
               ),
               VideoRecommendItem(:final video) => VideoCard(
                 key: ValueKey(item.id),

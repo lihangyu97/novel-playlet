@@ -57,6 +57,14 @@ void main() {
     );
   });
 
+  testWidgets('推荐页-小说卡片元信息带评分（作者 · 评分，点分隔）', (tester) async {
+    await pumpPreview(tester, const RecommendPage());
+    // fake 推荐流第 1 本：烽火戏诸侯（i=1 为奇数，score=8.8）。
+    expect(find.text('烽火戏诸侯 · 8.8分'), findsOneWidget);
+    // 第 2 本为偶数 score=9.3，确认不同书各自带自己的评分。
+    expect(find.text('爱潜水的乌贼 · 9.3分'), findsOneWidget);
+  });
+
   testWidgets('推荐页-短剧分类', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     await tester.tap(find.text('短剧'));

@@ -217,6 +217,7 @@ class FakePreviewTransport extends BackendTransport {
                                 'author': _authors[(i - 1) % _authors.length],
                                 'category': i.isEven ? '玄幻' : '都市',
                                 'word_number': '${i * 180000}',
+                                'score': i.isEven ? '9.3' : '8.8',
                                 'thumb_url': bookCoverUrl,
                               },
                           ],
