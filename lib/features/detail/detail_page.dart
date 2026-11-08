@@ -155,10 +155,16 @@ class _DetailPageState extends ConsumerState<DetailPage> {
           ),
         ),
       // 加载阶段只保留封面背景：不再转圈，内容就绪后直接淡入。
-      // 内容最下方展示资源 ID：一键复制，反馈问题时方便报出。
-      SliverToBoxAdapter(
-        child: DetailIdFooter(id: bookId, label: '书籍 ID'),
-      ),
+      // 内容最下方展示资源 ID：一键复制，反馈问题时方便报出。数据没回来前
+      // 不渲染（否则会先出现在封面下面，等简介/目录淡入后再被顶下去）；
+      // 和内容一起淡入，延迟排在简介/目录之后。
+      if (bundle != null || bundleAsync.hasError)
+        SliverToBoxAdapter(
+          child: DetailFadeIn(
+            delay: const Duration(milliseconds: 180),
+            child: DetailIdFooter(id: bookId, label: '书籍 ID'),
+          ),
+        ),
     ];
 
     final scheme = Theme.of(context).colorScheme;

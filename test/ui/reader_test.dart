@@ -97,7 +97,7 @@ void main() {
     );
   });
 
-  testWidgets('阅读页-工具栏打开时左右滑动不翻页且无压暗遮罩', (tester) async {
+  testWidgets('阅读页-工具栏打开时左右滑动不翻页，压暗遮罩保留', (tester) async {
     await pumpPreview(
       tester,
       const ReaderPage(
@@ -116,14 +116,21 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(_pageIndicator(tester), indicatorBefore, reason: '工具栏打开时左右滑动不应翻页');
 
-    // 压暗遮罩已彻底移除（工具栏打开时也不该出现）。
+    // 压暗遮罩保留：视觉上压暗正文，但不接收点击（IgnorePointer），
+    // 不抢手势，也不影响上面的「不翻页」。
+    final scrim = find.byWidgetPredicate(
+      (widget) =>
+          widget is ColoredBox && widget.color == const Color(0x33000000),
+    );
+    expect(scrim, findsOneWidget, reason: '工具栏打开时应保留压暗正文的遮罩层');
+    final opacity = tester.widget<AnimatedOpacity>(
+      find.ancestor(of: scrim, matching: find.byType(AnimatedOpacity)).first,
+    );
+    expect(opacity.opacity, 1.0, reason: '工具栏打开时遮罩应为可见状态');
     expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is ColoredBox && widget.color == const Color(0x33000000),
-      ),
-      findsNothing,
-      reason: '工具栏打开时不应再有压暗正文的遮罩层',
+      find.ancestor(of: scrim, matching: find.byType(IgnorePointer)),
+      findsWidgets,
+      reason: '遮罩不能抢手势，点击要穿透到正文',
     );
   });
 

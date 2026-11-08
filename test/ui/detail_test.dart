@@ -217,6 +217,35 @@ void main() {
       expect(copied, '1', reason: '复制的是完整 ID');
       expect(find.text('ID 已复制'), findsOneWidget, reason: '复制后弹浮动 SnackBar');
     });
+
+    testWidgets('详情加载中不先显示 ID 行，数据回来后才出现', (tester) async {
+      // 回归：ID 行曾先于简介/目录出现，内容淡入后再被顶下去（视觉跳动）。
+      // 现在必须等详情数据回来才渲染，并且和内容一起淡入。
+      final fake = FakePreviewTransport()
+        ..responseDelay = const Duration(milliseconds: 120);
+      await pumpPreview(
+        tester,
+        const DetailPage(bookId: '1'),
+        transport: fake,
+        settle: false,
+      );
+      await tester.pump(const Duration(milliseconds: 30));
+      expect(
+        find.byType(DetailIdFooter, skipOffstage: false),
+        findsNothing,
+        reason: '数据没回来前不应渲染 ID 行（否则会被简介/目录顶下去）',
+      );
+
+      // 数据回来 + 淡入完成。ID 行在内容最下方，可能在屏幕外，所以只断言
+      // 它已进入部件树（skipOffstage: false）。
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.byType(DetailIdFooter, skipOffstage: false),
+        findsOneWidget,
+        reason: '数据回来后 ID 行才出现',
+      );
+    });
   });
 
   testWidgets('详情页', (tester) async {

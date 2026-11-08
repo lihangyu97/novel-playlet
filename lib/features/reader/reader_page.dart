@@ -149,6 +149,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 ),
               ),
             ),
+            // 工具栏打开时压暗正文，让浮层上的文字更清楚；本身不接收点击，
+            // 点击穿透到正文的手势识别器，交给 _handleTap 收起工具栏。
+            // （工具栏打开时横向翻页已由 PageView 的 physics 锁住，见
+            // _buildPagedContent；遮罩只负责视觉压暗，不抢手势。）
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: _toolbarVisible ? 1 : 0,
+                  duration: _toolbarDuration,
+                  child: const ColoredBox(color: Color(0x33000000)),
+                ),
+              ),
+            ),
             Positioned(
               top: 0,
               left: 0,

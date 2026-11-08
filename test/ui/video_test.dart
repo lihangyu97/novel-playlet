@@ -352,6 +352,35 @@ void main() {
     expect(find.text('ID 已复制'), findsOneWidget, reason: '复制后弹浮动 SnackBar');
   });
 
+  testWidgets('短剧详情加载中不先显示 ID 行，数据回来后才出现', (tester) async {
+    // 回归：ID 行曾先于简介/选集出现，内容淡入后再被顶下去（视觉跳动）。
+    final fake = FakePreviewTransport()
+      ..responseDelay = const Duration(milliseconds: 120);
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
+    await pumpPreview(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: fake,
+      settle: false,
+    );
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(
+      find.byType(DetailIdFooter, skipOffstage: false),
+      findsNothing,
+      reason: '数据没回来前不应渲染 ID 行（否则会被简介/选集顶下去）',
+    );
+
+    // 数据回来 + 淡入完成。ID 行在内容最下方，可能在屏幕外，所以只断言
+    // 它已进入部件树（skipOffstage: false）。
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(
+      find.byType(DetailIdFooter, skipOffstage: false),
+      findsOneWidget,
+      reason: '数据回来后 ID 行才出现',
+    );
+  });
+
   testWidgets('短剧详情-选集展开（36 集一个 tab、一行 6 个）', (tester) async {
     final fake = FakePreviewTransport()..directoryChapterCount = 80;
     const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 80);
