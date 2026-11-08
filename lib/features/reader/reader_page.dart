@@ -10,6 +10,9 @@ import '../../app/theme/app_theme.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/chapter_content.dart';
+import '../../data/models/chapter_ideas.dart';
+import 'reader_comments.dart';
+import 'reader_comments_sheet.dart';
 import 'reader_controller.dart';
 import 'reader_pagination.dart';
 import 'reader_settings.dart';
@@ -116,6 +119,25 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final session = ref.watch(provider);
     final settings = ref.watch(readerSettingsProvider);
     final controller = ref.read(provider.notifier);
+    // 段评是当前「正在显示」那一章的；切章加载期间正文仍是上一章，用
+    // contentIndex 而不是 index，避免把下一章的计数画到上一章上。
+    final displayedChapter = session.chapterAt(session.contentIndex);
+    // 段评气泡关闭时不预取计数：工具栏「评论」入口按需再取（见
+    // _openChapterComments）。这样关掉气泡后每章 0 请求。
+    final ideas = !settings.showBubbles || displayedChapter == null
+        ? ChapterIdeas.empty
+        : ref
+                  .watch(
+                    chapterIdeasProvider(
+                      ChapterCommentsArgs(
+                        bookId: widget.args.bookId,
+                        chapterId: displayedChapter.id,
+                        itemVersion: displayedChapter.version,
+                      ),
+                    ),
+                  )
+                  .value ??
+              ChapterIdeas.empty;
     _lastSession = session;
     _controller = controller;
     // ReadingStore 是进程级 Provider，页面 dispose 后实例仍然有效。
@@ -145,7 +167,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTapUp: _handleTap,
-                  child: _buildBody(session, settings, controller),
+                  child: _buildBody(session, settings, controller, ideas),
                 ),
               ),
             ),
@@ -172,7 +194,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               left: 0,
               right: 0,
               bottom: 0,
-              child: _buildBottomBar(session, settings, controller),
+              child: _buildBottomBar(session, settings, controller, ideas),
             ),
           ],
         ),
@@ -184,6 +206,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     ReaderSessionState session,
     ReaderSettings settings,
     ReaderController controller,
+    ChapterIdeas ideas,
   ) {
     final paper = settings.paper;
     final error = session.error;
@@ -211,7 +234,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (content.isEmpty) {
       return _buildStatus(paper, _buildEmptyChapter(session, controller));
     }
-    return _buildPagedContent(session, settings, content, controller);
+    return _buildPagedContent(session, settings, content, controller, ideas);
   }
 
   /// 共享状态视图在夜间底色下要换一套亮色 scheme，否则文字会看不清。
@@ -280,6 +303,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     ReaderSettings settings,
     ChapterContent content,
     ReaderController controller,
+    ChapterIdeas ideas,
   ) {
     final paper = settings.paper;
     final foreground = paper.foreground;
@@ -308,6 +332,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 fontFamily: fontFamily,
                 width: contentWidth,
                 height: pageHeight,
+                ideas: ideas,
+                showBubbles: settings.showBubbles,
               );
         if (pagination == null || pagination.pages.isEmpty) {
           return _buildStatus(
@@ -352,6 +378,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                               textScaler: textScaler,
                               contentWidth: contentWidth,
                               horizontalPadding: _horizontalPadding,
+                              onBubbleTap: _openParagraphComments,
                             ),
                           ),
                         ),
@@ -645,6 +672,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     required String? fontFamily,
     required double width,
     required double height,
+    required ChapterIdeas ideas,
+    required bool showBubbles,
   }) {
     final key = _PaginationKey(
       content: content,
@@ -654,6 +683,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       lineHeight: settings.lineHeight,
       textScale: textScaler.scale(16),
       fontFamily: fontFamily,
+      ideas: ideas,
+      showBubbles: showBubbles,
     );
     final cached = _pagination;
     if (cached != null && _paginationKey == key) return cached;
@@ -666,6 +697,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final pagination = ReaderPagination.build(
       chapterId: content.id,
       paragraphs: content.paragraphs,
+      paraIndices: content.paraIndices,
+      showBubbles: showBubbles,
+      bubbleCounts: ideas.bubbleCounts,
+      bubbleVariants: ideas.bubbleVariants,
       spec: ReaderLayoutSpec(
         width: width,
         height: height,
@@ -819,6 +854,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     ReaderSessionState session,
     ReaderSettings settings,
     ReaderController controller,
+    ChapterIdeas ideas,
   ) {
     final paper = settings.paper;
     return IgnorePointer(
@@ -833,6 +869,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           foreground: paper.foreground,
           hasPrevious: session.hasPrevious,
           hasNext: session.hasNext,
+          onComments: () => unawaited(_openChapterComments()),
           onDirectory: () => _openDirectory(session, settings, controller),
           onPrevious: () {
             _hideToolbar();
@@ -848,6 +885,80 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           },
           onSettings: _openSettings,
         ),
+      ),
+    );
+  }
+
+  void _openParagraphComments(int paraIndex) {
+    final session = ref.read(readerSessionProvider(widget.args));
+    final chapter = session.chapterAt(session.contentIndex);
+    if (chapter == null) return;
+    final ideas =
+        ref
+            .read(
+              chapterIdeasProvider(
+                ChapterCommentsArgs(
+                  bookId: widget.args.bookId,
+                  chapterId: chapter.id,
+                  itemVersion: chapter.version,
+                ),
+              ),
+            )
+            .value ??
+        ChapterIdeas.empty;
+    _openCommentsAt(paraIndex, session, ideas);
+  }
+
+  /// 工具栏「评论」入口：气泡关闭时没有预取计数，这里按需拉一次再打开。
+  Future<void> _openChapterComments() async {
+    final session = ref.read(readerSessionProvider(widget.args));
+    final chapter = session.chapterAt(session.contentIndex);
+    if (chapter == null) return;
+    _hideToolbar();
+    final args = ChapterCommentsArgs(
+      bookId: widget.args.bookId,
+      chapterId: chapter.id,
+      itemVersion: chapter.version,
+    );
+    var ideas =
+        ref.read(chapterIdeasProvider(args)).value ?? ChapterIdeas.empty;
+    if (ideas.isEmpty) {
+      // 失败由 provider 归一成 empty；失败就用空结果提示，不打断阅读。
+      ideas = await ref.read(chapterIdeasProvider(args).future);
+    }
+    if (!mounted) return;
+    final paraIndex = ideas.chapterEndParaIndex;
+    if (paraIndex == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('本章还没有评论')));
+      return;
+    }
+    _openCommentsAt(paraIndex, session, ideas);
+  }
+
+  /// 打开某一段（或章末聚合桶）的评论面板。
+  ///
+  /// 段评正文必填 `item_version`，从目录章里取；老目录没有 version 时仍尝试，
+  /// 失败由面板自己给「加载失败 + 重试」，不影响阅读。
+  void _openCommentsAt(
+    int paraIndex,
+    ReaderSessionState session,
+    ChapterIdeas ideas,
+  ) {
+    final chapter = session.chapterAt(session.contentIndex);
+    if (chapter == null) return;
+    _hideToolbar();
+    final paper = ref.read(readerSettingsProvider).paper;
+    unawaited(
+      showReaderCommentsSheet(
+        context,
+        paper: paper,
+        bookId: widget.args.bookId,
+        chapterId: chapter.id,
+        itemVersion: chapter.version,
+        paraIndex: paraIndex,
+        title: paraIndex == ideas.chapterEndParaIndex ? '本章评论' : '段评',
+        totalCount: ideas.forParagraph(paraIndex)?.count ?? ideas.total,
       ),
     );
   }
@@ -921,6 +1032,8 @@ class _PaginationKey {
     required this.lineHeight,
     required this.textScale,
     required this.fontFamily,
+    required this.ideas,
+    required this.showBubbles,
   });
 
   final ChapterContent content;
@@ -935,6 +1048,11 @@ class _PaginationKey {
   /// 主题字体变了字形度量也会变，必须一起重排。
   final String? fontFamily;
 
+  /// 段评气泡会改变段末折行，ideas 变化（或开关切换）必须重排。
+  /// 用对象身份判断：provider 每次加载/刷新都会给新实例。
+  final ChapterIdeas ideas;
+  final bool showBubbles;
+
   @override
   bool operator ==(Object other) =>
       other is _PaginationKey &&
@@ -944,7 +1062,9 @@ class _PaginationKey {
       other.fontSize == fontSize &&
       other.lineHeight == lineHeight &&
       other.textScale == textScale &&
-      other.fontFamily == fontFamily;
+      other.fontFamily == fontFamily &&
+      identical(other.ideas, ideas) &&
+      other.showBubbles == showBubbles;
 
   @override
   int get hashCode => Object.hash(
@@ -955,5 +1075,7 @@ class _PaginationKey {
     lineHeight,
     textScale,
     fontFamily,
+    identityHashCode(ideas),
+    showBubbles,
   );
 }

@@ -104,8 +104,29 @@ class ReaderChapterCache {
     'id': content.id,
     'title': content.title,
     'paragraphs': content.paragraphs,
+    // 段评锚点：与 paragraphs 等长；老缓存没有这个字段，读出来当无锚点。
+    if (content.paraIndices.isNotEmpty) 'paraIndices': content.paraIndices,
     'fetchedAt': fetchedAt.millisecondsSinceEpoch,
   };
+
+  /// 段落 id 必须与段落数严格对齐：长度对不上（老缓存/坏文件）就当没有锚点，
+  /// 宁可少画气泡也不能把段评挂到别的段上。
+  List<int?> _decodeParaIndices(Object? raw, int length) {
+    if (raw is! List || raw.length != length) return const <int?>[];
+    final out = <int?>[];
+    for (final item in raw) {
+      if (item == null) {
+        out.add(null);
+      } else if (item is int) {
+        out.add(item);
+      } else if (item is String) {
+        out.add(int.tryParse(item));
+      } else {
+        return const <int?>[];
+      }
+    }
+    return List<int?>.unmodifiable(out);
+  }
 
   ReaderChapterHit? _decode(String raw, String chapterId) {
     try {
@@ -132,6 +153,10 @@ class ReaderChapterCache {
           id: storedId.isEmpty ? chapterId : storedId,
           title: asString(json['title']),
           paragraphs: List<String>.unmodifiable(paragraphs),
+          paraIndices: _decodeParaIndices(
+            json['paraIndices'],
+            paragraphs.length,
+          ),
         ),
         // 没有抓取时间的老文件一律当作过期，下次后台刷新补上。
         isStale:

@@ -2,6 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../data/models/chapter_ideas.dart';
+import 'reader_bubble.dart';
+
 /// 正文的行高行为。测量（TextPainter）与渲染（Text）必须显式传同一份，
 /// 否则两组默认值不同时（比如 DefaultTextStyle 带了 leadingDistribution）
 /// 行高会差一两个像素，翻到最后几页就会看到文字被切掉半行。
@@ -14,13 +17,14 @@ const TextHeightBehavior readerTextHeightBehavior = TextHeightBehavior(
 /// 段落 [TextSpan] 的测量结果：渲染复用同一份 span，缩进宽度也必须一致。
 @immutable
 class ReaderParagraphSpan {
-  const ReaderParagraphSpan({required this.span, required this.placeholder});
+  const ReaderParagraphSpan({required this.span, required this.placeholders});
 
   final TextSpan span;
 
-  /// TextPainter 需要显式塞进来的占位尺寸；渲染时由 RenderParagraph 从
-  /// WidgetSpan 子节点算出同一个值（见 [buildReaderParagraphSpan]）。
-  final PlaceholderDimensions placeholder;
+  /// TextPainter 需要显式塞进来的占位尺寸（首行缩进，可能还有段末气泡）；
+  /// 渲染时由 RenderParagraph 从 WidgetSpan 子节点算出同样的值
+  /// （见 [buildReaderParagraphSpan]）。
+  final List<PlaceholderDimensions> placeholders;
 }
 
 /// 构造一个段落的 span：首行缩进用零高 WidgetSpan 占位，正文文字仍是干净
@@ -33,6 +37,10 @@ ReaderParagraphSpan buildReaderParagraphSpan({
   required TextStyle style,
   required double width,
   required TextScaler textScaler,
+  int bubbleCount = 0,
+  ParagraphBubbleVariant bubbleVariant = ParagraphBubbleVariant.plain,
+  VoidCallback? onBubbleTap,
+  bool measureOnly = false,
 }) {
   final fontSize = style.fontSize ?? 14;
   // RenderParagraph 会把 WidgetSpan 子节点按周围 span 的字号做自动缩放，
@@ -42,21 +50,46 @@ ReaderParagraphSpan buildReaderParagraphSpan({
     (fontSize + (style.letterSpacing ?? 0)) * 2,
     math.max(0.0, width / scale - fontSize),
   );
-  return ReaderParagraphSpan(
-    span: TextSpan(
-      style: style,
-      children: <InlineSpan>[
-        WidgetSpan(
-          alignment: PlaceholderAlignment.bottom,
-          child: SizedBox(width: indent, height: 0),
-        ),
-        TextSpan(text: text),
-      ],
+  final children = <InlineSpan>[
+    WidgetSpan(
+      alignment: PlaceholderAlignment.bottom,
+      child: SizedBox(width: indent, height: 0),
     ),
-    placeholder: PlaceholderDimensions(
+    TextSpan(text: text),
+  ];
+  final placeholders = <PlaceholderDimensions>[
+    PlaceholderDimensions(
       size: Size(indent * scale, 0),
       alignment: PlaceholderAlignment.bottom,
     ),
+  ];
+  if (bubbleCount > 0) {
+    // 段末气泡参与排版：末行宽度要给气泡留位置，否则测量出来的折行与渲染
+    // 对不上（气泡会被裁掉或压到文字上）。
+    children.add(
+      WidgetSpan(
+        alignment: PlaceholderAlignment.bottom,
+        child: ReaderParagraphBubble(
+          count: bubbleCount,
+          variant: bubbleVariant,
+          onTap: measureOnly ? null : onBubbleTap,
+          scaled: !measureOnly,
+        ),
+      ),
+    );
+    placeholders.add(
+      PlaceholderDimensions(
+        size: Size(
+          (ReaderParagraphBubble.gap + ReaderParagraphBubble.boxWidth) * scale,
+          ReaderParagraphBubble.boxHeight * scale,
+        ),
+        alignment: PlaceholderAlignment.bottom,
+      ),
+    );
+  }
+  return ReaderParagraphSpan(
+    span: TextSpan(style: style, children: children),
+    placeholders: placeholders,
   );
 }
 
@@ -108,6 +141,9 @@ class ReaderBlock {
     required this.height,
     required List<double> lineTops,
     required List<double> lineHeights,
+    this.paraIndex,
+    this.bubbleCount = 0,
+    this.bubbleVariant = ParagraphBubbleVariant.plain,
   }) : lineTops = List<double>.unmodifiable(lineTops),
        lineHeights = List<double>.unmodifiable(lineHeights);
 
@@ -116,6 +152,13 @@ class ReaderBlock {
   final double height;
   final List<double> lineTops;
   final List<double> lineHeights;
+
+  /// 上游段落 id（正文 `<p idx>`），段评气泡与面板按它定位。
+  final int? paraIndex;
+
+  /// 本段要画的段评数；0 = 不画气泡。
+  final int bubbleCount;
+  final ParagraphBubbleVariant bubbleVariant;
 
   int get lineCount => lineTops.length;
 }
@@ -180,12 +223,32 @@ class ReaderPagination {
     required String chapterId,
     required List<String> paragraphs,
     required ReaderLayoutSpec spec,
+    List<int?> paraIndices = const <int?>[],
+    bool showBubbles = false,
+    Map<int, int> bubbleCounts = const <int, int>{},
+    Map<int, ParagraphBubbleVariant> bubbleVariants =
+        const <int, ParagraphBubbleVariant>{},
   }) {
     final blocks = <ReaderBlock>[];
-    for (final paragraph in paragraphs) {
-      final text = paragraph.trim();
+    for (var position = 0; position < paragraphs.length; position++) {
+      final text = paragraphs[position].trim();
       if (text.isEmpty) continue;
-      final block = _measureBlock(blocks.length, text, spec);
+      final paraIndex = position < paraIndices.length
+          ? paraIndices[position]
+          : null;
+      final bubbleCount = showBubbles && paraIndex != null
+          ? bubbleCounts[paraIndex] ?? 0
+          : 0;
+      final block = _measureBlock(
+        blocks.length,
+        text,
+        spec,
+        paraIndex: paraIndex,
+        bubbleCount: bubbleCount,
+        bubbleVariant: paraIndex == null
+            ? ParagraphBubbleVariant.plain
+            : bubbleVariants[paraIndex] ?? ParagraphBubbleVariant.plain,
+      );
       if (block != null) blocks.add(block);
     }
     return ReaderPagination._(
@@ -222,16 +285,14 @@ class ReaderPagination {
     return pages.isEmpty ? 0 : pages.length - 1;
   }
 
-  static ReaderBlock? _measureBlock(
-    int index,
-    String text,
-    ReaderLayoutSpec spec,
-  ) {
+  /// 纯文字排版时最后一行的宽度；用来判断气泡能不能贴在末行。
+  static double _lastLineWidth(String text, ReaderLayoutSpec spec) {
     final paragraph = buildReaderParagraphSpan(
       text: text,
       style: spec.bodyStyle,
       width: spec.width,
       textScaler: spec.textScaler,
+      measureOnly: true,
     );
     final painter = TextPainter(
       text: paragraph.span,
@@ -242,9 +303,61 @@ class ReaderPagination {
       textWidthBasis: TextWidthBasis.parent,
       locale: const Locale('zh', 'CN'),
     );
-    painter.setPlaceholderDimensions(<PlaceholderDimensions>[
-      paragraph.placeholder,
-    ]);
+    painter.setPlaceholderDimensions(paragraph.placeholders);
+    try {
+      painter.layout(minWidth: spec.width, maxWidth: spec.width);
+      final metrics = painter.computeLineMetrics();
+      return metrics.isEmpty ? 0 : metrics.last.width;
+    } finally {
+      painter.dispose();
+    }
+  }
+
+  static ReaderBlock? _measureBlock(
+    int index,
+    String text,
+    ReaderLayoutSpec spec, {
+    int? paraIndex,
+    int bubbleCount = 0,
+    ParagraphBubbleVariant bubbleVariant = ParagraphBubbleVariant.plain,
+  }) {
+    // 气泡是行内元素：只有最后一行还有空间时才能和正文同行。若最后一行正好
+    // 占满，气泡必然被挤到下一行独占一行——既难看又容易和下一段错位（Flutter
+    // 渲染 widget-only 行时按正文行高算，比占位高度高）。这种段落直接不画
+    // 气泡，章节评论入口仍然可用。
+    var effectiveBubbleCount = bubbleCount;
+    if (bubbleCount > 0) {
+      final scale = _textScaleFactor(
+        spec.textScaler,
+        spec.bodyStyle.fontSize ?? 14,
+      );
+      final lastLineWidth = _lastLineWidth(text, spec);
+      final bubbleTotal =
+          (ReaderParagraphBubble.gap + ReaderParagraphBubble.boxWidth) * scale;
+      if (lastLineWidth + bubbleTotal > spec.width + _epsilon) {
+        effectiveBubbleCount = 0;
+      }
+    }
+
+    final paragraph = buildReaderParagraphSpan(
+      text: text,
+      style: spec.bodyStyle,
+      width: spec.width,
+      textScaler: spec.textScaler,
+      bubbleCount: effectiveBubbleCount,
+      bubbleVariant: bubbleVariant,
+      measureOnly: true,
+    );
+    final painter = TextPainter(
+      text: paragraph.span,
+      textAlign: TextAlign.justify,
+      textDirection: TextDirection.ltr,
+      textScaler: spec.textScaler,
+      textHeightBehavior: readerTextHeightBehavior,
+      textWidthBasis: TextWidthBasis.parent,
+      locale: const Locale('zh', 'CN'),
+    );
+    painter.setPlaceholderDimensions(paragraph.placeholders);
     try {
       painter.layout(minWidth: spec.width, maxWidth: spec.width);
       final metrics = painter.computeLineMetrics();
@@ -260,6 +373,9 @@ class ReaderPagination {
       return ReaderBlock(
         index: index,
         text: text,
+        paraIndex: paraIndex,
+        bubbleCount: effectiveBubbleCount,
+        bubbleVariant: bubbleVariant,
         // 正常情况两者相等；取较大值保证渲染块的占位高度够裁剪。
         height: math.max(painter.height, top),
         lineTops: tops,

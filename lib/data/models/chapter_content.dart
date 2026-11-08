@@ -9,6 +9,7 @@ class ChapterContent {
     required this.id,
     required this.title,
     required this.paragraphs,
+    this.paraIndices = const <int?>[],
   });
 
   final String id;
@@ -17,7 +18,18 @@ class ChapterContent {
   /// 已清洗的段落（无 HTML 标签、无空段）。
   final List<String> paragraphs;
 
+  /// 与 [paragraphs] 等长的上游段落 id（正文 `<p idx="N">`），没有就是 null。
+  ///
+  /// 段评按这个 id 对齐；空列表表示这份内容没有锚点（旧缓存 / 纯文本源）。
+  final List<int?> paraIndices;
+
   bool get isEmpty => paragraphs.isEmpty;
+
+  /// 第 [position] 段的上游段落 id；越界或无锚点返回 null。
+  int? paraIndexAt(int position) =>
+      position >= 0 && position < paraIndices.length
+      ? paraIndices[position]
+      : null;
 }
 
 /// 解析正文响应。
@@ -39,14 +51,15 @@ ChapterContent parseChapterContent(
       ? title
       : firstString(data, ['title', 'chapter_title']);
   final html = firstString(data, ['content', 'chapter_content', 'text']);
-  final paragraphs = _stripLeadingTitle(htmlToParagraphs(html), resolvedTitle);
-  if (paragraphs.isEmpty) {
+  final parsed = _stripLeadingTitle(_parseHtmlParagraphs(html), resolvedTitle);
+  if (parsed.texts.isEmpty) {
     throw ApiException('正文为空');
   }
   return ChapterContent(
     id: chapterId,
     title: resolvedTitle,
-    paragraphs: paragraphs,
+    paragraphs: parsed.texts,
+    paraIndices: parsed.indices,
   );
 }
 
@@ -78,30 +91,53 @@ Map<String, ChapterContent> parseBatchChapterContents(
     final html = firstString(json, ['content', 'chapter_content', 'text']);
     if (html.trim().isEmpty) continue;
     final title = firstString(json, ['title', 'chapter_title', 'name']);
-    final paragraphs = _stripLeadingTitle(htmlToParagraphs(html), title);
-    if (paragraphs.isEmpty) continue;
+    final parsed = _stripLeadingTitle(_parseHtmlParagraphs(html), title);
+    if (parsed.texts.isEmpty) continue;
     out[entry.key] = ChapterContent(
       id: entry.key,
       title: title,
-      paragraphs: List<String>.unmodifiable(paragraphs),
+      paragraphs: List<String>.unmodifiable(parsed.texts),
+      paraIndices: List<int?>.unmodifiable(parsed.indices),
     );
   }
   return out;
 }
 
-/// 把正文 HTML 拍平成段落。
+/// 一段正文 + 它的上游段落 id（`<p idx="N">`）。
+class ParsedParagraphs {
+  const ParsedParagraphs(this.texts, this.indices);
+
+  final List<String> texts;
+  final List<int?> indices;
+
+  bool get isEmpty => texts.isEmpty;
+}
+
+/// 把正文 HTML 拍平成段落（不带段落 id 的兼容入口）。
+List<String> htmlToParagraphs(String html) => _parseHtmlParagraphs(html).texts;
+
+/// 把正文 HTML 拍平成段落，并保留 `<p idx="N">` 的段落 id。
 ///
 /// 上游正文是 `<p>` 段落 + `<br>` 换行的混合结构，还可能夹带 `<img>` 插图与
 /// 水印 span。块级元素边界即段落边界，行内元素直接拼文本。
-List<String> htmlToParagraphs(String html) {
-  if (html.trim().isEmpty) return const [];
+///
+/// 段落 id 是段评的锚点：标题（`<header><div class=tt-title>`）没有 idx，
+/// 一个 `<p>` 被换行拆成多段时只有第一段拿 id——与官方解析口径一致。
+ParsedParagraphs _parseHtmlParagraphs(String html) {
+  if (html.trim().isEmpty) return const ParsedParagraphs([], []);
   final fragment = html_parser.parseFragment(html);
-  final paragraphs = <String>[];
+  final texts = <String>[];
+  final indices = <int?>[];
   final buffer = StringBuffer();
+  int? pendingIndex;
 
   void flush() {
     final text = _clean(buffer.toString());
-    if (text.isNotEmpty) paragraphs.add(text);
+    if (text.isNotEmpty) {
+      texts.add(text);
+      indices.add(pendingIndex);
+      pendingIndex = null;
+    }
     buffer.clear();
   }
 
@@ -141,10 +177,12 @@ List<String> htmlToParagraphs(String html) {
       case 'h6':
       case 'blockquote':
         flush();
+        pendingIndex = int.tryParse(node.attributes['idx'] ?? '');
         for (final child in node.nodes) {
           walk(child);
         }
         flush();
+        pendingIndex = null;
         return;
       default:
         for (final child in node.nodes) {
@@ -157,17 +195,19 @@ List<String> htmlToParagraphs(String html) {
     walk(node);
   }
   flush();
-  return paragraphs;
+  return ParsedParagraphs(texts, indices);
 }
 
 /// 上游正文 HTML 以 `<header><div class="tt-title">第1章 …</div></header>` 开头，
-/// 页面已经单独渲染标题，这里把与标题重复的首段去掉。
-List<String> _stripLeadingTitle(List<String> paragraphs, String title) {
-  if (paragraphs.isEmpty || title.trim().isEmpty) return paragraphs;
-  final first = paragraphs.first.replaceAll(RegExp(r'\s+'), '');
+/// 页面已经单独渲染标题，这里把与标题重复的首段去掉（段落 id 同步去掉）。
+ParsedParagraphs _stripLeadingTitle(ParsedParagraphs parsed, String title) {
+  if (parsed.isEmpty || title.trim().isEmpty) return parsed;
+  final first = parsed.texts.first.replaceAll(RegExp(r'\s+'), '');
   final normalized = title.replaceAll(RegExp(r'\s+'), '');
-  if (first == normalized) return paragraphs.sublist(1);
-  return paragraphs;
+  if (first == normalized) {
+    return ParsedParagraphs(parsed.texts.sublist(1), parsed.indices.sublist(1));
+  }
+  return parsed;
 }
 
 String _clean(String raw) => raw

@@ -106,6 +106,7 @@ class OfflineBookStore {
       'id': content.id,
       'title': content.title,
       'paragraphs': content.paragraphs,
+      if (content.paraIndices.isNotEmpty) 'paraIndices': content.paraIndices,
       'fetchedAt': DateTime.now().millisecondsSinceEpoch,
     };
     await writeJsonAtomically(await chapterFile(bookId, content.id), json);
@@ -236,6 +237,24 @@ class OfflineBookStore {
     }
   }
 
+  /// 段落 id 与段落数严格对齐；对不上就当无锚点（老缓存/坏文件）。
+  List<int?> _decodeParaIndices(Object? raw, int length) {
+    if (raw is! List || raw.length != length) return const <int?>[];
+    final out = <int?>[];
+    for (final item in raw) {
+      if (item == null) {
+        out.add(null);
+      } else if (item is int) {
+        out.add(item);
+      } else if (item is String) {
+        out.add(int.tryParse(item));
+      } else {
+        return const <int?>[];
+      }
+    }
+    return List<int?>.unmodifiable(out);
+  }
+
   ChapterContent? _decodeChapter(Object? raw, String chapterId) {
     final json = asMap(raw);
     if (json == null) return null;
@@ -254,6 +273,7 @@ class OfflineBookStore {
       id: storedId.isEmpty ? chapterId : storedId,
       title: asString(json['title']),
       paragraphs: List<String>.unmodifiable(paragraphs),
+      paraIndices: _decodeParaIndices(json['paraIndices'], paragraphs.length),
     );
   }
 }
