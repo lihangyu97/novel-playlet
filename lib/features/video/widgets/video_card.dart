@@ -26,8 +26,8 @@ class VideoCard extends StatelessWidget {
 
   /// 元信息行是否按推荐流规则展示（推荐流开启；书架等入口保持「全 N 集」）。
   ///
-  /// 优先级与小说一致：`recommend_reason_list` 第一条 → 热度（短剧用
-  /// `rec_text`）→「全 N 集 · 评分」；都没有时退回「全 N 集」。
+  /// 文案 =「全 N 集」+ 现有推荐元信息：`recommend_reason_list` 第一条 →
+  /// 热度（短剧用 `rec_text`）→ 评分；集数始终在最前面。
   final bool showRecommendMeta;
 
   @override
@@ -45,13 +45,16 @@ class VideoCard extends StatelessWidget {
   String? _metaOf() {
     final episodes = item.episodeCount > 0 ? '全 ${item.episodeCount} 集' : '';
     if (!showRecommendMeta) return episodes.isEmpty ? null : episodes;
-    if (item.recommendReason.isNotEmpty) return item.recommendReason;
-    if (item.rankScore.isNotEmpty) return item.rankScore;
-    final score = scoreLabel(item.score);
-    final parts = [
-      if (episodes.isNotEmpty) episodes,
-      if (score.isNotEmpty) score,
+    // 集数永远排最前（短剧卡片的固有信息），后面再接推荐理由 / 热度 / 评分。
+    final tail = <String>[
+      if (item.recommendReason.isNotEmpty)
+        item.recommendReason
+      else if (item.rankScore.isNotEmpty)
+        item.rankScore
+      else if (scoreLabel(item.score).isNotEmpty)
+        scoreLabel(item.score),
     ];
+    final parts = [if (episodes.isNotEmpty) episodes, ...tail];
     return parts.isEmpty ? null : parts.join(' · ');
   }
 }

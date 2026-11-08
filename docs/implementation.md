@@ -562,7 +562,7 @@ flutter drive --profile -d <iPhone UDID> \
 | 链路 | 优先级 1 | 优先级 2 | 优先级 3（兜底） |
 |---|---|---|---|
 | 小说（`NovelGridCard`） | `recommend_reason_list` 第一条的 `content`（如「巅峰榜No.3」「19个老书虫在看」「细糠」） | `rank_score`（热度，如「8479万热度」） | 「作者 · 评分」（`score` 空/0 时只显示作者，作者空退回分类） |
-| 短剧/漫剧（`VideoCard`） | `recommend_reason_list`（JSON 串）里 `rec_tags[0].content` → `tag_info.text`（上新/热门/爆款）→ `sub_title_list` / `secondary_info_list` | `rec_text`（热度，如「4691万热度」；`show_rec_text=false` 时不展示） | 「全 N 集 · 评分」 |
+| 短剧/漫剧（`VideoCard`） | 「全 N 集」+ `recommend_reason_list`（JSON 串）里 `rec_tags[0].content` → `tag_info.text`（上新/热门/爆款）→ `sub_title_list` / `secondary_info_list` | 「全 N 集」+ `rec_text`（热度，如「4691万热度」；`show_rec_text=false` 时不展示） | 「全 N 集 · 评分」 |
 
 - 代码：统一提取 `lib/data/models/json_utils.dart::firstReasonText()`；模型字段
   `NovelItem.{recommendReason,rankScore,score}`、`VideoSeries.{score,recommendReason,rankScore}`
@@ -613,7 +613,8 @@ flutter drive --profile -d <iPhone UDID> \
 
 ### 11.4 坑 / 设计约束
 
-- 卡片元信息只有**一行**且封面宽 108pt：继续叠加播放量/字数/状态等字段，建议放第二行或做封面角标，
+- 标题固定占两行高度（一行书名也补齐第二行），保证同排卡片元信息行对齐、视觉高度一致；
+  卡片元信息只有**一行**且封面宽 108pt：继续叠加播放量/字数/状态等字段，建议放第二行或做封面角标，
   否则长作者名 + 长标签会挤成省略号（golden 里 `爱潜水的乌贼 · 9.…`）。
 - 短剧 `recommend_reason_list.sub_title_list` 多为「剧情 / 149集」这类与卡片既有信息重复的分类，
   所以提取顺序是 `rec_tags` → `tag_info.text` → `sub_title_list`，不要反过来。

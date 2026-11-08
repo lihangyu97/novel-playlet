@@ -73,6 +73,36 @@ void main() {
     expect(find.text('玄幻 · 9.0分'), findsOneWidget);
   });
 
+  testWidgets('标题只有一行时也占两行高度：同排卡片元信息行对齐', (tester) async {
+    NovelGridCard build(String id, String title) => NovelGridCard(
+      item: NovelItem(id: id, title: title, author: '作者', score: '9.3'),
+      onTap: () {},
+      width: 108,
+      showRecommendMeta: true,
+    );
+    await tester.pumpWidget(
+      wrap(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [build('1', '短书名'), build('2', '一个明显会折成两行的很长很长的书名')],
+        ),
+      ),
+    );
+    final cards = find.byType(NovelGridCard);
+    expect(
+      tester.getSize(cards.at(0)).height,
+      tester.getSize(cards.at(1)).height,
+      reason: '一行标题与两行标题的卡片视觉高度必须一致',
+    );
+    final metas = find.text('作者 · 9.3分');
+    expect(metas, findsNWidgets(2));
+    expect(
+      tester.getTopLeft(metas.at(0)).dy,
+      tester.getTopLeft(metas.at(1)).dy,
+      reason: '两张卡片的元信息行基线要对齐',
+    );
+  });
+
   testWidgets('书架等入口不传 showRecommendMeta：保持原元信息', (tester) async {
     await tester.pumpWidget(
       wrap(

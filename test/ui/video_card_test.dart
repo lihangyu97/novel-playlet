@@ -33,18 +33,18 @@ void main() {
     );
   }
 
-  testWidgets('推荐理由优先于热度与评分', (tester) async {
+  testWidgets('集数在最前，推荐理由优先于热度与评分', (tester) async {
     await tester.pumpWidget(
       wrap(card(reason: '系列剧·40万人在追', rank: '4691万热度', score: '8.2')),
     );
-    expect(find.text('系列剧·40万人在追'), findsOneWidget);
-    expect(find.text('4691万热度'), findsNothing);
+    expect(find.text('全 40 集 · 系列剧·40万人在追'), findsOneWidget);
+    expect(find.textContaining('4691万热度'), findsNothing);
     expect(find.textContaining('8.2分'), findsNothing);
   });
 
-  testWidgets('没有推荐理由时展示热度（rec_text）', (tester) async {
+  testWidgets('没有推荐理由时：集数 + 热度（rec_text）', (tester) async {
     await tester.pumpWidget(wrap(card(rank: '4691万热度', score: '8.2')));
-    expect(find.text('4691万热度'), findsOneWidget);
+    expect(find.text('全 40 集 · 4691万热度'), findsOneWidget);
   });
 
   testWidgets('没有理由/热度时退回「全 N 集 · 评分」', (tester) async {

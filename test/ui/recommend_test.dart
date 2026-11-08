@@ -73,13 +73,21 @@ void main() {
     await pumpPreview(tester, const RecommendPage());
     await tester.tap(find.text('短剧'));
     await tester.pumpAndSettle();
-    // i=3/6/9 带 recommend_reason_list，i=1 带 rec_text，i=2 只有集数+评分。
-    expect(find.text('系列剧·40万人在追'), findsWidgets, reason: '有推荐理由时优先展示');
-    expect(find.text('10万热度'), findsOneWidget, reason: '无理由时展示 rec_text 热度');
+    // 集数永远在最前；i=3/6/9 带推荐理由，i=1 带 rec_text，i=2 只有集数+评分。
+    expect(
+      find.text('全 43 集 · 系列剧·40万人在追'),
+      findsOneWidget,
+      reason: '集数在最前，有推荐理由时优先展示',
+    );
+    expect(
+      find.text('全 41 集 · 10万热度'),
+      findsOneWidget,
+      reason: '无理由时展示「集数 + rec_text 热度」',
+    );
     expect(
       find.text('全 42 集 · 8.2分'),
       findsOneWidget,
-      reason: '没有理由/热度时退回集数 · 评分',
+      reason: '没有理由/热度时退回「集数 · 评分」',
     );
   });
 

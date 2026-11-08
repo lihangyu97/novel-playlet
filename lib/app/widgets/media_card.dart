@@ -34,10 +34,23 @@ class MediaCard extends StatelessWidget {
   /// 封面 Hero tag；null = 不参与飞入动画（例如深链/无列表来源）。
   final String? heroTag;
 
+  /// 标题行高倍数；与 [FeedGridMetrics] 计算 cellHeight 的口径保持一致。
+  static const double titleLineHeightFactor = 1.25;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final coverHeight = width * kCoverAspect;
+    final titleStyle = theme.textTheme.bodyMedium?.copyWith(
+      fontWeight: FontWeight.w600,
+      height: titleLineHeightFactor,
+    );
+    // 标题区固定两行高度：书名/剧名只有一行时也把标题与副标题的间距撑开，
+    // 同一行卡片的元信息行才会对齐、卡片视觉高度一致（见 FeedGridMetrics
+    // 的 cellHeight，本来就按「标题两行 + 元信息一行」预算）。
+    final textScaler = MediaQuery.textScalerOf(context);
+    final titleLineHeight =
+        textScaler.scale(titleStyle?.fontSize ?? 14) * titleLineHeightFactor;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppTheme.cardRadius),
@@ -51,13 +64,13 @@ class MediaCard extends StatelessWidget {
               child: NovelCover(url: cover, width: width, height: coverHeight),
             ),
             const SizedBox(height: 8),
-            Text(
-              title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                height: 1.25,
+            SizedBox(
+              height: titleLineHeight * 2,
+              child: Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: titleStyle,
               ),
             ),
             if (meta != null) ...[
