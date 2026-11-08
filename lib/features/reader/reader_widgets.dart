@@ -19,6 +19,7 @@ class ReaderPageContent extends StatelessWidget {
     required this.textScaler,
     required this.contentWidth,
     required this.horizontalPadding,
+    this.onBubbleTap,
   });
 
   final ReaderPage page;
@@ -28,6 +29,9 @@ class ReaderPageContent extends StatelessWidget {
   /// 可读区宽度（不含左右内边距），首行缩进按它计算。
   final double contentWidth;
   final double horizontalPadding;
+
+  /// 点段评气泡：回调段落 id，由阅读页打开该段的评论面板。
+  final void Function(int paraIndex)? onBubbleTap;
 
   @override
   Widget build(BuildContext context) {
@@ -42,13 +46,20 @@ class ReaderPageContent extends StatelessWidget {
   }
 
   Widget _buildFragment(ReaderFragment fragment) {
-    // 与分页测量共用同一个 span 构建函数：首行缩进 WidgetSpan 的文字度量
-    // 在测量与渲染两侧完全一致，缩进不再靠全角空格拼进正文。
+    // 与分页测量共用同一个 span 构建函数：首行缩进 / 段评气泡的占位度量
+    // 在测量与渲染两侧完全一致，不能各自实现一套。
+    final block = fragment.block;
+    final paraIndex = block.paraIndex;
     final paragraph = buildReaderParagraphSpan(
-      text: fragment.block.text,
+      text: block.text,
       style: textStyle,
       width: contentWidth,
       textScaler: textScaler,
+      bubbleCount: block.bubbleCount,
+      bubbleVariant: block.bubbleVariant,
+      onBubbleTap: paraIndex == null || onBubbleTap == null
+          ? null
+          : () => onBubbleTap!(paraIndex),
     );
     return Positioned(
       top: fragment.top,
@@ -177,6 +188,7 @@ class ReaderBottomBar extends StatelessWidget {
     required this.onPrevious,
     required this.onNext,
     required this.onSettings,
+    this.onComments,
   });
 
   /// Home 指示条高度：工具栏贴屏幕底，背景铺到安全区后面。
@@ -186,10 +198,12 @@ class ReaderBottomBar extends StatelessWidget {
   final Color foreground;
   final bool hasPrevious;
   final bool hasNext;
+
   final VoidCallback onDirectory;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
   final VoidCallback onSettings;
+  final VoidCallback? onComments;
 
   @override
   Widget build(BuildContext context) {
@@ -212,6 +226,12 @@ class ReaderBottomBar extends StatelessWidget {
               label: '目录',
               color: foreground,
               onTap: onDirectory,
+            ),
+            _ReaderToolButton(
+              icon: Icons.forum_outlined,
+              label: '评论',
+              color: foreground,
+              onTap: onComments,
             ),
             _ReaderToolButton(
               icon: Icons.skip_previous_rounded,
@@ -420,6 +440,35 @@ class ReaderSettingsSheet extends ConsumerWidget {
                       onTap: () => controller.setPaper(option),
                     ),
                   ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '段评气泡',
+                        style: TextStyle(fontSize: 13, color: foreground),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '关闭只隐藏段尾气泡，章末评论仍在',
+                        style: TextStyle(
+                          fontSize: 11,
+                          height: 1.3,
+                          color: muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: settings.showBubbles,
+                  onChanged: controller.setShowBubbles,
+                ),
               ],
             ),
           ],

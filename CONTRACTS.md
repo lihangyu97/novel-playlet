@@ -56,6 +56,12 @@ Future<List<Chapter>> directory(String bookId);           // 已摊平，Chapter
 Future<List<Chapter>> videoEpisodes(String seriesId);     // 与 directory 同一条路由
 Future<ChapterContent> chapter(String itemId, {String title = ''});
 Future<Map<String, ChapterContent>> chaptersBatch(List<Chapter> chapters, {Duration timeout = const Duration(seconds: 40)}); // 离线整本下载用，阅读页不调用
+
+// 评论 / 段评（只读，匿名设备签名，见下文「评论 / 段评」）
+Future<ChapterIdeas> chapterIdeas(String itemId, {String itemVersion = '', int commentSource = 3}); // 整章段评计数 + 评论 id
+Future<BookCommentPage> paragraphComments(String bookId, String itemId, {required int paraIndex, required String itemVersion, int count = 20, String cursor = ''}); // 某段/章末桶的段评正文
+Future<BookCommentPage> bookComments(String bookId, {int count = 10, int offset = 0}); // 详情页书评（旧接口，带评分/context）
+Future<CommentReplyPage> commentReplies(String commentId, {required String bookId, required String groupId, int count = 10}); // 评论回复，groupId = 章节 itemId
 Future<VideoSource> videoSource(String episodeId, {bool refresh = false, int? maxHeight}); // refresh=1 删缓存重下；默认带 variants=0；maxHeight=下载清晰度上限
 Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 /src，不打上游
 // 以上错误统一抛 ApiException（message 可直接展示）
@@ -66,7 +72,8 @@ Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 
 `FeedPage<T>`：`items / nextOffset / sessionId`，`hasMore` 是 getter（只认 `nextOffset` 是否前进，不信上游 `has_more`）。
 `NovelItem`：`id / title / cover / author / intro / category / wordCount / score / lastChapter`，`isValid` 表示可展示。
 `BookDetail`：`bookId / title / cover / author / abstract / category / creationStatus(0连载 1完结 -1未知) / wordNumber / serialCount / readCount / score / tags / lastChapterTitle`，另有 `statusLabel / wordLabel / metaParts`。
-`Chapter`：`id / title / volumeName / index`；`ChapterContent`：`id / title / List<String> paragraphs`。
+`Chapter`：`id / title / volumeName / index / version`（`version` 来自目录，段评正文必填）；`ChapterContent`：`id / title / List<String> paragraphs / List<int?> paraIndices`（`<p idx="N">` 锚点，与 paragraphs 等长）。
+评论模型：`BookComment` / `BookCommentPage`（段评、书评共用）、`ChapterIdeas` / `ParagraphIdeas`（段评计数）、`CommentReply` / `CommentReplyPage`。
 `VideoSeries`：短剧/漫剧卡片；`VideoDetail`：详情字段 + 选集数等；`VideoSource`：可播放地址 + key + variants。
 
 ### 错误模型
@@ -154,6 +161,30 @@ final task = ref.watch(offlineTaskProvider);   // OfflineTask?（含 speedBytesP
 4. 下载任务同一时刻只有一个，其余 FIFO 排队（内存队列，上限 20，按 kind+id 去重）；当前任务完成/失败/取消后自动启动下一个，paused 时队列停住；切后台在当前章/集结束后暂停、回前台不自动继续；删除区/条目之前先 `clearFor` 取消任务/排队。队列不持久化（重启后等待项消失，当前任务恢复成 paused）。
 5. manifest schema 读不懂时当"没有缓存"处理，不删文件（交给用户手动清理）。
 
+## 评论 / 段评（只读）
+
+数据链路（内核已有接口，Rust 零改动；Dart 走 FFI，不受 loopback `APP_APIS` 白名单限制）：
+
+1. `chapterIdeas(itemId, itemVersion)`：`GET /api/v1/chapters/{id}/reviews` → 上游 idea list，返回
+   `data.data` 按段落 id 分桶的 `count` / `infos[].comment_id`（整章一次，不分页）。
+2. `paragraphComments(bookId, itemId, paraIndex, itemVersion)`：`GET /api/v1/books/{id}/reviews`，
+   带 `group_id=章节id, group_type=15, comment_source=2, comment_type=1, server_channel=38`，
+   `cursor` 翻页；段评和工具栏「评论」共用这一条（章节桶 = idea map 里**段号最大**的桶，约定 10000+）。
+3. `commentReplies(...)`：`GET /api/v1/comments/{id}/replies`，点击「N 条回复」时懒加载。
+
+约定：
+
+- **只读**：没有发评论/点赞/回复入口；匿名设备签名，无账号登录。
+- **失败静默**：段评是装饰，`chapterIdeasProvider` 失败一律 `ChapterIdeas.empty`，不能把阅读页打成错误态。
+- **锚点**：正文解析必须保留 `<p idx="N">`（`ChapterContent.paraIndices`）与目录 `version`；
+  纯文本回退源、老缓存（无 paraIndices/version）不显示气泡，工具栏「评论」仍按计数可用。
+- **气泡位置**：只跟段末行同行；末行放不下时**不画**（避免独占一行或被下一段裁切）。
+- **请求频率**：气泡开 = 每章 1 次 idea list；气泡关 = 0 次（点工具栏「评论」才按需取）；
+  面板/回复/书评翻页全部由用户手势触发，无轮询、无后台预取、无逐段请求。
+- **离线**：离线阅读不请求评论（无网络必失败），入口/气泡自然为空。
+- **缓存**：`reader_chapters/` 与 `offline/novel/` 的章节 JSON 增加可选 `paraIndices`；
+  读取时长度对不上就当没有锚点（宁可少画气泡，不能把段评挂错段）。
+
 ## 导航
 
 ```dart
@@ -182,6 +213,7 @@ context.pushAppRoute(const CacheCenterRoute());    // 我的 → 缓存的下载
 ## 测试与工程质量
 
 - UI 测试在 `test/ui/`（按页面拆：recommend / home / detail / video / reader / mine / settings / 缓存中心，共享 `test/ui/preview_harness.dart`），共 23 张 golden；根目录 `test/*_test.dart` 是解析 / 缓存 / 并发 / 存储 / 主题测试。
+- 评论/段评：`test/comment_models_test.dart`（响应形状 + 段落锚点）、`test/reader_comments_sheet_test.dart`（面板分页/回复/失败态）、`test/reader_pagination_bubble_test.dart`（气泡占位与重排）、`test/ui/detail_reviews_test.dart`（书评卡片/弹窗）。
 - 真机性能 harness：`integration_test/reader_pagination_perf_test.dart`（`flutter drive --profile`，不进 `flutter test` / CI；结论见 `docs/implementation.md` §8）。
 - CI 在 `.github/workflows/ci.yml`：Dart format / analyze / test、Rust fmt / clippy / test、FRB 绑定漂移校验、iOS 无签名构建。本地等价命令 `make check`（只做格式化用 `make format`）。
 - Rust 内核是 fqapp 的 fork：基线 commit、本地补丁清单与上游同步流程都在 `PATCHES.md`；改 `rust/` 必须同步更新它。
@@ -189,10 +221,10 @@ context.pushAppRoute(const CacheCenterRoute());    // 我的 → 缓存的下载
 ## 页面清单（已实现）
 
 1. 推荐页：顶部搜索输入框（40pt；继续往下浏览时整条收起、分类 tabs 吸顶；往回滚第一下立即展开、搜索态保持展开；收起后切分类保持收起）+ 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧）+ 各分类推荐列表（底部导航只剩「推荐 / 我的」）
-2. 详情页：封面/书名/作者/分类/状态/字数/简介/标签 + 目录 + 底部「开始阅读」
-3. 阅读页：分页正文 + 点击呼出工具栏 + 上一章/下一章 + 字号/行距/底色 + 进度保存
+2. 详情页：封面/书名/作者/分类/状态/字数/简介/标签 + 书评卡片（首条 + 弹窗查看全部）+ 目录 + 底部「开始阅读」
+3. 阅读页：分页正文 + 段评气泡 + 工具栏「评论」/评论面板（分页/回复只读）+ 点击呼出工具栏 + 上一章/下一章 + 字号/行距/底色/段评气泡开关 + 进度保存
 4. 我的页：小说 / 短剧两块镜像面板（右下角悬浮切换按钮或左右滑动切换；切换按标题/最近/书架三块 0/100/200ms 阶梯延迟）- 小说侧 = 书架 + 最近阅读；短剧侧 = 收藏网格 + 最近观看（点击直接续播对应集）；两面板共用 `PanelShell`；右下角悬浮按钮组 = 缓存中心入口（固定）+ 小说/短剧切换按钮，设置入口只有一枚、在小说面板时靠右、短剧面板时靠左，切换时随面板在屏幕内移动
 5. 设置页：主题色（3 个预设 + HSV 自定义取色，全站生效并持久化）+ 深浅色模式（跟随系统 / 手动深色，持久化）+ 存储占用与清理（离线缓存提示去「我的 → 缓存」页处理）
 6. 缓存中心：我的右下角悬浮按钮进入；小说/短剧分区列出下载中/排队中/已下载，进度条 + 实时网速，暂停/继续/重试/取消排队，M3 删除与按区清空（确认框），点条目 Hero 进详情
 
-不在本期范围：听书、漫画、评论、段评、登录。
+不在本期范围：听书、漫画、登录；评论/段评只做**只读**（不发评论、不点赞、不回复）。

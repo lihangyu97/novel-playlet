@@ -16,8 +16,8 @@
 
 - **推荐**：顶部搜索框 + 分类 tabs（小说 / 短剧 / 漫剧），每个分类独立推荐流与搜索结果，翻页、下拉刷新、首屏不足自动补页。
   推荐卡元信息行按优先级展示：`recommend_reason_list` 第一条（小说是数组元素 `content`，如「巅峰榜No.3」；短剧是 JSON 串里的 `rec_tags[0].content` / `tag_info.text`）→ `rank_score`（小说）/ `rec_text`（短剧热度，如「4691万热度」）→ 作者（短剧为「全 N 集」+ 理由/热度）。**评分不再进元信息行**，而是封面右上角角标（白字 + 半透明深色底 + 轻阴影，`9.3分`），小说与短剧/漫剧一致；短剧详情页也会展示星标评分。
-- **详情**：小说与短剧共用一套「封面头 + 简介卡 + 标签」版式；小说有目录，短剧有选集（36 集/组）。
-- **阅读页**：`TextPainter` 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、目录跳章、邻章预取、进度保存。
+- **详情**：小说与短剧共用一套「封面头 + 简介卡 + 标签」版式；小说有目录 + 书评卡片（首条 + 弹窗看全部），短剧有选集（36 集/组）。
+- **阅读页**：`TextPainter` 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、段评气泡、工具栏「评论」/评论面板（只读）、目录跳章、邻章预取、进度保存。
 - **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下集/播完自动下一集、选集弹层、横屏全屏、失败分类与「重新下载这一集」。
 - **我的**：小说 / 短剧两块镜像面板（书架 / 收藏 + 最近阅读 / 最近观看 + 缓存与设置入口）。
 - **缓存中心**：离线整本 / 整剧下载的进度、网速、排队、暂停/继续/删除/清空。
@@ -239,8 +239,55 @@ ChapterContent{id,title,paragraphs}
 - 进度：`{chapterId, chapterIndex, blockIndex, updatedAt}`，`blockIndex` 是页首段落下标。
 - 写入：翻页 400ms 防抖、切章立即 flush、页面 dispose 再兜一次。
 - 表：`reading_progress_v1`（最近 200 本 LRU）+ `recent_reading_v1`（3 条）+ `last_read_book_v1`。
-- 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、4 种底色，落
-  `reader_font_size_v1 / reader_line_height_v1 / reader_paper_v1`；已落盘偏好优先，默认值只影响无历史偏好的用户。
+- 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、4 种底色、段评气泡开关
+  （默认开），落 `reader_font_size_v1 / reader_line_height_v1 / reader_paper_v1 / reader_show_bubbles_v1`；
+  已落盘偏好优先，默认值只影响无历史偏好的用户。
+
+### 4.7 评论 / 段评（只读）
+
+内核 `comments.rs` 与 fqapp 同源，接口已齐，Dart 不需要 Rust 改动；FFI 调用不受
+loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（DeviceSigned），**不需要登录**。
+
+```text
+打开章节
+ ├─ 正文解析保留 <p idx="N"> → ChapterContent.paraIndices；目录读 item_data_list[].version → Chapter.version
+ └─ GET /chapters/{id}/reviews（整章一次）
+      → data.data = { "0": {count, infos[]}, "28": …, "10000": … }
+      → total = 各段 count 之和；有 idx 且 count>0 的段画段尾气泡
+      → 工具栏「评论」入口 = idea map 里段号最大的桶（约定 10000+）
+
+点气泡 / 工具栏「评论」
+ └─ 评论面板（0.76 屏高）
+      ├─ GET /books/{bookId}/reviews?group_id={章节id}&group_type=15
+      │     &comment_source=2&comment_type=1&server_channel=38
+      │     &para_index=N&item_version={version}&count=20[&cursor=…]
+      ├─ 滚动近底用 cursor 拉下一页（cursor 不前进就停止）
+      └─ 「N 条回复」→ GET /comments/{commentId}/replies?book_id=&group_id=&count=10
+```
+
+约定：
+
+- **只读**：没有发评论/点赞/回复入口（内核只有短剧写接口，小说段评写接口不存在）。
+- **装饰失败静默**：`chapterIdeasProvider` 失败一律 `ChapterIdeas.empty`，阅读页不进入错误态。
+- **锚点缺失不瞎猜**：纯文本回退源 / 老缓存没有 `paraIndices` 就不画气泡；目录缺 `version`
+  时段评正文可能回 103001，面板给「加载失败 + 重试」，不影响正文。
+- **气泡只跟最后一行同行**：测量时先看末行剩余空间，气泡放得下才画；放不下就不画
+  （避免气泡独占一行、以及 widget 行高与占位高度不一致导致的裁切/盖字）。
+- **离线**：离线阅读不请求评论，气泡/入口自然为空。
+- **缓存兼容**：`reader_chapters/` 与 `offline/novel/` 的章节 JSON 增加可选 `paraIndices`，
+  读取时长度必须与 paragraphs 对齐，否则当无锚点。
+
+书评（详情页）走另一条旧接口 `GET /books/{id}/comments`（0–10 分 + `comment_cnt` /
+`2.6万人点评` 文案），卡片只露第一条，弹窗按 `offset` 翻页。
+
+**请求频率**（全部由用户动作触发，无轮询 / 无后台预取 / 无逐段请求）：
+
+| 动作 | 请求 |
+|---|---|
+| 打开一章（段评气泡开） | 1 次 idea list（整章计数，切章才发） |
+| 段评气泡关 | **0 次**；点工具栏「评论」时才发 1 次 idea list |
+| 打开评论面板 | 1 次评论列表（20 条/页），滚动翻页每页 1 次，「N 条回复」每次展开 1 次 |
+| 进入小说详情页 | 1 次书评（20 条），弹窗滚动翻页每页 1 次 |
 
 ---
 
@@ -377,10 +424,10 @@ cached miss 时第一次取流仍会按内核重试预算耗一段时间，失�
 | 位置 | 格式 / key | 上限 / TTL |
 |---|---|---|
 | `offline/novel/<b64url(bookId)>/book.json` | `OfflineBook`（章节列表 + 元信息） | 无 TTL；小说区 1 GiB 软上限 |
-| `offline/novel/<bookKey>/<b64url(chapterId)>.json` | `{id,title,paragraphs,fetchedAt}` 明文 | 无 TTL |
+| `offline/novel/<bookKey>/<b64url(chapterId)>.json` | `{id,title,paragraphs[,paraIndices],fetchedAt}` 明文 | 无 TTL |
 | `offline/video/<b64url(seriesId)>/series.json` | 剧集列表 + 档位 + 进度 | 无 TTL；短剧区 3 GiB 软上限 |
 | `offline/video/<seriesKey>/<b64url(episodeId)>.mp4` | **明文 mp4** | 无 TTL |
-| `reader_chapters/<b64url(chapterId)>.json` | `{id,title,paragraphs,fetchedAt}` | 300 文件（mtime）、7 天 stale、内存 LRU 8 |
+| `reader_chapters/<b64url(chapterId)>.json` | `{id,title,paragraphs[,paraIndices],fetchedAt}` | 300 文件（mtime）、7 天 stale、内存 LRU 8 |
 | `backend/src/<videoId>.mp4` | **CENC 密文** | 总预算 128 MiB，最旧优先 |
 | `backend/src/<videoId>.<ext>.key` | hex 密钥 sidecar | 随视频删 |
 | `backend/src/<videoId>.<ext>.variant.json` | `{name,width,height,short_edge}` | 随视频删 |
@@ -529,6 +576,8 @@ flutter drive --profile -d <iPhone UDID> \
 11. `chaptersBatch` 解密失败时内核保留密文且不置 `content_decrypted`，离线整本下载的「回退单章」未完整闭环。
 12. App 全局锁竖屏；只有播放页横屏视频可进全屏。
 13. iOS 上架需处理 GPLv3 与内容授权，当前定位自用/自签。
+14. 评论/段评/书评**只读**：不能发评论、点赞、回复；离线阅读不显示段评/书评；纯文本回退源或
+    老缓存没有段落锚点时只显示章末聚合评论、不画气泡。
 
 **可优化点**（现状观察，非承诺）：阅读页 bootstrap 重复请求目录；详情 `Future.wait` 任一失败丢弃部分成功结果；
 首次网络类失败仍无法提前判定（没有 connectivity 能力），只能等内核重试预算；`serve_src_file` 只处理 `.mp4`（`.m4s/.ts` 会退回明文静态服务）。
@@ -544,6 +593,9 @@ flutter drive --profile -d <iPhone UDID> \
 | `third_party/README.md` | `video_player_avfoundation` 补丁内容与插件升级时如何重放 |
 | `lib/features/recommend/content_source.dart` | 分类策略（tab_type / 搜索 tab / 漫剧兜底） |
 | `lib/features/cache/offline_downloader.dart` | 离线下载引擎（单任务状态机 + 队列） |
+| `lib/data/models/{chapter_ideas,book_comment,comment_reply}.dart` | 段评/书评/回复模型与解析 |
+| `lib/features/reader/{reader_comments,reader_comments_sheet,reader_bubble}.dart` | 段评 provider / 评论面板 / 段尾气泡 |
+| `lib/features/detail/{detail_reviews_section,detail_reviews_sheet}.dart` | 详情页书评卡片与弹窗 |
 | `lib/features/video/network_health.dart` | 会话级「疑似离线」标记：断网后切集快速失败、手动重试强制联网 |
 | `rust/src/endpoints/video.rs` | 取流、选档、整集下载、缓存淘汰、`/src` 解密 |
 | `rust/src/endpoints/{book,content,dhcontent}.rs` | 详情、目录、正文（DH / AES）与批量正文 |

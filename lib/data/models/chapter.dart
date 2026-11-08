@@ -7,11 +7,18 @@ class Chapter {
     required this.title,
     this.volumeName = '',
     this.index = 0,
+    this.version = '',
   });
 
   final String id;
   final String title;
   final String volumeName;
+
+  /// 目录里的正文版本（`item_data_list[].version`）。
+  ///
+  /// 段评正文（`/books/{id}/reviews` 的段评配方）必填 `item_version`，缺了
+  /// 上游回 103001；老目录/离线 manifest 可能没有，允许为空。
+  final String version;
 
   /// 在整本目录里的序号（0 基），阅读器上一章/下一章按它走。
   final int index;
@@ -21,6 +28,7 @@ class Chapter {
     title: firstString(raw, ['title', 'chapter_title', 'name']),
     volumeName: firstString(raw, ['volume_name', 'volumeName']),
     index: index ?? 0,
+    version: firstString(raw, ['version', 'item_version', 'itemVersion']),
   );
 }
 

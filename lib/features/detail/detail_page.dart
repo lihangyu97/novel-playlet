@@ -16,6 +16,8 @@ import 'detail_directory_sheet.dart';
 import 'detail_hero.dart';
 import 'detail_intro_section.dart';
 import 'detail_providers.dart';
+import 'detail_reviews_section.dart';
+import 'detail_reviews_sheet.dart';
 
 /// 小说详情页：Hero 信息 + 简介/标签 + 目录 + 底部「开始阅读 / 加入书架」。
 ///
@@ -71,6 +73,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     final bundleAsync = ref.watch(detailBundleProvider(bookId));
     final progressAsync = ref.watch(detailProgressProvider(bookId));
     final shelfAsync = ref.watch(detailShelfProvider(bookId));
+    final reviewsAsync = ref.watch(bookReviewsProvider(bookId));
 
     // 用 .value 而非 when：刷新时保留上一份数据，页面不闪加载态。
     final bundle = bundleAsync.value;
@@ -80,6 +83,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     final shelfItem = _resolveShelfItem(bundle, preview);
     final onShelf = shelfAsync.value ?? false;
     final shelfBusy = shelfAsync.isLoading && !shelfAsync.hasValue;
+    final reviews = reviewsAsync.value;
 
     // 「继续阅读」优先用进度里保存的章（目录顺序变了也还找得到），
     // 没有进度才从第一章开始。
@@ -124,6 +128,22 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             ),
           ),
         ),
+        // 书评：简介/标签之后、目录之前。接口失败或没有书评时 reviews 为
+        // null/空，整块不占位——次要数据不制造错误态，也不留空白卡片。
+        if (reviews != null && reviews.comments.isNotEmpty)
+          SliverToBoxAdapter(
+            child: DetailFadeIn(
+              delay: const Duration(milliseconds: 90),
+              child: DetailReviewsSection(
+                page: reviews,
+                onOpenAll: () => showDetailReviewsSheet(
+                  context,
+                  bookId: bookId,
+                  initialPage: reviews,
+                ),
+              ),
+            ),
+          ),
         SliverToBoxAdapter(
           child: DetailFadeIn(
             delay: const Duration(milliseconds: 120),

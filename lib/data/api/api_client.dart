@@ -1,9 +1,12 @@
 import 'dart:convert';
 
 import '../../core/backend/backend_transport.dart';
+import '../models/book_comment.dart';
 import '../models/book_detail.dart';
 import '../models/chapter.dart';
 import '../models/chapter_content.dart';
+import '../models/chapter_ideas.dart';
+import '../models/comment_reply.dart';
 import '../models/feed_page.dart';
 import '../models/json_utils.dart';
 import '../models/novel_item.dart';
@@ -283,6 +286,95 @@ class ApiClient {
       'item_ids': ids.join(','),
     }, timeout: timeout);
     return parseBatchChapterContents(payload);
+  }
+
+  /// 一章的段评/章末评论汇总（计数 + 评论 id，整章一次、不分页）。
+  ///
+  /// 段评是阅读页装饰：业务上「没有段评」也会返回不可用 code，这里按空处理，
+  /// 由调用方决定隐藏入口；真正的网络/鉴权失败仍抛 [ApiException]。
+  Future<ChapterIdeas> chapterIdeas(
+    String itemId, {
+    String itemVersion = '',
+    int commentSource = 3,
+  }) async {
+    if (itemId.isEmpty) return ChapterIdeas.empty;
+    final payload = await _getJson(
+      '/api/v1/chapters/${Uri.encodeComponent(itemId)}/reviews',
+      {
+        'comment_source': '$commentSource',
+        if (itemVersion.isNotEmpty) 'item_version': itemVersion,
+      },
+      timeout: const Duration(seconds: 15),
+    );
+    return ChapterIdeas.fromPayload(payload);
+  }
+
+  /// 某一段（或章末聚合桶）的段评正文，`cursor` 翻页。
+  ///
+  /// [itemVersion] 来自目录；缺了上游会回 103001，所以调用方要尽量带上。
+  /// [paraIndex] 用章末桶时传 [ChapterIdeas.chapterEndParaIndex]。
+  Future<BookCommentPage> paragraphComments(
+    String bookId,
+    String itemId, {
+    required int paraIndex,
+    required String itemVersion,
+    int count = 20,
+    String cursor = '',
+  }) async {
+    final payload = await _getJson(
+      '/api/v1/books/${Uri.encodeComponent(bookId)}/reviews',
+      {
+        'book_id': bookId,
+        'group_id': itemId,
+        'group_type': '15',
+        'comment_source': '2',
+        'comment_type': '1',
+        'server_channel': '38',
+        'para_index': '$paraIndex',
+        if (itemVersion.isNotEmpty) 'item_version': itemVersion,
+        'count': '$count',
+        if (cursor.isNotEmpty) 'cursor': cursor,
+      },
+      timeout: const Duration(seconds: 20),
+    );
+    return BookCommentPage.fromCommentListPayload(payload);
+  }
+
+  /// 书评列表（旧接口，带 `comment_cnt` / `score_cnt` / `2.6万人点评` 文案）。
+  ///
+  /// 用 `offset` 翻页，`nextOffset` 由响应给出。
+  Future<BookCommentPage> bookComments(
+    String bookId, {
+    int count = 10,
+    int offset = 0,
+  }) async {
+    final payload = await _getJson(
+      '/api/v1/books/${Uri.encodeComponent(bookId)}/comments',
+      {'count': '$count', 'offset': '$offset'},
+      timeout: const Duration(seconds: 20),
+    );
+    return BookCommentPage.fromLegacyPayload(payload);
+  }
+
+  /// 一条评论的回复列表（段评 / 书评共用；短剧回复是另一条路由）。
+  Future<CommentReplyPage> commentReplies(
+    String commentId, {
+    required String bookId,
+    required String groupId,
+    int count = 10,
+  }) async {
+    if (commentId.isEmpty) return CommentReplyPage.empty;
+    final payload = await _getJson(
+      '/api/v1/comments/${Uri.encodeComponent(commentId)}/replies',
+      {
+        'comment_id': commentId,
+        'book_id': bookId,
+        'group_id': groupId,
+        'count': '$count',
+      },
+      timeout: const Duration(seconds: 20),
+    );
+    return CommentReplyPage.fromPayload(payload);
   }
 
   Future<Map<String, dynamic>> _getJson(

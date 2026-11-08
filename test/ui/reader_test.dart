@@ -7,7 +7,9 @@ import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_controller.dart';
+import 'package:novel_playlet/features/reader/reader_bubble.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
+import 'package:novel_playlet/features/reader/reader_settings.dart';
 import 'package:novel_playlet/features/reader/reader_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -48,6 +50,7 @@ void main() {
     // 点中间 1/3 呼出工具栏。
     await tester.tapAt(const Offset(195, 420));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('评论'), findsOneWidget, reason: '工具栏应提供本章评论入口');
     await expectLater(
       find.byType(ReaderPage),
       matchesGoldenFile('../goldens/reader_toolbar.png'),
@@ -248,6 +251,68 @@ void main() {
     expect(find.text('重试'), findsNothing);
     expect(find.textContaining('加载失败'), findsNothing);
     expect(find.textContaining('第二章'), findsWidgets);
+  });
+
+  testWidgets('阅读页-段评气泡随开关显示/隐藏，点气泡打开评论面板', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    expect(
+      find.byType(ReaderParagraphBubble),
+      findsWidgets,
+      reason: '预览章有段评计数，首屏应该画出气泡',
+    );
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    container.read(readerSettingsProvider.notifier).setShowBubbles(false);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(ReaderParagraphBubble), findsNothing);
+
+    container.read(readerSettingsProvider.notifier).setShowBubbles(true);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(ReaderParagraphBubble), findsWidgets);
+
+    // 点第一个气泡：打开该段的评论面板（预览 transport 返回两条段评）。
+    await tester.tap(find.byType(ReaderParagraphBubble).first);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.textContaining('条评论'), findsOneWidget);
+    expect(find.text('预览段评 1'), findsOneWidget);
+  });
+
+  testWidgets('阅读页-关闭段评气泡后不预取评论，点评论入口才请求', (tester) async {
+    SharedPreferences.setMockInitialValues({'reader_show_bubbles_v1': false});
+    final transport = FakePreviewTransport();
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: transport,
+    );
+    expect(
+      transport.calls.where((call) => call.contains('/reviews')),
+      isEmpty,
+      reason: '关闭气泡后不应为了计数预取段评',
+    );
+    expect(find.byType(ReaderParagraphBubble), findsNothing);
+
+    // 打开工具栏 → 点「评论」：这是唯一一次按需请求 idea 列表。
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('评论'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(
+      transport.calls.where(
+        (call) => call.contains('/chapters/') && call.contains('/reviews'),
+      ),
+      isNotEmpty,
+    );
+    expect(find.textContaining('条评论'), findsOneWidget);
   });
 }
 

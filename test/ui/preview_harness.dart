@@ -323,6 +323,55 @@ class FakePreviewTransport extends BackendTransport {
         },
       };
     }
+    if (path.endsWith('/comments')) {
+      // 书评（旧接口形状：data.comment[] + comment_cnt / context /
+      // next_offset）。时间戳按「相对现在」的偏移生成，timeLabel() 才会稳定
+      // 输出「2天前」这类相对文案，golden 不会随运行时间变化。
+      return {
+        'code': 0,
+        'data': {
+          'comment_cnt': 3,
+          'context': '2.6万人点评',
+          'next_offset': 3,
+          'has_more': false,
+          'comment': [
+            {
+              'comment_id': 'rc1',
+              'text': '陈平安的成长线写得很扎实，剑气长城那一段反复看了好几遍，越读越有味道。',
+              'score': 9,
+              'digg_count': 328,
+              'reply_count': 12,
+              'create_timestamp': _secondsAgo(const Duration(days: 2)),
+              'user_info': {
+                'base_info': {'user_name': '一蓑烟雨', 'user_avatar': ''},
+              },
+            },
+            {
+              'comment_id': 'rc2',
+              'text': '前期节奏偏慢，后面渐入佳境。',
+              'score': 8,
+              'digg_count': 96,
+              'reply_count': 3,
+              'create_timestamp': _secondsAgo(const Duration(hours: 5)),
+              'user_info': {
+                'base_info': {'user_name': '翻书人', 'user_avatar': ''},
+              },
+            },
+            {
+              'comment_id': 'rc3',
+              'text': '人物群像立得住，配角也有自己的高光。',
+              'score': 10,
+              'digg_count': 521,
+              'reply_count': 20,
+              'create_timestamp': _secondsAgo(const Duration(days: 9)),
+              'user_info': {
+                'base_info': {'user_name': '剑气长存', 'user_avatar': ''},
+              },
+            },
+          ],
+        },
+      };
+    }
     if (path.endsWith('/detail')) {
       return {
         'code': 0,
@@ -361,6 +410,66 @@ class FakePreviewTransport extends BackendTransport {
         },
       };
     }
+    // 章末/段评计数（阅读页段评气泡与「本章评论」入口）。
+    if (path.contains('/chapters/') && path.endsWith('/reviews')) {
+      return {
+        'code': 0,
+        'data': {
+          'item_version': 'v-preview',
+          'data': {
+            '0': {
+              'count': 3,
+              'infos': <dynamic>[],
+              'user_count': 1,
+              'is_author_comment': false,
+            },
+            '2': {
+              'count': 12,
+              'infos': <dynamic>[],
+              'user_count': 0,
+              'is_author_comment': true,
+            },
+            '8': {
+              'count': 5,
+              'infos': <dynamic>[],
+              'user_count': 0,
+              'is_author_comment': false,
+            },
+            '10000': {
+              'count': 20,
+              'infos': <dynamic>[],
+              'user_count': 0,
+              'is_author_comment': false,
+            },
+          },
+        },
+      };
+    }
+    // 段评正文（点气泡/章末入口打开的面板）。
+    if (path.startsWith('/api/v1/books/') && path.endsWith('/reviews')) {
+      return {
+        'code': 0,
+        'data': {
+          'common_list_info': {'total': 2, 'has_more': false, 'cursor': ''},
+          'data_list': [
+            for (var i = 0; i < 2; i++)
+              {
+                'comment': {
+                  'comment_id': 'pc$i',
+                  'common': {
+                    'content': {'text': '预览段评 ${i + 1}'},
+                    'create_timestamp': 1756000000 + i,
+                    'user_info': {
+                      'base_info': {'user_name': '读者${i + 1}'},
+                    },
+                  },
+                  'stat': {'digg_count': i, 'reply_count': 0},
+                },
+              },
+          ],
+        },
+      };
+    }
     if (path.contains('/chapters/')) {
       return {
         'code': 0,
@@ -369,7 +478,7 @@ class FakePreviewTransport extends BackendTransport {
           'title': '第一章',
           'content': [
             for (var p = 0; p < 9; p++)
-              '<p>${_paragraphs[p % _paragraphs.length]}${'这是用来验证分页与中文排版的一段正文，长度足够撑满一屏中的若干行。' * 2}</p>',
+              '<p idx="$p">${_paragraphs[p % _paragraphs.length]}${'这是用来验证分页与中文排版的一段正文，长度足够撑满一屏中的若干行。' * 2}</p>',
           ].join(),
         },
       };
@@ -441,6 +550,10 @@ class FakePreviewTransport extends BackendTransport {
     final ones = n % 10;
     return '${digits[tens]}十${ones == 0 ? '' : digits[ones]}';
   }
+
+  /// 距今 [age] 之前的秒级时间戳（上游旧接口用秒）。
+  static int _secondsAgo(Duration age) =>
+      DateTime.now().subtract(age).millisecondsSinceEpoch ~/ 1000;
 }
 
 /// 预览用内存缓存：widget 测试里 path_provider/真实磁盘 IO 在 fake async 下

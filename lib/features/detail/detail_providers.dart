@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/storage/offline/offline_book.dart';
 import '../../core/storage/reading_store.dart';
+import '../../data/models/book_comment.dart';
 import '../../data/models/book_detail.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/novel_item.dart';
@@ -77,6 +78,27 @@ DetailBundle _bundleFromOffline(OfflineBook book) => DetailBundle(
       ),
   ],
 );
+
+/// 书评每页条数。
+///
+/// 详情页卡片只露第一条，但同一份数据会被书评弹层当作首屏复用，所以按弹层
+/// 的每页大小请求，打开弹层时不再二次拉第一页。
+const bookReviewsPageSize = 20;
+
+/// 书评第一页。
+///
+/// 书评是详情页的次要信息：任何失败都返回 null，页面直接不渲染书评区块，
+/// 不弹错误、不影响主内容；同时显式关掉 Riverpod 的自动重试，避免次要数据
+/// 在后台反复打接口（与视频详情等网络 provider 的处理保持一致）。
+final bookReviewsProvider = FutureProvider.autoDispose
+    .family<BookCommentPage?, String>((ref, bookId) async {
+      final api = ref.watch(apiClientProvider);
+      try {
+        return await api.bookComments(bookId, count: bookReviewsPageSize);
+      } catch (_) {
+        return null;
+      }
+    }, retry: (retryCount, error) => null);
 
 /// 上次阅读进度，用来把主按钮切成「继续阅读 · 第N章」。
 ///

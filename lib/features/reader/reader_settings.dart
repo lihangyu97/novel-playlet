@@ -14,6 +14,7 @@ class ReaderSettings {
     this.fontSize = 21,
     this.lineHeight = 1.8,
     this.paper = ReaderPaper.parchment,
+    this.showBubbles = true,
   });
 
   /// 15–30，单位与 Flutter 逻辑像素一致。
@@ -24,14 +25,19 @@ class ReaderSettings {
 
   final ReaderPaper paper;
 
+  /// 是否在段尾画段评气泡。关掉只影响气泡渲染，章末/工具栏评论入口仍在。
+  final bool showBubbles;
+
   ReaderSettings copyWith({
     double? fontSize,
     double? lineHeight,
     ReaderPaper? paper,
+    bool? showBubbles,
   }) => ReaderSettings(
     fontSize: fontSize ?? this.fontSize,
     lineHeight: lineHeight ?? this.lineHeight,
     paper: paper ?? this.paper,
+    showBubbles: showBubbles ?? this.showBubbles,
   );
 
   @override
@@ -39,10 +45,11 @@ class ReaderSettings {
       other is ReaderSettings &&
       other.fontSize == fontSize &&
       other.lineHeight == lineHeight &&
-      other.paper == paper;
+      other.paper == paper &&
+      other.showBubbles == showBubbles;
 
   @override
-  int get hashCode => Object.hash(fontSize, lineHeight, paper);
+  int get hashCode => Object.hash(fontSize, lineHeight, paper, showBubbles);
 }
 
 final readerSettingsProvider =
@@ -55,6 +62,7 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
   static const _fontSizeKey = 'reader_font_size_v1';
   static const _lineHeightKey = 'reader_line_height_v1';
   static const _paperKey = 'reader_paper_v1';
+  static const _bubblesKey = 'reader_show_bubbles_v1';
 
   static const double minFontSize = 15;
   static const double maxFontSize = 30;
@@ -96,6 +104,13 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
     _persist();
   }
 
+  void setShowBubbles(bool value) {
+    if (value == state.showBubbles) return;
+    _userChanged = true;
+    state = state.copyWith(showBubbles: value);
+    _persist();
+  }
+
   Future<void> _restore() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -114,6 +129,7 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
             .clamp(minLineHeight, maxLineHeight)
             .toDouble(),
         paper: paper,
+        showBubbles: prefs.getBool(_bubblesKey) ?? fallback.showBubbles,
       );
       if (restored != state) state = restored;
     } catch (_) {
@@ -129,6 +145,7 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
       await prefs.setDouble(_fontSizeKey, snapshot.fontSize);
       await prefs.setDouble(_lineHeightKey, snapshot.lineHeight);
       await prefs.setString(_paperKey, snapshot.paper.name);
+      await prefs.setBool(_bubblesKey, snapshot.showBubbles);
     } catch (_) {
       // 偏好落盘失败只影响下次启动的默认值，不打扰当前阅读。
       return;
