@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
@@ -12,6 +13,7 @@ import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/chapter.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
+import 'package:novel_playlet/features/video/network_health.dart';
 import 'package:novel_playlet/features/video/playback_speed.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -93,6 +95,33 @@ void main() {
     expect(api.cachedCalls, 1);
     expect(api.sourceCalls, 1);
     expect(factory.created, hasLength(1));
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('疑似离线（近期网络失败）：未缓存集跳过取流，手动重试强制联网', (tester) async {
+    final health = NetworkHealth()..recordFailure();
+    final store = _FakeSeriesStore();
+    final factory = _FakeFactory();
+    final api = _FakeApi(sourceUrl: 'http://127.0.0.1:18931/src/e1.mp4');
+    await _pumpPlayer(
+      tester,
+      store: store,
+      factory: factory,
+      api: api,
+      overrides: [networkHealthProvider.overrideWithValue(health)],
+    );
+
+    expect(api.cachedCalls, 1, reason: '本地缓存探测照旧');
+    expect(api.sourceCalls, 0, reason: '疑似离线时不应再付一次完整取流等待');
+    expect(find.text('该集未离线缓存'), findsOneWidget);
+
+    // 用户点重试：清掉疑似离线，强制走一次完整网络请求。
+    await tester.tap(find.text('重试'));
+    await tester.pump();
+    await tester.pump();
+    expect(api.sourceCalls, 1, reason: '手动重试必须真的联网');
+    expect(health.isSuspectedOffline, isFalse, reason: '取流成功清除疑似离线');
 
     await _disposePlayer(tester);
   });
@@ -382,10 +411,12 @@ Future<ProviderContainer> _pumpPlayer(
   required _ControllerFactory factory,
   ApiClient? api,
   Future<bool> Function()? ensureLoopback,
+  List<Override> overrides = const [],
 }) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        ...overrides,
         offlineSeriesStoreProvider.overrideWithValue(store),
         playbackControllerFactoryProvider.overrideWithValue(factory.call),
         if (api != null) apiClientProvider.overrideWithValue(api),

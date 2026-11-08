@@ -14,7 +14,7 @@
 //   device    - persistent device pool + registration
 //   sign      - request signing primitives
 //
-// See CONTRACTS.md for the app-side contract and docs/architecture-review.md
+// See CONTRACTS.md for the app-side contract and docs/implementation.md
 // for the architecture decisions and known gaps.
 
 pub mod api;

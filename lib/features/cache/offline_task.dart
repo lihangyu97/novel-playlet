@@ -161,7 +161,7 @@ class OfflineTaskStore {
   OfflineTaskStore({Future<SharedPreferences> Function()? preferences})
     : _preferences = preferences ?? SharedPreferences.getInstance;
 
-  /// 持久化 key（固定，见 docs/offline-cache.md §7）。
+  /// 持久化 key（固定，见 docs/implementation.md）。
   static const String storageKey = 'offline_task_v1';
 
   final Future<SharedPreferences> Function() _preferences;

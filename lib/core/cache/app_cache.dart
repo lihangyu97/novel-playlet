@@ -9,7 +9,7 @@ import 'app_image_cache.dart';
 ///
 /// 只统计缓存，不包含书架/阅读进度（`shared_preferences`）、内核的设备注册池
 /// （`backend/config/`），也不包含**离线缓存区**（`offline/`，见
-/// docs/offline-cache.md）——离线缓存是用户主动下载的数据，永不自动清理，
+/// docs/implementation.md）——离线缓存是用户主动下载的数据，永不自动清理，
 /// 由「我的 → 缓存」页单独统计与手动删除。
 @immutable
 class CacheUsage {

@@ -26,7 +26,7 @@ dependencies:
   # 正文 HTML → 段落。
   html: 0.15.6
   cupertino_icons: ^1.0.8
-  # 视频播放：底层 AVPlayer（iOS）。方案与边界见 docs/video-playback.md。
+  # 视频播放：底层 AVPlayer（iOS）。方案与边界见 docs/implementation.md。
   video_player: ^2.14.1
 
 # AVPlayer 起播/seek 后会把 rate 复位成 defaultRate；上游 2.12.3 没有同步

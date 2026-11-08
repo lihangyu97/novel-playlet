@@ -17,7 +17,7 @@ import 'package:novel_playlet/features/reader/reader_page.dart';
 
 /// 阅读页分页/切章在**真机 profile 模式**下的 UI 线程帧耗时采集。
 ///
-/// 背景（docs/architecture-review.md P1-6）：阅读页在 LayoutBuilder 里对整章
+/// 背景（docs/implementation.md）：阅读页在 LayoutBuilder 里对整章
 /// 所有段落跑 TextPainter，量完才画第一页。文档估计切章有 20–50ms 同步卡顿，
 /// 但那是静态推断；TextPainter 必须在 UI isolate，widget 测试/模拟器都测不准，
 /// 只能真机 profile 量。

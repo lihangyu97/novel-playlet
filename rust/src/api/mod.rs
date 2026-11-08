@@ -1,6 +1,6 @@
 //! flutter_rust_bridge surface - the public entry point of the Rust core.
 //!
-//! Architecture decisions and consequences: see `docs/architecture-review.md`.
+//! Architecture decisions and consequences: see `docs/implementation.md`.
 //! App-side contract: `CONTRACTS.md`.
 //!
 //! Flutter calls [request] for every backend call; the loopback HTTP adapter

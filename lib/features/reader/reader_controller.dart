@@ -32,6 +32,7 @@ class ReaderSessionState {
     this.cover = '',
     this.loading = true,
     this.error,
+    this.failedIndex = -1,
     this.resumeBlockIndex = 0,
     this.resumeChapterIndex = -1,
   });
@@ -47,6 +48,12 @@ class ReaderSessionState {
   final String cover;
   final bool loading;
   final String? error;
+
+  /// 最近一次加载失败的章（目录下标）；-1 表示没有。
+  ///
+  /// 已经读到正文时失败不会清空页面：`index` 会退回正在显示的章，失败目标
+  /// 单独记在这里，供顶部提示条的「重试」定位到正确章节。
+  final int failedIndex;
 
   /// 续读入口的落点：当前页首段下标。只有"按本地进度续读"时才有值；
   /// 用户显式点章节进入，或跳过头后会被清成 0。
@@ -80,6 +87,7 @@ class ReaderSessionState {
     String? cover,
     bool? loading,
     Object? error = _unset,
+    Object? failedIndex = _unset,
     int? resumeBlockIndex,
     int? resumeChapterIndex,
   }) => ReaderSessionState(
@@ -93,6 +101,9 @@ class ReaderSessionState {
     cover: cover ?? this.cover,
     loading: loading ?? this.loading,
     error: identical(error, _unset) ? this.error : error as String?,
+    failedIndex: identical(failedIndex, _unset)
+        ? this.failedIndex
+        : failedIndex as int,
     resumeBlockIndex: resumeBlockIndex ?? this.resumeBlockIndex,
     resumeChapterIndex: resumeChapterIndex ?? this.resumeChapterIndex,
   );
@@ -126,7 +137,7 @@ class ReaderController extends Notifier<ReaderSessionState> {
   /// 小说离线 pinned 区（整本下载落盘的目录 + 正文）。
   ///
   /// 阅读链路按 offline → 自动缓存 → 网络 的顺序取正文，见
-  /// docs/offline-cache.md §5；它只被用户手动删除，阅读页不会写它。
+  /// docs/implementation.md；它只被用户手动删除，阅读页不会写它。
   late OfflineBookStore _offline;
 
   /// 下一章/上一章的后台预取队列。并发上限 1，避免快速滑动时打爆请求。
@@ -365,6 +376,7 @@ class ReaderController extends Notifier<ReaderSessionState> {
     state = state.copyWith(
       index: clamped,
       error: null,
+      failedIndex: -1,
       // 跳到别的章后，原来的续读落点就失效了，别影响后续进入本章。
       resumeBlockIndex: leavesResumeEntry ? 0 : resumeBlockIndex,
       resumeChapterIndex: leavesResumeEntry ? -1 : resumeChapterIndex,
@@ -407,9 +419,16 @@ class ReaderController extends Notifier<ReaderSessionState> {
       _prefetchNeighbors();
     } catch (error) {
       if (_disposed || token != _requestToken) return;
+      // 已经读到正文时不要整页报错：保留正在显示的章，错误降级成顶部提示条。
+      // index 退回 contentIndex，信息条/上下章/目录都和实际正文保持一致；
+      // 失败目标记到 failedIndex，提示条「重试」据此定位。
+      final hasVisibleContent =
+          state.content != null && state.contentIndex >= 0;
       state = state.copyWith(
+        index: hasVisibleContent ? state.contentIndex : clamped,
         loading: false,
         error: _messageOf(error, '正文加载失败'),
+        failedIndex: clamped,
       );
     }
   }
@@ -429,6 +448,7 @@ class ReaderController extends Notifier<ReaderSessionState> {
       contentIndex: position,
       loading: false,
       error: null,
+      failedIndex: -1,
     );
   }
 
@@ -608,7 +628,18 @@ class ReaderController extends Notifier<ReaderSessionState> {
       await _bootstrap();
       return;
     }
-    await _loadChapter(state.index);
+    // 失败时 index 已经退回正在显示的章，真正要重试的是 failedIndex。
+    final target = state.failedIndex >= 0 ? state.failedIndex : state.index;
+    await _loadChapter(target);
+  }
+
+  /// 关闭「正文加载失败」提示条：只清错误，不重新请求。
+  ///
+  /// 只有已经读到正文时才允许关闭；首次进入就失败（content 为空）必须保留
+  /// 整页错误态，否则关掉后会停在无内容的空白页。
+  void dismissError() {
+    if (state.error == null || state.content == null) return;
+    state = state.copyWith(error: null, failedIndex: -1);
   }
 
   /// 目录/正文失败文案：统一走 [apiErrorCopy]（具体原因优先，技术兜底换短句）。

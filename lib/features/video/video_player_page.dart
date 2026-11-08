@@ -12,6 +12,7 @@ import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/video_source.dart';
 import '../cache/cache_providers.dart';
+import 'network_health.dart';
 import 'offline_playback.dart';
 import 'playback_speed.dart';
 import 'widgets/episode_picker_sheet.dart';
@@ -33,7 +34,7 @@ final playbackControllerFactoryProvider = Provider<PlaybackControllerFactory>((
     if (file != null) {
       // 无弹幕叠加需求，平台视图底层就是 AVPlayerLayer：少一次逐帧纹理
       // 拷贝，发热和功耗更好。若真机上发现浮层被原生视图遮挡，可退回默认
-      // 的 textureView（见 docs/video-playback.md 4.1）。
+      // 的 textureView（见 docs/implementation.md）。
       return VideoPlayerController.file(
         file,
         viewType: VideoViewType.platformView,
@@ -51,7 +52,7 @@ final playbackControllerFactoryProvider = Provider<PlaybackControllerFactory>((
 /// 一集一个 controller：切集就换 controller（换档/换集都走同一条路），
 /// 播放中的 controller 不跨集复用——AVPlayer 对同一 item 换源不如重建稳。
 ///
-/// 后台/画中画/HDR 本轮不做（见 docs/video-playback.md）：退后台不做显式
+/// 后台/画中画/HDR 本轮不做（见 docs/implementation.md）：退后台不做显式
 /// 暂停，回前台仍在播放就继续。
 ///
 /// 方向：App 全局竖屏（`main.dart` 锁定），只有横屏视频（宽高比 > 1.05）才在
@@ -64,6 +65,17 @@ class VideoPlayerPage extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<VideoPlayerPage> createState() => _VideoPlayerPageState();
+}
+
+/// 近期发生过网络类失败后，主动跳过取流（见 [NetworkHealth]）。
+///
+/// 单独一个类型是为了让 `_open` 的 catch 能区分「真的取流失败」和「按策略
+/// 主动跳过」：后者不应再记一次失败，但同样落到「未离线缓存」的文案。
+class _OfflineSuspected implements Exception {
+  const _OfflineSuspected();
+
+  @override
+  String toString() => 'network recently failed; skipped source resolution';
 }
 
 class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
@@ -199,7 +211,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _wasPlaying = false;
     _speedReapplyPending = false;
     // 旧画面先留着垫底，等新集真正出画面再释放（见
-    // docs/playback-quality-speed.md §1.4 P0-2）。
+    // docs/implementation.md）。
     _retainCurrentController();
     String sourceUrl = '';
     String localPath = '';
@@ -209,7 +221,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       _error = null;
       // 控制条只在首次进入播放页、或用户点屏幕后出现；播完自动切下一集
       // 是「被动续播」，不应该再把控制条弹出来打断观看（见
-      // docs/playback-quality-speed.md §4.4）。
+      // docs/implementation.md）。
       _controlsVisible = !autoAdvance;
       _dragValue = null;
       // 有上一帧兜底时先不闪 spinner：本地文件往往 200ms 内就绪。
@@ -225,7 +237,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
 
     try {
       // 离线副本优先：命中就直接开本地明文 mp4，不请求内核、不等待
-      // 「准备播放」。未命中才走原来的在线流程（见 docs/offline-cache.md §6.2）。
+      // 「准备播放」。未命中才走原来的在线流程（见 docs/implementation.md）。
       final offlineFile = await _offlineFile(episode.id, refresh: refresh);
       if (!mounted || generation != _generation) return;
       // 「确认离线」只能在取流失败后推断，所以这里先按在线尝试。
@@ -297,8 +309,16 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         }
       }
 
+      // 刚发生过网络类失败：这一集又没有离线副本 / 本地缓存，别再付一次
+      // 完整取流等待（黑洞网络下内核重试会耗几十秒），直接给可操作文案。
+      // 用户点「重试」会清掉标记并强制走一次完整网络请求。
+      if (!refresh && ref.read(networkHealthProvider).isSuspectedOffline) {
+        throw const _OfflineSuspected();
+      }
+
       final source = await api.videoSource(episode.id, refresh: refresh);
       if (!mounted || generation != _generation) return;
+      ref.read(networkHealthProvider).recordSuccess();
       await playUrl(source.url);
     } catch (error, stack) {
       if (!mounted || generation != _generation) return;
@@ -322,9 +342,15 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       _disposeRetained();
       // 没有离线副本、失败又像「网络不可达」：换成明确文案；网络在线时保留
       // 原来的失败原因（上游/鉴权/解码各有各的说明 + 重试入口）。
+      final offlineLike =
+          error is _OfflineSuspected || isOfflineNetworkFailure(error);
+      if (error is! _OfflineSuspected && isOfflineNetworkFailure(error)) {
+        // 记住这次失败，后续切集不再重复等一次完整取流（见 NetworkHealth）。
+        ref.read(networkHealthProvider).recordFailure();
+      }
       final missedOffline = resolveOfflineEpisode(
         cachedFile: null,
-        offline: isOfflineNetworkFailure(error),
+        offline: offlineLike,
       );
       setState(() {
         _loading = false;
@@ -352,6 +378,15 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
               );
       });
     }
+  }
+
+  /// 用户主动重试 / 重新下载：清掉「疑似离线」再走一次完整取流。
+  ///
+  /// 自动切集为了不重复等网络会短路，但用户点按钮就是明确要求再试一次，
+  /// 这里必须把标记清掉，否则按钮会立刻被同一条短路逻辑挡回来。
+  void _retry({bool refresh = false}) {
+    ref.read(networkHealthProvider).clear();
+    unawaited(_open(_index, refresh: refresh));
   }
 
   /// 初始化并接管 controller（离线本地文件 / 在线流共用）。
@@ -499,6 +534,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         _prefetching.contains(episode.id)) {
       return;
     }
+    // 刚发生过网络类失败就不预取：预取会触发整集下载，断网时只会白等一段
+    // 内核重试预算；等切集真正命中网络成功后再恢复。
+    if (ref.read(networkHealthProvider).isSuspectedOffline) return;
     // 离线命中不需要预取：本地文件本身就是秒开。
     final seriesId = widget.args.seriesId;
     if (seriesId.isNotEmpty) {
@@ -527,6 +565,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           ? VideoSource(url: cachedUrl)
           : await api.videoSource(episode.id);
       if (!mounted) return;
+      // 预取真的走了网络且成功：说明网络可用，清掉「疑似离线」。
+      if (cachedUrl == null) {
+        ref.read(networkHealthProvider).recordSuccess();
+      }
       // 页内只留最近两条：追剧时无限积累没有意义。
       while (_prefetched.length >= 2) {
         _prefetched.remove(_prefetched.keys.first);
@@ -1138,12 +1180,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
               runSpacing: 8,
               alignment: WrapAlignment.center,
               children: [
-                FilledButton(
-                  onPressed: () => unawaited(_open(_index)),
-                  child: const Text('重试'),
-                ),
+                FilledButton(onPressed: _retry, child: const Text('重试')),
                 OutlinedButton(
-                  onPressed: () => unawaited(_open(_index, refresh: true)),
+                  onPressed: () => _retry(refresh: true),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white,
                     side: const BorderSide(color: Colors.white38),

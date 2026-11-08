@@ -5,7 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 /// 离线 pinned 区的目录布局与原子写工具。
 ///
-/// 布局见 docs/offline-cache.md §4.1：
+/// 布局见 docs/implementation.md：
 /// `<Application Support>/offline/{novel,video}/<key>/`。
 /// 与自动缓存（`reader_chapters/`、`backend/src/`、`Caches/`）物理隔离，
 /// **不参与任何自动淘汰 / TTL / 体积裁剪**，只能由用户显式删除。

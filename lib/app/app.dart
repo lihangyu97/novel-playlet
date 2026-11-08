@@ -20,12 +20,13 @@ class NovelPlayletApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final seed = ref.watch(themeSeedProvider);
+    final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
       title: 'novel-playlet',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(seed),
       darkTheme: AppTheme.dark(seed),
-      themeMode: ThemeMode.system,
+      themeMode: themeMode,
       scrollBehavior: const AppScrollBehavior(),
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
