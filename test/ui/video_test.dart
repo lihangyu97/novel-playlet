@@ -106,6 +106,7 @@ void main() {
 
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
       expect(find.text('详情标题'), findsOneWidget);
+      expect(find.text('8.2分'), findsOneWidget, reason: '短剧详情展示评分');
       expect(find.text('选集'), findsOneWidget);
       expect(
         tester.getSize(find.byType(DetailCoverBackdrop)).height,

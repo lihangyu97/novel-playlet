@@ -15,6 +15,8 @@ class NovelItem {
     this.wordCount = 0,
     this.score = '',
     this.lastChapter = '',
+    this.recommendReason = '',
+    this.rankScore = '',
   });
 
   final String id;
@@ -26,6 +28,12 @@ class NovelItem {
   final int wordCount;
   final String score;
   final String lastChapter;
+
+  /// 推荐理由（`recommend_reason_list` 第一条，如「巅峰榜No.3」「19个老书虫在看」）。
+  final String recommendReason;
+
+  /// 热度（`rank_score`，如「8479万热度」）；没有推荐理由时用它。
+  final String rankScore;
 
   bool get isValid => id.isNotEmpty && title.isNotEmpty;
 
@@ -58,6 +66,8 @@ class NovelItem {
       wordCount: asInt(inner['word_number']),
       score: asString(inner['score']),
       lastChapter: firstString(inner, ['last_chapter_title', 'last_chapter']),
+      recommendReason: firstReasonText(inner['recommend_reason_list']),
+      rankScore: firstString(inner, ['rank_score']),
     );
   }
 
@@ -92,7 +102,9 @@ class NovelItem {
       other.category == category &&
       other.wordCount == wordCount &&
       other.score == score &&
-      other.lastChapter == lastChapter;
+      other.lastChapter == lastChapter &&
+      other.recommendReason == recommendReason &&
+      other.rankScore == rankScore;
 
   @override
   int get hashCode => Object.hash(
@@ -105,5 +117,7 @@ class NovelItem {
     wordCount,
     score,
     lastChapter,
+    recommendReason,
+    rankScore,
   );
 }

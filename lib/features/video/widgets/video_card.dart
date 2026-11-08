@@ -14,6 +14,7 @@ class VideoCard extends StatelessWidget {
     required this.width,
     required this.onTap,
     this.heroTag,
+    this.showRecommendMeta = false,
   });
 
   final VideoSeries item;
@@ -23,15 +24,37 @@ class VideoCard extends StatelessWidget {
   /// 封面 Hero tag；null = 不参与飞入动画。
   final String? heroTag;
 
+  /// 元信息行是否按推荐流规则展示（推荐流开启；书架等入口保持「全 N 集」）。
+  ///
+  /// 文案 =「全 N 集」+ 现有推荐元信息：`recommend_reason_list` 第一条 →
+  /// 热度（短剧用 `rec_text`）→ 评分；集数始终在最前面。
+  final bool showRecommendMeta;
+
   @override
   Widget build(BuildContext context) {
     return MediaCard(
       cover: item.cover,
       title: item.title,
-      meta: item.episodeCount > 0 ? '全 ${item.episodeCount} 集' : null,
+      meta: _metaOf(),
+      // 评分和小说一致：移到封面右上角角标，不占元信息行。
+      cornerText: showRecommendMeta ? scoreLabel(item.score) : null,
       width: width,
       onTap: onTap,
       heroTag: heroTag,
     );
+  }
+
+  /// 元信息行 =「全 N 集」+ 推荐理由 / 热度（集数永远最前）。
+  String? _metaOf() {
+    final episodes = item.episodeCount > 0 ? '全 ${item.episodeCount} 集' : '';
+    if (!showRecommendMeta) return episodes.isEmpty ? null : episodes;
+    final tail = <String>[
+      if (item.recommendReason.isNotEmpty)
+        item.recommendReason
+      else if (item.rankScore.isNotEmpty)
+        item.rankScore,
+    ];
+    final parts = [if (episodes.isNotEmpty) episodes, ...tail];
+    return parts.isEmpty ? null : parts.join(' · ');
   }
 }

@@ -5,6 +5,8 @@
 /// 规则：能转成字符串就用字符串；转不出就给默认值，绝不抛。
 library;
 
+import 'dart:convert';
+
 String asString(Object? value, [String fallback = '']) {
   if (value == null) return fallback;
   if (value is String) return value;
@@ -59,6 +61,71 @@ String firstString(Map<String, dynamic> map, List<String> keys) {
     if (value.isNotEmpty) return value;
   }
   return '';
+}
+
+/// 从上游「推荐理由」字段里取第一条可展示文案。
+///
+/// 同名字段在两条链路里形状不同（实测 2026-11-08）：
+/// - 小说推荐：`recommend_reason_list` 是数组，元素是对象，如
+///   `[{content: "巅峰榜No.3", can_click: true, ...}]`；
+/// - 短剧/漫剧推荐：`recommend_reason_list` 是 **JSON 字符串**，常见形态
+///   `{"tag_info":{"text":"上新"},"rec_tags":[{"content":"系列剧·40万人在追"}],
+///     "sub_title_list":[{"content":"剧情"}]}`。
+///
+/// 统一规则：数组取第一个有文案的元素；对象优先 `rec_tags[]`（真正的推荐
+/// 理由，按顺序取第一个），其次 `tag_info.text`（「上新/热门/爆款」角标），
+/// 再次 `sub_title_list[]` / `secondary_info_list[]`；字符串先当 JSON 解析，
+/// 解析失败原样返回。空串 / `0` 一律视为没有理由。
+String firstReasonText(Object? raw) => _reasonTextOf(raw, 0);
+
+String _reasonTextOf(Object? raw, int depth) {
+  if (raw == null || depth > 4) return '';
+  if (raw is String) {
+    final text = raw.trim();
+    if (text.isEmpty) return '';
+    if (!text.startsWith('{') && !text.startsWith('[')) return _cleanText(text);
+    try {
+      return _reasonTextOf(jsonDecode(text), depth + 1);
+    } catch (_) {
+      // 不是合法 JSON（或半截字符串）：按原始文案展示。
+      return _cleanText(text);
+    }
+  }
+  if (raw is List) {
+    for (final item in raw) {
+      final text = _reasonTextOf(item, depth + 1);
+      if (text.isNotEmpty) return text;
+    }
+    return '';
+  }
+  if (raw is Map) {
+    final map = asMap(raw)!;
+    // 数组元素自身的文案字段（小说 reason 数组就是这个形状）。
+    for (final key in const ['content', 'text', 'recommend_reason']) {
+      final text = _cleanText(asString(map[key]));
+      if (text.isNotEmpty) return text;
+    }
+    // 真正的推荐理由优先；「上新/热门/爆款」角标次之（漫剧只有角标时，
+    // sub_title_list 里是「剧情/149集」这类和卡片信息重复的分类，放最后）。
+    final recTags = _reasonTextOf(map['rec_tags'], depth + 1);
+    if (recTags.isNotEmpty) return recTags;
+    final tagInfo = asMap(map['tag_info']);
+    if (tagInfo != null) {
+      final text = _cleanText(asString(tagInfo['text']));
+      if (text.isNotEmpty) return text;
+    }
+    for (final key in const ['sub_title_list', 'secondary_info_list']) {
+      final text = _reasonTextOf(map[key], depth + 1);
+      if (text.isNotEmpty) return text;
+    }
+    return '';
+  }
+  return _cleanText(asString(raw));
+}
+
+String _cleanText(String value) {
+  final text = value.trim();
+  return text == '0' || text == '0.0' ? '' : text;
 }
 
 /// 展开 `{code, data}` 信封，兼容 Rust 的 200 信封与上游的 0 信封。

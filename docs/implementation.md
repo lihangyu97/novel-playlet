@@ -15,6 +15,7 @@
 页面：
 
 - **推荐**：顶部搜索框 + 分类 tabs（小说 / 短剧 / 漫剧），每个分类独立推荐流与搜索结果，翻页、下拉刷新、首屏不足自动补页。
+  推荐卡元信息行按优先级展示：`recommend_reason_list` 第一条（小说是数组元素 `content`，如「巅峰榜No.3」；短剧是 JSON 串里的 `rec_tags[0].content` / `tag_info.text`）→ `rank_score`（小说）/ `rec_text`（短剧热度，如「4691万热度」）→ 作者（短剧为「全 N 集」+ 理由/热度）。**评分不再进元信息行**，而是封面右上角角标（白字 + 半透明深色底 + 轻阴影，`9.3分`），小说与短剧/漫剧一致；短剧详情页也会展示星标评分。
 - **详情**：小说与短剧共用一套「封面头 + 简介卡 + 标签」版式；小说有目录，短剧有选集（36 集/组）。
 - **阅读页**：`TextPainter` 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、目录跳章、邻章预取、进度保存。
 - **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下集/播完自动下一集、选集弹层、横屏全屏、失败分类与「重新下载这一集」。
@@ -457,6 +458,30 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 真实上游探针（需
   （golden 需要系统字体），Rust 门禁跑 Linux，外加 FRB 漂移校验与 iOS 无签名构建。
 - `integration_test/reader_pagination_perf_test.dart` 是真机 performance harness，不进 CI（见 §8）。
 
+### 7.5 真机覆盖安装与缓存保留（iOS 自签）
+
+- **覆盖安装不丢数据的前提**：同一个 bundle id + 同一个 Team（`529D3FU98W`）用
+  `xcrun devicectl device install app` 安装；这是升级（update），不会卸载 App，数据容器
+  （离线书/短剧、阅读章节缓存、偏好、播放进度）原样保留。ios-sideload 的 `install.sh` 走的就是
+  `devicectl install`，**不要用会先卸载的工具/流程**。
+- 装前保险（可选但推荐，约 1 分钟 / 300MB 以内）：
+
+```bash
+xcrun devicectl device copy from --device <UDID> \
+  --domain-type appDataContainer --domain-identifier com.lihangyu.novelPlaylet \
+  --source 'Library/Application Support' --destination ~/np-backup-<时间>
+xcrun devicectl device copy from --device <UDID> \
+  --domain-type appDataContainer --domain-identifier com.lihangyu.novelPlaylet \
+  --source 'Library/Preferences' --destination ~/np-backup-<时间>/Preferences
+```
+
+- 装后校验（缓存是否保留）：对比 `offline/` 下 mp4 和章节 JSON 的 sha、`reader_chapters/` 文件数、
+  `backend/src/` 内核缓存；`book.json` / `series.json` 的 `updatedAt` 可能因启动对账被重写（内容/数量不变，
+  属正常）。`backend/config/device_pool.json` 被内核改名成 `.corrupt-*` 是设备池密钥读不到时的自愈，
+  只影响匿名设备重新注册，不影响缓存内容。
+- **签名 7 天到期**后 App 会闪退，重跑一次 sideload 的 `all.sh` 续签即可；覆盖安装同样不丢数据。
+- 装完可直接启动验证：`xcrun devicectl device process launch --device <UDID> com.lihangyu.novelPlaylet`。
+
 ---
 
 ## 8. 性能记录：阅读页整章分页
@@ -523,3 +548,79 @@ flutter drive --profile -d <iPhone UDID> \
 | `rust/src/endpoints/video.rs` | 取流、选档、整集下载、缓存淘汰、`/src` 解密 |
 | `rust/src/endpoints/{book,content,dhcontent}.rs` | 详情、目录、正文（DH / AES）与批量正文 |
 | `.github/workflows/ci.yml` / `Makefile` | 质量门禁 |
+
+---
+
+## 11. 附录：推荐列表字段与卡片元信息（2026-11-08 抓包）
+
+> 数据来源：macOS host 加载内核 dylib 直连上游，抓 `/api/v1/recommend/homepage` 的
+> `tab_type=2`（小说 27 本）、`tab_type=8`（短剧 6 部）、`tab_type=24`（漫剧 12 部）各一页原样响应。
+> 内核对该接口**原样透传上游 JSON**，字段解析全部在 Dart 侧。
+
+### 11.1 卡片元信息展示优先级（已实现）
+
+| 链路 | 优先级 1 | 优先级 2 | 优先级 3（兜底） |
+|---|---|---|---|
+| 小说（`NovelGridCard`） | `recommend_reason_list` 第一条的 `content`（如「巅峰榜No.3」「19个老书虫在看」「细糠」） | `rank_score`（热度，如「8479万热度」） | 作者（作者空退回分类） |
+| 短剧/漫剧（`VideoCard`） | 「全 N 集」+ `recommend_reason_list`（JSON 串）里 `rec_tags[0].content` → `tag_info.text`（上新/热门/爆款）→ `sub_title_list` / `secondary_info_list` | 「全 N 集」+ `rec_text`（热度，如「4691万热度」；`show_rec_text=false` 时不展示） | 「全 N 集」 |
+
+- 代码：统一提取 `lib/data/models/json_utils.dart::firstReasonText()`；模型字段
+  `NovelItem.{recommendReason,rankScore,score}`、`VideoSeries.{score,recommendReason,rankScore}`
+  （`lib/data/parsers/video_parsers.dart`）；卡片用 `showRecommendMeta` 只在推荐流开启，
+  书架 / 搜索结果保持原元信息（作者·分类 / 全 N 集）。
+- 两种 `recommend_reason_list` 形态必须分别处理：**小说是数组**（元素对象取 `content`），
+  **短剧/漫剧是 JSON 字符串**（解析后取 `rec_tags` / `tag_info` / `sub_title_list`）。
+- 评分：`score` 是字符串；`0` / `0.0` / 空都算未评分，展示时统一补「分」。
+  推荐卡评分固定在封面右上角角标（`MediaCard.cornerText`，白字 + 半透明深色底 + 轻阴影），
+  不再混进作者/集数行；短剧详情页也在标题下用「星标 + 8.2分」展示。
+
+### 11.2 小说列表 `book_data` 关键字段（27 本样本）
+
+| 字段 | 样例 | 现状 / 可用位置 |
+|---|---|---|
+| `book_id` / `book_name` / `author` / `thumb_url` | — | 列表卡片已渲染 |
+| `score` | `9.0`（样本 27/27，6.9–9.5） | 推荐卡封面右上角角标 + 详情页星标 |
+| `rank_score` | `8479万热度`（16/27） | 元信息第二优先级 |
+| `recommend_reason_list` | `[{content:"巅峰榜No.3", can_click:true, ...}]`（7/27） | 元信息第一优先级 |
+| `category` / `tags` | `传统玄幻` / `传统玄幻,玄幻` | 卡片分类兜底、详情标签 |
+| `word_number` | `2286030` | 详情已渲染字数；列表可做第二行/角标 |
+| `creation_status` | `1`（0 连载 / 1 完结） | 详情已渲染；列表可做角标 |
+| `serial_count` | `1052` | 总章数，候选 |
+| `last_chapter_title` | `第1052章 …` | 详情「更新至」已渲染；列表候选 |
+| `read_cnt_text` / `read_count` | `225.5万人在读` / `2254443` | 详情已用；列表候选（占宽度） |
+| `read_count_all` | `14099373` | 累计阅读，候选 |
+| `all_bookshelf_count` | `309` | 「X 人加书架」，候选 |
+| `listen_count` | `1260` | 听书人数，候选 |
+| `exclusive` / `top_right_icon` / `sub_title` | `1` / `null` / `""` | 运营角标候选 |
+| `color_dominate` | `#201818` | 封面主色，可做骨架/占位色 |
+| `recommend_info` / `quality_rate` / `data_rate` | 内部埋点 / 质量权重 | 不渲染 |
+
+### 11.3 短剧/漫剧列表 `video_data` 关键字段（18 部样本）
+
+| 字段 | 样例 | 现状 / 可用位置 |
+|---|---|---|
+| `series_id` / `title` / `cover` / `episode_cnt` | — | 列表卡片已渲染 |
+| `score` | `8.2`（tab 8/24 全有，8.0–8.3） | 推荐卡封面右上角角标（与小说一致）+ 短剧详情页星标 |
+| `recommend_reason_list` | JSON 串：`{tag_info:{text:"上新"}, rec_tags:[{content:"系列剧·40万人在追"}], sub_title_list:[{content:"剧情"}]}` | 元信息第一优先级 |
+| `rec_text` / `show_rec_text` | `4691万热度` / `true` | 元信息第二优先级（热度） |
+| `play_cnt` | `5862787` | 播放量，候选（可格式化成「586万」） |
+| `rec_tags` | `["系列剧·40万人在追","27万人收藏","小说改编","年代"]` | 多标签角标候选 |
+| `tag_info` | `{text:"上新"/"热门"/"爆款", bg_color, dark_bg_color, icon_url}` | 角标 + 配色/图标候选 |
+| `sub_title` / `sub_title_list` | `剧情·149集` / `["剧情","149集"]` | 分类·集数，候选副标题 |
+| `category_schema` | `[{name:"年代"},…]` | 分类（可点） |
+| `video_desc` | 长文本 | 简介（列表未渲染） |
+| `duration` / `episode` / `vertical` / `video_platform` | `12551` / `true` / `true` / `3` | 元数据 |
+| `book_exist` / `support_listen` | `true` / `true` | 「有原著 / 可听书」候选 |
+| `recommend_info` / `series_pred_score` | 内部埋点 | 不渲染 |
+
+### 11.4 坑 / 设计约束
+
+- 标题固定占两行高度（一行书名也补齐第二行），保证同排卡片元信息行对齐、视觉高度一致；
+  卡片元信息只有**一行**且封面宽 108pt：继续叠加播放量/字数/状态等字段，建议放第二行或做封面角标，
+  否则长作者名 + 长标签会挤成省略号（golden 里 `爱潜水的乌贼 · 9.…`）。
+- 短剧 `recommend_reason_list.sub_title_list` 多为「剧情 / 149集」这类与卡片既有信息重复的分类，
+  所以提取顺序是 `rec_tags` → `tag_info.text` → `sub_title_list`，不要反过来。
+- 小说 `recommend_reason_list` 的 `content` 可能是「细糠」「19个老书虫在看」这类口语化文案，
+  直接展示即可，不要二次加工。
+- 短剧列表的 `tab_type=16`（单集视频）和 tab 8/24 结构不同（信息在 `video_detail` 里），App 不用 tab 16。
+

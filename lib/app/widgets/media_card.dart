@@ -18,6 +18,7 @@ class MediaCard extends StatelessWidget {
     required this.onTap,
     this.meta,
     this.heroTag,
+    this.cornerText,
   });
 
   final String cover;
@@ -34,10 +35,28 @@ class MediaCard extends StatelessWidget {
   /// 封面 Hero tag；null = 不参与飞入动画（例如深链/无列表来源）。
   final String? heroTag;
 
+  /// 封面右上角角标文案（如评分「9.3分」）；null / 空串不显示。
+  ///
+  /// 白字 + 半透明深色底 + 轻阴影：封面颜色不可控，纯白字直接压图容易糊。
+  final String? cornerText;
+
+  /// 标题行高倍数；与 [FeedGridMetrics] 计算 cellHeight 的口径保持一致。
+  static const double titleLineHeightFactor = 1.25;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final coverHeight = width * kCoverAspect;
+    final titleStyle = theme.textTheme.bodyMedium?.copyWith(
+      fontWeight: FontWeight.w600,
+      height: titleLineHeightFactor,
+    );
+    // 标题区固定两行高度：书名/剧名只有一行时也把标题与副标题的间距撑开，
+    // 同一行卡片的元信息行才会对齐、卡片视觉高度一致（见 FeedGridMetrics
+    // 的 cellHeight，本来就按「标题两行 + 元信息一行」预算）。
+    final textScaler = MediaQuery.textScalerOf(context);
+    final titleLineHeight =
+        textScaler.scale(titleStyle?.fontSize ?? 14) * titleLineHeightFactor;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppTheme.cardRadius),
@@ -48,16 +67,26 @@ class MediaCard extends StatelessWidget {
           children: [
             CoverHero(
               tag: heroTag,
-              child: NovelCover(url: cover, width: width, height: coverHeight),
+              child: Stack(
+                children: [
+                  NovelCover(url: cover, width: width, height: coverHeight),
+                  if (cornerText != null && cornerText!.isNotEmpty)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: _CornerBadge(cornerText!),
+                    ),
+                ],
+              ),
             ),
             const SizedBox(height: 8),
-            Text(
-              title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                height: 1.25,
+            SizedBox(
+              height: titleLineHeight * 2,
+              child: Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: titleStyle,
               ),
             ),
             if (meta != null) ...[
@@ -72,6 +101,48 @@ class MediaCard extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 卡片元信息行里的评分文案：上游 `score` 是字符串，`0` / `0.0` / 空都算
+/// 未评分；有值时补「分」，避免和集数/字数等纯数字混淆。
+String scoreLabel(String raw) {
+  final value = raw.trim();
+  if (value.isEmpty || value == '0' || value == '0.0') return '';
+  return '$value分';
+}
+
+/// 封面右上角角标：白字 + 半透明深色底 + 轻阴影。
+class _CornerBadge extends StatelessWidget {
+  const _CornerBadge(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.38),
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          height: 1.15,
         ),
       ),
     );

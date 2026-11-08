@@ -426,6 +426,8 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
                 width: width,
                 onTap: onTap,
                 heroTag: heroTag,
+                // 推荐流：推荐理由 → 热度 → 作者 · 评分；书架等入口不传。
+                showRecommendMeta: true,
               ),
               VideoRecommendItem(:final video) => VideoCard(
                 key: ValueKey(item.id),
@@ -433,6 +435,8 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
                 width: width,
                 onTap: onTap,
                 heroTag: heroTag,
+                // 短剧/漫剧同规则：推荐理由 → 热度（rec_text）→ 集数 · 评分。
+                showRecommendMeta: true,
               ),
             };
           },
