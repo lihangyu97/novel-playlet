@@ -77,3 +77,11 @@ class MediaCard extends StatelessWidget {
     );
   }
 }
+
+/// 卡片元信息行里的评分文案：上游 `score` 是字符串，`0` / `0.0` / 空都算
+/// 未评分；有值时补「分」，避免和集数/字数等纯数字混淆。
+String scoreLabel(String raw) {
+  final value = raw.trim();
+  if (value.isEmpty || value == '0' || value == '0.0') return '';
+  return '$value分';
+}

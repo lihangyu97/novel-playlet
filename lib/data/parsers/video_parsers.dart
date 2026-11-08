@@ -99,6 +99,13 @@ class VideoCardAdapter extends CardAdapter<VideoSeries> {
       intro: firstString(raw, _seriesIntroKeys),
       episodeCount: _firstInt(raw, _seriesEpisodeKeys),
       isManju: _isManjuCard(raw),
+      score: asString(raw['score']).trim(),
+      recommendReason: firstReasonText(raw['recommend_reason_list']),
+      // 短剧没有 rank_score：对位字段是 rec_text（平台给的展示文案，
+      // 如「4691万热度」）；show_rec_text=false 时不展示。
+      rankScore: raw['show_rec_text'] == false
+          ? ''
+          : asString(raw['rec_text']).trim(),
     );
   }
 

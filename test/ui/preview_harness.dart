@@ -145,6 +145,12 @@ class FakePreviewTransport extends BackendTransport {
                                     _dramaTitles[(i - 1) % _dramaTitles.length],
                                 'series_cover': videoCoverUrl,
                                 'episode_cnt': '${40 + i}',
+                                'score': i.isEven ? '8.2' : '8.0',
+                                // 优先推荐理由；其次 rec_text（热度）；都没有
+                                // 才退回「全 N 集 · 评分」。
+                                if (i % 3 == 0) 'recommend_reason_list': '{"tag_info":{"text":"上新"},"rec_tags":[{"content":"系列剧·40万人在追"}]}',
+                                if (i % 3 == 1) 'rec_text': '${i * 10}万热度',
+                                if (i % 3 == 1) 'show_rec_text': true,
                               },
                           ],
                         },
@@ -181,6 +187,10 @@ class FakePreviewTransport extends BackendTransport {
                                     _animeTitles[(i - 1) % _animeTitles.length],
                                 'series_cover': '',
                                 'episode_cnt': '${12 + i * 2}',
+                                'score': '8.0',
+                                if (i % 3 == 0) 'recommend_reason_list': '{"tag_info":{"text":"上新"},"sub_title_list":[{"content":"剧情"},{"content":"149集"}]}',
+                                if (i % 3 == 1) 'rec_text': '${i * 10}万热度',
+                                if (i % 3 == 1) 'show_rec_text': true,
                               },
                           ],
                         },
@@ -218,6 +228,13 @@ class FakePreviewTransport extends BackendTransport {
                                 'category': i.isEven ? '玄幻' : '都市',
                                 'word_number': '${i * 180000}',
                                 'score': i.isEven ? '9.3' : '8.8',
+                                // 元信息优先级：i%3==0 推荐理由 → i%3==1 热度 →
+                                // 其余走「作者 · 评分」。
+                                if (i % 3 == 0)
+                                  'recommend_reason_list': [
+                                    {'content': '巅峰榜No.$i'},
+                                  ],
+                                if (i % 3 == 1) 'rank_score': '$i万热度',
                                 'thumb_url': bookCoverUrl,
                               },
                           ],

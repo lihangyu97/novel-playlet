@@ -14,6 +14,9 @@ class VideoSeries {
     this.intro = '',
     this.episodeCount = 0,
     this.isManju = false,
+    this.score = '',
+    this.recommendReason = '',
+    this.rankScore = '',
   });
 
   /// 剧集 id（`series_id_str` 优先：数字型 `series_id` 会被上游截断）。
@@ -27,6 +30,15 @@ class VideoSeries {
   /// 漫剧首页流 `tab_type=24` 整条都是漫剧，不依赖这个字段；只有混在短剧
   /// 搜索流里的卡片要靠它区分。
   final bool isManju;
+
+  /// 评分（上游 `score`，如「8.2」）。
+  final String score;
+
+  /// 推荐理由（`recommend_reason_list` JSON 串里第一条可展示文案）。
+  final String recommendReason;
+
+  /// 热度（`rec_text`，如「4691万热度」），短剧没有 `rank_score`，用它对位。
+  final String rankScore;
 
   bool get isValid => id.isNotEmpty && title.isNotEmpty;
 
@@ -58,9 +70,21 @@ class VideoSeries {
       other.cover == cover &&
       other.intro == intro &&
       other.episodeCount == episodeCount &&
-      other.isManju == isManju;
+      other.isManju == isManju &&
+      other.score == score &&
+      other.recommendReason == recommendReason &&
+      other.rankScore == rankScore;
 
   @override
-  int get hashCode =>
-      Object.hash(id, title, cover, intro, episodeCount, isManju);
+  int get hashCode => Object.hash(
+    id,
+    title,
+    cover,
+    intro,
+    episodeCount,
+    isManju,
+    score,
+    recommendReason,
+    rankScore,
+  );
 }

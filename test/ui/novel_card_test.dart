@@ -3,7 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 
-/// 推荐流小说卡片的元信息行：`作者 · 评分`（点分隔），无评分/0 时不占位。
+/// 推荐流小说卡片的元信息优先级：推荐理由 → 热度（rank_score）→
+/// 「作者 · 评分」；书架等入口保持作者/分类。
 void main() {
   Widget wrap(Widget child) => MaterialApp(
     theme: ThemeData(useMaterial3: true),
@@ -14,6 +15,9 @@ void main() {
     String author = '作者',
     String category = '',
     String score = '',
+    String reason = '',
+    String rank = '',
+    bool enabled = true,
   }) {
     return NovelGridCard(
       item: NovelItem(
@@ -22,13 +26,29 @@ void main() {
         author: author,
         category: category,
         score: score,
+        recommendReason: reason,
+        rankScore: rank,
       ),
       onTap: () {},
-      showScore: true,
+      showRecommendMeta: enabled,
     );
   }
 
-  testWidgets('作者 + 评分：点分隔，评分带「分」', (tester) async {
+  testWidgets('推荐理由优先于热度与评分', (tester) async {
+    await tester.pumpWidget(
+      wrap(card(reason: '巅峰榜No.3', rank: '8479万热度', score: '9.3')),
+    );
+    expect(find.text('巅峰榜No.3'), findsOneWidget);
+    expect(find.text('8479万热度'), findsNothing);
+    expect(find.textContaining('9.3分'), findsNothing);
+  });
+
+  testWidgets('没有推荐理由时展示热度', (tester) async {
+    await tester.pumpWidget(wrap(card(rank: '8479万热度', score: '9.3')));
+    expect(find.text('8479万热度'), findsOneWidget);
+  });
+
+  testWidgets('没有理由/热度时展示「作者 · 评分」', (tester) async {
     await tester.pumpWidget(wrap(card(score: '9.3')));
     expect(find.text('作者 · 9.3分'), findsOneWidget);
   });
@@ -53,21 +73,14 @@ void main() {
     expect(find.text('玄幻 · 9.0分'), findsOneWidget);
   });
 
-  testWidgets('书架等入口不传 showScore：保持原元信息', (tester) async {
+  testWidgets('书架等入口不传 showRecommendMeta：保持原元信息', (tester) async {
     await tester.pumpWidget(
       wrap(
-        NovelGridCard(
-          item: const NovelItem(
-            id: '1',
-            title: '书名',
-            author: '作者',
-            score: '9.3',
-          ),
-          onTap: () {},
-        ),
+        card(reason: '巅峰榜No.3', rank: '8479万热度', score: '9.3', enabled: false),
       ),
     );
     expect(find.text('作者'), findsOneWidget);
     expect(find.textContaining('分'), findsNothing);
+    expect(find.text('巅峰榜No.3'), findsNothing);
   });
 }

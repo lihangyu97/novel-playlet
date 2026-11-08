@@ -57,12 +57,30 @@ void main() {
     );
   });
 
-  testWidgets('推荐页-小说卡片元信息带评分（作者 · 评分，点分隔）', (tester) async {
+  testWidgets('推荐页-小说卡元信息按「推荐理由 → 热度 → 作者 · 评分」', (tester) async {
     await pumpPreview(tester, const RecommendPage());
-    // fake 推荐流第 1 本：烽火戏诸侯（i=1 为奇数，score=8.8）。
-    expect(find.text('烽火戏诸侯 · 8.8分'), findsOneWidget);
-    // 第 2 本为偶数 score=9.3，确认不同书各自带自己的评分。
-    expect(find.text('爱潜水的乌贼 · 9.3分'), findsOneWidget);
+    // fake 推荐流：i%3==1 带 rank_score，i%3==2 只有评分，i%3==0 带推荐理由。
+    expect(find.text('1万热度'), findsOneWidget, reason: '无理由时展示热度');
+    expect(
+      find.text('爱潜水的乌贼 · 9.3分'),
+      findsOneWidget,
+      reason: '无理由/热度时退回作者 · 评分',
+    );
+    expect(find.text('巅峰榜No.3'), findsOneWidget, reason: '有推荐理由时优先展示');
+  });
+
+  testWidgets('推荐页-短剧卡元信息按同一优先级（理由 → 热度 → 集数 · 评分）', (tester) async {
+    await pumpPreview(tester, const RecommendPage());
+    await tester.tap(find.text('短剧'));
+    await tester.pumpAndSettle();
+    // i=3/6/9 带 recommend_reason_list，i=1 带 rec_text，i=2 只有集数+评分。
+    expect(find.text('系列剧·40万人在追'), findsWidgets, reason: '有推荐理由时优先展示');
+    expect(find.text('10万热度'), findsOneWidget, reason: '无理由时展示 rec_text 热度');
+    expect(
+      find.text('全 42 集 · 8.2分'),
+      findsOneWidget,
+      reason: '没有理由/热度时退回集数 · 评分',
+    );
   });
 
   testWidgets('推荐页-短剧分类', (tester) async {
