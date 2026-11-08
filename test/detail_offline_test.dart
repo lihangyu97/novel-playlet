@@ -25,7 +25,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ui/preview_harness.dart';
 
-/// 小说详情页的离线集成（docs/offline-cache.md §5）：
+/// 小说详情页的离线集成（docs/implementation.md）：
 /// - 网络失败时详情回退离线 manifest（书名/封面/目录），还能点章节进阅读；
 /// - 底部「缓存整本」按钮三态：未缓存 / 已缓存 / 进行中（暂停）。
 ///

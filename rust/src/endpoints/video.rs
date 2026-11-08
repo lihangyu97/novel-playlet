@@ -59,7 +59,7 @@ fn cache_entry_lock(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
     lock
 }
 
-// Note: 编码拒绝必须穿透回退链（策略见 docs/video-playback.md 的编码兼容一节）。
+// Note: 编码拒绝必须穿透回退链（策略见 docs/implementation.md 的选档一节）。
 #[derive(Debug, PartialEq, Eq)]
 enum VideoSourceResolution {
     Found(String, Vec<u8>),

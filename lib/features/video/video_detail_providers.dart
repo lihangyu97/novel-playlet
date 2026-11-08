@@ -22,7 +22,7 @@ class VideoDetailBundle {
 ///
 /// 在线失败时回退到离线区的 `series.json` manifest（剧名/封面/选集）：
 /// 断网也能从「我的」或列表进详情，选集里已缓存的集由播放页用本地文件秒开
-/// （见 docs/offline-cache.md §6.2）。没有离线 manifest 才把错误交给页面。
+/// （见 docs/implementation.md）。没有离线 manifest 才把错误交给页面。
 ///
 /// 和 `detail_providers.dart` 的 [detailBundleProvider] 一样，这里关掉
 /// Riverpod 3 的默认自动重试（10 次、约 38 秒）：短剧详情失败就是「选集拉

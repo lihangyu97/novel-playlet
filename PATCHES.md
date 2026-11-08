@@ -44,7 +44,7 @@ diff -rq /tmp/fqbase/rust rust -x target
 
 ## 3. 本地补丁清单（相对基线）
 
-### 3.1 内核路由收口 / loopback 安全（docs/architecture-review.md P1-3）
+### 3.1 内核路由收口 / loopback 安全（docs/implementation.md）
 
 | 文件 | 本地改动 | 原因 |
 |---|---|---|
@@ -83,7 +83,7 @@ Dart 侧配套（不在 `rust/` 内，但同属一次改动）：`lib/core/backe
 |---|---|
 | `src/config.rs` | 删 `algorithm_type` / `Admin`（无任何读取方）；端口缺省 18921→18931，与 `assets/config/config.json`、Dart 侧对齐（P2-2） |
 | `src/device/crypto.rs`、`src/endpoints/home.rs`、`src/endpoints/manga/download.rs`、`src/endpoints/video.rs`、`src/endpoints/video/variant_url_shapes.rs`、`tests/playlet_interaction_contract.rs` | 删掉指向 `.agents/notes/**` 等不存在文档的注释引用 |
-| `src/lib.rs`、`src/api/mod.rs`、`src/server.rs`、`src/dispatch.rs` | 删掉 `docs/migration/**` 死引用，改指 `CONTRACTS.md` / `docs/*.md` |
+| `src/lib.rs`、`src/api/mod.rs`、`src/server.rs`、`src/dispatch.rs` | 删掉 `docs/migration/**` 死引用，改指 `CONTRACTS.md` / `docs/implementation.md` |
 
 ### 3.5 构建与生成物（P1-5）
 

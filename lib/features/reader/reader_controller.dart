@@ -126,7 +126,7 @@ class ReaderController extends Notifier<ReaderSessionState> {
   /// 小说离线 pinned 区（整本下载落盘的目录 + 正文）。
   ///
   /// 阅读链路按 offline → 自动缓存 → 网络 的顺序取正文，见
-  /// docs/offline-cache.md §5；它只被用户手动删除，阅读页不会写它。
+  /// docs/implementation.md；它只被用户手动删除，阅读页不会写它。
   late OfflineBookStore _offline;
 
   /// 下一章/上一章的后台预取队列。并发上限 1，避免快速滑动时打爆请求。

@@ -17,7 +17,7 @@ import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 阅读页离线优先链路（docs/offline-cache.md §5）。
+/// 阅读页离线优先链路（docs/implementation.md）。
 ///
 /// 用临时目录 + 内存缓存放真实的 `OfflineBookStore` / `ReaderChapterCache`，
 /// 只把网络换成可编排的假 transport：

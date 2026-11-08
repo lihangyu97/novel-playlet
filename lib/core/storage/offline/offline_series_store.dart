@@ -10,7 +10,7 @@ import 'offline_series.dart';
 ///
 /// 与小说区同构，但文件是二进制：下载器先用 [partFile] 拿到暂存路径，用
 /// `IOSink` 流式写入（不把整集读进内存），完成后 [commitEpisode] 原子 rename
-/// 成正式文件。见 docs/offline-cache.md §4.2 / §6.1。
+/// 成正式文件。见 docs/implementation.md。
 ///
 /// 与自动层（内核 `backend/src/` 的 CENC 临时缓存）物理隔离；这里的内容只由
 /// 用户显式删除。
@@ -67,7 +67,7 @@ class OfflineSeriesStore {
   /// 已缓存集的文件；未缓存/坏文件返回 null。
   ///
   /// 播放器用这个判断"离线命中 → `VideoPlayerController.file`"，未命中走在线
-  /// 流程（见 docs/offline-cache.md §6.2）。
+  /// 流程（见 docs/implementation.md）。
   Future<File?> episodeFile(String seriesId, String episodeId) =>
       episodeFileIfCached(seriesId, episodeId);
 

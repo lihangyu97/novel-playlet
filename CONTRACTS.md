@@ -2,10 +2,10 @@
 
 ## 现在什么已经就绪
 
-- Flutter 工程（iOS-only 目标，但不要改 `ios/` 与 `pubspec.yaml`；视频域专项例外见 [docs/playback-quality-speed.md](docs/playback-quality-speed.md) 与 `third_party/README.md`）
+- Flutter 工程（iOS 优先，Android 打包链路已通；不要改 `ios/` 与 `pubspec.yaml`，视频域专项例外见 [docs/implementation.md](docs/implementation.md) 与 `third_party/README.md`）
 - Rust 内核 `rust/` 已完整拷入，FRB 绑定在 `lib/src/rust/`（**自动生成，不要手改**）
 - 启动链：`lib/main.dart → BootstrapGate → BackendService.start() → Rust init`
-- 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / videoFeed / searchVideos / bookDetail / videoDetail / videoEpisodes / videoSource / cachedVideoUrl / directory / chapter）
+- 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / videoFeed / searchVideos / bookDetail / videoDetail / videoEpisodes / videoSource / cachedVideoUrl / directory / chapter / chaptersBatch）
 - 模型：`lib/data/models/`（`NovelItem`、`BookDetail`、`Chapter`、`ChapterContent`、`FeedPage`、`VideoSeries`、`VideoDetail`、`VideoSource`、`json_utils`（含 `ApiErrorKind`））。卡片解析不在 model 层：统一在 `lib/data/parsers/`（`card_walker.dart` 的 `walkCards` / `CardAdapter` 骨架 + `novel_parsers.dart` / `video_parsers.dart`）
 - 分类策略：`lib/features/recommend/content_source.dart` 的 `ContentSource`（`NovelSource` / `DramaSource` / `ManjuSource`）。上游 `tab_type`、搜索 tab、漫剧搜索兜底都在策略对象里；`lib/features/recommend/recommend_category.dart` 只留 label / searchHint / emptyIcon / source，页面不再按分类写 if
 - 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读、短剧收藏/观看进度）；阅读进度表按最近 200 本做 LRU 上限（`progressLimit`）。缓存：`lib/core/cache/`（封面缓存 `AppImageCache`、占用统计与清理 `AppCache`，入口在「我的 → 设置 → 存储」）
@@ -25,7 +25,7 @@
 ## 硬性规则
 
 1. **只改自己 feature 目录里的文件**（见各自任务说明）。共享文件（`lib/app/**`、`lib/data/**`、`lib/core/**`、`lib/src/rust/**`、`rust/`、`ios/`、`pubspec.yaml`）一律不要改。缺共享组件就在自己的目录里写。
-2. **不要新增依赖。** 只用 pubspec 里现有的包（flutter_riverpod、cached_network_image、flutter_cache_manager、html、shared_preferences、flutter_secure_storage、path_provider、video_player）。`video_player` 是视频域专用：只允许 `lib/features/video/` 使用，播放器细节见 `docs/video-playback.md`。`video_player_avfoundation` 通过 `third_party/` 本地补丁覆盖（defaultRate 倍速修复，见 `third_party/README.md`），不要直接改 pub cache。
+2. **不要新增依赖。** 只用 pubspec 里现有的包（flutter_riverpod、cached_network_image、flutter_cache_manager、html、shared_preferences、flutter_secure_storage、path_provider、video_player）。`video_player` 是视频域专用：只允许 `lib/features/video/` 使用，播放器细节见 `docs/implementation.md`。`video_player_avfoundation` 通过 `third_party/` 本地补丁覆盖（defaultRate 倍速修复，见 `third_party/README.md`），不要直接改 pub cache。
 3. **不要跑 `flutter build` / `flutter run`**（很慢，由 Lead 统一验证）。用 `flutter analyze lib/features/<你的域>` 自检，必须 0 error 0 warning。
 4. UI 文案用中文；注释写"为什么"，不要写"做了什么"。
 5. 只用 Material 3 + `Theme.of(context).colorScheme`，不要硬编码颜色（阅读页底色用 `ReaderPaper`）。
@@ -55,6 +55,7 @@ Future<VideoDetail> videoDetail(String seriesId);
 Future<List<Chapter>> directory(String bookId);           // 已摊平，Chapter{id,title,volumeName,index}
 Future<List<Chapter>> videoEpisodes(String seriesId);     // 与 directory 同一条路由
 Future<ChapterContent> chapter(String itemId, {String title = ''});
+Future<Map<String, ChapterContent>> chaptersBatch(List<Chapter> chapters, {Duration timeout = const Duration(seconds: 40)}); // 离线整本下载用，阅读页不调用
 Future<VideoSource> videoSource(String episodeId, {bool refresh = false, int? maxHeight}); // refresh=1 删缓存重下；默认带 variants=0；maxHeight=下载清晰度上限
 Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 /src，不打上游
 // 以上错误统一抛 ApiException（message 可直接展示）
@@ -110,7 +111,7 @@ Future<List<VideoWatchProgress>> videoHistory({int limit = 3});
 
 ## 离线缓存（pinned 区，只手动清理）
 
-设计依据：[docs/offline-cache.md](docs/offline-cache.md)。两区目录：`<AppSupport>/offline/novel/<bookKey>/`、`<AppSupport>/offline/video/<seriesKey>/`。
+设计依据：[docs/implementation.md](docs/implementation.md)。两区目录：`<AppSupport>/offline/novel/<bookKey>/`、`<AppSupport>/offline/video/<seriesKey>/`。
 
 ```dart
 // 存储（构造函数可注入 OfflinePaths，测试用临时目录）
@@ -180,7 +181,7 @@ context.pushAppRoute(const CacheCenterRoute());    // 我的 → 缓存的下载
 ## 测试与工程质量
 
 - UI 测试在 `test/ui/`（按页面拆：recommend / home / detail / video / reader / mine / settings / 缓存中心，共享 `test/ui/preview_harness.dart`），共 23 张 golden；根目录 `test/*_test.dart` 是解析 / 缓存 / 并发 / 存储 / 主题测试。
-- 真机性能 harness：`integration_test/reader_pagination_perf_test.dart`（`flutter drive --profile`，不进 `flutter test` / CI；结论见 `docs/reader-pagination-profile.md`）。
+- 真机性能 harness：`integration_test/reader_pagination_perf_test.dart`（`flutter drive --profile`，不进 `flutter test` / CI；结论见 `docs/implementation.md` §8）。
 - CI 在 `.github/workflows/ci.yml`：Dart format / analyze / test、Rust fmt / clippy / test、FRB 绑定漂移校验、iOS 无签名构建。本地等价命令 `make check`（只做格式化用 `make format`）。
 - Rust 内核是 fqapp 的 fork：基线 commit、本地补丁清单与上游同步流程都在 `PATCHES.md`；改 `rust/` 必须同步更新它。
 
@@ -189,7 +190,7 @@ context.pushAppRoute(const CacheCenterRoute());    // 我的 → 缓存的下载
 1. 推荐页：顶部搜索输入框（40pt；继续往下浏览时整条收起、分类 tabs 吸顶；往回滚第一下立即展开、搜索态保持展开；收起后切分类保持收起）+ 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧）+ 各分类推荐列表（底部导航只剩「推荐 / 我的」）
 2. 详情页：封面/书名/作者/分类/状态/字数/简介/标签 + 目录 + 底部「开始阅读」
 3. 阅读页：分页正文 + 点击呼出工具栏 + 上一章/下一章 + 字号/行距/底色 + 进度保存
-4. 我的页：小说 / 短剧两块镜像面板（悬浮按钮或左右滑动切换；切换按标题/最近/书架三块 0/100/200ms 阶梯延迟）- 小说侧 = 书架 + 最近阅读 + 右上角缓存/设置入口；短剧侧 = 收藏网格 + 最近观看（点击直接续播对应集）+ 左侧缓存/设置入口；两面板共用 `PanelShell`，设置入口只有一枚、与缓存入口成组随面板在屏幕内左右移动
+4. 我的页：小说 / 短剧两块镜像面板（右下角悬浮切换按钮或左右滑动切换；切换按标题/最近/书架三块 0/100/200ms 阶梯延迟）- 小说侧 = 书架 + 最近阅读；短剧侧 = 收藏网格 + 最近观看（点击直接续播对应集）；两面板共用 `PanelShell`；右下角悬浮按钮组 = 缓存中心入口（固定）+ 小说/短剧切换按钮，设置入口只有一枚、在小说面板时靠右、短剧面板时靠左，切换时随面板在屏幕内移动
 5. 设置页：主题色（预设 + HSV 自定义取色，全站生效并持久化）+ 存储占用与清理（离线缓存提示去「我的 → 缓存」页处理）
 6. 缓存中心：我的右下角悬浮按钮进入；小说/短剧分区列出下载中/排队中/已下载，进度条 + 实时网速，暂停/继续/重试/取消排队，M3 删除与按区清空（确认框），点条目 Hero 进详情
 

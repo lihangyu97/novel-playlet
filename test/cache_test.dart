@@ -49,7 +49,7 @@ void main() {
     File('${docs.path}/diag.log').writeAsStringSync('x');
 
     // 离线缓存区（offline/）：用户主动下载的数据，不是可重建缓存。
-    // clear() 绝不能碰它（docs/offline-cache.md 的隔离不变式）。
+    // clear() 绝不能碰它（docs/implementation.md 的缓存隔离不变式）。
     final offlineNovel = Directory('${support.path}/offline/novel/b1')
       ..createSync(recursive: true);
     File('${offlineNovel.path}/book.json').writeAsStringSync('{"bookId":"b1"}');

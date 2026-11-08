@@ -10,7 +10,7 @@ import 'offline_paths.dart';
 /// 小说离线区：manifest + 每章正文 JSON。
 ///
 /// 目录与自动加速层（`reader_chapters/`）完全隔离：这里的内容**只**由用户
-/// 显式删除，不参与任何自动淘汰，见 docs/offline-cache.md §3 的不变式。
+/// 显式删除，不参与任何自动淘汰，见 docs/implementation.md 的缓存隔离不变式。
 ///
 /// 所有读方法遇到 IO/解析异常都降级为 miss（自愈：坏章节文件删除），绝不
 /// 把半截数据当正文交给阅读页；写方法失败向上抛，由下载器暂停任务并提示。
