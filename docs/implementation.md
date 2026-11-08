@@ -178,7 +178,9 @@ await OfflineBookStore.read(bookId)                    ← 磁盘
      命中 → 直接展示；isStale（>7 天）→ 先展示，同时入队后台静默刷新
 ③ 网络：api.chapter(chapterId) → parseChapterContent → 展示
      unawaited(_cache.put) → 预取邻章
-     失败 → 整页「正文加载失败」+ 重试
+     失败 → 首次进入（还没有正文）整页「正文加载失败」+ 重试；
+            已读到正文时保留正在显示的章，错误降级为正文顶部提示条
+            （重试 / 关闭），index 退回 contentIndex、失败章记在 failedIndex
 ```
 
 - 代际 `_requestToken` 保证快速切章时旧响应不覆盖新章；`_applyContent` 按 `chapterId`
@@ -327,8 +329,11 @@ api.videoSource(episodeId, maxHeight=默认720P)
 取流超时 / 取流失败 / ATS 拦截 / 回环连接中断 / 解码失败 / 本地地址失效 / 未离线缓存。
 技术详情可复制，「重新下载这一集」= `refresh=1`。
 
-断网时：`mode=cached` 命中可播（FRB 不走 socket，`/src` 是本机文件）；
-cached miss 时 `api.videoSource` 会等满 120s 才失败，再提示「该集未离线缓存」。
+断网时：`mode=cached` 命中可播（FRB 不走 socket，`/src` 是本机文件）。
+cached miss 时第一次取流仍会按内核重试预算耗一段时间，失败后进入**会话级「疑似离线」**
+（`NetworkHealth`，TTL 90s）：后续切集不再重复等取流，直接提示「该集未离线缓存」；
+任一次取流成功或用户点「重试」都会清掉标记并强制走一次完整网络请求。
+预取在疑似离线期间也会跳过。
 
 ---
 
@@ -461,7 +466,9 @@ flutter drive --profile -d <iPhone UDID> \
 **当前限制**：
 
 1. 首次打开必须联网完成设备注册（`log.snssdk.com`），失败停在「阅读环境启动失败」。
-2. 短剧起播要等整集下载进内核缓存（流式回环未做）；`mode=cached` 命中可秒开，miss 时最多等 120s。
+2. 短剧起播要等整集下载进内核缓存（流式回环未做）；`mode=cached` 命中可秒开。
+   断网后第一次取流仍可能耗到内核重试预算（黑洞网络约几十秒），之后进入「疑似离线」
+   快速失败（见 §5.7），用户手动重试会再试一次完整网络。
 3. 清晰度：在线播放固定「当次上游最高可解码档」；720P 上限只作用于**离线整剧下载**（默认 720P，可设最高/1080P/480P）。
 4. 倍速 3x 在在线源上可能被 AVFoundation 静默 clamp 成 2x（已接受，不 fork 插件）。
 5. 离线下载：仅前台；按章/集粒度续传，无字节级断点；同时一个任务，队列只在内存里；不支持选集下载。
@@ -475,7 +482,7 @@ flutter drive --profile -d <iPhone UDID> \
 13. iOS 上架需处理 GPLv3 与内容授权，当前定位自用/自签。
 
 **可优化点**（现状观察，非承诺）：阅读页 bootstrap 重复请求目录；详情 `Future.wait` 任一失败丢弃部分成功结果；
-cached miss + 断网时 120s 等待偏长；`serve_src_file` 只处理 `.mp4`（`.m4s/.ts` 会退回明文静态服务）。
+首次网络类失败仍无法提前判定（没有 connectivity 能力），只能等内核重试预算；`serve_src_file` 只处理 `.mp4`（`.m4s/.ts` 会退回明文静态服务）。
 
 ---
 
@@ -488,6 +495,7 @@ cached miss + 断网时 120s 等待偏长；`serve_src_file` 只处理 `.mp4`（
 | `third_party/README.md` | `video_player_avfoundation` 补丁内容与插件升级时如何重放 |
 | `lib/features/recommend/content_source.dart` | 分类策略（tab_type / 搜索 tab / 漫剧兜底） |
 | `lib/features/cache/offline_downloader.dart` | 离线下载引擎（单任务状态机 + 队列） |
+| `lib/features/video/network_health.dart` | 会话级「疑似离线」标记：断网后切集快速失败、手动重试强制联网 |
 | `rust/src/endpoints/video.rs` | 取流、选档、整集下载、缓存淘汰、`/src` 解密 |
 | `rust/src/endpoints/{book,content,dhcontent}.rs` | 详情、目录、正文（DH / AES）与批量正文 |
 | `.github/workflows/ci.yml` / `Makefile` | 质量门禁 |

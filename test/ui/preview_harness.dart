@@ -39,6 +39,9 @@ class FakePreviewTransport extends BackendTransport {
   /// 命中这些关键词的搜索返回 500（验证失败后换关键词/重试的 loading 态）。
   final failingQueries = <String>{};
 
+  /// 这些章节的正文接口返回 500（验证「切章失败保留旧正文」）。
+  final failingChapterIds = <String>{};
+
   /// 推荐流首页请求全部返回 500（验证首屏失败立即出错误页）。
   bool failRecommend = false;
 
@@ -88,6 +91,19 @@ class FakePreviewTransport extends BackendTransport {
         Uint8List.fromList(utf8.encode(jsonEncode({'message': 'boom'}))),
         'application/json',
       );
+    }
+    // 单章失败：正文接口返回 500，目录/详情照常，用于验证「切章失败保留旧正文」。
+    if (path.contains('/chapters/')) {
+      final chapterId = Uri.decodeComponent(
+        path.split('/chapters/')[1].split('/').first,
+      );
+      if (failingChapterIds.contains(chapterId)) {
+        return BackendResponse(
+          500,
+          Uint8List.fromList(utf8.encode(jsonEncode({'message': 'boom'}))),
+          'application/json',
+        );
+      }
     }
     return BackendResponse(
       200,

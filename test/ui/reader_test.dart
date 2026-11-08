@@ -180,4 +180,36 @@ void main() {
       matchesGoldenFile('../goldens/reader_settings_sheet.png'),
     );
   });
+
+  testWidgets('阅读页-切章失败保留旧正文，错误降级为可重试提示条', (tester) async {
+    final transport = FakePreviewTransport();
+    transport.failingChapterIds.add('c2');
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: transport,
+    );
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    const args = ReaderArgs(bookId: '1', bookTitle: '剑来');
+    // 进入下一章（c2）失败：不能把正在读的正文清掉。
+    await container.read(readerSessionProvider(args).notifier).nextChapter();
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.byType(ReaderPageContent), findsWidgets, reason: '旧正文应保留');
+    expect(find.text('重试'), findsOneWidget);
+    expect(find.textContaining('加载失败'), findsOneWidget);
+
+    // 网络恢复后点重试：重试的是失败的那一章，提示条消失、正文换成新章。
+    transport.failingChapterIds.remove('c2');
+    await tester.tap(find.text('重试'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('重试'), findsNothing);
+    expect(find.textContaining('加载失败'), findsNothing);
+    expect(find.textContaining('第二章'), findsWidgets);
+  });
 }

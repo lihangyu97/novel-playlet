@@ -185,7 +185,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   ) {
     final paper = settings.paper;
     final error = session.error;
-    if (error != null) {
+    // 首次进入还没有正文时，失败只能整页报错；已经读到正文时保留正文，
+    // 错误降级成正文顶部的提示条（见 _buildPagedContent），别因为一次网络
+    // 抖动把正在读的章清掉。
+    if (error != null && session.content == null) {
       return _buildStatus(
         paper,
         ErrorView(message: error, onRetry: controller.retry),
@@ -206,7 +209,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (content.isEmpty) {
       return _buildStatus(paper, _buildEmptyChapter(session, controller));
     }
-    return _buildPagedContent(session, settings, content);
+    return _buildPagedContent(session, settings, content, controller);
   }
 
   /// 共享状态视图在夜间底色下要换一套亮色 scheme，否则文字会看不清。
@@ -274,6 +277,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     ReaderSessionState session,
     ReaderSettings settings,
     ChapterContent content,
+    ReaderController controller,
   ) {
     final paper = settings.paper;
     final foreground = paper.foreground;
@@ -357,6 +361,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             message: '正在加载第 ${session.index + 1} 章…',
                             foreground: foreground,
                           ),
+                        ),
+                      ),
+                    // 切章失败：正文仍然是上一章（controller 已把 index 退回
+                    // contentIndex），错误只以提示条形式出现，读完这页再决定
+                    // 重试还是继续读别的章。
+                    if (session.error != null)
+                      Positioned(
+                        top: 8,
+                        left: 12,
+                        right: 12,
+                        child: _buildLoadErrorBanner(
+                          session,
+                          controller,
+                          foreground,
                         ),
                       ),
                   ],
@@ -460,6 +478,69 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             ),
           ),
           Text('${pageIndex + 1}/$pageCount', style: style),
+        ],
+      ),
+    );
+  }
+
+  /// 切章失败的顶部提示条：不挡正文，给「重试 / 关闭」两个动作。
+  ///
+  /// 失败目标可能是用户正在翻去的下一章，而正文还停在上一章，所以文案里
+  /// 必须带上失败的是第几章，否则用户不知道点重试会去哪。
+  Widget _buildLoadErrorBanner(
+    ReaderSessionState session,
+    ReaderController controller,
+    Color foreground,
+  ) {
+    final failedIndex = session.failedIndex >= 0
+        ? session.failedIndex
+        : session.index;
+    final chapter = session.chapterAt(failedIndex);
+    final title = chapter == null ? '正文加载失败' : '「${chapter.title}」加载失败';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 4, 2, 4),
+      decoration: BoxDecoration(
+        color: foreground.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.error_outline_rounded,
+            size: 16,
+            color: foreground.withValues(alpha: 0.8),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$title：${session.error ?? ''}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                height: 1.3,
+                color: foreground.withValues(alpha: 0.8),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => unawaited(controller.retry()),
+            style: TextButton.styleFrom(
+              foregroundColor: foreground,
+              minimumSize: const Size(0, 32),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              textStyle: const TextStyle(fontSize: 12),
+            ),
+            child: const Text('重试'),
+          ),
+          IconButton(
+            onPressed: controller.dismissError,
+            tooltip: '关闭',
+            iconSize: 16,
+            visualDensity: VisualDensity.compact,
+            color: foreground.withValues(alpha: 0.6),
+            icon: const Icon(Icons.close_rounded),
+          ),
         ],
       ),
     );
