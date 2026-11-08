@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -159,6 +160,68 @@ class BackendTransport {
       response.body,
       response.contentType,
     );
+  }
+
+  /// 用**真实 socket** 探一次回环监听是否还活着。
+  ///
+  /// iOS 会在 App 长时间挂起后回收 listening socket 的底层资源（Apple TN2277
+  /// "Networking and Multitasking"）；进程恢复后内核的 tokio listener 还在内存
+  /// 里、FFI 调用照常成功，但 127.0.0.1 上已经没人 accept。任何 HTTP 客户端
+  /// （AVPlayer 拉 `/src`）都会立刻得到 NSURLErrorCannotConnectToHost(-1004,
+  /// "Could not connect to the server")，只有重启进程才会重新 bind。
+  ///
+  /// 这里**必须走 `dart:io`**：FFI 传输（[send]）不经过回环适配器，内核活着时
+  /// 它永远成功，发现不了 listener 已死。所以探针是唯一能从 Dart 侧判断
+  /// 「回环服务还在不在」的手段。
+  ///
+  /// 每次尝试单独建 [HttpClient]（连接/读 ~400ms 超时），在 [timeout] 预算内
+  /// 重试；只有 HTTP 200 且 body 的 `status == "ok"` 才算健康。默认预算 5s：
+  /// 内核 supervisor 的探活间隔上限是 2s（iOS 熄屏休眠会暂停单调时钟，
+  /// 恢复后计时器不一定立刻到期），播放页的一次性恢复重试要覆盖这个窗口。
+  Future<bool> waitForLoopbackHealthy({
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    if (!isRunning) return false;
+    final base = baseUrl;
+    if (base.isEmpty) return false;
+    final uri = Uri.tryParse('$base/health');
+    if (uri == null || uri.host.isEmpty) return false;
+    final deadline = DateTime.now().add(timeout);
+    const attemptBudget = Duration(milliseconds: 400);
+    const retryGap = Duration(milliseconds: 100);
+    while (true) {
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) return false;
+      final attemptTimeout = remaining < attemptBudget
+          ? remaining
+          : attemptBudget;
+      if (await _probeLoopbackOnce(uri, attemptTimeout)) return true;
+      final left = deadline.difference(DateTime.now());
+      if (left <= Duration.zero) return false;
+      await Future<void>.delayed(left < retryGap ? left : retryGap);
+    }
+  }
+
+  Future<bool> _probeLoopbackOnce(Uri uri, Duration attemptTimeout) async {
+    final client = HttpClient()..connectionTimeout = attemptTimeout;
+    // 回环探针不该经过系统代理：代理回一个 200 会掩盖 listener 已死。
+    client.findProxy = (_) => 'DIRECT';
+    try {
+      final request = await client.getUrl(uri).timeout(attemptTimeout);
+      request.headers.set(HttpHeaders.connectionHeader, 'close');
+      final response = await request.close().timeout(attemptTimeout);
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(attemptTimeout);
+      if (response.statusCode != HttpStatus.ok) return false;
+      final decoded = jsonDecode(body);
+      return decoded is Map && decoded['status'] == 'ok';
+    } catch (_) {
+      return false;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   /// 测试专用：进程全局运行时已被外部 `RustLib.init` 装好。

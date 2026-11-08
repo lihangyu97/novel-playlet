@@ -77,6 +77,7 @@ Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 
 - 行为策略：翻页失败时 `FeedState.loadMoreRetryable` 决定 footer 是否显示「重试」；`badInput` / `tooLarge` / `deviceFailed` 这类不可重试错误不显示按钮，`retryLoadMore()` 也直接不发请求。
 - B2 超时归一：内核 504 在传输层抛 `BackendTimeoutException`，`ApiClient` 归一成 `ApiException(kind: timeout)`；499 取消仍是 `TimeoutException`（用户不可见，不转成 ApiException）。
 - **仍不做 Dart 自动重试 / 退避循环**：重试与退避在 Rust 内核，Dart 只决定「要不要给用户一个重试入口」。
+- 回环自愈契约（Apple TN2277）：iOS 长时间挂起可能回收内核回环监听的底层资源（FFI 仍正常，真实 socket 连接被拒）。内核 supervisor 在**同端口**自愈重绑（baseUrl / capability / `/src` 免鉴权面不变，已发出的播放地址继续有效）；Dart 侧 `BackendTransport.waitForLoopbackHealthy()` 用 `dart:io` 真实 HTTP `GET /health` 探活（FFI 请求不经过回环 adapter，探不出来），`BackendService.ensureLoopback()` 在探活失败时串行执行整核 `shutdown`+`init` 兜底；播放页对 -1004 只做**一次**有界恢复重试（恢复，不是通用自动重试循环）。
 
 ## 本地存储 API（已完成）
 

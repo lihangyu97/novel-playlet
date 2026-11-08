@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
@@ -173,6 +174,84 @@ void main() {
 
     await _disposePlayer(tester);
   });
+
+  testWidgets('回环 -1004：一次性恢复成功后自动重开这一集，不显示错误页', (tester) async {
+    final store = _FakeSeriesStore();
+    final factory = _LoopbackFailingFactory(failures: 1);
+    var ensureCalls = 0;
+    await _pumpPlayer(
+      tester,
+      store: store,
+      factory: factory,
+      api: _FakeApi(cachedUrl: 'http://127.0.0.1:18931/src/e1.mp4'),
+      ensureLoopback: () async {
+        ensureCalls += 1;
+        return true;
+      },
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(ensureCalls, 1, reason: '回环 connect refused 只做一次探活恢复');
+    expect(factory.created, 2, reason: '恢复后必须重建 controller 重开这一集');
+    expect(factory.healthy, hasLength(1));
+    expect(factory.healthy.single.value.isPlaying, isTrue);
+    expect(factory.healthy.single.speeds, contains(1.0));
+    expect(find.text('本地视频服务未响应'), findsNothing);
+    expect(find.text('AVPlayer 播放失败'), findsNothing);
+    expect(find.byType(VideoPlayer), findsOneWidget);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('回环 -1004：恢复失败时显示专用文案', (tester) async {
+    final store = _FakeSeriesStore();
+    final factory = _LoopbackFailingFactory(failures: 1);
+    var ensureCalls = 0;
+    await _pumpPlayer(
+      tester,
+      store: store,
+      factory: factory,
+      api: _FakeApi(cachedUrl: 'http://127.0.0.1:18931/src/e1.mp4'),
+      ensureLoopback: () async {
+        ensureCalls += 1;
+        return false;
+      },
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(ensureCalls, 1);
+    expect(factory.created, 1, reason: '恢复失败不重建 controller');
+    expect(find.text('本地视频服务未响应'), findsOneWidget);
+    expect(find.textContaining('TN2277'), findsOneWidget);
+    expect(find.text('AVPlayer 播放失败'), findsNothing);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('回环 -1004：恢复后仍失败时不再继续恢复（有界）', (tester) async {
+    final store = _FakeSeriesStore();
+    final factory = _LoopbackFailingFactory(failures: 2);
+    var ensureCalls = 0;
+    await _pumpPlayer(
+      tester,
+      store: store,
+      factory: factory,
+      api: _FakeApi(cachedUrl: 'http://127.0.0.1:18931/src/e1.mp4'),
+      ensureLoopback: () async {
+        ensureCalls += 1;
+        return true;
+      },
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(ensureCalls, 1, reason: '只允许一次自愈重试，不能循环');
+    expect(factory.created, 2);
+    expect(find.text('本地视频服务未响应'), findsOneWidget);
+
+    await _disposePlayer(tester);
+  });
 }
 
 const _episodes = <Chapter>[
@@ -180,11 +259,17 @@ const _episodes = <Chapter>[
   Chapter(id: 'e2', title: '第 2 集'),
 ];
 
+/// controller 工厂替身共用的调用形状（与 `PlaybackControllerFactory` 一致）。
+abstract interface class _ControllerFactory {
+  VideoPlayerController call({File? file, Uri? networkUrl});
+}
+
 Future<ProviderContainer> _pumpPlayer(
   WidgetTester tester, {
   required _FakeSeriesStore store,
-  required _FakeFactory factory,
+  required _ControllerFactory factory,
   ApiClient? api,
+  Future<bool> Function()? ensureLoopback,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -192,6 +277,8 @@ Future<ProviderContainer> _pumpPlayer(
         offlineSeriesStoreProvider.overrideWithValue(store),
         playbackControllerFactoryProvider.overrideWithValue(factory.call),
         if (api != null) apiClientProvider.overrideWithValue(api),
+        if (ensureLoopback != null)
+          backendEnsureLoopbackProvider.overrideWithValue(ensureLoopback),
       ],
       child: MaterialApp(
         home: VideoPlayerPage(
@@ -257,9 +344,10 @@ class _FakeApi extends ApiClient {
 }
 
 /// controller 工厂测试替身：记录创建次数与倍速下发记录。
-class _FakeFactory {
+class _FakeFactory implements _ControllerFactory {
   final List<_FakeController> created = <_FakeController>[];
 
+  @override
   VideoPlayerController call({File? file, Uri? networkUrl}) {
     final controller = _FakeController();
     created.add(controller);
@@ -317,4 +405,40 @@ class _FakeController extends VideoPlayerController {
   }
 
   int disposeCount = 0;
+}
+
+/// 前 [failures] 个 controller 在 initialize() 抛 -1004（iOS 长时间后台回来
+/// 的真机形态），之后返回正常 fake：锁「播放页对 -1004 只做一次有界恢复」。
+class _LoopbackFailingFactory implements _ControllerFactory {
+  _LoopbackFailingFactory({this.failures = 1});
+
+  final int failures;
+  final List<_FakeController> healthy = <_FakeController>[];
+  int created = 0;
+  int failed = 0;
+
+  @override
+  VideoPlayerController call({File? file, Uri? networkUrl}) {
+    created += 1;
+    if (failed < failures) {
+      failed += 1;
+      return _ConnectRefusedController();
+    }
+    final controller = _FakeController();
+    healthy.add(controller);
+    return controller;
+  }
+}
+
+/// 模拟 vendored video_player_avfoundation 的真实错误形态：只有
+/// localizedDescription，没有数字 code。
+class _ConnectRefusedController extends _FakeController {
+  @override
+  Future<void> initialize() async {
+    throw PlatformException(
+      code: 'VideoError',
+      message: 'Failed to load video: Could not connect to the server.',
+      details: null,
+    );
+  }
 }

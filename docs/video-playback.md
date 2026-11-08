@@ -81,6 +81,7 @@
 5. **缓存与流式的关系**：进入播放默认流式，后台按需缓存（类似 fqapp 的"边看边缓存"）还是只做手动下载？下载目录/上限/清理策略后续细化。
 6. **错误与重试**：CDN 4xx/过期地址、变体降档、重试上限、错误文案（是否对齐 fqapp 的 `PlaybackIssue` 四类）。
    - 现状（2026-11-04）：播放页已把失败分类展示（取流超时 / 取流失败 / 本地回环中断 / 解码失败 / ATS 拦截 / 4xx）+ 原始错误可复制；内核支持 `refresh=1` 强制重新下载，UI 有「重新下载这一集」。仍未做自动重试与变体降档重试。
+   - 2026-11-08 补：AVPlayer 的 `-1004`（localizedDescription「Could not connect to the server.」）之前没有分支，会落到泛化的「AVPlayer 播放失败」；现在归入「本地视频服务未响应」，并先做一次回环探活/自愈重试，见 4.4。
 7. **起播位置**：进度只记到集，重新进入从 0 开始；若某集看了一半退出，下次是否仍从 0（当前决定：是）。
 8. **详情页/选集页数据**：复用 Rust 已有的 `video_detail` / `pseries`（剧集列表）接口，还是需要新增字段；分页与失败态。
 9. **首播延迟目标**：流式回环下首帧 P50/P90 目标值，作为是否要更大预读窗口的依据。
@@ -92,6 +93,31 @@
 12. 免费签名 7 天对验证节奏的影响（每 7 天重装；后台/重启场景单独排）。
 13. 代码归属：播放器抽象、数据模型、页面放 `lib/features/video/` 还是新建 `lib/media/`。
 14. 实现后同步 `README.md`（功能表/已知限制）与 `CONTRACTS.md`（依赖与平台规则）。
+
+### 4.4 后台回环监听被系统回收（Apple TN2277）与自愈（2026-11-08）
+
+真机现象：App 长时间在后台后，打开任意一集都报
+`PlatformException(VideoError, "Failed to load video: Could not connect to the server.")`
+（AVPlayer 的 `NSURLErrorCannotConnectToHost`，-1004），杀进程重开才恢复；
+但返回 `/src` 地址的 FFI 调用一直正常。
+
+根因：Apple TN2277 *Networking and Multitasking* —— App 被挂起时，系统可能回收
+`listen()` 套接字的底层资源；回到前台后进程不会收到可靠通知，listener 已经不在
+监听了（`accept` 返回 `EBADF`），于是 127.0.0.1:18931 上的新连接一律被拒。FFI 不
+走 socket，所以数据层完全看不出异常；只有播放器走真实回环 HTTP 才暴露成 -1004。
+
+自愈分两层：
+
+- **内核侧**：loopback adapter 带 supervisor，自己定期探活，发现 listener 被回收
+  后在**同一端口**重新 bind。baseUrl / token 不变，已经发给播放器的 `/src` URL
+  继续有效。
+- **App 侧**（本仓）：`BackendTransport.waitForLoopbackHealthy()` 用 `dart:io`
+  起真实 HTTP `GET /health` 探活（FFI 请求不经过回环 adapter，探不出来）；
+  `BackendService.ensureLoopback()` 把探活失败后的整核 `shutdown` + `init`
+  重绑串行化，作为 supervisor 的兜底；播放页对 -1004 只做**一次**有界恢复重试
+  （不是通用自动重试循环），仍失败才显示「本地视频服务未响应」并建议重启 App。
+- 默认探活预算 5s：内核 supervisor 的探活间隔上限是 2s，而 iOS 熄屏休眠会暂停
+  单调时钟，恢复后计时器不一定立刻到期；播放页的一次性重试要覆盖这个窗口。
 
 ## 5. M0 验收清单
 
@@ -149,3 +175,4 @@
 | 2026-11-07 | 修复「UI 显示 2x、实际 1x」：iOS AVPlayer 在起播/seek 后按 `defaultRate`(默认 1.0) 复位 rate，上游 avfoundation 2.12.3 从不写 defaultRate。改为 vendored 插件（`third_party/video_player_avfoundation`，补 defaultRate）+ Dart 在首帧/seek/恢复时补设倍速；`pubspec.yaml` 用 dependency_overrides |
 | 2026-11-07 | 内核 `/api/v1/videos/{id}` 新增 `mode=cached`（只查本地 `/src` + key sidecar，不打上游，断网可播自动缓存集）与 `variants=0`（播放页不需要清晰度列表，省 fallback 请求）；播放页顺序改为 离线 → 预取 → cached → 正常取流，并顺手缓存离线路径 root、合并 stat |
 | 2026-11-07 | 下载清晰度上限（C0）：内核 `?max_height=` 按短边选档、单文件缓存 + `.variant.json` marker；离线整剧默认 720P（设置页可选最高/1080P/480P），manifest 记录请求上限与每集实际档位，缓存中心展示。在线播放默认档不变，等 M1 后做 C1 在线换档 |
+| 2026-11-08 | 后台上回环监听被回收（Apple TN2277）导致播放必现 -1004：内核 supervisor 同端口自愈重绑；Dart 侧 `waitForLoopbackHealthy()` 走真实 socket 探活 `/health`、`ensureLoopback()` 串行兜底重启，播放页对 -1004 只做一次有界恢复重试，并新增「本地视频服务未响应」文案；默认探活预算 5s（supervisor 间隔 2s + iOS 休眠暂停单调时钟）。见 4.4 |

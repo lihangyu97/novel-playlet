@@ -14,6 +14,15 @@ final apiClientProvider = Provider<ApiClient>(
   (ref) => ApiClient(ref.watch(backendServiceProvider).transport),
 );
 
+/// 回环自愈入口：探活失败时重启内核（同端口重绑），见
+/// [BackendService.ensureLoopback]。
+///
+/// 抽成 Provider 是为了播放页的 -1004 一次性恢复在 widget 测试里能替换成
+/// fake，不真的在测试进程里重启内核。
+final backendEnsureLoopbackProvider = Provider<Future<bool> Function()>(
+  (ref) => ref.watch(backendServiceProvider).ensureLoopback,
+);
+
 /// 书架与阅读进度。
 final readingStoreProvider = Provider<ReadingStore>((ref) => ReadingStore());
 

@@ -100,6 +100,20 @@ Dart 侧配套（不在 `rust/` 内，但同属一次改动）：`lib/core/backe
 |---|---|---|
 | `src/api/mod.rs` | `core_log::install()` 从 `#[cfg(target_os = "android")]` 里移到无条件执行（Android 仍额外镜像 logcat） | 真机出问题时 App 容器里没有 `rust.log`，推荐/详情等接口的业务失败（`dispatch.rs` 的 `api ... failed: ...`）只能靠猜；iOS 加上同一份轮转文件后，`xcrun devicectl device copy from --domain-type appDataContainer` 就能直接取日志定位。host/单测也照旧写到各自临时运行目录，不影响行为 |
 
+### 3.7 回环监听器自愈：iOS 后台 socket 被系统回收（2026-11-08）
+
+原因：Apple [TN2277 *Networking and Multitasking*](https://developer.apple.com/library/archive/technotes/tn2277/_index.html) 的 "Listening Socket" 一节说明，
+app 被挂起后系统可能回收其监听 socket 的内核资源；回到前台时该 socket 已不再监听，而进程（以及 FRB/tokio 运行时）仍在运行。
+axum 0.8 的 accept 循环对 accept 错误无限重试、永不返回，所以监听任务既不会退出也不会重建，
+`127.0.0.1:<port>` 从此一律 `connect()` 被拒（ECONNREFUSED / `NSURLErrorCannotConnectToHost` -1004），
+播放器报 "Could not connect to the server."，只有杀进程重启才能恢复 —— 这正是真机短剧起播失败的根因。
+
+| 文件 | 本地改动 | 原因 |
+|---|---|---|
+| `src/server.rs` | `serve()` 改为 spawn 一个监听监督任务：每 2s 用 TCP connect 探测自己绑定的端口（间隔必须小：Apple 的 `Instant` 基于 `mach_absolute_time`，设备锁屏睡眠期间不前进，大间隔会把恢复拖延到睡眠时长之后）；探测被拒即 abort 内部 `axum::serve` 任务、丢弃旧 socket，并**立即**重绑同一端口（失败才 250ms→5s 退避）。绑定统一走 `bind_listener()`：`TcpSocket::new_v4()` + `set_reuseaddr(true)` + `bind` + `listen(1024)`，初始绑定与每次重绑都带 `SO_REUSEADDR`（旧监听器 accept 过的连接可能在同一端口留 TIME_WAIT，不设会 EADDRINUSE 约 15s）。端口/能力 token/`base_url()` 全部不变，已发给 AVPlayer 的 `/src` URL 继续有效；只在 accepting / reclaimed+rebinding / rebound / stopped 四个状态转换打 info/warn，`rust.log` 可直接看出自愈。对外 `serve()` 与 `LoopbackHandle` 形状不变，`shutdown()` 的 `lifetime.cancel()` 与 `task.abort()` 两条路径都有单测验证会释放端口 | iOS 挂起后系统回收回环监听 socket，播放器 `-1004` 且只有重启进程能恢复 |
+| `tests/loopback_reclaim.rs` | **新增**：健康监听不自行结束；监听器死亡后 `connect()` 得到 ECONNREFUSED（不是 HTTP 5xx）；同端口重绑后 `/health` 恢复 | 把 TN2277 的症状模型与恢复路径锁成契约测试 |
+
+
 ## 4. 不在本文件范围内的部分
 
 - `rust/` 之外的 Dart 侧改动（UI/数据层/存储）由 git 历史管理，不需要和上游对齐；

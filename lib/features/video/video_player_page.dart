@@ -180,10 +180,14 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     if (retained != null) unawaited(retained.dispose());
   }
 
+  /// [recovered] 只用于「回环监听被系统回收」的一次性恢复：调用方第一次
+  /// 恢复重试时传 true，避免恢复本身失败后无限自愈。CONTRACTS 把自动重试
+  /// 循环留给内核，页面这里只做一次有界恢复，不是退避重试。
   Future<void> _open(
     int index, {
     bool refresh = false,
     bool autoAdvance = false,
+    bool recovered = false,
   }) async {
     if (_episodes.isEmpty) return;
     final episode = _episodes[index];
@@ -264,8 +268,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         try {
           await playUrl(prefetched.url);
           return;
-        } catch (_) {
+        } catch (error) {
           // 预取的 `/src` 可能已被内核 128MB 预算淘汰：回退正常取流。
+          // 但「回环监听被回收」不是地址问题，回退只会再失败一次；抛给外层
+          // 走一次有界自愈（见下面 catch）。
+          if (_isLoopbackConnectRefused(error)) rethrow;
         }
       }
 
@@ -282,8 +289,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           try {
             await playUrl(cachedUrl);
             return;
-          } catch (_) {
-            // 缓存条目可能刚被淘汰/半截：继续走正常取流。
+          } catch (error) {
+            // 缓存条目可能刚被淘汰/半截：继续走正常取流。回环监听被回收时
+            // 同理不能回退（下一次取流也播不了），交给外层自愈。
+            if (_isLoopbackConnectRefused(error)) rethrow;
           }
         }
       }
@@ -293,6 +302,22 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       await playUrl(source.url);
     } catch (error, stack) {
       if (!mounted || generation != _generation) return;
+      // iOS 长时间挂起后会回收回环监听（Apple TN2277）：内核 FFI 还活着，
+      // 但 AVPlayer 连 127.0.0.1 被拒（-1004）。先探活/必要时整核重启，
+      // 服务回来后把这一集重新打开一次；[recovered] 保证最多恢复一次。
+      if (!recovered && _isLoopbackConnectRefused(error)) {
+        final restored = await ref.read(backendEnsureLoopbackProvider)();
+        if (!mounted || generation != _generation) return;
+        if (restored) {
+          await _open(
+            index,
+            refresh: refresh,
+            autoAdvance: autoAdvance,
+            recovered: true,
+          );
+          return;
+        }
+      }
       _spinnerTimer?.cancel();
       _disposeRetained();
       // 没有离线副本、失败又像「网络不可达」：换成明确文案；网络在线时保留
@@ -514,6 +539,32 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     }
   }
 
+  /// 这次失败是不是「回环监听已死」——connect refused。
+  ///
+  /// iOS 长时间挂起后会回收 listening socket（Apple TN2277），内核 FFI 照常
+  /// 可用，但 127.0.0.1 上已经没人 accept；AVPlayer 把它报成
+  /// NSURLErrorCannotConnectToHost(-1004, "Could not connect to the server")。
+  /// vendored video_player_avfoundation 只把 localizedDescription 传上来
+  /// （没有数字 code），所以以英文文案为主、数字 code 只作兜底。
+  bool _isLoopbackConnectRefused(Object error) {
+    if (error is SocketException) {
+      final code = error.osError?.errorCode;
+      return code == 61 || // Darwin ECONNREFUSED
+          code == 111 || // Linux ECONNREFUSED
+          error.message.toLowerCase().contains('connection refused');
+    }
+    if (error is! PlatformException) return false;
+    final text = [
+      error.code,
+      error.message ?? '',
+      error.details?.toString() ?? '',
+    ].join(' ').toLowerCase();
+    return text.contains('could not connect to the server') ||
+        text.contains('cannot connect to host') ||
+        text.contains('connection refused') ||
+        text.contains('-1004');
+  }
+
   /// 把播放异常翻译成"人话原因 + 可复制的技术详情"。
   ///
   /// 失败发生在两段：`videoSource`（内核取流/整集下载，抛 ApiException；
@@ -573,6 +624,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       } else if (RegExp(r'403|404|410').hasMatch(text)) {
         title = '本地视频地址失效';
         reason = '回环服务对 /src 返回了 4xx，多半是缓存被清理或内核重启过。重新下载这一集即可。';
+      } else if (_isLoopbackConnectRefused(error)) {
+        title = '本地视频服务未响应';
+        reason =
+            '播放器连不上 App 内的本地视频服务（127.0.0.1）：App 长时间在后台后，'
+            '系统回收了本机回环监听（iOS TN2277）。已尝试自动重启播放服务；'
+            '如果仍然失败，请重启 App。';
       } else {
         title = 'AVPlayer 播放失败';
         reason = '播放器内部错误，具体信息见下方。';
