@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../app/router.dart';
 import '../../../app/widgets/cover_hero.dart';
+import '../../../app/widgets/novel_cover.dart';
 import '../../../app/widgets/states.dart';
 import '../../../core/storage/reading_store.dart';
 import '../../../data/models/novel_item.dart';
@@ -30,7 +31,7 @@ class MineNovelPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineDataProvider);
     final data = async.value;
-    final metrics = MineGridMetrics.of(context);
+    final metrics = MineGridMetrics.of(context, coverAspect: kNovelCoverAspect);
     return PanelShell<MineData>(
       data: data,
       progress: progress,
@@ -68,6 +69,7 @@ class MineNovelPanel extends ConsumerWidget {
             itemWidth: metrics.itemWidth,
             itemHeight: metrics.itemHeight,
             spacing: MineGridMetrics.spacing,
+            coverAspect: kNovelCoverAspect,
             heroTagOf: (item) => CoverHeroTag.novel('mine-shelf', item.id),
             onOpen: (item) => _openDetail(context, item),
             onLongPress: (item) => _showShelfMenu(context, ref, item),

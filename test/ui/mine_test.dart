@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
-import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,20 +14,22 @@ import 'preview_harness.dart';
 /// 我的页预览：小说/短剧双面板、悬浮切换、书架与最近观看。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/mine_test.dart`。
-/// 这一页所有封面的高宽比都必须 = [kCoverAspect]（11:8）。
+/// 这一页的封面都必须是各自内容类型的原生比例：小说 3:4、短剧 7:10。
 void _expectCoverAspect(WidgetTester tester, String label) {
   final bad = tester
       .widgetList<NovelCover>(find.byType(NovelCover))
-      .where(
-        (cover) => (cover.height / cover.width - kCoverAspect).abs() > 0.002,
-      )
+      .where((cover) {
+        final ratio = cover.height / cover.width;
+        return (ratio - kNovelCoverAspect).abs() > 0.002 &&
+            (ratio - kVideoCoverAspect).abs() > 0.002;
+      })
       .map(
         (cover) =>
             '${cover.width.toStringAsFixed(1)}×${cover.height.toStringAsFixed(1)}'
             '(h/w=${(cover.height / cover.width).toStringAsFixed(3)})',
       )
       .toSet();
-  expect(bad, isEmpty, reason: '$label 有封面比例不是 11:8：$bad');
+  expect(bad, isEmpty, reason: '$label 有封面既不是小说 3:4 也不是短剧 7:10：$bad');
 }
 
 void main() {
@@ -289,36 +290,16 @@ void main() {
     );
   });
 
-  /// 缓存入口是右下角悬浮按钮（与切换按钮同款圆形），固定在切换按钮左侧；
-  /// 右上角只剩设置按钮。
-  testWidgets('我的页-悬浮缓存入口在切换按钮左侧并打开缓存中心', (tester) async {
+  /// 缓存入口已挪到推荐页搜索框右侧的「已缓存」，这一页右下角只剩切换按钮。
+  testWidgets('我的页-右下角只剩面板切换按钮', (tester) async {
     await pumpPreview(tester, const MinePage());
-    final cacheButton = find.byKey(MinePage.cacheButtonKey);
-    final switchButton = find.byKey(MinePage.switchButtonKey);
-    expect(cacheButton, findsOneWidget);
-    expect(switchButton, findsOneWidget);
-    expect(find.byIcon(Icons.download_outlined), findsOneWidget);
-
-    // 上图标是悬浮缓存按钮、右上角只剩设置按钮。
+    expect(find.byKey(MinePage.switchButtonKey), findsOneWidget);
+    expect(
+      find.byIcon(Icons.download_outlined),
+      findsNothing,
+      reason: '悬浮缓存入口已删除',
+    );
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
-
-    final cacheRect = tester.getRect(cacheButton);
-    final switchRect = tester.getRect(switchButton);
-    expect(
-      cacheRect.right,
-      lessThan(switchRect.left),
-      reason: '缓存悬浮按钮应固定在切换按钮左侧',
-    );
-    expect(
-      cacheRect.center.dy,
-      closeTo(switchRect.center.dy, 0.5),
-      reason: '两个悬浮按钮应同一行垂直居中',
-    );
-    expect(cacheRect.size, switchRect.size, reason: '两个悬浮按钮同尺寸（52×52）');
-
-    await tester.tap(cacheButton);
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(CacheCenterPage), findsOneWidget);
   });
 
   testWidgets('我的页（短剧）', (tester) async {

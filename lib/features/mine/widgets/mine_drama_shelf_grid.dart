@@ -17,6 +17,7 @@ class MineDramaShelfGrid extends StatelessWidget {
     required this.itemWidth,
     required this.itemHeight,
     required this.spacing,
+    required this.coverAspect,
     required this.onOpen,
     required this.onLongPress,
     this.heroTagOf,
@@ -27,6 +28,9 @@ class MineDramaShelfGrid extends StatelessWidget {
   final double itemWidth;
   final double itemHeight;
   final double spacing;
+
+  /// 封面原生比例（高 / 宽）：短剧 7:10。
+  final double coverAspect;
   final ValueChanged<VideoSeries> onOpen;
   final ValueChanged<VideoSeries> onLongPress;
   final String Function(VideoSeries item)? heroTagOf;
@@ -49,6 +53,7 @@ class MineDramaShelfGrid extends StatelessWidget {
       cardBuilder: (item, heroTag) => VideoCard(
         item: item,
         width: itemWidth,
+        coverAspect: coverAspect,
         onTap: () => onOpen(item),
         heroTag: heroTag,
       ),

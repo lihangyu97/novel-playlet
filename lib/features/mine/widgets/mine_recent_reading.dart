@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/widgets/novel_cover.dart';
 import '../../../core/storage/reading_store.dart';
 import 'mine_recent_tile.dart';
 import 'recent_list.dart';
@@ -26,6 +27,7 @@ class MineRecentReading extends StatelessWidget {
       items: items,
       tileOf: (item) => MineRecentTile(
         cover: item.cover,
+        coverAspect: kNovelCoverAspect,
         title: item.bookTitle.isEmpty ? '未命名作品' : item.bookTitle,
         subtitle: item.chapterId.isEmpty
             ? '尚未开始阅读'

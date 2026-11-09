@@ -28,8 +28,8 @@ class FeedStaggeredGrid<T> extends StatelessWidget {
   /// 算出来的），卡片可以直接按它算封面高度。
   final Widget Function(BuildContext context, T item, double width) itemBuilder;
 
-  /// 左右留白（与详情/搜索一致）。
-  static const double horizontalPadding = 16;
+  /// 左右留白：与顶部搜索框区域的边距一致（都是 8），列表和搜索框左右对齐。
+  static const double horizontalPadding = 8;
 
   /// 列间距。
   static const double crossAxisSpacing = 8;

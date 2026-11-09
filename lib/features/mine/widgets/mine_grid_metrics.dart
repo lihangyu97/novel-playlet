@@ -2,8 +2,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
-import '../../../app/widgets/novel_cover.dart';
-
 /// 我的页书架/收藏网格的尺寸换算。
 ///
 /// 小说与短剧两侧共用一套规则，保证切换面板时卡片尺寸完全一致；宽屏
@@ -28,7 +26,11 @@ class MineGridMetrics {
   final double itemWidth;
   final double itemHeight;
 
-  factory MineGridMetrics.of(BuildContext context) {
+  /// [coverAspect] 是封面原生比例（高 / 宽）：小说 3:4、短剧 7:10。
+  factory MineGridMetrics.of(
+    BuildContext context, {
+    required double coverAspect,
+  }) {
     final availableWidth = math.max(
       0.0,
       MediaQuery.sizeOf(context).width - _gutter * 2,
@@ -42,13 +44,13 @@ class MineGridMetrics {
       (availableWidth - spacing * (columns - 1)) / columns,
     );
     final textScaler = MediaQuery.textScalerOf(context);
-    // 与 MediaCard 的内部排版对齐（封面 kCoverAspect 比例 + 标题两行 + 元信息
-    // 一行），再按系统字体缩放留出高度，避免网格单元格比卡片矮造成溢出。
+    // 与 MediaCard 的内部排版对齐（封面原生比例 + 标题两行 + 元信息一行），
+    // 再按系统字体缩放留出高度，避免网格单元格比卡片矮造成溢出。
     return MineGridMetrics._(
       columns: columns,
       itemWidth: itemWidth,
       itemHeight:
-          itemWidth * kCoverAspect +
+          itemWidth * coverAspect +
           8 +
           textScaler.scale(14) * 1.25 * 2 +
           3 +

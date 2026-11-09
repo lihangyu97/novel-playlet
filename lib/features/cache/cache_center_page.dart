@@ -671,7 +671,11 @@ class _CacheTile extends StatelessWidget {
                 child: NovelCover(
                   url: entry.cover,
                   width: 48,
-                  height: 48 * kCoverAspect,
+                  height:
+                      48 *
+                      (entry.kind == OfflineTaskKind.novel
+                          ? kNovelCoverAspect
+                          : kVideoCoverAspect),
                   radius: 8,
                   fadeInDuration: Duration.zero,
                 ),

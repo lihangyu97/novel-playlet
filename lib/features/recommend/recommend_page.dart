@@ -57,26 +57,6 @@ class RecommendPageState extends ConsumerState<RecommendPage>
   ScrollController _feedControllerFor(RecommendCategory category) =>
       _feedControllers.putIfAbsent(category, ScrollController.new);
 
-  /// 折叠判定阈值（方向 + 位移）：
-  /// - 向下滚够 [_collapseTravel] 且已离开顶部 [_collapseAt] 才收起，避免一点就收；
-  /// - 向上滚 [_revealTravel] 立即展开：滚很深时，用户往回滑的第一下就该看到
-  ///   搜索框，而不是等一路滚回顶部。
-  static const double _collapseTravel = 28;
-  static const double _revealTravel = 6;
-  static const double _collapseAt = 48;
-  static const double _expandAt = 8;
-
-  /// 顶部搜索框是否已收起（只为列表腾空间，搜索态永远展开）。
-  bool _searchCollapsed = false;
-
-  /// 上一次滚动位置；切分类时置空，避免把「新列表从 0 开始」误读成一次
-  /// 巨大的向上滚动而把搜索框弹出来。
-  double? _lastPixels;
-
-  /// 当前方向累计的滚动距离（方向一变就清零）。
-  double _downTravel = 0;
-  double _upTravel = 0;
-
   RecommendCategory get _activeCategory => _categories[_tabController.index];
 
   @override
@@ -86,12 +66,10 @@ class RecommendPageState extends ConsumerState<RecommendPage>
     // 否则会看到"结果列表 + 空搜索框"的错位状态。
     final query = ref.read(searchQueryProvider);
     if (query != null) _searchController.text = query;
-    _tabController.addListener(_onTabChanged);
   }
 
   @override
   void dispose() {
-    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
@@ -149,126 +127,61 @@ class RecommendPageState extends ConsumerState<RecommendPage>
     ref.read(searchQueryProvider.notifier).cancel();
   }
 
-  /// 折叠状态是页面级的：收起后左右切分类保持收起，不因为新分类在顶部
-  /// 就把搜索框弹回来。这里只清掉方向累计，避免新列表的第一次通知被当成
-  /// 跨列表的巨大位移。
-  void _onTabChanged() {
-    _lastPixels = null;
-    _downTravel = 0;
-    _upTravel = 0;
-  }
-
-  /// 竖向列表的滚动通知会冒泡到这里；PageView 的横向滚动按 axis 过滤掉。
-  ///
-  /// 搜索态不参与折叠：搜索结果与推荐流是两条列表，用搜索结果的滚动位置
-  /// 影响折叠会让「取消搜索后回到推荐流」的状态错乱。
-  bool _handleScroll(ScrollNotification notification) {
-    if (notification.metrics.axis != Axis.vertical) return false;
-    if (ref.read(searchQueryProvider) != null) return false;
-    final offset = notification.metrics.pixels;
-    final last = _lastPixels;
-    _lastPixels = offset;
-    if (last == null) return false;
-    final delta = offset - last;
-    if (delta > 0) {
-      _downTravel += delta;
-      _upTravel = 0;
-    } else if (delta < 0) {
-      _upTravel += -delta;
-      _downTravel = 0;
-    }
-    _updateCollapsed(offset);
-    return false;
-  }
-
-  /// 收起/展开判定。
-  ///
-  /// 搜索态或输入框聚焦时永远展开：正在输入/看搜索结果时把输入框藏起来
-  /// 会让人不知道自己在哪、也没法改关键词。
-  void _updateCollapsed(double offset) {
-    if (!mounted) return;
-    final bool next;
-    if (ref.read(searchQueryProvider) != null || _searchFocus.hasFocus) {
-      next = false;
-    } else if (_searchCollapsed) {
-      // 回到顶部附近，或任意一次向上的滚动（不看滚了多深）都立即展开。
-      final atTop = offset <= _expandAt;
-      final scrollingBack = _upTravel >= _revealTravel;
-      next = !(atTop || scrollingBack);
-    } else {
-      next = offset > _collapseAt && _downTravel >= _collapseTravel;
-    }
-    _applyCollapsed(next);
-  }
-
-  void _applyCollapsed(bool next) {
-    if (next == _searchCollapsed) return;
-    setState(() => _searchCollapsed = next);
-    _downTravel = 0;
-    _upTravel = 0;
+  void _openCacheCenter() {
+    context.pushAppRoute(const CacheCenterRoute());
   }
 
   @override
   Widget build(BuildContext context) {
     final activeQuery = ref.watch(searchQueryProvider);
-    // 进入搜索态立即展开输入框；退出搜索时保持当前状态（推荐流的滚动位置
-    // 没变，不需要再按偏移重新判断）。
-    ref.listen(searchQueryProvider, (previous, next) {
-      if (next != null) _applyCollapsed(false);
-    });
 
     return SafeArea(
       bottom: false,
       child: Column(
         children: [
-          // 搜索框常驻但可收起：上滑浏览时整条折叠，把屏幕让给列表；
-          // 回到顶部或进入搜索态自动展开。AnimatedSize 让高度变化是动画，
-          // 列表跟随变高、滚动偏移不变，不会出现跳帧感。
-          AnimatedSize(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
-            alignment: Alignment.topCenter,
-            child: _searchCollapsed
-                ? const SizedBox(width: double.infinity)
-                : Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                    // 提示文案跟着当前分类走；AnimatedBuilder 同时让左右滑动
-                    // 切分类时提示词及时更新。
-                    child: AnimatedBuilder(
-                      animation: _tabController,
-                      builder: (context, _) => FeedSearchField(
-                        controller: _searchController,
-                        focusNode: _searchFocus,
-                        hintText: _activeCategory.searchHint,
-                        onSubmitted: _submitSearch,
-                        onClear: _clearSearchInput,
-                        onCancel: _cancelSearch,
-                        showCancel: activeQuery != null,
-                      ),
+          // 搜索框常驻顶部，不随列表滚动收起；右侧固定「已缓存」入口。
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  // 提示文案跟着当前分类走；AnimatedBuilder 同时让左右滑动
+                  // 切分类时提示词及时更新。
+                  child: AnimatedBuilder(
+                    animation: _tabController,
+                    builder: (context, _) => FeedSearchField(
+                      controller: _searchController,
+                      focusNode: _searchFocus,
+                      hintText: _activeCategory.searchHint,
+                      onSubmitted: _submitSearch,
+                      onClear: _clearSearchInput,
+                      onCancel: _cancelSearch,
+                      showCancel: activeQuery != null,
                     ),
                   ),
+                ),
+                const SizedBox(width: 8),
+                _CachedEntryButton(onTap: _openCacheCenter),
+              ],
+            ),
           ),
-          // tabs 与列表之间留呼吸空间；收起搜索框时给 tabs 补回状态栏下方的
-          // 安全距离，否则下划线会贴着状态栏。
+          // tabs 与列表之间留呼吸空间。
           Padding(
-            padding: EdgeInsets.only(top: _searchCollapsed ? 8 : 0, bottom: 8),
+            padding: const EdgeInsets.only(bottom: 8),
             child: _buildCategoryTabs(context),
           ),
           Expanded(
-            child: NotificationListener<ScrollNotification>(
-              onNotification: _handleScroll,
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  for (final category in _categories)
-                    _CategoryFeedPage(
-                      key: ValueKey(category),
-                      category: category,
-                      bottomInset: widget.bottomInset,
-                      scrollController: _feedControllerFor(category),
-                    ),
-                ],
-              ),
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                for (final category in _categories)
+                  _CategoryFeedPage(
+                    key: ValueKey(category),
+                    category: category,
+                    bottomInset: widget.bottomInset,
+                    scrollController: _feedControllerFor(category),
+                  ),
+              ],
             ),
           ),
         ],
@@ -334,6 +247,11 @@ class _CategoryFeedPage extends ConsumerStatefulWidget {
 class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
     with AutomaticKeepAliveClientMixin {
   RecommendCategory get _category => widget.category;
+
+  /// 当前分类的封面原生比例：小说 3:4，短剧/漫剧 7:10。
+  double get _coverAspect => _category == RecommendCategory.novel
+      ? kNovelCoverAspect
+      : kVideoCoverAspect;
 
   @override
   bool get wantKeepAlive => true;
@@ -443,6 +361,7 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
         if (state.isSearchMode) {
           return FeedResultsSliver<RecommendItem>(
             items: state.items,
+            coverAspect: _coverAspect,
             coverOf: (item) => item.cover,
             titleOf: (item) => item.title,
             metaOf: (item) => item.searchMeta,
@@ -491,6 +410,53 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
           },
         );
       },
+    );
+  }
+}
+
+/// 搜索框右侧的「已缓存」入口：跳转缓存中心（离线下载的书 / 短剧）。
+///
+/// 与搜索框同高、同底色、同圆角（[FeedSearchField.radius]），只放文字，把
+/// 视觉重心留给输入框；高度 40 满足触控下限。
+class _CachedEntryButton extends StatelessWidget {
+  const _CachedEntryButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final radius = BorderRadius.circular(FeedSearchField.radius);
+    return Tooltip(
+      message: '已缓存',
+      child: Semantics(
+        button: true,
+        label: '已缓存',
+        child: Material(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: radius,
+          child: InkWell(
+            borderRadius: radius,
+            onTap: onTap,
+            child: SizedBox(
+              height: FeedSearchField.height,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Center(
+                  child: Text(
+                    '已缓存',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

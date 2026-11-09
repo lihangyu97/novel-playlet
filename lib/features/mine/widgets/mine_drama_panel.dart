@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../app/router.dart';
 import '../../../app/widgets/cover_hero.dart';
+import '../../../app/widgets/novel_cover.dart';
 import '../../../app/widgets/states.dart';
 import '../../../core/storage/reading_store.dart';
 import '../../../data/models/json_utils.dart';
@@ -31,7 +32,7 @@ class MineDramaPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineDramaDataProvider);
     final data = async.value;
-    final metrics = MineGridMetrics.of(context);
+    final metrics = MineGridMetrics.of(context, coverAspect: kVideoCoverAspect);
     return PanelShell<MineDramaData>(
       data: data,
       progress: progress,
@@ -77,6 +78,7 @@ class MineDramaPanel extends ConsumerWidget {
             itemWidth: metrics.itemWidth,
             itemHeight: metrics.itemHeight,
             spacing: MineGridMetrics.spacing,
+            coverAspect: kVideoCoverAspect,
             heroTagOf: (item) =>
                 CoverHeroTag.video('mine-drama-shelf', item.id),
             onOpen: (item) => _openDetail(context, item),

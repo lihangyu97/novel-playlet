@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
+import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/feed/feed_results.dart';
 import 'package:novel_playlet/features/feed/feed_search_field.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
@@ -180,83 +181,38 @@ void main() {
     );
   });
 
-  /// C：上滑浏览时搜索框整条收起，tabs 保留；回到顶部再展开。
-  testWidgets('推荐页-上滑收起搜索框、tabs 保留、回顶展开', (tester) async {
+  /// 搜索框常驻顶部：上滑多深都不收起、位置不挪，tabs 照旧在。
+  testWidgets('推荐页-搜索框常驻顶部不随滚动收起', (tester) async {
     final fake = FakePreviewTransport()..novelItemCount = 30;
     await pumpPreview(tester, const RecommendPage(), transport: fake);
-    expect(find.byType(FeedSearchField), findsOneWidget);
+    final before = tester.getTopLeft(find.byType(FeedSearchField));
 
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(FeedSearchField), findsNothing, reason: '上滑后搜索框应收起');
-    expect(find.text('小说'), findsOneWidget, reason: 'tabs 必须保留，否则切不了分类');
-
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, 300));
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(FeedSearchField), findsOneWidget, reason: '回到顶部应重新展开');
-  });
-
-  /// 搜索态不能收起：输入框正在被使用，藏起来用户就不知道自己在搜什么。
-  testWidgets('推荐页-搜索态下滚动不收起搜索框', (tester) async {
-    final fake = FakePreviewTransport()..searchItemCount = 30;
-    await pumpPreview(tester, const RecommendPage(), transport: fake);
-    await tester.enterText(find.byType(TextField), '剑来');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(
       find.byType(FeedSearchField),
       findsOneWidget,
-      reason: '搜索态必须保持搜索框可见',
+      reason: '搜索框必须常驻，不能随上滑收起',
     );
+    expect(find.text('小说'), findsOneWidget, reason: 'tabs 必须一起保留');
+    expect(
+      tester.getTopLeft(find.byType(FeedSearchField)),
+      before,
+      reason: '常驻时搜索框位置不应变化',
+    );
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, 600));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(FeedSearchField), findsOneWidget);
   });
 
-  /// 各分类的折叠状态独立：短剧没滚过要展开，切回已滚动的小说要继续收起。
-  /// 收起后左右切分类不能把搜索框弹回来：折叠是页面级状态，与各分类
-  /// 自己的滚动位置无关（即使切到的分类还停在顶部）。
-  testWidgets('推荐页-收起后切分类保持收起', (tester) async {
-    final fake = FakePreviewTransport()..novelItemCount = 30;
-    await pumpPreview(tester, const RecommendPage(), transport: fake);
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
+  /// 搜索框右侧的「已缓存」入口直接进缓存中心。
+  testWidgets('推荐页-已缓存入口打开缓存中心', (tester) async {
+    await pumpPreview(tester, const RecommendPage());
+    expect(find.text('已缓存'), findsOneWidget);
+    await tester.tap(find.text('已缓存'));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(FeedSearchField), findsNothing);
-
-    await tester.tap(find.text('短剧'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(
-      find.byType(FeedSearchField),
-      findsNothing,
-      reason: '切到未滚动的分类也不应重新展开搜索框',
-    );
-    expect(find.text('短剧'), findsOneWidget);
-
-    await tester.tap(find.text('小说'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(FeedSearchField), findsNothing, reason: '切回来仍保持收起');
-  });
-
-  /// 深处回落立即展开：滚得很深时，往回滑的第一下就要看到搜索框，
-  /// 不能等一路滚回顶部才展开。
-  testWidgets('推荐页-深滚动后往回滑立即展开', (tester) async {
-    final fake = FakePreviewTransport()..novelItemCount = 30;
-    await pumpPreview(tester, const RecommendPage(), transport: fake);
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(FeedSearchField), findsNothing);
-    final deepOffset = verticalOffset(tester);
-    expect(deepOffset, greaterThan(300), reason: '前置条件：确实滚了很远');
-
-    // 往回滑一小段（仍在很深的位置）：搜索框必须立刻出现。
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, 80));
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(FeedSearchField), findsOneWidget, reason: '往回滑应立即展开搜索框');
-    expect(
-      verticalOffset(tester),
-      greaterThan(300),
-      reason: '展开不依赖滚回顶部：此时仍应处于深滚动位置',
-    );
+    expect(find.byType(CacheCenterPage), findsOneWidget);
   });
 
   /// 封面尺寸回归：推荐流按内容域原生比例出封面（小说 240×320、短剧/漫剧 400×571，都是高/宽）。
@@ -373,9 +329,13 @@ void main() {
     );
   });
 
-  /// 搜索态也统一：三个分类都是横向列表 + 同一套条目，封面同宽同高。
-  testWidgets('封面尺寸-三个分类的搜索结果一致', (tester) async {
-    Future<Size> searchOn(String query, {String? tab}) async {
+  /// 搜索态：三个分类共用同一套条目，但封面高宽比跟各自分类走。
+  testWidgets('封面尺寸-各分类搜索结果使用原生比例', (tester) async {
+    Future<Size> searchOn(
+      String query, {
+      String? tab,
+      required double aspect,
+    }) async {
       await pumpPreview(tester, const RecommendPage());
       if (tab != null) {
         await tester.tap(find.text(tab));
@@ -392,19 +352,21 @@ void main() {
         FeedResultTile.coverWidth,
         reason: '搜索结果封面宽度应走 FeedResultTile.coverWidth',
       );
-      expect(
-        sizes.first.height / sizes.first.width,
-        closeTo(kCoverAspect, 0.001),
-      );
+      expect(sizes.first.height / sizes.first.width, closeTo(aspect, 0.001));
       return sizes.first;
     }
 
-    final novel = await searchOn('剑来');
-    final drama = await searchOn('太奶奶', tab: '短剧');
-    final anime = await searchOn('漫剧', tab: '漫剧');
+    final novel = await searchOn('剑来', aspect: kNovelCoverAspect);
+    final drama = await searchOn('太奶奶', tab: '短剧', aspect: kVideoCoverAspect);
+    final anime = await searchOn('漫剧', tab: '漫剧', aspect: kVideoCoverAspect);
 
-    expect(drama, novel, reason: '短剧与小说搜索结果封面尺寸必须一致');
-    expect(anime, novel, reason: '漫剧与小说搜索结果封面尺寸必须一致');
+    expect(drama.width, novel.width, reason: '搜索结果封面同宽');
+    expect(
+      drama.height,
+      greaterThan(novel.height),
+      reason: '短剧 7:10 比小说 3:4 高',
+    );
+    expect(anime.height, closeTo(drama.height, 0.001), reason: '漫剧同 7:10');
   });
 
   group('封面 Hero 飞入', () {

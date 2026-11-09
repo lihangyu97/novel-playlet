@@ -17,6 +17,7 @@ class MineShelfGrid extends StatelessWidget {
     required this.itemWidth,
     required this.itemHeight,
     required this.spacing,
+    required this.coverAspect,
     required this.onOpen,
     required this.onLongPress,
     this.heroTagOf,
@@ -27,6 +28,9 @@ class MineShelfGrid extends StatelessWidget {
   final double itemWidth;
   final double itemHeight;
   final double spacing;
+
+  /// 封面原生比例（高 / 宽）：小说 3:4。
+  final double coverAspect;
   final ValueChanged<NovelItem> onOpen;
   final ValueChanged<NovelItem> onLongPress;
 
@@ -51,6 +55,7 @@ class MineShelfGrid extends StatelessWidget {
       cardBuilder: (item, heroTag) => NovelGridCard(
         item: item,
         width: itemWidth,
+        coverAspect: coverAspect,
         onTap: () => onOpen(item),
         heroTag: heroTag,
       ),

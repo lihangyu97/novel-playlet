@@ -124,7 +124,7 @@ void main() {
     expect(verticalOffset(tester), 0, reason: '再次点击推荐应滚回顶部');
   });
 
-  testWidgets('首页-滚动后顶部收起', (tester) async {
+  testWidgets('首页-滚动后搜索框常驻顶部', (tester) async {
     final fake = FakePreviewTransport()..novelItemCount = 30;
     await pumpPreview(tester, const HomeShell(), transport: fake);
     await tester.drag(
@@ -132,7 +132,11 @@ void main() {
       const Offset(0, -420),
     );
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(FeedSearchField), findsNothing);
+    expect(
+      find.byType(FeedSearchField),
+      findsOneWidget,
+      reason: '搜索框常驻顶部，滚动后也不收起',
+    );
     expect(find.text('小说'), findsOneWidget);
     await expectLater(
       find.byType(HomeShell),

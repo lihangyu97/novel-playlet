@@ -34,9 +34,6 @@ class MinePage extends ConsumerStatefulWidget {
   static const dramaPanelKey = Key('mine-panel-drama');
   static const switchButtonKey = Key('mine-panel-switch');
 
-  /// 右下角悬浮「缓存」入口（切换按钮左侧）。
-  static const cacheButtonKey = Key('mine-cache-entry');
-
   @override
   ConsumerState<MinePage> createState() => _MinePageState();
 }
@@ -62,10 +59,6 @@ class _MinePageState extends ConsumerState<MinePage>
 
   void _openSettings() {
     context.pushAppRoute(const SettingsRoute());
-  }
-
-  void _openCacheCenter() {
-    context.pushAppRoute(const CacheCenterRoute());
   }
 
   void _togglePanel() => _animateTo(_panel == 1 ? 0 : 1);
@@ -183,25 +176,15 @@ class _MinePageState extends ConsumerState<MinePage>
                 ),
               ),
             ),
-            // 右下角两个悬浮按钮：缓存中心 + 小说/短剧切换。都贴在悬浮底栏
-            // 上方，缓存入口固定在切换按钮左侧，不遮胶囊。
+            // 右下角只剩面板切换按钮：缓存入口已挪到推荐页搜索框右侧的
+            // 「已缓存」按钮，不再悬浮在这一页（避免和胶囊/切换按钮挤在一起）。
             Positioned(
               right: 16,
               bottom: widget.bottomInset + 16,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _CacheCenterButton(
-                    key: MinePage.cacheButtonKey,
-                    onTap: _openCacheCenter,
-                  ),
-                  const SizedBox(width: 12),
-                  _PanelSwitchButton(
-                    key: MinePage.switchButtonKey,
-                    showingDrama: _showingDrama,
-                    onTap: _togglePanel,
-                  ),
-                ],
+              child: _PanelSwitchButton(
+                key: MinePage.switchButtonKey,
+                showingDrama: _showingDrama,
+                onTap: _togglePanel,
               ),
             ),
           ],
@@ -221,47 +204,6 @@ class _MinePageState extends ConsumerState<MinePage>
           child: ExcludeSemantics(excluding: !settled, child: child),
         );
       },
-    );
-  }
-}
-
-/// 悬浮「缓存中心」按钮：与 [_PanelSwitchButton] 同一套圆形悬浮样式，但用
-/// secondaryContainer 配色与主色切换按钮区分开，避免两个按钮抢注意力。
-class _CacheCenterButton extends StatelessWidget {
-  const _CacheCenterButton({super.key, required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: '缓存中心',
-      child: Semantics(
-        button: true,
-        label: '缓存中心',
-        child: Material(
-          color: scheme.secondaryContainer,
-          shape: const CircleBorder(),
-          elevation: 4,
-          shadowColor: Colors.black38,
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: SizedBox(
-              width: 52,
-              height: 52,
-              child: Center(
-                child: Icon(
-                  Icons.download_outlined,
-                  size: 24,
-                  color: scheme.onSecondaryContainer,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

@@ -30,8 +30,8 @@
 4. UI 文案用中文；注释写"为什么"，不要写"做了什么"。
 5. 只用 Material 3 + `Theme.of(context).colorScheme`，不要硬编码颜色（阅读页底色用 `ReaderPaper`；推荐流卡片的纯白底 / 暗色底统一走 `AppTheme.mediaCardColor`）。
 6. 列表图片一律走 `NovelCover`（处理空 URL/失败），不要裸 `Image.network`。
-7. 封面一律取缩略图：解析时用 `lib/data/models/json_utils.dart` 的 `coverKeys`（`thumb_url` 优先），不要回退到 `detail_page_thumb_url` / `cover` 之外的大图。封面位宽度：推荐流双列约 173pt / 三列约 111pt，书架等其它入口仍 ≤108pt，详情 Hero 也只有 96×132；`NovelCover` 按 `width * dpr` 解图，卡片变宽会自动跟着涨，不要手动写死解码宽度。书架与阅读进度会把 `cover` 落盘，存大图 URL 等于永久多付带宽。
-8. 封面像素比例：`kCoverAspect`（`lib/app/widgets/novel_cover.dart`，11:8）是**默认**，搜索结果、书架、最近阅读、详情封面继续用它，不要各写 `1.38` / `4/3` 这类字面量。推荐流瀑布流是例外：卡片不定高，按内容域原生比例出图（`kNovelCoverAspect` = 320/240，`kVideoCoverAspect` = 571/400），这样封面不被裁切、卡片自然错落；接口不返回封面尺寸，不要按单张图解码量尺寸（会在瀑布流里二次重排）。
+7. 封面一律取缩略图：解析时用 `lib/data/models/json_utils.dart` 的 `coverKeys`（`thumb_url` 优先），不要回退到 `detail_page_thumb_url` / `cover` 之外的大图。封面位宽度：推荐流双列约 173pt / 三列约 111pt，书架等其它入口仍 ≤108pt；详情页封面铺成整屏宽模糊背景（`DetailCoverBackdrop`），大图也用不上。`NovelCover` 按 `width * dpr` 解图，卡片变宽会自动跟着涨，不要手动写死解码宽度。书架与阅读进度会把 `cover` 落盘，存大图 URL 等于永久多付带宽。
+8. 封面像素比例按内容类型取**上游原生比例**：小说 `kNovelCoverAspect`（320/240 = 4:3）、短剧/漫剧 `kVideoCoverAspect`（571/400 ≈ 10:7），定义在 `lib/app/widgets/novel_cover.dart`，由卡片类型/面板显式传入。推荐流瀑布流、搜索结果、书架、最近阅读、缓存中心都用原生比例，封面不被裁切；小说与短剧封面高度因此不同（7:10 比 3:4 高约 7%），切分类 tab 时卡片会变高，属预期。`kCoverAspect`（11:8）只作为 `MediaCard` / `NovelGridCard` / `VideoCard` 的默认值保留，页面入口不要依赖默认值。接口不返回封面尺寸，不要按单张图解码量尺寸（会在瀑布流里二次重排）。
 
 ## 数据层 API（已完成，直接用）
 
@@ -221,7 +221,7 @@ context.pushAppRoute(const CacheCenterRoute());    // 我的 → 缓存的下载
 
 ## 测试与工程质量
 
-- UI 测试在 `test/ui/`（按页面拆：recommend / home / detail / video / reader / mine / settings / 缓存中心，共享 `test/ui/preview_harness.dart`），共 26 张 golden（已有 23 张，本分支新增 `feed_staggered_grid` / `recommend_three_columns` / `recommend_dark` 三张，并需 `--update-goldens` 重生成 recommend / home / settings 相关 9 张）；瀑布流布局本身另有 `test/ui/feed_staggered_grid_test.dart`（不定高卡片按列排 + 双列/三列基线），推荐布局偏好见 `test/recommend_layout_test.dart`；根目录 `test/*_test.dart` 是解析 / 缓存 / 并发 / 存储 / 主题测试。
+- UI 测试在 `test/ui/`（按页面拆：recommend / home / detail / video / reader / mine / settings / 缓存中心，共享 `test/ui/preview_harness.dart`），共 27 张 golden；瀑布流布局本身另有 `test/ui/feed_staggered_grid_test.dart`（不定高卡片按列排 + 双列/三列基线），推荐布局偏好见 `test/recommend_layout_test.dart`；根目录 `test/*_test.dart` 是解析 / 缓存 / 并发 / 存储 / 主题测试。
 - 评论/段评：`test/comment_models_test.dart`（响应形状 + 段落锚点）、`test/reader_comments_sheet_test.dart`（面板分页/回复/失败态）、`test/reader_pagination_bubble_test.dart`（气泡占位与重排）、`test/ui/detail_reviews_test.dart`（书评卡片/弹窗）。
 - 真机性能 harness：`integration_test/reader_pagination_perf_test.dart`（`flutter drive --profile`，不进 `flutter test` / CI；结论见 `docs/implementation.md` §8）。
 - CI 在 `.github/workflows/ci.yml`：Dart format / analyze / test、Rust fmt / clippy / test、FRB 绑定漂移校验、iOS 无签名构建。本地等价命令 `make check`（只做格式化用 `make format`）。
@@ -229,11 +229,11 @@ context.pushAppRoute(const CacheCenterRoute());    // 我的 → 缓存的下载
 
 ## 页面清单（已实现）
 
-1. 推荐页：顶部搜索输入框（40pt；继续往下浏览时整条收起、分类 tabs 吸顶；往回滚第一下立即展开、搜索态保持展开；收起后切分类保持收起）+ 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧）+ 各分类推荐流（白底卡片 + 不定高瀑布流，默认双列、设置里可切三列；封面按内容域原生比例出图；底部导航只剩「推荐 / 我的」）
+1. 推荐页：顶部**常驻**搜索输入框（40pt、圆角 10，不随列表滚动收起；右侧固定「已缓存」圆角按钮 → 缓存中心）+ 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧）+ 各分类推荐流（白底卡片 + 不定高瀑布流，默认双列、设置里可切三列；左右留白与行/列间距都 8；封面按内容域原生比例出图；底部导航只剩「推荐 / 我的」）
 2. 详情页：封面/书名/作者/分类/状态/字数/简介/标签 + 书评卡片（首条 + 弹窗查看全部）+ 目录 + 底部「开始阅读」
 3. 阅读页：分页正文 + 段评气泡 + 工具栏「评论」/评论面板（分页/回复只读）+ 点击呼出工具栏 + 上一章/下一章 + 字号/行距/底色/段评气泡开关 + 进度保存
-4. 我的页：小说 / 短剧两块镜像面板（右下角悬浮切换按钮或左右滑动切换；切换按标题/最近/书架三块 0/100/200ms 阶梯延迟）- 小说侧 = 书架 + 最近阅读；短剧侧 = 收藏网格 + 最近观看（点击直接续播对应集）；两面板共用 `PanelShell`；右下角悬浮按钮组 = 缓存中心入口（固定）+ 小说/短剧切换按钮，设置入口只有一枚、在小说面板时靠右、短剧面板时靠左，切换时随面板在屏幕内移动
+4. 我的页：小说 / 短剧两块镜像面板（右下角悬浮切换按钮或左右滑动切换；切换按标题/最近/书架三块 0/100/200ms 阶梯延迟）- 小说侧 = 书架 + 最近阅读；短剧侧 = 收藏网格 + 最近观看（点击直接续播对应集）；两面板共用 `PanelShell`；右下角只剩小说/短剧悬浮切换按钮（缓存入口已移到推荐页搜索框右侧，不再悬浮在这一页），设置入口只有一枚、在小说面板时靠右、短剧面板时靠左，切换时随面板在屏幕内移动
 5. 设置页：主题色（3 个预设 + HSV 自定义取色，全站生效并持久化）+ 深浅色模式（跟随系统 / 手动深色，持久化）+ 首页推荐布局（双列 / 三列二选一，默认双列，持久化）+ 存储占用与清理（离线缓存提示去「我的 → 缓存」页处理）
-6. 缓存中心：我的右下角悬浮按钮进入；小说/短剧分区列出下载中/排队中/已下载，进度条 + 实时网速，暂停/继续/重试/取消排队，M3 删除与按区清空（确认框），点条目 Hero 进详情
+6. 缓存中心：推荐页搜索框右侧「已缓存」按钮进入（不再是「我的」页悬浮按钮）；小说/短剧分区列出下载中/排队中/已下载，进度条 + 实时网速，暂停/继续/重试/取消排队，M3 删除与按区清空（确认框），点条目 Hero 进详情
 
 不在本期范围：听书、漫画、登录；评论/段评只做**只读**（不发评论、不点赞、不回复）。
