@@ -32,13 +32,13 @@ class FeedStaggeredGrid<T> extends StatelessWidget {
   static const double horizontalPadding = 16;
 
   /// 列间距。
-  static const double crossAxisSpacing = 12;
+  static const double crossAxisSpacing = 8;
 
   /// 行间距：瀑布流里上下两张卡之间的距离。
   ///
-  /// 比旧三列网格的 16 小一档：白底卡片本身有底色边界，行间距再大整页会显得
-  /// 松散；12 在双列卡片之间仍能看清两列。
-  static const double mainAxisSpacing = 12;
+  /// 比旧三列网格的 16 小两档：白底卡片本身有底色边界，行间距再大整页会显得
+  /// 松散；8 在双列卡片之间仍能看清两列（原 12 再收 2/3）。
+  static const double mainAxisSpacing = 8;
 
   @override
   Widget build(BuildContext context) {
