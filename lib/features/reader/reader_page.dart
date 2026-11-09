@@ -153,6 +153,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       _chapterTransition.forward(from: 0);
     });
 
+    // 气泡从「关」切回「开」：当前正文若是老缓存（没有段落锚点），立刻补取
+    // 一次，否则要等重进本章才看得到气泡。
+    ref.listen<ReaderSettings>(readerSettingsProvider, (previous, next) {
+      if (previous == null || previous.showBubbles == next.showBubbles) return;
+      if (next.showBubbles) controller.ensureAnchorUpgrade();
+    });
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: _overlayStyle(paper),
       child: Scaffold(
@@ -167,7 +174,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTapUp: _handleTap,
-                  child: _buildBody(session, settings, controller, ideas),
+                  // 正文里的段评气泡按纸色取色（夜间纸色要用深色 scheme 才看得清），
+                  // 其余控件都显式传色，包一层主题只影响气泡与空/错态视图。
+                  child: Theme(
+                    data: _readerTheme(settings.paper),
+                    child: _buildBody(session, settings, controller, ideas),
+                  ),
                 ),
               ),
             ),
