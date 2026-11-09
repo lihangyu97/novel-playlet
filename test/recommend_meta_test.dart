@@ -57,10 +57,21 @@ void main() {
         ],
         'rank_score': '8479万热度',
         'score': '9.3',
+        'color_dominate': '#201818',
       });
       expect(item.recommendReason, '巅峰榜No.3');
       expect(item.rankScore, '8479万热度');
       expect(item.score, '9.3');
+      expect(item.colorDominate, '#201818');
+    });
+
+    test('小说：只带 back_color_dominate 时退用它当封面占位色', () {
+      final item = NovelItem.fromRaw({
+        'book_id': '2',
+        'book_name': '书名2',
+        'back_color_dominate': '#131F37',
+      });
+      expect(item.colorDominate, '#131F37');
     });
 
     test('短剧：JSON 串理由 + rec_text 热度 + score', () {
@@ -84,6 +95,7 @@ void main() {
                               '"rec_tags":[{"content":"系列剧·40万人在追"}]}',
                           'rec_text': '4691万热度',
                           'show_rec_text': true,
+                          'color_dominate': '#2F1B36',
                         },
                       ],
                     },
@@ -98,6 +110,7 @@ void main() {
       expect(items.first.recommendReason, '系列剧·40万人在追');
       expect(items.first.rankScore, '4691万热度');
       expect(items.first.score, '8.2');
+      expect(items.first.colorDominate, '#2F1B36');
     });
 
     test('短剧：show_rec_text=false 时不把 rec_text 当热度', () {

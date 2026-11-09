@@ -7,8 +7,9 @@ import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 
-/// 推荐流小说卡片的元信息优先级：推荐理由 → 热度（rank_score）→ 作者；
-/// 评分不进元信息行，单独放封面右上角角标。书架等入口保持作者/分类。
+/// 推荐流小说卡片的元信息：书名下方固定显示作者（作者空退回分类），
+/// 推荐理由 / 热度（rank_score）各自一行、有就显示；评分不进元信息行，
+/// 单独放封面右上角角标。书架等入口保持作者/分类单行。
 void main() {
   Widget wrap(Widget child) => MaterialApp(
     theme: ThemeData(useMaterial3: true),
@@ -22,6 +23,7 @@ void main() {
     String reason = '',
     String rank = '',
     bool enabled = true,
+    bool reasonOnCover = false,
   }) {
     return NovelGridCard(
       item: NovelItem(
@@ -35,26 +37,81 @@ void main() {
       ),
       onTap: () {},
       showRecommendMeta: enabled,
+      reasonOnCover: reasonOnCover,
     );
   }
 
-  testWidgets('推荐理由优先于热度；评分在封面右上角角标', (tester) async {
+  testWidgets('作者无条件显示；推荐理由与热度各自一行（有就显示）', (tester) async {
     await tester.pumpWidget(
       wrap(card(reason: '巅峰榜No.3', rank: '8479万热度', score: '9.3')),
     );
+    expect(find.text('作者'), findsOneWidget, reason: '作者固定显示，不被理由/热度顶掉');
     expect(find.text('巅峰榜No.3'), findsOneWidget);
-    expect(find.text('8479万热度'), findsNothing);
-    expect(find.text('作者'), findsNothing, reason: '有推荐理由时不显示作者');
+    expect(find.text('8479万热度'), findsOneWidget);
     expect(find.text('9.3分'), findsOneWidget, reason: '评分显示在角标上');
   });
 
-  testWidgets('没有推荐理由时展示热度', (tester) async {
+  group('双列：理由上封面 + 热度右对齐', () {
+    testWidgets('推荐理由在封面角标，热度与作者同一行靠右', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          card(
+            reason: '巅峰榜No.3',
+            rank: '8479万热度',
+            score: '9.3',
+            reasonOnCover: true,
+          ),
+        ),
+      );
+      expect(find.text('巅峰榜No.3'), findsOneWidget);
+      expect(find.text('作者'), findsOneWidget);
+      expect(find.text('8479万热度'), findsOneWidget);
+      final titleY = tester.getTopLeft(find.text('书名')).dy;
+      expect(
+        tester.getTopLeft(find.text('巅峰榜No.3')).dy,
+        lessThan(titleY),
+        reason: '推荐理由在封面角标上，不占文字区',
+      );
+      final author = tester.getTopLeft(find.text('作者'));
+      final heat = tester.getTopLeft(find.text('8479万热度'));
+      expect(heat.dy, closeTo(author.dy, 0.5), reason: '热度与作者同一行');
+      expect(heat.dx, greaterThan(author.dx), reason: '热度靠右，行尾不空着');
+    });
+
+    testWidgets('没有理由/热度时只剩作者一行', (tester) async {
+      await tester.pumpWidget(wrap(card(score: '9.3', reasonOnCover: true)));
+      expect(find.text('作者'), findsOneWidget);
+      expect(find.textContaining('巅峰榜'), findsNothing);
+    });
+  });
+
+  testWidgets('行序：书名 → 作者 → 推荐理由 → 热度', (tester) async {
+    await tester.pumpWidget(
+      wrap(card(reason: '巅峰榜No.3', rank: '8479万热度', score: '9.3')),
+    );
+    final titleY = tester.getTopLeft(find.text('书名')).dy;
+    final authorY = tester.getTopLeft(find.text('作者')).dy;
+    final reasonY = tester.getTopLeft(find.text('巅峰榜No.3')).dy;
+    final rankY = tester.getTopLeft(find.text('8479万热度')).dy;
+    expect(titleY, lessThan(authorY), reason: '作者紧贴书名下方');
+    expect(authorY, lessThan(reasonY));
+    expect(reasonY, lessThan(rankY));
+  });
+
+  testWidgets('只有热度：作者 + 热度两行', (tester) async {
     await tester.pumpWidget(wrap(card(rank: '8479万热度', score: '9.3')));
+    expect(find.text('作者'), findsOneWidget);
     expect(find.text('8479万热度'), findsOneWidget);
     expect(find.text('9.3分'), findsOneWidget);
   });
 
-  testWidgets('没有理由/热度时展示作者；评分只进角标', (tester) async {
+  testWidgets('只有推荐理由：作者 + 理由两行', (tester) async {
+    await tester.pumpWidget(wrap(card(reason: '巅峰榜No.3', score: '9.3')));
+    expect(find.text('作者'), findsOneWidget);
+    expect(find.text('巅峰榜No.3'), findsOneWidget);
+  });
+
+  testWidgets('没有理由/热度时只有作者一行；评分只进角标', (tester) async {
     await tester.pumpWidget(wrap(card(score: '9.3')));
     expect(find.text('作者'), findsOneWidget);
     expect(find.text('作者 · 9.3分'), findsNothing, reason: '评分不再混在作者行里');
@@ -69,17 +126,17 @@ void main() {
     }
   });
 
-  testWidgets('作者缺失：评分仍只显示在角标', (tester) async {
-    await tester.pumpWidget(wrap(card(author: '', score: '8.8')));
-    expect(find.text('8.8分'), findsOneWidget);
-  });
-
   testWidgets('作者缺失时退回分类；评分只进角标', (tester) async {
     await tester.pumpWidget(
       wrap(card(author: '', category: '玄幻', score: '9.0')),
     );
     expect(find.text('玄幻'), findsOneWidget);
     expect(find.text('9.0分'), findsOneWidget);
+  });
+
+  testWidgets('作者与分类都缺失：元信息行无文案，评分仍只在角标', (tester) async {
+    await tester.pumpWidget(wrap(card(author: '', score: '8.8')));
+    expect(find.text('8.8分'), findsOneWidget);
   });
 
   testWidgets('标题只有一行时也占两行高度：同排卡片元信息行对齐', (tester) async {

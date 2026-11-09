@@ -72,31 +72,59 @@ void main() {
     );
   });
 
-  testWidgets('推荐页-小说卡元信息按「推荐理由 → 热度 → 作者」，评分在角标', (tester) async {
+  testWidgets('推荐页-小说卡：作者固定一行，推荐理由/热度各自有就显示', (tester) async {
     await pumpPreview(tester, const RecommendPage());
-    // fake 推荐流：i%3==1 带 rank_score，i%3==2 只有作者，i%3==0 带推荐理由。
-    expect(find.text('1万热度'), findsOneWidget, reason: '无理由时展示热度');
-    expect(find.text('爱潜水的乌贼'), findsOneWidget, reason: '无理由/热度时退回作者');
-    expect(find.text('巅峰榜No.3'), findsOneWidget, reason: '有推荐理由时优先展示');
+    // fake 推荐流：每本都有作者；i%3==0 带推荐理由，i%3==1 带 rank_score。
+    expect(find.text('1万热度'), findsWidgets, reason: '热度有就显示（i=1）');
+    expect(find.text('巅峰榜No.3'), findsWidgets, reason: '推荐理由有就显示（i=3）');
+    expect(find.text('烽火戏诸侯'), findsWidgets, reason: '作者无条件显示');
+    // 双列：热度右对齐到作者同一行，行尾不空着；作者不被顶掉。
+    final heatCard = find.ancestor(
+      of: find.text('1万热度').first,
+      matching: find.byType(NovelGridCard),
+    );
+    final authorInHeatCard = find.descendant(
+      of: heatCard,
+      matching: find.text('烽火戏诸侯'),
+    );
+    expect(authorInHeatCard, findsOneWidget, reason: '作者与热度显示在同一张卡上');
+    expect(
+      tester.getTopLeft(find.text('1万热度').first).dy,
+      closeTo(tester.getTopLeft(authorInHeatCard).dy, 0.5),
+      reason: '热度与作者同一行',
+    );
+    expect(
+      tester.getTopLeft(find.text('1万热度').first).dx,
+      greaterThan(tester.getTopLeft(authorInHeatCard).dx),
+      reason: '热度靠右',
+    );
+    final reasonCard = find.ancestor(
+      of: find.text('巅峰榜No.3').first,
+      matching: find.byType(NovelGridCard),
+    );
+    expect(
+      find.descendant(of: reasonCard, matching: find.text('卖报小郎君')),
+      findsOneWidget,
+      reason: '作者与推荐理由显示在同一张卡上',
+    );
     // 评分从作者行移到封面右上角角标（i=1 8.8 / i=2 9.3）。
     expect(find.text('8.8分'), findsWidgets, reason: '评分在封面右上角角标');
     expect(find.text('9.3分'), findsWidgets, reason: '评分在封面右上角角标');
   });
 
-  testWidgets('推荐页-短剧卡元信息按同一优先级（理由 → 热度 → 集数 · 评分）', (tester) async {
+  testWidgets('推荐页-短剧卡：集数固定一行，推荐理由/热度各自有就显示', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     await tester.tap(find.text('短剧'));
     await tester.pumpAndSettle();
-    // 集数永远在最前；i=3/6/9 带推荐理由，i=1 带 rec_text，i=2 只有集数+评分。
+    // i=3/6/9 带推荐理由，i=1 带 rec_text（热度），i=2 只有集数。
+    expect(find.text('全 43 集'), findsOneWidget, reason: '集数固定一行');
+    expect(find.text('系列剧·40万人在追'), findsWidgets, reason: '推荐理由单独一行，有就显示');
+    expect(find.text('全 41 集'), findsOneWidget);
+    expect(find.text('10万热度'), findsOneWidget, reason: '热度有就显示');
     expect(
-      find.text('全 43 集 · 系列剧·40万人在追'),
-      findsOneWidget,
-      reason: '集数在最前，有推荐理由时优先展示',
-    );
-    expect(
-      find.text('全 41 集 · 10万热度'),
-      findsOneWidget,
-      reason: '无理由时展示「集数 + rec_text 热度」',
+      tester.getTopLeft(find.text('10万热度')).dy,
+      closeTo(tester.getTopLeft(find.text('全 41 集')).dy, 0.5),
+      reason: '双列：热度与集数同一行（右对齐）',
     );
     expect(find.text('全 42 集'), findsOneWidget, reason: '没有理由/热度时只显示集数');
     // 评分进封面角标（短剧 i=1 8.0 / i=2 8.2）。

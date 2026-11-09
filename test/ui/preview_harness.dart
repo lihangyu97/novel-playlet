@@ -146,8 +146,8 @@ class FakePreviewTransport extends BackendTransport {
                                 'series_cover': videoCoverUrl,
                                 'episode_cnt': '${40 + i}',
                                 'score': i.isEven ? '8.2' : '8.0',
-                                // 优先推荐理由；其次 rec_text（热度）；都没有
-                                // 才退回「全 N 集 · 评分」。
+                                // 可选元信息：推荐理由 / rec_text（热度）各一行，
+                                // 有就显示；集数固定一行。
                                 if (i % 3 == 0) 'recommend_reason_list': '{"tag_info":{"text":"上新"},"rec_tags":[{"content":"系列剧·40万人在追"}]}',
                                 if (i % 3 == 1) 'rec_text': '${i * 10}万热度',
                                 if (i % 3 == 1) 'show_rec_text': true,
@@ -228,8 +228,11 @@ class FakePreviewTransport extends BackendTransport {
                                 'category': i.isEven ? '玄幻' : '都市',
                                 'word_number': '${i * 180000}',
                                 'score': i.isEven ? '9.3' : '8.8',
-                                // 元信息优先级：i%3==0 推荐理由 → i%3==1 热度 →
-                                // 其余走「作者 · 评分」。
+                                // 封面主色：真实响应 27/27 都带；封面没加载出来时当占位底色。
+                                'color_dominate':
+                                    _coverColors[(i - 1) % _coverColors.length],
+                                // 可选元信息：i%3==0 推荐理由，i%3==1 热度；
+                                // 作者固定一行，评分走封面角标。
                                 if (i % 3 == 0)
                                   'recommend_reason_list': [
                                     {'content': '巅峰榜No.$i'},
@@ -500,6 +503,19 @@ class FakePreviewTransport extends BackendTransport {
   ];
 
   static const _authors = ['烽火戏诸侯', '爱潜水的乌贼', '卖报小郎君', '会说话的肘子', '情何以甚'];
+
+  /// 封面主色样本（取自真实响应 `color_dominate`）：golden 里用它渲染占位色。
+  static const _coverColors = [
+    '#786858',
+    '#201818',
+    '#382820',
+    '#131F37',
+    '#202838',
+    '#A98F6D',
+    '#305018',
+    '#b87850',
+    '#c8d0d0',
+  ];
   static const _dramaTitles = [
     '十八岁太奶奶驾到，重整家族荣耀',
     '父皇，您别再逼我做皇帝了',

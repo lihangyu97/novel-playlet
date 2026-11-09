@@ -34,10 +34,12 @@ class RecommendPage extends ConsumerStatefulWidget {
   final double bottomInset;
 
   @override
-  ConsumerState<RecommendPage> createState() => _RecommendPageState();
+  ConsumerState<RecommendPage> createState() => RecommendPageState();
 }
 
-class _RecommendPageState extends ConsumerState<RecommendPage>
+/// 推荐页 State：对壳层暴露 [scrollActiveFeedToTop]，供底栏「再次点击推荐」
+/// 时把当前分类的列表平滑滚回顶部。
+class RecommendPageState extends ConsumerState<RecommendPage>
     with SingleTickerProviderStateMixin {
   static const _categories = RecommendCategory.values;
 
@@ -47,6 +49,13 @@ class _RecommendPageState extends ConsumerState<RecommendPage>
   );
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
+
+  /// 每个分类一条列表滚动控制器：分类页保活，滚动位置各自独立；
+  /// 底栏再次点「推荐」时只滚当前分类这一条。
+  final _feedControllers = <RecommendCategory, ScrollController>{};
+
+  ScrollController _feedControllerFor(RecommendCategory category) =>
+      _feedControllers.putIfAbsent(category, ScrollController.new);
 
   /// 折叠判定阈值（方向 + 位移）：
   /// - 向下滚够 [_collapseTravel] 且已离开顶部 [_collapseAt] 才收起，避免一点就收；
@@ -86,7 +95,28 @@ class _RecommendPageState extends ConsumerState<RecommendPage>
     _tabController.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
+    for (final controller in _feedControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
+  }
+
+  /// 当前分类的列表平滑滚回顶部。
+  ///
+  /// 由壳层在「已经处于推荐 tab 时再次点击推荐」时调用；已经在顶部就是无操作，
+  /// 不会白跑一次动画。别的分类保活着，位置不动。
+  void scrollActiveFeedToTop() {
+    final controller = _feedControllers[_activeCategory];
+    if (controller == null ||
+        !controller.hasClients ||
+        controller.offset <= 0) {
+      return;
+    }
+    controller.animateTo(
+      0,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _submitSearch(String raw) {
@@ -235,6 +265,7 @@ class _RecommendPageState extends ConsumerState<RecommendPage>
                       key: ValueKey(category),
                       category: category,
                       bottomInset: widget.bottomInset,
+                      scrollController: _feedControllerFor(category),
                     ),
                 ],
               ),
@@ -287,10 +318,14 @@ class _CategoryFeedPage extends ConsumerStatefulWidget {
     super.key,
     required this.category,
     required this.bottomInset,
+    required this.scrollController,
   });
 
   final RecommendCategory category;
   final double bottomInset;
+
+  /// 分类级滚动控制器（推荐页持有，用于底栏再次点击时回顶）。
+  final ScrollController scrollController;
 
   @override
   ConsumerState<_CategoryFeedPage> createState() => _CategoryFeedPageState();
@@ -393,6 +428,7 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
     return FeedView<RecommendItem>(
       state: data,
       bottomInset: widget.bottomInset,
+      controller: widget.scrollController,
       // 合并后分类本身就是标题，推荐态不再显示「为你推荐 / 短剧推荐」；
       // 搜索态保留「搜索结果」便于区分。
       title: isSearch ? '搜索结果' : null,
@@ -430,8 +466,10 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
                 width: width,
                 onTap: onTap,
                 heroTag: heroTag,
-                // 推荐流：推荐理由 → 热度 → 作者 · 评分；书架等入口不传。
+                // 推荐流：作者固定一行；双列时理由上封面角标、热度右对齐，
+                // 三列放不下就退回理由/热度各自一行。
                 showRecommendMeta: true,
+                reasonOnCover: layout.columns == 2,
                 surface: true,
                 naturalTitleHeight: true,
                 coverAspect: kNovelCoverAspect,
@@ -442,8 +480,9 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
                 width: width,
                 onTap: onTap,
                 heroTag: heroTag,
-                // 短剧/漫剧同规则：推荐理由 → 热度（rec_text）→ 集数 · 评分。
+                // 短剧/漫剧同规则：集数固定一行；双列理由上封面、热度右对齐。
                 showRecommendMeta: true,
+                reasonOnCover: layout.columns == 2,
                 surface: true,
                 naturalTitleHeight: true,
                 coverAspect: kVideoCoverAspect,

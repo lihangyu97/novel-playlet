@@ -17,6 +17,7 @@ class NovelItem {
     this.lastChapter = '',
     this.recommendReason = '',
     this.rankScore = '',
+    this.colorDominate = '',
   });
 
   final String id;
@@ -35,6 +36,10 @@ class NovelItem {
   /// 热度（`rank_score`，如「8479万热度」）；没有推荐理由时用它。
   final String rankScore;
 
+  /// 封面主色（上游 `color_dominate`，如 `#201818`；缺失时退
+  /// `back_color_dominate`）。封面图还没加载出来时用它当占位底色。
+  final String colorDominate;
+
   bool get isValid => id.isNotEmpty && title.isNotEmpty;
 
   /// 卡片字段优先，其次 `book_data` 内层。
@@ -51,6 +56,7 @@ class NovelItem {
     // 封面和 id/title 一样要回退到卡片层：有的 card 把 thumb_url 挂在外层、
     // book_data 里只放书名，只看内层会白丢一张图。
     final cover = firstString(inner, coverKeys);
+    final color = firstString(inner, coverColorKeys);
     return NovelItem(
       id: id.isEmpty ? firstString(raw, ['book_id', 'item_id', 'id']) : id,
       title: title.isEmpty ? firstString(raw, ['title', 'name']) : title,
@@ -68,6 +74,9 @@ class NovelItem {
       lastChapter: firstString(inner, ['last_chapter_title', 'last_chapter']),
       recommendReason: firstReasonText(inner['recommend_reason_list']),
       rankScore: firstString(inner, ['rank_score']),
+      colorDominate: color.isNotEmpty
+          ? color
+          : firstString(raw, coverColorKeys),
     );
   }
 
@@ -77,6 +86,7 @@ class NovelItem {
     'cover': cover,
     'author': author,
     'category': category,
+    if (colorDominate.isNotEmpty) 'colorDominate': colorDominate,
   };
 
   static NovelItem fromStorageJson(Map<String, dynamic> json) => NovelItem(
@@ -85,6 +95,7 @@ class NovelItem {
     cover: asString(json['cover']),
     author: asString(json['author']),
     category: asString(json['category']),
+    colorDominate: asString(json['colorDominate']),
   );
 
   /// 按"所有参与展示的字段"比较，不是只比 id：
@@ -104,7 +115,8 @@ class NovelItem {
       other.score == score &&
       other.lastChapter == lastChapter &&
       other.recommendReason == recommendReason &&
-      other.rankScore == rankScore;
+      other.rankScore == rankScore &&
+      other.colorDominate == colorDominate;
 
   @override
   int get hashCode => Object.hash(
@@ -119,5 +131,6 @@ class NovelItem {
     lastChapter,
     recommendReason,
     rankScore,
+    colorDominate,
   );
 }

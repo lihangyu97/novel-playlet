@@ -106,6 +106,8 @@ class VideoCardAdapter extends CardAdapter<VideoSeries> {
       rankScore: raw['show_rec_text'] == false
           ? ''
           : asString(raw['rec_text']).trim(),
+      // 封面主色：短剧 payload 未在抓包样本里确认，有就用于占位色。
+      colorDominate: firstString(raw, coverColorKeys),
     );
   }
 

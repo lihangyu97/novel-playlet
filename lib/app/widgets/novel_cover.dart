@@ -31,6 +31,22 @@ const double kCoverRadius = 10;
 const double kNovelCoverAspect = 320 / 240;
 const double kVideoCoverAspect = 571 / 400;
 
+/// 上游封面主色（`color_dominate`，如 `#201818` / `#AARRGGBB`）→ 占位底色。
+///
+/// 解析失败 / 空串返回 null（调用方退回系统灰占位）。上游偶尔给大写、
+/// 省略 `#`、或者 8 位带 alpha 的写法，这里都兼容。
+Color? coverPlaceholderColorOf(String raw) {
+  final value = raw.trim();
+  if (value.isEmpty) return null;
+  var hex = value.startsWith('#') ? value.substring(1) : value;
+  if (hex.length == 6) hex = 'FF$hex';
+  if (hex.length != 8) return null;
+  final parsed = int.tryParse(hex, radix: 16);
+  if (parsed == null) return null;
+  final color = Color(parsed);
+  return color.a == 0 ? null : color;
+}
+
 /// 统一的书籍封面：固定圆角、占位底色、失败兜底。
 ///
 /// 上游封面 URL 可能是 http、可能为空、可能 403，所以不能直接用
@@ -46,6 +62,7 @@ class NovelCover extends StatelessWidget {
     required this.width,
     required this.height,
     this.radius = kCoverRadius,
+    this.placeholderColor,
     this.fadeInDuration = const Duration(milliseconds: 120),
   });
 
@@ -54,6 +71,13 @@ class NovelCover extends StatelessWidget {
   final double height;
   final double radius;
 
+  /// 封面还没加载出来（或缺失）时的占位底色，来自上游 `color_dominate`；
+  /// null = 退回系统灰（[ColorScheme.surfaceContainerHighest]）。
+  ///
+  /// 用封面自己的主色垫底，加载过程就不会先闪一块灰：占位色和图片色调接近，
+  /// 首帧观感更稳，滚动时也不会一排灰块。
+  final Color? placeholderColor;
+
   /// 主图就绪后的淡入时长；详情页大封面传 [Duration.zero] 直接替换。
   final Duration fadeInDuration;
 
@@ -61,15 +85,22 @@ class NovelCover extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dpr = MediaQuery.devicePixelRatioOf(context);
+    final tint = placeholderColor;
     final placeholder = Container(
       width: width,
       height: height,
-      color: scheme.surfaceContainerHighest,
+      color: tint ?? scheme.surfaceContainerHighest,
       alignment: Alignment.center,
       child: Icon(
         Icons.menu_book_outlined,
         size: width * 0.4,
-        color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
+        // 占位色来自封面主色，深浅不定：亮底用深图标、暗底用浅图标，
+        // 否则 #201818 这类深色封面上书图标会糊成一片。
+        color: tint == null
+            ? scheme.onSurfaceVariant.withValues(alpha: 0.5)
+            : (tint.computeLuminance() > 0.5
+                  ? Colors.black.withValues(alpha: 0.28)
+                  : Colors.white.withValues(alpha: 0.28)),
       ),
     );
 
