@@ -19,8 +19,11 @@ class MineGridMetrics {
   /// 列间距（同时作为 GridView 的 crossAxisSpacing）。
   static const spacing = 8.0;
 
-  /// 卡片目标宽度：手机 3 列、iPad 自动增列。
-  static const _maxCardWidth = 128.0;
+  /// 卡片目标宽度：手机（含 402pt 的 iPhone 17）保持 3 列，宽屏自动增列。
+  ///
+  /// 左右留白收到 8 后可用宽度变宽，阈值从 128 提到 132，避免 402pt 机型
+  /// 因为 ceil(386 / 128) = 4 意外变成 4 列。
+  static const _maxCardWidth = 132.0;
 
   final int columns;
   final double itemWidth;
