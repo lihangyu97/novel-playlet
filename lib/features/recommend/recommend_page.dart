@@ -136,19 +136,21 @@ class RecommendPageState extends ConsumerState<RecommendPage>
   Widget build(BuildContext context) {
     final activeQuery = ref.watch(searchQueryProvider);
 
-    return SafeArea(
-      bottom: false,
-      child: Stack(
-        children: [
-          // 顶部固定模块（搜索框 + 分类 tabs）的蓝粉氛围渐变：固定不滚动。
-          const Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 116,
-            child: TopGlow(spec: kRecommendTopGlow),
-          ),
-          Column(
+    // 渐变要盖到状态栏那一条（安全区不参与布局），否则顶部会留一条纯白。
+    final topInset = MediaQuery.paddingOf(context).top;
+    return Stack(
+      children: [
+        // 顶部固定模块（搜索框 + 分类 tabs）的蓝粉氛围渐变：固定不滚动。
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 116 + topInset,
+          child: const TopGlow(spec: kRecommendTopGlow),
+        ),
+        SafeArea(
+          bottom: false,
+          child: Column(
             children: [
               // 搜索框常驻顶部，不随列表滚动收起；右侧固定「已缓存」入口。
               Padding(
@@ -197,8 +199,8 @@ class RecommendPageState extends ConsumerState<RecommendPage>
               ),
             ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

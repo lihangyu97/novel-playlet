@@ -208,6 +208,19 @@ void main() {
     expect(find.byType(FeedSearchField), findsOneWidget);
   });
 
+  /// 顶部渐变必须盖住状态栏（安全区）那一条，不能从状态栏下方才开始。
+  testWidgets('推荐页-顶部渐变盖住状态栏', (tester) async {
+    tester.view.padding = const FakeViewPadding(top: 44);
+    await pumpPreview(tester, const RecommendPage());
+    final glow = tester.getRect(find.byType(TopGlow));
+    expect(glow.top, 0, reason: '渐变必须从屏幕最顶端开始');
+    expect(
+      glow.height,
+      greaterThanOrEqualTo(116 + 44),
+      reason: '高度要包含状态栏安全区，否则顶部会留一条纯白',
+    );
+  });
+
   /// 搜索框右侧的「已缓存」入口直接进缓存中心。
   testWidgets('推荐页-已缓存入口打开缓存中心', (tester) async {
     await pumpPreview(tester, const RecommendPage());

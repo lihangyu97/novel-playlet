@@ -254,6 +254,19 @@ void main() {
     expect(find.text('短剧'), findsWidgets);
   });
 
+  /// 顶部渐变必须盖住状态栏（安全区）那一条。
+  testWidgets('我的页-顶部渐变盖住状态栏', (tester) async {
+    tester.view.padding = const FakeViewPadding(top: 44);
+    await pumpPreview(tester, const MinePage());
+    final glow = tester.getRect(find.byType(TopGlow));
+    expect(glow.top, 0, reason: '渐变必须从屏幕最顶端开始');
+    expect(
+      glow.height,
+      greaterThanOrEqualTo(150 + 44),
+      reason: '高度要包含状态栏安全区，否则顶部会留一条纯白',
+    );
+  });
+
   /// 顶部固定页头的氛围渐变：小说/短剧各一套角度，切换面板时过渡到另一套。
   testWidgets('我的页-页头渐变随面板切换过渡', (tester) async {
     await pumpPreview(tester, const MinePage());

@@ -121,93 +121,99 @@ class _MinePageState extends ConsumerState<MinePage>
     // 看剧存进度会让整个 MinePage（含两个面板、两个动画控制器、设置按钮）
     // 重建一次，而它还在 PageView 里 keep-alive，看不见时也照建。
     ref.listen(mineDramaDataProvider, (_, _) {});
+    // 渐变要盖到状态栏那一条（安全区不参与布局），否则顶部会留一条纯白。
+    final topInset = MediaQuery.paddingOf(context).top;
     return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Stack(
-          children: [
-            // 顶部固定模块（图标 + 标题 + 副标题）的氛围渐变：跟着面板切换进度
-            // 在小说/短剧两套渐变之间连续插值，左右滑动时背景是过渡而非硬切。
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 150,
-              child: AnimatedBuilder(
-                animation: _controller,
-                builder: (context, _) => TopGlow(
-                  spec: TopGlowSpec.lerp(
-                    kNovelTopGlow,
-                    kDramaTopGlow,
-                    _controller.value,
-                  ),
+      body: Stack(
+        children: [
+          // 顶部固定模块（图标 + 标题 + 副标题）的氛围渐变：跟着面板切换进度
+          // 在小说/短剧两套渐变之间连续插值，左右滑动时背景是过渡而非硬切。
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 150 + topInset,
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) => TopGlow(
+                spec: TopGlowSpec.lerp(
+                  kNovelTopGlow,
+                  kDramaTopGlow,
+                  _controller.value,
                 ),
               ),
             ),
-            GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onHorizontalDragStart: _onHorizontalDragStart,
-              onHorizontalDragUpdate: _onHorizontalDragUpdate,
-              onHorizontalDragEnd: _onHorizontalDragEnd,
-              child: Stack(
-                children: [
-                  _panelSurface(
-                    index: 0,
-                    child: MineNovelPanel(
-                      key: MinePage.novelPanelKey,
-                      bottomInset: widget.bottomInset,
-                      progress: _controller,
-                    ),
+          ),
+          SafeArea(
+            bottom: false,
+            child: Stack(
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragStart: _onHorizontalDragStart,
+                  onHorizontalDragUpdate: _onHorizontalDragUpdate,
+                  onHorizontalDragEnd: _onHorizontalDragEnd,
+                  child: Stack(
+                    children: [
+                      _panelSurface(
+                        index: 0,
+                        child: MineNovelPanel(
+                          key: MinePage.novelPanelKey,
+                          bottomInset: widget.bottomInset,
+                          progress: _controller,
+                        ),
+                      ),
+                      _panelSurface(
+                        index: 1,
+                        child: MineDramaPanel(
+                          key: MinePage.dramaPanelKey,
+                          bottomInset: widget.bottomInset,
+                          progress: _controller,
+                        ),
+                      ),
+                    ],
                   ),
-                  _panelSurface(
-                    index: 1,
-                    child: MineDramaPanel(
-                      key: MinePage.dramaPanelKey,
-                      bottomInset: widget.bottomInset,
-                      progress: _controller,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // 唯一一个设置按钮：小说面板时在右、短剧面板时在左，切换过程中
-            // 跟着 _controller 在屏幕内左右移动（不会被滑出屏幕）。
-            Positioned(
-              top: 20,
-              left: 8,
-              right: 8,
-              height: 40,
-              child: AnimatedBuilder(
-                animation: _controller,
-                builder: (context, child) {
-                  return Align(
-                    alignment: Alignment(1 - 2 * _controller.value, 0),
-                    child: child,
-                  );
-                },
-                child: IconButton(
-                  onPressed: _openSettings,
-                  tooltip: '设置',
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 22,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  icon: const Icon(Icons.settings_outlined),
                 ),
-              ),
+                // 唯一一个设置按钮：小说面板时在右、短剧面板时在左，切换过程中
+                // 跟着 _controller 在屏幕内左右移动（不会被滑出屏幕）。
+                Positioned(
+                  top: 20,
+                  left: 8,
+                  right: 8,
+                  height: 40,
+                  child: AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, child) {
+                      return Align(
+                        alignment: Alignment(1 - 2 * _controller.value, 0),
+                        child: child,
+                      );
+                    },
+                    child: IconButton(
+                      onPressed: _openSettings,
+                      tooltip: '设置',
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 22,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      icon: const Icon(Icons.settings_outlined),
+                    ),
+                  ),
+                ),
+                // 右下角只剩面板切换按钮：缓存入口已挪到推荐页搜索框右侧的
+                // 「已缓存」按钮，不再悬浮在这一页（避免和胶囊/切换按钮挤在一起）。
+                Positioned(
+                  right: 8,
+                  bottom: widget.bottomInset + 16,
+                  child: _PanelSwitchButton(
+                    key: MinePage.switchButtonKey,
+                    showingDrama: _showingDrama,
+                    onTap: _togglePanel,
+                  ),
+                ),
+              ],
             ),
-            // 右下角只剩面板切换按钮：缓存入口已挪到推荐页搜索框右侧的
-            // 「已缓存」按钮，不再悬浮在这一页（避免和胶囊/切换按钮挤在一起）。
-            Positioned(
-              right: 8,
-              bottom: widget.bottomInset + 16,
-              child: _PanelSwitchButton(
-                key: MinePage.switchButtonKey,
-                showingDrama: _showingDrama,
-                onTap: _togglePanel,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
