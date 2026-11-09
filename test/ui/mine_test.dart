@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
@@ -251,6 +252,21 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle(const Duration(milliseconds: 600));
     expect(find.text('短剧'), findsWidgets);
+  });
+
+  /// 顶部固定页头的氛围渐变：小说/短剧各一套角度，切换面板时过渡到另一套。
+  testWidgets('我的页-页头渐变随面板切换过渡', (tester) async {
+    await pumpPreview(tester, const MinePage());
+    TopGlow glow() => tester.widget<TopGlow>(find.byType(TopGlow));
+    expect(glow().spec.begin, kNovelTopGlow.begin);
+
+    await tester.tap(find.byKey(MinePage.switchButtonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+    expect(
+      glow().spec.begin,
+      kDramaTopGlow.begin,
+      reason: '切到短剧后页头渐变应过渡成短剧那一套角度',
+    );
   });
 
   /// 页头（图标 + 主标题 + 副标题）固定贴顶，和推荐页搜索框一样不跟着列表滚。

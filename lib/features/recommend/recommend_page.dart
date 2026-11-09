@@ -10,6 +10,7 @@ import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/novel_card.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
+import '../../app/widgets/top_glow.dart';
 import '../video/widgets/video_card.dart';
 import 'recommend_category.dart';
 import 'recommend_controller.dart';
@@ -137,52 +138,64 @@ class RecommendPageState extends ConsumerState<RecommendPage>
 
     return SafeArea(
       bottom: false,
-      child: Column(
+      child: Stack(
         children: [
-          // 搜索框常驻顶部，不随列表滚动收起；右侧固定「已缓存」入口。
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  // 提示文案跟着当前分类走；AnimatedBuilder 同时让左右滑动
-                  // 切分类时提示词及时更新。
-                  child: AnimatedBuilder(
-                    animation: _tabController,
-                    builder: (context, _) => FeedSearchField(
-                      controller: _searchController,
-                      focusNode: _searchFocus,
-                      hintText: _activeCategory.searchHint,
-                      onSubmitted: _submitSearch,
-                      onClear: _clearSearchInput,
-                      onCancel: _cancelSearch,
-                      showCancel: activeQuery != null,
+          // 顶部固定模块（搜索框 + 分类 tabs）的蓝粉氛围渐变：固定不滚动。
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 116,
+            child: TopGlow(spec: kRecommendTopGlow),
+          ),
+          Column(
+            children: [
+              // 搜索框常驻顶部，不随列表滚动收起；右侧固定「已缓存」入口。
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      // 提示文案跟着当前分类走；AnimatedBuilder 同时让左右滑动
+                      // 切分类时提示词及时更新。
+                      child: AnimatedBuilder(
+                        animation: _tabController,
+                        builder: (context, _) => FeedSearchField(
+                          controller: _searchController,
+                          focusNode: _searchFocus,
+                          hintText: _activeCategory.searchHint,
+                          onSubmitted: _submitSearch,
+                          onClear: _clearSearchInput,
+                          onCancel: _cancelSearch,
+                          showCancel: activeQuery != null,
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    _CachedEntryButton(onTap: _openCacheCenter),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                _CachedEntryButton(onTap: _openCacheCenter),
-              ],
-            ),
-          ),
-          // tabs 与列表之间留呼吸空间。
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: _buildCategoryTabs(context),
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                for (final category in _categories)
-                  _CategoryFeedPage(
-                    key: ValueKey(category),
-                    category: category,
-                    bottomInset: widget.bottomInset,
-                    scrollController: _feedControllerFor(category),
-                  ),
-              ],
-            ),
+              ),
+              // tabs 与列表之间留呼吸空间。
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _buildCategoryTabs(context),
+              ),
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    for (final category in _categories)
+                      _CategoryFeedPage(
+                        key: ValueKey(category),
+                        category: category,
+                        bottomInset: widget.bottomInset,
+                        scrollController: _feedControllerFor(category),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),

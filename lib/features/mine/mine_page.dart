@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/router.dart';
+import '../../app/widgets/top_glow.dart';
 import 'mine_drama_providers.dart';
 import 'widgets/mine_drama_panel.dart';
 import 'widgets/mine_novel_panel.dart';
@@ -125,6 +126,24 @@ class _MinePageState extends ConsumerState<MinePage>
         bottom: false,
         child: Stack(
           children: [
+            // 顶部固定模块（图标 + 标题 + 副标题）的氛围渐变：跟着面板切换进度
+            // 在小说/短剧两套渐变之间连续插值，左右滑动时背景是过渡而非硬切。
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 150,
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, _) => TopGlow(
+                  spec: TopGlowSpec.lerp(
+                    kNovelTopGlow,
+                    kDramaTopGlow,
+                    _controller.value,
+                  ),
+                ),
+              ),
+            ),
             GestureDetector(
               behavior: HitTestBehavior.translucent,
               onHorizontalDragStart: _onHorizontalDragStart,

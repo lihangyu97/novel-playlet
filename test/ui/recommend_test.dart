@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
+import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/feed/feed_results.dart';
 import 'package:novel_playlet/features/feed/feed_search_field.dart';
@@ -64,6 +65,7 @@ void main() {
 
   testWidgets('推荐页-小说分类', (tester) async {
     await pumpPreview(tester, const RecommendPage());
+    expect(find.byType(TopGlow), findsOneWidget, reason: '顶部固定模块带氛围渐变');
     // 合并后推荐态不再有「为你推荐 / 短剧推荐」区块标题。
     expect(find.text('为你推荐'), findsNothing);
     expect(find.text('短剧推荐'), findsNothing);
