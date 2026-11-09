@@ -11,13 +11,22 @@ import '../../data/models/json_utils.dart';
 /// 本地缓存命中结果。
 @immutable
 class ReaderChapterHit {
-  const ReaderChapterHit({required this.content, required this.isStale});
+  const ReaderChapterHit({
+    required this.content,
+    required this.isStale,
+    this.anchorsOutdated = false,
+  });
 
   final ChapterContent content;
 
   /// 抓取时间超过 [ReaderChapterCache.staleAfter] 的旧条目仍可先展示，
   /// 调用方可在后台刷新一次缓存，不阻塞当前阅读。
   final bool isStale;
+
+  /// 升级前写入的老缓存没有段落锚点（`paraIndices`），段评气泡因此画不出来。
+  /// 调用方在气泡开启时应后台补取一次带锚点的正文；纯文本源补取后仍无锚点，
+  /// 写回带 [ReaderChapterCache.schemaVersion] 的缓存后不会再触发。
+  final bool anchorsOutdated;
 }
 
 /// 章节正文本地缓存。
@@ -37,6 +46,10 @@ class ReaderChapterCache {
   }) : _supportDirectory = supportDirectory ?? getApplicationSupportDirectory;
 
   static const _dirName = 'reader_chapters';
+
+  /// 缓存 schema 版本。老文件没有 `v` 字段（按 0 算）；段评锚点
+  /// （`paraIndices`）从版本 2 开始落盘，读到版本落后的缓存要补取一次正文。
+  static const int schemaVersion = chapterCacheSchemaVersion;
 
   final Future<Directory> Function() _supportDirectory;
   final int memoryCapacity;
@@ -101,6 +114,7 @@ class ReaderChapterCache {
   }
 
   Map<String, dynamic> _encode(ChapterContent content, DateTime fetchedAt) => {
+    'v': schemaVersion,
     'id': content.id,
     'title': content.title,
     'paragraphs': content.paragraphs,
@@ -148,20 +162,22 @@ class ReaderChapterCache {
         fetchedAt > 0 ? fetchedAt : 0,
       );
       final storedId = asString(json['id']);
+      final content = ChapterContent(
+        id: storedId.isEmpty ? chapterId : storedId,
+        title: asString(json['title']),
+        paragraphs: List<String>.unmodifiable(paragraphs),
+        paraIndices: _decodeParaIndices(json['paraIndices'], paragraphs.length),
+      );
       return ReaderChapterHit(
-        content: ChapterContent(
-          id: storedId.isEmpty ? chapterId : storedId,
-          title: asString(json['title']),
-          paragraphs: List<String>.unmodifiable(paragraphs),
-          paraIndices: _decodeParaIndices(
-            json['paraIndices'],
-            paragraphs.length,
-          ),
-        ),
+        content: content,
         // 没有抓取时间的老文件一律当作过期，下次后台刷新补上。
         isStale:
             fetchedAt <= 0 ||
             DateTime.now().difference(fetchedTime) > staleAfter,
+        // 老 schema 的正文没有写入段落锚点；纯文本源本来就没有锚点，补取一次
+        // 后写回新版 schema，就不再触发。
+        anchorsOutdated:
+            asInt(json['v']) < schemaVersion && content.paraIndices.isEmpty,
       );
     } catch (_) {
       return null;

@@ -3,6 +3,12 @@ import 'package:html/parser.dart' as html_parser;
 
 import 'json_utils.dart';
 
+/// 章节正文缓存（`reader_chapters/` 与 `offline/novel/` 同构）的 schema 版本。
+///
+/// 版本 2 起落盘段评需要的段落锚点 `paraIndices`；读到没有 `v` 字段的老文件
+/// （按 0 算）时，阅读页会在气泡开启时补取一次带锚点的正文。
+const int chapterCacheSchemaVersion = 2;
+
 /// 一章正文。
 class ChapterContent {
   const ChapterContent({

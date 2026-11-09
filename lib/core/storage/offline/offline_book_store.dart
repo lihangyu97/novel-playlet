@@ -103,6 +103,7 @@ class OfflineBookStore {
   Future<int> writeChapter(String bookId, ChapterContent content) async {
     if (content.id.isEmpty) return 0;
     final json = {
+      'v': chapterCacheSchemaVersion,
       'id': content.id,
       'title': content.title,
       'paragraphs': content.paragraphs,
