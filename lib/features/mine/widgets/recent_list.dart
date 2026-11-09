@@ -9,6 +9,9 @@ import 'mine_recent_tile.dart';
 ///
 /// 返回普通 Box 而不是 sliver：我的页把内容拆成「头部 / 最近阅读 / 书架」三块，
 /// 每块要独立做横向延迟动画，sliver 没法单独平移。
+///
+/// 行与行之间不留额外 gap：每条 tile 自己上下各 8pt 内边距，相邻行之间自然
+/// 是 16pt，与区块/网格的 8 留白同一套节奏。
 class RecentList<T> extends StatelessWidget {
   const RecentList({super.key, required this.items, required this.tileOf});
 
@@ -20,12 +23,7 @@ class RecentList<T> extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Column(
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            if (i > 0) const SizedBox(height: 2),
-            tileOf(items[i]),
-          ],
-        ],
+        children: [for (var i = 0; i < items.length; i++) tileOf(items[i])],
       ),
     );
   }

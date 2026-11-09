@@ -110,7 +110,8 @@ class MineSectionHeader extends StatelessWidget {
             ),
           );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 20, 8, 10),
+      // 区块标题上下也统一 8（与左右留白一致）。
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       child: Row(
         children: mirrored
             ? [

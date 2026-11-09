@@ -449,7 +449,7 @@ class _CachedEntryButton extends StatelessWidget {
         button: true,
         label: '已缓存',
         child: Material(
-          color: scheme.surfaceContainerHighest,
+          color: FeedSearchField.surfaceColor(context),
           borderRadius: radius,
           child: InkWell(
             borderRadius: radius,

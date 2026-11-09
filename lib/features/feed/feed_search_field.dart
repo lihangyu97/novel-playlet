@@ -38,6 +38,17 @@ class FeedSearchField extends StatelessWidget {
   /// 搜索框圆角；右侧「已缓存」入口也用这个值，两块并排时圆角一致。
   static const double radius = 10;
 
+  /// 搜索框 /「已缓存」按钮底色。
+  ///
+  /// 浅色主题用**纯白**（顶部有淡蓝粉渐变时白块更干净）；深色主题保持
+  /// 深色容器底，避免一块纯白在暗色页里刺眼。
+  static Color surfaceColor(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.brightness == Brightness.dark
+        ? theme.colorScheme.surfaceContainerHighest
+        : Colors.white;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -52,7 +63,7 @@ class FeedSearchField extends StatelessWidget {
           child: DecoratedBox(
             // 只留底色不画描边：iOS 搜索栏观感，避免和列表卡片分隔线叠在一起。
             decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
+              color: FeedSearchField.surfaceColor(context),
               borderRadius: BorderRadius.circular(radius),
             ),
             child: SizedBox(
