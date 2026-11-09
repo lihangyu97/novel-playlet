@@ -2,14 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/novel_item.dart';
 import 'media_card.dart';
+import 'novel_cover.dart';
 
-/// 推荐页小说分类的卡片：大封面 + 标题 + 作者/分类。
+/// 推荐页小说分类的卡片：封面 + 标题 + 作者/分类。
 ///
-/// 推荐流是混排的（榜单、猜你喜欢、新书），这里用统一的三列网格承载；区块
-/// 标题与"更多"留给后续按 cell 渲染，卡片本身不感知区块。
-///
-/// 骨架与短剧卡完全一致，见 [MediaCard]；这里只负责把 [NovelItem] 映射成
-/// 卡片的几个文案参数。
+/// 推荐流用白底瀑布流卡片（[surface] + [naturalTitleHeight] + 原生封面比例）；
+/// 书架等固定网格沿用紧凑形态。骨架见 [MediaCard]，这里只负责把
+/// [NovelItem] 映射成卡片的几个文案参数。
 class NovelGridCard extends StatelessWidget {
   const NovelGridCard({
     super.key,
@@ -18,6 +17,9 @@ class NovelGridCard extends StatelessWidget {
     this.width = 108,
     this.heroTag,
     this.showRecommendMeta = false,
+    this.coverAspect = kCoverAspect,
+    this.surface = false,
+    this.naturalTitleHeight = false,
   });
 
   final NovelItem item;
@@ -34,6 +36,15 @@ class NovelGridCard extends StatelessWidget {
   /// 「作者 · 评分」；都没有时退回作者/分类（原行为）。
   final bool showRecommendMeta;
 
+  /// 封面高 / 宽；推荐流传 [kNovelCoverAspect]，其它入口保持默认。
+  final double coverAspect;
+
+  /// 是否画成白底卡片（见 [MediaCard.surface]）。
+  final bool surface;
+
+  /// 标题是否按内容自然高度（见 [MediaCard.naturalTitleHeight]）。
+  final bool naturalTitleHeight;
+
   @override
   Widget build(BuildContext context) {
     // 作者缺失时退回分类：元信息行不展示空串，但保持占位。
@@ -47,6 +58,9 @@ class NovelGridCard extends StatelessWidget {
       width: width,
       onTap: onTap,
       heroTag: heroTag,
+      coverAspect: coverAspect,
+      surface: surface,
+      naturalTitleHeight: naturalTitleHeight,
     );
   }
 

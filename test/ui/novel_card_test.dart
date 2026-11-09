@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/app/widgets/media_card.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
+import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 
 /// 推荐流小说卡片的元信息优先级：推荐理由 → 热度（rank_score）→ 作者；
@@ -118,5 +122,136 @@ void main() {
     expect(find.textContaining('分'), findsNothing);
     expect(find.text('巅峰榜No.3'), findsNothing);
     expect(find.text('8479万热度'), findsNothing);
+  });
+
+  group('推荐流白底卡片（surface + naturalTitleHeight）', () {
+    NovelGridCard feedCard({
+      required String id,
+      String title = '书名',
+      String author = '作者',
+    }) {
+      return NovelGridCard(
+        item: NovelItem(id: id, title: title, author: author, score: '9.3'),
+        onTap: () {},
+        width: 173,
+        showRecommendMeta: true,
+        surface: true,
+        naturalTitleHeight: true,
+        coverAspect: kNovelCoverAspect,
+      );
+    }
+
+    /// 卡片自己的 Material：AppSurfaceCard 是唯一的卡片底色来源。
+    Material surfaceMaterial(WidgetTester tester) {
+      return tester.widget<Material>(
+        find
+            .descendant(
+              of: find.byType(AppSurfaceCard),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+    }
+
+    testWidgets('白底 + 小圆角，封面底部直角（圆角交给卡片裁）', (tester) async {
+      await tester.pumpWidget(wrap(feedCard(id: '1')));
+      expect(find.byType(AppSurfaceCard), findsOneWidget);
+      expect(surfaceMaterial(tester).color, Colors.white);
+      expect(
+        surfaceMaterial(tester).borderRadius,
+        BorderRadius.circular(AppTheme.mediaCardRadius),
+      );
+      expect(
+        AppTheme.mediaCardRadius,
+        lessThan(AppTheme.cardRadius),
+        reason: '媒体卡圆角比通用 Card 小',
+      );
+      final cover = tester.widget<NovelCover>(find.byType(NovelCover));
+      expect(cover.radius, 0, reason: '封面不自己画圆角：顶部由卡片裁、底部保持直角');
+      expect(
+        cover.height / cover.width,
+        closeTo(kNovelCoverAspect, 0.001),
+        reason: '推荐流按内容域原生比例出封面',
+      );
+    });
+
+    testWidgets('暗色模式：卡片底色用 surfaceContainerHigh，不用纯白', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark(),
+          home: Scaffold(
+            body: Center(child: feedCard(id: '1')),
+          ),
+        ),
+      );
+      final dark = AppTheme.dark();
+      expect(
+        surfaceMaterial(tester).color,
+        dark.colorScheme.surfaceContainerHigh,
+        reason: '暗色不能硬编码纯白，靠比画布亮一档的底色分层',
+      );
+    });
+
+    testWidgets('标题按自然高度：一行标题的卡片比两行矮', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              feedCard(id: '1', title: '短书名'),
+              feedCard(id: '2', title: '一个明显会折成两行的很长很长的书名'),
+            ],
+          ),
+        ),
+      );
+      final heights = tester
+          .widgetList<NovelGridCard>(find.byType(NovelGridCard))
+          .map((card) => tester.getSize(find.byWidget(card)).height)
+          .toList();
+      expect(
+        heights.first,
+        lessThan(heights.last),
+        reason: '瀑布流卡片高度由标题行数决定，不再固定两行',
+      );
+    });
+
+    testWidgets('默认形态（书架等）不画白底卡', (tester) async {
+      await tester.pumpWidget(wrap(card(score: '9.3')));
+      expect(find.byType(AppSurfaceCard), findsNothing);
+      expect(
+        tester.widget<NovelCover>(find.byType(NovelCover)).radius,
+        kCoverRadius,
+        reason: '紧凑网格保持原来的封面圆角，白底卡才由卡片裁圆角',
+      );
+    });
+
+    testWidgets('元信息为空时不占行，卡片更矮', (tester) async {
+      MediaCard mediaCard({String? meta}) => MediaCard(
+        cover: '',
+        title: '书名',
+        meta: meta,
+        width: 173,
+        onTap: () {},
+        surface: true,
+        naturalTitleHeight: true,
+      );
+
+      await tester.pumpWidget(
+        wrap(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              mediaCard(meta: null),
+              mediaCard(meta: '作者'),
+            ],
+          ),
+        ),
+      );
+      final heights = tester
+          .widgetList<MediaCard>(find.byType(MediaCard))
+          .map((card) => tester.getSize(find.byWidget(card)).height)
+          .toList();
+      expect(heights.first, lessThan(heights.last), reason: '没有元信息的卡片不该留空行');
+    });
   });
 }

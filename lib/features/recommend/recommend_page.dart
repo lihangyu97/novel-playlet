@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../feed/feed_grid.dart';
 import '../feed/feed_results.dart';
 import '../feed/feed_search_field.dart';
+import '../feed/feed_staggered_grid.dart';
 import '../feed/feed_view.dart';
 import '../../app/router.dart';
 import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/novel_card.dart';
+import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../video/widgets/video_card.dart';
 import 'recommend_category.dart';
 import 'recommend_controller.dart';
 import 'recommend_item.dart';
+import 'recommend_layout.dart';
 import 'recommend_state.dart';
 
 /// 合并后的「推荐」页：顶部搜索框 + 可左右滑动的分类 tabs + 每个分类一条流。
@@ -351,6 +353,9 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
     super.build(context);
     final async = ref.watch(recommendFeedProvider(_category));
     final activeQuery = ref.watch(searchQueryProvider);
+    // 布局偏好在这里 watch（不要放进 sliverBuilder 闭包里）：切换双列/三列
+    // 时整页重建，瀑布流按新列数重新排版。
+    final layout = ref.watch(recommendLayoutProvider);
     final data = async.value;
 
     // 关键词已提交但结果还没回来：整页只留加载/错误，避免旧推荐流或上一个
@@ -410,15 +415,14 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
             heroTagOf: _coverHeroTag,
           );
         }
-        final metrics = FeedGridMetrics.of(context);
-        return FeedGrid<RecommendItem>(
+        return FeedStaggeredGrid<RecommendItem>(
           items: state.items,
-          metrics: metrics,
+          columns: layout.columns,
           itemBuilder: (context, item, width) {
             void onTap() => _openDetail(item);
             final heroTag = _coverHeroTag(item);
             // 小说与短剧/漫剧的卡片元信息不同（作者 vs 集数），复用各自
-            // 现有卡片，保证封面比例/字号完全一致。
+            // 现有卡片；推荐流统一是白底不定高卡片，封面按内容域原生比例。
             return switch (item) {
               NovelRecommendItem(:final novel) => NovelGridCard(
                 key: ValueKey(item.id),
@@ -428,6 +432,9 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
                 heroTag: heroTag,
                 // 推荐流：推荐理由 → 热度 → 作者 · 评分；书架等入口不传。
                 showRecommendMeta: true,
+                surface: true,
+                naturalTitleHeight: true,
+                coverAspect: kNovelCoverAspect,
               ),
               VideoRecommendItem(:final video) => VideoCard(
                 key: ValueKey(item.id),
@@ -437,6 +444,9 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
                 heroTag: heroTag,
                 // 短剧/漫剧同规则：推荐理由 → 热度（rec_text）→ 集数 · 评分。
                 showRecommendMeta: true,
+                surface: true,
+                naturalTitleHeight: true,
+                coverAspect: kVideoCoverAspect,
               ),
             };
           },

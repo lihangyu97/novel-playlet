@@ -15,13 +15,14 @@
 页面：
 
 - **推荐**：顶部搜索框 + 分类 tabs（小说 / 短剧 / 漫剧），每个分类独立推荐流与搜索结果，翻页、下拉刷新、首屏不足自动补页。
+  推荐流是**白底不定高卡片 + 瀑布流**（`SliverMasonryGrid`）：默认双列、设置里可切三列，卡片高度由内容决定（标题 1~2 行、没有元信息就不占行），封面按内容域原生比例出图（小说 240×320、短剧/漫剧 400×571），不再统一裁成 11:8。
   推荐卡元信息行按优先级展示：`recommend_reason_list` 第一条（小说是数组元素 `content`，如「巅峰榜No.3」；短剧是 JSON 串里的 `rec_tags[0].content` / `tag_info.text`）→ `rank_score`（小说）/ `rec_text`（短剧热度，如「4691万热度」）→ 作者（短剧为「全 N 集」+ 理由/热度）。**评分不再进元信息行**，而是封面右上角角标（白字 + 半透明深色底 + 轻阴影，`9.3分`），小说与短剧/漫剧一致；短剧详情页也会展示星标评分。
 - **详情**：小说与短剧共用一套「封面头 + 简介卡 + 标签」版式；小说有目录 + 书评卡片（首条 + 弹窗看全部），短剧有选集（36 集/组）。
 - **阅读页**：`TextPainter` 真实分页、左右翻页、点击分区、工具栏、字号/行距/4 种底色、段评气泡、工具栏「评论」/评论面板（只读）、目录跳章、邻章预取、进度保存。
 - **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下集/播完自动下一集、选集弹层、横屏全屏、失败分类与「重新下载这一集」。
 - **我的**：小说 / 短剧两块镜像面板（书架 / 收藏 + 最近阅读 / 最近观看 + 缓存与设置入口）。
 - **缓存中心**：离线整本 / 整剧下载的进度、网速、排队、暂停/继续/删除/清空。
-- **设置**：主题色（天蓝 / 草绿 / 绯红 + 自定义取色）、深浅色模式（跟随系统 / 手动）、存储占用与清理、离线下载清晰度。
+- **设置**：主题色（天蓝 / 草绿 / 绯红 + 自定义取色）、深浅色模式（跟随系统 / 手动）、首页推荐布局（双列 / 三列，默认双列）、存储占用与清理、离线下载清晰度。
 
 两个内容链路：
 
@@ -36,7 +37,7 @@
 
 | 层 | 选型 |
 |---|---|
-| UI | Flutter 3.47.9 / Dart 3.13、Riverpod 3、Material 3（seed 主题色） |
+| UI | Flutter 3.47.9 / Dart 3.13、Riverpod 3、Material 3（seed 主题色）、`flutter_staggered_grid_view` 0.8.0-dev.3（推荐流双列/三列瀑布流；0.7.x 不支持 Dart 3） |
 | 内核 | Rust（从同仓库族 `fqapp` 整体 fork）：签名 / 设备池 / 请求 / 限流 / 重试 / 正文解密 / CENC 解密 / 回环 HTTP |
 | 桥接 | flutter_rust_bridge 2.13.0（进程内 FFI，不走 socket） |
 | 播放 | `video_player` 2.14.1；`video_player_avfoundation` 用 `third_party/` 本地补丁（补 `AVPlayer.defaultRate`，修 iOS 倍速复位） |
@@ -59,7 +60,7 @@ integration_test/ 阅读分页真机性能 harness
 启动链：
 
 ```
-main.dart（锁竖屏、预读主题色、裁剪封面缓存）
+main.dart（锁竖屏、预读主题色/深浅色/推荐布局、裁剪封面缓存）
   → BootstrapGate（Splash，失败展示可读原因 + 重试）
   → BackendService.start()（把 assets/config 的 config.json / device_pool 部署到 <AppSupport>/backend/config）
   → BackendTransport.start()（Keychain 取设备池密钥 → rust.setDevicePoolKey → rust.init）
@@ -592,6 +593,9 @@ flutter drive --profile -d <iPhone UDID> \
 | `PATCHES.md` | Rust 内核相对 fqapp 的 fork 基线、本地补丁清单与上游同步流程 |
 | `third_party/README.md` | `video_player_avfoundation` 补丁内容与插件升级时如何重放 |
 | `lib/features/recommend/content_source.dart` | 分类策略（tab_type / 搜索 tab / 漫剧兜底） |
+| `lib/features/recommend/recommend_layout.dart` | 首页推荐布局（双列 / 三列）provider 与持久化 |
+| `lib/features/feed/feed_staggered_grid.dart` | 推荐流瀑布流（sliver 网格 + 列宽换算，卡片不定高） |
+| `lib/app/widgets/surface_card.dart` | 通用白底卡容器（推荐流先接入，后续列表逐步复用） |
 | `lib/features/cache/offline_downloader.dart` | 离线下载引擎（单任务状态机 + 队列） |
 | `lib/data/models/{chapter_ideas,book_comment,comment_reply}.dart` | 段评/书评/回复模型与解析 |
 | `lib/features/reader/{reader_comments,reader_comments_sheet,reader_bubble}.dart` | 段评 provider / 评论面板 / 段尾气泡 |
@@ -667,12 +671,37 @@ flutter drive --profile -d <iPhone UDID> \
 
 ### 11.4 坑 / 设计约束
 
-- 标题固定占两行高度（一行书名也补齐第二行），保证同排卡片元信息行对齐、视觉高度一致；
-  卡片元信息只有**一行**且封面宽 108pt：继续叠加播放量/字数/状态等字段，建议放第二行或做封面角标，
+- 紧凑网格（书架等）的标题固定占两行高度（一行书名也补齐第二行），保证同排卡片元信息行对齐；搜索结果是横向列表、标题只占一行，不属于这套网格。
+  **推荐流例外**：改成瀑布流后卡片不定高，标题按 1~2 行自然高度，没有元信息就不占行，
+  高低差交给瀑布流吸收（见 11.5）。
+  紧凑卡片的元信息只有**一行**且封面宽 108pt：继续叠加播放量/字数/状态等字段，建议放第二行或做封面角标，
   否则长作者名 + 长标签会挤成省略号（golden 里 `爱潜水的乌贼 · 9.…`）。
 - 短剧 `recommend_reason_list.sub_title_list` 多为「剧情 / 149集」这类与卡片既有信息重复的分类，
   所以提取顺序是 `rec_tags` → `tag_info.text` → `sub_title_list`，不要反过来。
 - 小说 `recommend_reason_list` 的 `content` 可能是「细糠」「19个老书虫在看」这类口语化文案，
   直接展示即可，不要二次加工。
 - 短剧列表的 `tab_type=16`（单集视频）和 tab 8/24 结构不同（信息在 `video_detail` 里），App 不用 tab 16。
+
+### 11.5 推荐流布局与封面比例（2026-11-09）
+
+- **布局**：`SliverMasonryGrid`（`flutter_staggered_grid_view`，CONTRACTS 依赖白名单）按子节点实际
+  高度排版，双列/三列共用一套卡片；列数来自 `recommendLayoutProvider`（设置页「主题 → 首页推荐布局」，
+  默认双列，持久化 key `home_recommend_layout_v1`，`main.dart` 启动预读避免首页先按双列渲染再跳）。
+  旧的固定高度三列网格 `FeedGrid` / `FeedGridMetrics` 已删除，新增 `FeedStaggeredGrid`：
+  卡片高度不再预算，列宽由 `SliverLayoutBuilder` 从 sliver 实际拿到的 `crossAxisExtent`
+  算（不用 MediaQuery 屏宽，外层加留白/被放进窄容器时也不会错位）。
+- **卡片**：`AppSurfaceCard`（浅色纯白底、暗色 `surfaceContainerHigh`、圆角
+  `AppTheme.mediaCardRadius` = 10、无阴影）+ 封面满宽出血；封面 `NovelCover.radius` 传 0，
+  顶部圆角由卡片裁、底部保持直角。通用白底卡抽在 `lib/app/widgets/surface_card.dart`，
+  书架等入口暂时保持原紧凑卡（`MediaCard.surface` 默认 false），后续逐步替换。
+- **不定高来源**：标题自然 1~2 行 + 元信息为空时不占行（短剧缺集数）。小说标题较短，双列下大多一行
+  放下；短剧/漫剧标题更长，错落更明显。想要更夸张的高低差得给卡片加内容（简介/字数），不在本期。
+- **封面比例**：接口不返回封面尺寸，按内容域已知原生尺寸出图（`kNovelCoverAspect` = 320/240 = 4/3 ≈ 1.333，`kVideoCoverAspect` = 571/400
+  ≈ 1.4275，都是高/宽；11:8 = 1.375 正好是两者中间）；搜索结果 / 书架 / 最近阅读 / 详情仍统一
+  `kCoverAspect`（11:8）。逐图真实比例需要解码后回填尺寸，会让瀑布流二次重排，暂不做。
+- **不变的部分**：搜索态（横向结果列表）、下拉刷新、滚动到底加载、首屏补页、底部 footer 全部复用
+  `FeedView`，与列数无关；切换布局保持当前滚动位置（有意为之：`FeedView` 的 State 与 ScrollController
+  不重建，深滚时换列数会停在新布局的相近位置，但不跳回顶部）。
+- **golden**：新增 `feed_staggered_grid.png`（瀑布流本身）、`recommend_three_columns.png`、`recommend_dark.png`；
+  推荐流/设置页改版后需 `--update-goldens` 重生成 `recommend*.png`、`home*.png`、`settings*.png`。
 

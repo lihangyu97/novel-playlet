@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/widgets/media_card.dart';
+import '../../../app/widgets/novel_cover.dart';
 import '../../../data/models/video_series.dart';
 
 /// 视频列表的卡片：竖版封面 + 标题 + 集数。
@@ -15,6 +16,9 @@ class VideoCard extends StatelessWidget {
     required this.onTap,
     this.heroTag,
     this.showRecommendMeta = false,
+    this.coverAspect = kCoverAspect,
+    this.surface = false,
+    this.naturalTitleHeight = false,
   });
 
   final VideoSeries item;
@@ -30,6 +34,15 @@ class VideoCard extends StatelessWidget {
   /// 热度（短剧用 `rec_text`）→ 评分；集数始终在最前面。
   final bool showRecommendMeta;
 
+  /// 封面高 / 宽；推荐流传 [kVideoCoverAspect]，其它入口保持默认。
+  final double coverAspect;
+
+  /// 是否画成白底卡片（见 [MediaCard.surface]）。
+  final bool surface;
+
+  /// 标题是否按内容自然高度（见 [MediaCard.naturalTitleHeight]）。
+  final bool naturalTitleHeight;
+
   @override
   Widget build(BuildContext context) {
     return MediaCard(
@@ -41,6 +54,9 @@ class VideoCard extends StatelessWidget {
       width: width,
       onTap: onTap,
       heroTag: heroTag,
+      coverAspect: coverAspect,
+      surface: surface,
+      naturalTitleHeight: naturalTitleHeight,
     );
   }
 

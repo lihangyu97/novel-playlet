@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/features/feed/feed_results.dart';
 import 'package:novel_playlet/features/feed/feed_search_field.dart';
+import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,6 +37,18 @@ List<Size> _searchCoverSizes(WidgetTester tester) {
   return tester
       .widgetList<NovelCover>(covers)
       .map((cover) => Size(cover.width, cover.height))
+      .toList();
+}
+
+/// 前 [count] 张卡片各自的左边距去重后的列表：列数 = 左边距种类数。
+///
+/// 瀑布流里同一列卡片的 x 相同，所以这比数卡片总数更直接；用前几张卡是因为
+/// 首屏内容一定已布局（不依赖滚动）。
+List<double> _firstCardLefts(WidgetTester tester, {required int count}) {
+  final cards = tester
+      .widgetList<NovelGridCard>(find.byType(NovelGridCard))
+      .take(count);
+  return {for (final card in cards) tester.getTopLeft(find.byWidget(card)).dx}
       .toList();
 }
 
@@ -216,19 +231,21 @@ void main() {
     );
   });
 
-  /// 封面尺寸回归：三个分类的推荐流封面必须同宽同高。
+  /// 封面尺寸回归：推荐流按内容域原生比例出封面（小说 240×320、短剧/漫剧 400×571，都是高/宽）。
   ///
-  /// 上游原生比例不同（小说 240×320 = 3:4，短剧 400×571 ≈ 1.427），以前两条
-  /// 流各用各的 `coverAspect`；合并成一个页面后更不能出现切分类封面大小跳变。
+  /// 以前统一裁成 kCoverAspect（11:8），是为了让三个分类的封面同宽同高、切 tab
+  /// 不跳；改成不定高瀑布流后这个约束没必要了：按上游原生比例出图不裁封面，
+  /// 小说会比短剧/漫剧略矮。列宽仍然只由列数决定，同一分类里封面尺寸必须一致。
   /// 切分类后旧页面会被 TabBarView 保活，所以按卡片类型圈定当前分类的封面。
-  testWidgets('封面尺寸-三个分类的推荐流一致', (tester) async {
+  testWidgets('封面尺寸-推荐流按内容域原生比例', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     final novel = _gridCoverSizes(tester, novel: true);
     expect(novel, isNotEmpty);
     expect(novel.map((size) => size.width).toSet(), hasLength(1));
     expect(
       novel.first.height / novel.first.width,
-      closeTo(kCoverAspect, 0.001),
+      closeTo(kNovelCoverAspect, 0.001),
+      reason: '小说封面按 240×320（高/宽 4:3）出图，不再裁成 11:8',
     );
 
     await tester.tap(find.text('短剧'));
@@ -238,7 +255,8 @@ void main() {
     expect(drama.map((size) => size.width).toSet(), hasLength(1));
     expect(
       drama.first.height / drama.first.width,
-      closeTo(kCoverAspect, 0.001),
+      closeTo(kVideoCoverAspect, 0.001),
+      reason: '短剧/漫剧封面按 400×571 原生比例出图',
     );
 
     await tester.tap(find.text('漫剧'));
@@ -246,8 +264,85 @@ void main() {
     final anime = _gridCoverSizes(tester, novel: false);
     expect(anime, isNotEmpty);
 
-    expect(drama.first, novel.first, reason: '短剧与小说封面尺寸必须一致');
-    expect(anime.first, novel.first, reason: '漫剧与小说封面尺寸必须一致');
+    expect(drama.first.width, novel.first.width, reason: '同一套列宽，封面宽度必须一致');
+    expect(anime.first.width, novel.first.width, reason: '同一套列宽，封面宽度必须一致');
+    expect(
+      drama.first.height,
+      greaterThan(novel.first.height),
+      reason: '短剧原生比例（高/宽 571/400 ≈ 1.4275）比小说（4/3 ≈ 1.333）更高',
+    );
+  });
+
+  /// 默认双列瀑布流：前两张卡片分列左右，卡片是白底卡。
+  testWidgets('推荐页-默认双列瀑布流', (tester) async {
+    await pumpPreview(tester, const RecommendPage());
+    expect(
+      _firstCardLefts(tester, count: 2),
+      hasLength(2),
+      reason: '默认双列：前两张卡片左右各一张',
+    );
+    expect(find.byType(AppSurfaceCard), findsWidgets, reason: '推荐卡是白底卡片');
+  });
+
+  /// 布局偏好是全局状态：设置页把布局切成三列后，推荐页立即按三列排版。
+  testWidgets('推荐页-三列布局每行三张', (tester) async {
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      extraOverrides: [
+        recommendLayoutProvider.overrideWith(
+          () => RecommendLayoutController(initialLayout: RecommendLayout.three),
+        ),
+      ],
+    );
+    expect(
+      _firstCardLefts(tester, count: 3),
+      hasLength(3),
+      reason: '三列：前三张卡片各占一列',
+    );
+  });
+
+  /// 切列数立即生效，不需要重新进页面（推荐页 watch 同一个 provider）。
+  testWidgets('推荐页-切换布局立即生效', (tester) async {
+    await pumpPreview(tester, const RecommendPage());
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(RecommendPage)),
+    );
+    container
+        .read(recommendLayoutProvider.notifier)
+        .setLayout(RecommendLayout.three);
+    await tester.pumpAndSettle();
+    expect(_firstCardLefts(tester, count: 3), hasLength(3));
+  });
+
+  /// 三列基线：列数换掉后卡宽变窄，锁住整页观感。
+  testWidgets('推荐页-三列', (tester) async {
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      extraOverrides: [
+        recommendLayoutProvider.overrideWith(
+          () => RecommendLayoutController(initialLayout: RecommendLayout.three),
+        ),
+      ],
+    );
+    await expectLater(
+      find.byType(RecommendPage),
+      matchesGoldenFile('../goldens/recommend_three_columns.png'),
+    );
+  });
+
+  /// 深色基线：白底卡在暗色下换成 surfaceContainerHigh，靠底色差分层（不画阴影）。
+  testWidgets('推荐页-深色', (tester) async {
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      brightness: Brightness.dark,
+    );
+    await expectLater(
+      find.byType(RecommendPage),
+      matchesGoldenFile('../goldens/recommend_dark.png'),
+    );
   });
 
   /// 搜索态也统一：三个分类都是横向列表 + 同一套条目，封面同宽同高。

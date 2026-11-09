@@ -23,6 +23,11 @@ dependencies:
   shared_preferences: ^2.3.0
   cached_network_image: ^4.0.0
   flutter_cache_manager: ^3.4.8
+  # 推荐流瀑布流（双列/三列、卡片不定高）：社区标准实现，自己手写 RenderSliver
+  # 的测量/回收/滚动缓存成本太高。依赖白名单见 CONTRACTS.md「硬性规则」。
+  # 钉预发布版：0.7.x 的 SDK 上界是 <3.0.0，Dart 3 直接解析失败；0.8.0-dev.3
+  # 才把约束放到 >=3.2.0 <4.0.0，API 与 0.7.x 一致（SliverMasonryGrid.count）。
+  flutter_staggered_grid_view: 0.8.0-dev.3
   # 正文 HTML → 段落。
   html: 0.15.6
   cupertino_icons: ^1.0.8
