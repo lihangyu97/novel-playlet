@@ -22,6 +22,7 @@ class FeedView<T> extends StatefulWidget {
     required this.emptyIcon,
     this.onRefresh,
     this.bottomInset = 0,
+    this.controller,
   });
 
   final FeedState<T> state;
@@ -44,12 +45,22 @@ class FeedView<T> extends StatefulWidget {
   /// 被悬浮底栏遮住的底部高度；追加到列表末尾空白上，保证最后一项能滚出来。
   final double bottomInset;
 
+  /// 外部滚动控制器；null = 自己建一个（默认）。
+  ///
+  /// 推荐页要让底栏「再次点击推荐」把**当前分类**的列表平滑滚回顶部，所以
+  /// 由页面按分类持有控制器并传进来。控制器归调用方销毁，这里只管用。
+  final ScrollController? controller;
+
   @override
   State<FeedView<T>> createState() => _FeedViewState<T>();
 }
 
 class _FeedViewState<T> extends State<FeedView<T>> {
-  final _scrollController = ScrollController();
+  /// 自己建的控制器（外部没传时用），归本 State 销毁。
+  ScrollController? _ownController;
+
+  ScrollController get _scrollController =>
+      widget.controller ?? (_ownController ??= ScrollController());
 
   /// 距底部多远开始预取下一页。保持保守：内容只有一页半时放大阈值会让一次
   /// 拖动连翻好几页，新卡片连环插入的观感很像"列表在跳动"。
@@ -61,7 +72,7 @@ class _FeedViewState<T> extends State<FeedView<T>> {
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _ownController?.dispose();
     super.dispose();
   }
 

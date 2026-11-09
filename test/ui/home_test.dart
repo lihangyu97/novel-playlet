@@ -101,6 +101,29 @@ void main() {
     );
   });
 
+  /// 底栏「推荐」处于选中态时再次点击：当前分类列表平滑回顶（不是瞬移）。
+  testWidgets('首页-再次点击底栏「推荐」：当前分类列表平滑回顶', (tester) async {
+    final fake = FakePreviewTransport()..novelItemCount = 30;
+    await pumpPreview(tester, const HomeShell(), transport: fake);
+    await tester.drag(
+      find.byType(CustomScrollView).first,
+      const Offset(0, -420),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    final scrolled = verticalOffset(tester);
+    expect(scrolled, greaterThan(100), reason: '前置：列表已滚离顶部');
+
+    await tester.tap(find.text('推荐'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final midway = verticalOffset(tester);
+    expect(midway, greaterThan(0), reason: '动画中途不应已经到顶（要平滑滚动）');
+    expect(midway, lessThan(scrolled), reason: '动画中途应已开始向上滚');
+
+    await tester.pumpAndSettle();
+    expect(verticalOffset(tester), 0, reason: '再次点击推荐应滚回顶部');
+  });
+
   testWidgets('首页-滚动后顶部收起', (tester) async {
     final fake = FakePreviewTransport()..novelItemCount = 30;
     await pumpPreview(tester, const HomeShell(), transport: fake);

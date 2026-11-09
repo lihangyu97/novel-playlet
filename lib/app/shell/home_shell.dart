@@ -26,19 +26,25 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   int _index = 0;
   final _pageController = PageController();
 
+  /// 拿到推荐页 State：底栏「推荐」处于选中态时再次点击，要把当前分类的
+  /// 列表平滑滚回顶部（页面用 keep-alive 保活，滚动位置在页面子树里）。
+  final _recommendKey = GlobalKey<RecommendPageState>();
+
   static const _slideDuration = Duration(milliseconds: 280);
 
   /// 每个 tab = 一条底栏项 + 一个页面构造器（页面需要底栏高度留白）。
   ///
-  /// 不是 const：页面构造器是闭包，但这个列表只在 State 里建一次。
-  static final _tabs = <_ShellTab>[
+  /// 不是 const：页面构造器是闭包（还要捕获 [_recommendKey]），但这个列表
+  /// 只在 State 里建一次。
+  late final _tabs = <_ShellTab>[
     _ShellTab(
       destination: const FloatingNavigationDestination(
         icon: Icon(Icons.explore_outlined),
         selectedIcon: Icon(Icons.explore),
         label: '推荐',
       ),
-      builder: (bottomInset) => RecommendPage(bottomInset: bottomInset),
+      builder: (bottomInset) =>
+          RecommendPage(key: _recommendKey, bottomInset: bottomInset),
     ),
     _ShellTab(
       destination: const FloatingNavigationDestination(
@@ -57,7 +63,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 
   void _onDestinationSelected(int value) {
-    if (value == _index) return;
+    if (value == _index) {
+      // 已经在该 tab：推荐页再次点击 = 当前分类列表平滑回顶（常见交互）。
+      // 「我的」等其它 tab 暂不需要，保持无操作。
+      if (value == 0) _recommendKey.currentState?.scrollActiveFeedToTop();
+      return;
+    }
     // 底栏高亮先跟着点击走，页面再滑过去，避免滑动期间选中态滞后。
     setState(() => _index = value);
     _pageController.animateToPage(
