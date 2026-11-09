@@ -38,7 +38,7 @@ class ReaderParagraphBubble extends StatelessWidget {
   static const double gap = 8;
 
   /// 描边宽度（逻辑值，不随系统字体缩放）。
-  static const double strokeWidth = 1.2;
+  static const double _strokeWidth = 1.2;
 
   String get label => count > 99 ? '99+' : '$count';
 
@@ -54,7 +54,10 @@ class ReaderParagraphBubble extends StatelessWidget {
       width: boxWidth,
       height: boxHeight,
       child: CustomPaint(
-        painter: _BubbleOutlinePainter(color: color, strokeWidth: strokeWidth),
+        painter: _BubbleOutlinePainter(
+          color: color,
+          strokeWidth: _strokeWidth,
+        ),
         child: Padding(
           padding: const EdgeInsets.only(bottom: _bubbleTailHeight),
           child: Center(
@@ -108,6 +111,8 @@ class _BubbleOutlinePainter extends CustomPainter {
     final right = size.width - inset;
     final top = inset;
     final bottom = size.height - _bubbleTailHeight;
+    // 极端缩放（盒高不大于尾巴）时没有可画的本体，直接跳过，避免负圆角。
+    if (bottom <= top) return;
     final radius = (bottom - top) / 2;
     // 尾巴在左下：沿底边从右往左走时先下探再回到底边。
     final tailLeft = size.width * 0.34;

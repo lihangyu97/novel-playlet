@@ -57,7 +57,9 @@ void main() {
       ),
     );
 
-    final hit = (await cache.get('c2'))!;
+    // 新建实例：绕过内存 LRU，走真实的磁盘解码路径。
+    final decoded = ReaderChapterCache(supportDirectory: () async => support);
+    final hit = (await decoded.get('c2'))!;
     expect(hit.content.paraIndices, [7, 8]);
     expect(hit.anchorsOutdated, isFalse);
 
@@ -74,7 +76,8 @@ void main() {
       ),
     );
 
-    final hit = (await cache.get('c3'))!;
+    final decoded = ReaderChapterCache(supportDirectory: () async => support);
+    final hit = (await decoded.get('c3'))!;
     expect(hit.anchorsOutdated, isFalse, reason: '写回新 schema 后不再重试');
   });
 

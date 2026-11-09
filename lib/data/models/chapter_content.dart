@@ -26,10 +26,17 @@ class ChapterContent {
 
   /// 与 [paragraphs] 等长的上游段落 id（正文 `<p idx="N">`），没有就是 null。
   ///
-  /// 段评按这个 id 对齐；空列表表示这份内容没有锚点（旧缓存 / 纯文本源）。
+  /// 段评按这个 id 对齐；空列表表示这份缓存没写过锚点字段（升级前缓存 /
+  /// 离线旧文件）。纯文本源的解析结果是全 null 的列表，不是空列表。
   final List<int?> paraIndices;
 
   bool get isEmpty => paragraphs.isEmpty;
+
+  /// 是否真的拿到了段落锚点（至少一段带 `<p idx>`）。
+  ///
+  /// 段评气泡与回填都只看这个：全 null 的列表（纯文本源）没有可用锚点，
+  /// 不能拿它替换正在显示的离线/缓存正文。
+  bool get hasAnchors => paraIndices.any((index) => index != null);
 
   /// 第 [position] 段的上游段落 id；越界或无锚点返回 null。
   int? paraIndexAt(int position) =>
