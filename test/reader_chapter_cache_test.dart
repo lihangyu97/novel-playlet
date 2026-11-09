@@ -69,11 +69,7 @@ void main() {
 
   test('新版缓存即使没有锚点也不再触发补取', () async {
     await cache.put(
-      const ChapterContent(
-        id: 'c3',
-        title: '第3章',
-        paragraphs: ['纯文本源没有锚点'],
-      ),
+      const ChapterContent(id: 'c3', title: '第3章', paragraphs: ['纯文本源没有锚点']),
     );
 
     final decoded = ReaderChapterCache(supportDirectory: () async => support);

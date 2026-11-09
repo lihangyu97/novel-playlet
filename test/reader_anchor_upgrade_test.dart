@@ -203,7 +203,7 @@ class _AnchorTransport extends BackendTransport {
             for (final id in directoryIds)
               {
                 'item_id': id,
-                'title': '第${id}章',
+                'title': '第$id章',
                 'volume_name': '',
                 'version': 'v1',
               },

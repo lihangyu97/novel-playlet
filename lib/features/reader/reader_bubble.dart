@@ -1,17 +1,22 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../data/models/chapter_ideas.dart';
 
-/// 段评气泡的尾巴高度（逻辑值，未乘缩放）：气泡本体 = 盒子高度减尾巴，
+/// 段评气泡的尾巴宽度（逻辑值，未乘缩放）：气泡本体 = 盒子宽度减尾巴，
 /// 数字只在气泡本体内居中，避免被尾巴顶偏。
-const double _bubbleTailHeight = 4;
+const double _bubbleTailWidth = 4;
 
 /// 段尾段评气泡。
 ///
 /// 官方用 APK 里的皮肤图（本仓库没有素材，也不能加依赖），这里用主题色画一个
-/// **空心对话气泡**近似：透明底 + 描边 + 左下小尾巴，数字居中；三种 variant
-/// 只区分描边/数字配色（普通 / 有读者 / 作者），文案是该段评论数，>99 显示
-/// 99+——与官方口径一致。
+/// **空心对话气泡**近似：透明底 + 描边 + 左侧朝左的小尾巴，数字居中；三种
+/// variant 只区分描边/数字配色（普通 / 有读者 / 作者），文案是该段评论数，
+/// >99 显示 99+——与官方口径一致。
+///
+/// 尾巴朝左（指向正文）而不是朝下：气泡挂在段末行尾，朝下会顶到下一段行首，
+/// 朝左才指向它标注的那一段文字。
 ///
 /// 尺寸是**未缩放**的逻辑值：分页测量时 PlaceholderDimensions 会乘上系统字体
 /// 缩放，RenderParagraph 渲染 WidgetSpan 时也会做同样的缩放，两边必须同源
@@ -54,12 +59,10 @@ class ReaderParagraphBubble extends StatelessWidget {
       width: boxWidth,
       height: boxHeight,
       child: CustomPaint(
-        painter: _BubbleOutlinePainter(
-          color: color,
-          strokeWidth: _strokeWidth,
-        ),
+        painter: _BubbleOutlinePainter(color: color, strokeWidth: _strokeWidth),
         child: Padding(
-          padding: const EdgeInsets.only(bottom: _bubbleTailHeight),
+          // 尾巴占掉左边一条，数字在本体里居中。
+          padding: const EdgeInsets.only(left: _bubbleTailWidth),
           child: Center(
             child: Text(
               scaled ? label : '',
@@ -90,7 +93,7 @@ class ReaderParagraphBubble extends StatelessWidget {
   }
 }
 
-/// 空心对话气泡描边：圆角矩形 + 左下小尾巴，只描边不填充。
+/// 空心对话气泡描边：圆角矩形 + 左侧朝左的小尾巴，只描边不填充。
 class _BubbleOutlinePainter extends CustomPainter {
   const _BubbleOutlinePainter({required this.color, required this.strokeWidth});
 
@@ -107,43 +110,39 @@ class _BubbleOutlinePainter extends CustomPainter {
       ..color = color;
     // 内缩半个描边，避免线条正好压在 WidgetSpan 边界上被裁掉。
     final inset = strokeWidth / 2;
-    final left = inset;
+    // 本体从左边让出尾巴宽度，尾巴三角形单独探到盒子最左侧。
+    final left = inset + _bubbleTailWidth;
     final right = size.width - inset;
     final top = inset;
-    final bottom = size.height - _bubbleTailHeight;
-    // 极端缩放（盒高不大于尾巴）时没有可画的本体，直接跳过，避免负圆角。
-    if (bottom <= top) return;
-    final radius = (bottom - top) / 2;
-    // 尾巴在左下：沿底边从右往左走时先下探再回到底边。
-    final tailLeft = size.width * 0.34;
-    final tailRight = size.width * 0.54;
-    final tailTip = Offset(size.width * 0.42, size.height - inset);
+    final bottom = size.height - inset;
+    // 极端缩放（盒高/盒宽过小）时没有可画的本体，直接跳过，避免负圆角。
+    if (bottom <= top || right <= left) return;
+    final bodyHeight = bottom - top;
+    final radius = math.min(bodyHeight * 0.32, (right - left) / 2);
+    // 尾巴在左侧偏下：沿左边从下往上走时先向左探出再回到边线。
+    final tailUpper = top + bodyHeight * 0.48;
+    final tailLower = top + bodyHeight * 0.66;
+    final tailTip = Offset(inset, top + bodyHeight * 0.57);
 
     final path = Path()
       ..moveTo(left + radius, top)
       ..lineTo(right - radius, top)
-      ..arcToPoint(
-        Offset(right, top + radius),
-        radius: Radius.circular(radius),
-      )
+      ..arcToPoint(Offset(right, top + radius), radius: Radius.circular(radius))
       ..lineTo(right, bottom - radius)
       ..arcToPoint(
         Offset(right - radius, bottom),
         radius: Radius.circular(radius),
       )
-      ..lineTo(tailRight, bottom)
-      ..lineTo(tailTip.dx, tailTip.dy)
-      ..lineTo(tailLeft, bottom)
       ..lineTo(left + radius, bottom)
       ..arcToPoint(
         Offset(left, bottom - radius),
         radius: Radius.circular(radius),
       )
+      ..lineTo(left, tailLower)
+      ..lineTo(tailTip.dx, tailTip.dy)
+      ..lineTo(left, tailUpper)
       ..lineTo(left, top + radius)
-      ..arcToPoint(
-        Offset(left + radius, top),
-        radius: Radius.circular(radius),
-      )
+      ..arcToPoint(Offset(left + radius, top), radius: Radius.circular(radius))
       ..close();
     canvas.drawPath(path, paint);
   }
