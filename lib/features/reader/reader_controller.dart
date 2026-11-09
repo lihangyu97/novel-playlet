@@ -15,6 +15,7 @@ import '../../data/models/chapter_content.dart';
 import '../../data/models/json_utils.dart';
 import '../cache/cache_providers.dart';
 import 'reader_chapter_cache.dart';
+import 'reader_settings.dart';
 
 /// 阅读会话状态。
 ///
@@ -147,6 +148,17 @@ class ReaderController extends Notifier<ReaderSessionState> {
   final Set<String> _prefetched = <String>{};
   bool _prefetchWorkerRunning = false;
   static const int _maxPrefetchQueue = 4;
+
+  /// 缺段落锚点的老缓存/老离线正文：同一章每次会话只补取一次，避免纯文本源
+  /// 反复请求。
+  final Set<String> _anchorUpgradeTried = <String>{};
+
+  /// 会话内补到锚点的正文（按 chapterId）。
+  ///
+  /// 离线章节的补取结果只放这里：不写离线 pinned 区、也不写自动缓存，但同一
+  /// 次阅读里切走再回来仍要能画气泡，否则每次重进都回落到无锚点的离线正文。
+  final Map<String, ChapterContent> _anchoredChapters =
+      <String, ChapterContent>{};
 
   @override
   ReaderSessionState build() {
@@ -387,11 +399,18 @@ class ReaderController extends Notifier<ReaderSessionState> {
     _saveProgress(chapter, blockIndex: resumeBlock);
 
     // 1) 离线 pinned 层优先：整本下载过的正文直接展示，连 loading 都不进。
-    //    离线命中不回写自动缓存——离线区是最终数据源，自动层只负责加速。
+    //    离线内容不回写自动缓存——离线区是最终数据源；缺段落锚点时只补取
+    //    网络正文用于显示/段评，不覆盖离线数据。
     final offline = await _readOfflineChapter(chapter.id);
     if (_disposed || token != _requestToken) return;
     if (offline != null) {
-      _applyContent(chapter, offline);
+      final upgraded = _anchoredChapters[chapter.id];
+      _applyContent(chapter, upgraded ?? offline);
+      // 升级前下载的离线章节没有段落锚点：在线时补取一次带锚点的正文。
+      // 结果只用于当前显示/段评并记在会话里，不覆盖离线 pinned 区。
+      if (upgraded == null && offline.paraIndices.isEmpty) {
+        unawaited(_upgradeAnchors(chapter, writeCache: false));
+      }
       _prefetchNeighbors();
       return;
     }
@@ -401,8 +420,15 @@ class ReaderController extends Notifier<ReaderSessionState> {
     if (_disposed || token != _requestToken) return;
     if (cached != null) {
       _applyContent(chapter, cached.content);
-      // 超过 7 天的旧正文仍先展示，同时悄悄刷新一次缓存。
-      if (cached.isStale) _enqueuePrefetch(chapter);
+      // 老 schema 缓存没有段落锚点：后台补取一次并回填当前章，别让段评
+      // 一直等到 7 天过期才出现；补取本身也会刷新过期缓存，不再重复请求。
+      if (cached.anchorsOutdated &&
+          ref.read(readerSettingsProvider).showBubbles) {
+        unawaited(_upgradeAnchors(chapter));
+      } else if (cached.isStale) {
+        // 超过 7 天的旧正文仍先展示，同时悄悄刷新一次缓存。
+        _enqueuePrefetch(chapter);
+      }
       _prefetchNeighbors();
       return;
     }
@@ -535,6 +561,62 @@ class ReaderController extends Notifier<ReaderSessionState> {
       return;
     } finally {
       _prefetching.remove(id);
+    }
+  }
+
+  /// 阅读页在「气泡开启、但当前正文没有段落锚点」时调用（含设置里重新打开
+  /// 气泡）：同一章只补取一次，避免纯文本源反复发请求。
+  void ensureAnchorUpgrade() {
+    final chapter = state.chapterAt(state.contentIndex);
+    final content = state.content;
+    if (chapter == null || content == null) return;
+    // 空列表 = 老缓存/老离线文件没写过锚点字段，需要补取；全 null 的列表
+    // （纯文本源）是已经取回的正文，不再为它发请求。
+    if (content.paraIndices.isNotEmpty) return;
+    unawaited(_upgradeAnchors(chapter));
+  }
+
+  /// 老版本写入的缓存/离线正文没有段落锚点（正文 `<p idx>`），段评气泡因此
+  /// 永远画不出来：这里后台补取一次，拿到**真锚点**后替换当前显示（只在用户
+  /// 还停在这一章时），并按 [writeCache] 决定是否写回自动缓存。
+  ///
+  /// - 纯文本源补取回来仍没有锚点：不替换正文；自动缓存来源写回带 `v` 的新
+  ///   缓存后不再重试，离线来源不写（离线正文是用户数据）。
+  /// - 段评气泡关闭时不发请求（与「关气泡 = 0 请求」的约定一致）；冷启动要
+  ///   等本地偏好恢复，避免拿默认值误判。
+  Future<void> _upgradeAnchors(
+    Chapter chapter, {
+    bool writeCache = true,
+  }) async {
+    final id = chapter.id;
+    if (_disposed || id.isEmpty) return;
+    final settings = ref.read(readerSettingsProvider.notifier);
+    if (!settings.isRestored) await settings.restoreFuture;
+    if (_disposed) return;
+    if (!ref.read(readerSettingsProvider).showBubbles) return;
+    if (!_anchorUpgradeTried.add(id)) return;
+    final token = _requestToken;
+    try {
+      final content = await ref
+          .read(apiClientProvider)
+          .chapter(id, title: chapter.title);
+      if (_disposed) return;
+      if (content.hasAnchors) {
+        _anchoredChapters[id] = content;
+      }
+      if (writeCache) {
+        // 无论有没有锚点都写回：带 `v` 的新 schema 会阻止下次再试。
+        unawaited(_cache.put(content));
+      }
+      if (!content.hasAnchors || token != _requestToken) return;
+      final position = state.chapters.indexWhere((item) => item.id == id);
+      if (position < 0 || state.index != position) return;
+      // 有失败提示条时不动 state，避免把「重试」的目标章一起清掉。
+      if (state.error != null) return;
+      _applyContent(chapter, content);
+    } catch (_) {
+      // 断网/上游失败：保留原正文继续读，下次进本章再试。
+      _anchorUpgradeTried.remove(id);
     }
   }
 

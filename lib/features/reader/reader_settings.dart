@@ -72,9 +72,21 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
   /// 用户在磁盘读取返回前就改过设置时，不能被旧的落盘值覆盖。
   bool _userChanged = false;
 
+  bool _restored = false;
+  Future<void>? _restoreFuture;
+
+  /// 本地偏好是否已从磁盘恢复（成功/失败都算完成）。
+  ///
+  /// 冷启动时 [build] 先给默认值、异步补磁盘值；「按开关决定要不要发请求」
+  /// 的逻辑（如段评锚点补取）必须等它，否则会拿默认值误判。
+  bool get isRestored => _restored;
+
+  /// 本地偏好恢复完成的 Future；没有开始恢复时立即触发一次。
+  Future<void> get restoreFuture => _restoreFuture ??= _restore();
+
   @override
   ReaderSettings build() {
-    _restore();
+    _restoreFuture = _restore();
     return const ReaderSettings();
   }
 
@@ -135,6 +147,8 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
     } catch (_) {
       // 本地偏好读不到就用默认排版，不影响正文展示。
       return;
+    } finally {
+      _restored = true;
     }
   }
 

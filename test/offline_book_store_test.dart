@@ -71,10 +71,11 @@ void main() {
     expect(hit!.title, '标题c1');
     expect(hit.paragraphs, ['正文c1']);
 
-    // 落盘结构：id/title/paragraphs/fetchedAt。
+    // 落盘结构：v/id/title/paragraphs/fetchedAt（v = 章节缓存 schema 版本）。
     final raw = jsonDecode(
       await (await store.chapterFile('b1', 'c1')).readAsString(),
     );
+    expect(raw['v'], chapterCacheSchemaVersion);
     expect(raw['id'], 'c1');
     expect(raw['paragraphs'], ['正文c1']);
     expect(raw['fetchedAt'], isA<int>());

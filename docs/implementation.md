@@ -200,6 +200,11 @@ await OfflineBookStore.read(bookId)                    ← 磁盘
   在当前目录里重找位置，后台换目录不会把正文挂错章。
 - 离线命中**不回写**自动缓存；自动层只是加速器。
 - ±1 章预取：队列上限 4、worker 并发 1、只写缓存不动 UI；失败静默。
+- **老正文补锚点**：缓存/离线正文没有 `paraIndices`（升级前写入的老文件）且气泡开启时，
+  后台补取一次正文：只有真拿到 `<p idx>` 锚点才回填当前章。自动缓存来源同时写回缓存；
+  离线来源只记在会话内（切走再回来仍生效），不覆盖离线 pinned 区、也不写自动缓存。
+  补取回来仍无锚点（纯文本源）就不替换正文；自动缓存来源写回新版 schema（`v`）后不再
+  重试，离线来源每章每次会话最多一次。断网静默、下次打开再试。
 
 ### 4.4 网络与解密
 
@@ -269,13 +274,21 @@ loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（
 
 - **只读**：没有发评论/点赞/回复入口（内核只有短剧写接口，小说段评写接口不存在）。
 - **装饰失败静默**：`chapterIdeasProvider` 失败一律 `ChapterIdeas.empty`，阅读页不进入错误态。
-- **锚点缺失不瞎猜**：纯文本回退源 / 老缓存没有 `paraIndices` 就不画气泡；目录缺 `version`
-  时段评正文可能回 103001，面板给「加载失败 + 重试」，不影响正文。
+- **锚点缺失不瞎猜**：没有 `paraIndices` 的段不画气泡；升级前写入的老缓存/老离线正文
+  会在后台补取一次带锚点的正文（见 §4.3），纯文本回退源补取后仍无锚点、不替换正文。
+  目录缺 `version` 时段评正文可能回 103001，面板给「加载失败 + 重试」，不影响正文。
 - **气泡只跟最后一行同行**：测量时先看末行剩余空间，气泡放得下才画；放不下就不画
   （避免气泡独占一行、以及 widget 行高与占位高度不一致导致的裁切/盖字）。
-- **离线**：离线阅读不请求评论，气泡/入口自然为空。
-- **缓存兼容**：`reader_chapters/` 与 `offline/novel/` 的章节 JSON 增加可选 `paraIndices`，
-  读取时长度必须与 paragraphs 对齐，否则当无锚点。
+- **气泡样式**：自绘**空心对话气泡**——透明底 + 主题色描边 + **左侧朝左**的小尾巴，数字居中，
+  `>99` 显示 `99+`；三种 variant 只换描边/数字配色（普通 / 有读者 / 作者），不引图片素材。
+  尾巴朝左指向它标注的段落：气泡挂在段末行尾，朝下会顶到下一段行首。
+- **汇总重新请求不闪**：离线进入时目录后台刷新会把章的 `version` 从空换成网络值，
+  idea list 会按新 `version` 重新请求；页面在结果回来前沿用当前章上一份汇总
+  （`_resolveIdeas`），避免已经画出来的气泡先消失再出现。
+- **离线**：断网时评论请求必失败、静默；离线正文缺锚点会在线时补取一次（见 §4.3），纯断网阅读仍无气泡。
+- **缓存兼容**：`reader_chapters/` 与 `offline/novel/` 的章节 JSON 增加可选 `paraIndices`
+  与 schema 版本 `v`；读取时长度必须与 paragraphs 对齐，否则当无锚点。老文件没有 `v`
+  （按 0 算），命中后标记 `anchorsOutdated`，由阅读页补取一次带锚点的正文。
 
 书评（详情页）走另一条旧接口 `GET /books/{id}/comments`（0–10 分 + `comment_cnt` /
 `2.6万人点评` 文案），卡片只露第一条，弹窗按 `offset` 翻页。
@@ -285,6 +298,7 @@ loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（
 | 动作 | 请求 |
 |---|---|
 | 打开一章（段评气泡开） | 1 次 idea list（整章计数，切章才发） |
+| 老缓存/老离线正文缺锚点（气泡开） | 该章首次 +1 次正文；自动缓存来源写回新 schema 后不再发；离线来源每章每次会话各一次 |
 | 段评气泡关 | **0 次**；点工具栏「评论」时才发 1 次 idea list |
 | 打开评论面板 | 1 次评论列表（20 条/页），滚动翻页每页 1 次，「N 条回复」每次展开 1 次 |
 | 进入小说详情页 | 1 次书评（20 条），弹窗滚动翻页每页 1 次 |
@@ -424,10 +438,10 @@ cached miss 时第一次取流仍会按内核重试预算耗一段时间，失�
 | 位置 | 格式 / key | 上限 / TTL |
 |---|---|---|
 | `offline/novel/<b64url(bookId)>/book.json` | `OfflineBook`（章节列表 + 元信息） | 无 TTL；小说区 1 GiB 软上限 |
-| `offline/novel/<bookKey>/<b64url(chapterId)>.json` | `{id,title,paragraphs[,paraIndices],fetchedAt}` 明文 | 无 TTL |
+| `offline/novel/<bookKey>/<b64url(chapterId)>.json` | `{v,id,title,paragraphs[,paraIndices],fetchedAt}` 明文 | 无 TTL |
 | `offline/video/<b64url(seriesId)>/series.json` | 剧集列表 + 档位 + 进度 | 无 TTL；短剧区 3 GiB 软上限 |
 | `offline/video/<seriesKey>/<b64url(episodeId)>.mp4` | **明文 mp4** | 无 TTL |
-| `reader_chapters/<b64url(chapterId)>.json` | `{id,title,paragraphs[,paraIndices],fetchedAt}` | 300 文件（mtime）、7 天 stale、内存 LRU 8 |
+| `reader_chapters/<b64url(chapterId)>.json` | `{v,id,title,paragraphs[,paraIndices],fetchedAt}` | 300 文件（mtime）、7 天 stale、内存 LRU 8 |
 | `backend/src/<videoId>.mp4` | **CENC 密文** | 总预算 128 MiB，最旧优先 |
 | `backend/src/<videoId>.<ext>.key` | hex 密钥 sidecar | 随视频删 |
 | `backend/src/<videoId>.<ext>.variant.json` | `{name,width,height,short_edge}` | 随视频删 |

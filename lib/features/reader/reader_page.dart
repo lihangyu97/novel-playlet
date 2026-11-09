@@ -9,6 +9,7 @@ import '../../app/router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
+import '../../data/models/chapter.dart';
 import '../../data/models/chapter_content.dart';
 import '../../data/models/chapter_ideas.dart';
 import 'reader_comments.dart';
@@ -80,10 +81,50 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   /// 续读落点只恢复一次；后续重排、重进本章都不该再跳。
   bool _resumeApplied = false;
 
+  /// 当前显示章的段评汇总「粘滞」值（见 [_resolveIdeas]）。
+  ///
+  /// 离线进入时目录会在后台刷新：章的 `version` 从空（离线 manifest 不存）
+  /// 换成网络目录里的值，`chapterIdeasProvider` 的 family key 随之变化、重新
+  /// 请求。若直接 `?? empty`，已经画出来的气泡会先消失再出现（真机可见的
+  /// 闪动），所以同一章在重新请求期间沿用上一份结果。
+  ChapterIdeas? _stickyIdeas;
+  String _stickyIdeasChapterId = '';
+
+  /// 当前显示章的段评汇总（计数 + variant）。
+  ///
+  /// 切章/关气泡立即清空；同一章重新请求期间沿用上一份结果，新结果（哪怕是
+  /// 空结果）一回来就替换，避免气泡闪一下。
+  ChapterIdeas _resolveIdeas(Chapter? chapter, bool showBubbles) {
+    if (!showBubbles || chapter == null) {
+      _stickyIdeas = null;
+      _stickyIdeasChapterId = '';
+      return ChapterIdeas.empty;
+    }
+    if (chapter.id != _stickyIdeasChapterId) {
+      _stickyIdeas = null;
+      _stickyIdeasChapterId = chapter.id;
+    }
+    final value = ref
+        .watch(
+          chapterIdeasProvider(
+            ChapterCommentsArgs(
+              bookId: widget.args.bookId,
+              chapterId: chapter.id,
+              itemVersion: chapter.version,
+            ),
+          ),
+        )
+        .value;
+    if (value != null) _stickyIdeas = value;
+    return value ?? _stickyIdeas ?? ChapterIdeas.empty;
+  }
+
   @override
   void dispose() {
     _flushReadingPositionOnDispose();
     _pageController.dispose();
+    // 切章过渡在快速进出/真机打断时会停在半路，ticker 不释放会被框架断言。
+    _chapterTransition.dispose();
     super.dispose();
   }
 
@@ -124,20 +165,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final displayedChapter = session.chapterAt(session.contentIndex);
     // 段评气泡关闭时不预取计数：工具栏「评论」入口按需再取（见
     // _openChapterComments）。这样关掉气泡后每章 0 请求。
-    final ideas = !settings.showBubbles || displayedChapter == null
-        ? ChapterIdeas.empty
-        : ref
-                  .watch(
-                    chapterIdeasProvider(
-                      ChapterCommentsArgs(
-                        bookId: widget.args.bookId,
-                        chapterId: displayedChapter.id,
-                        itemVersion: displayedChapter.version,
-                      ),
-                    ),
-                  )
-                  .value ??
-              ChapterIdeas.empty;
+    final ideas = _resolveIdeas(displayedChapter, settings.showBubbles);
     _lastSession = session;
     _controller = controller;
     // ReadingStore 是进程级 Provider，页面 dispose 后实例仍然有效。
@@ -151,6 +179,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       if (previous.contentIndex == next.contentIndex) return;
       _chapterSlide = next.contentIndex >= previous.contentIndex ? 1 : -1;
       _chapterTransition.forward(from: 0);
+    });
+
+    // 气泡从「关」切回「开」：当前正文若是老缓存（没有段落锚点），立刻补取
+    // 一次，否则要等重进本章才看得到气泡。
+    ref.listen<ReaderSettings>(readerSettingsProvider, (previous, next) {
+      if (previous == null || previous.showBubbles == next.showBubbles) return;
+      if (next.showBubbles) controller.ensureAnchorUpgrade();
     });
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -167,7 +202,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTapUp: _handleTap,
-                  child: _buildBody(session, settings, controller, ideas),
+                  // 正文里的段评气泡按纸色取色（夜间纸色要用深色 scheme 才看得清），
+                  // 其余控件都显式传色，包一层主题只影响气泡与空/错态视图。
+                  child: Theme(
+                    data: _readerTheme(settings.paper),
+                    child: _buildBody(session, settings, controller, ideas),
+                  ),
                 ),
               ),
             ),
