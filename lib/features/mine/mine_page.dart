@@ -155,8 +155,8 @@ class _MinePageState extends ConsumerState<MinePage>
             // 跟着 _controller 在屏幕内左右移动（不会被滑出屏幕）。
             Positioned(
               top: 20,
-              left: 16,
-              right: 16,
+              left: 8,
+              right: 8,
               height: 40,
               child: AnimatedBuilder(
                 animation: _controller,
@@ -179,7 +179,7 @@ class _MinePageState extends ConsumerState<MinePage>
             // 右下角只剩面板切换按钮：缓存入口已挪到推荐页搜索框右侧的
             // 「已缓存」按钮，不再悬浮在这一页（避免和胶囊/切换按钮挤在一起）。
             Positioned(
-              right: 16,
+              right: 8,
               bottom: widget.bottomInset + 16,
               child: _PanelSwitchButton(
                 key: MinePage.switchButtonKey,

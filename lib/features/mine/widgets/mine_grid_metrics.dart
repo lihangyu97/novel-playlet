@@ -13,11 +13,11 @@ class MineGridMetrics {
     required this.itemHeight,
   });
 
-  /// 每块网格的左右留白。
-  static const _gutter = 16.0;
+  /// 每块网格的左右留白（与推荐页/搜索框一致，都是 8）。
+  static const _gutter = 8.0;
 
   /// 列间距（同时作为 GridView 的 crossAxisSpacing）。
-  static const spacing = 12.0;
+  static const spacing = 8.0;
 
   /// 卡片目标宽度：手机 3 列、iPad 自动增列。
   static const _maxCardWidth = 128.0;

@@ -165,7 +165,7 @@ void main() {
     // 短剧标题块（延迟 0）已就位；小说标题整块滑到屏幕左侧外。
     expect(
       tester.getTopRight(find.text('短剧')).dx,
-      closeTo(330, 1),
+      closeTo(338, 1),
       reason: '短剧标题应停在镜像位置',
     );
     expect(tester.getTopLeft(find.text('小说')).dx, lessThan(-300));
@@ -181,7 +181,7 @@ void main() {
     // 再点回小说。
     await tester.tap(find.byKey(MinePage.switchButtonKey));
     await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(60, 1));
+    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(52, 1));
     expect(find.text('我的书架'), findsOneWidget);
   });
 
@@ -192,7 +192,7 @@ void main() {
     // 往左滑 → 短剧。
     await tester.drag(find.byType(MinePage), const Offset(-300, 0));
     await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(tester.getTopRight(find.text('短剧')).dx, closeTo(330, 1));
+    expect(tester.getTopRight(find.text('短剧')).dx, closeTo(338, 1));
     expect(
       find.descendant(
         of: find.byKey(MinePage.switchButtonKey),
@@ -204,7 +204,7 @@ void main() {
     // 往右滑 → 回小说。
     await tester.drag(find.byType(MinePage), const Offset(300, 0));
     await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(60, 1));
+    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(52, 1));
   });
 
   /// 过渡不是整页一起动：标题块 0ms 先走，最近阅读块晚 100ms，书架块晚 200ms。
@@ -258,7 +258,7 @@ void main() {
   testWidgets('我的页-短剧标题与设置按钮左右镜像', (tester) async {
     await pumpPreview(tester, const MinePage());
     const pageWidth = 390.0;
-    const gutter = 16.0;
+    const gutter = 8.0;
     const iconBox = 34.0;
     const iconGap = 10.0;
 

@@ -18,7 +18,7 @@ class RecentList<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Column(
         children: [
           for (var i = 0; i < items.length; i++) ...[
