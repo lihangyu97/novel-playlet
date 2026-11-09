@@ -253,6 +253,34 @@ void main() {
     expect(find.text('短剧'), findsWidgets);
   });
 
+  /// 页头（图标 + 主标题 + 副标题）固定贴顶，和推荐页搜索框一样不跟着列表滚。
+  testWidgets('我的页-页头固定贴顶不随列表滚动', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'shelf_books_v1': jsonEncode([
+        for (var i = 1; i <= 12; i++)
+          {'id': '$i', 'title': '书$i', 'cover': '', 'author': '作者$i'},
+      ]),
+    });
+    await pumpPreview(tester, const MinePage());
+    final header = find.text('小说');
+    final headerBefore = tester.getTopLeft(header);
+    final shelfBefore = tester.getTopLeft(find.text('我的书架'));
+
+    await tester.drag(
+      find.byType(CustomScrollView).first,
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.text('小说'), findsOneWidget, reason: '页头必须始终可见');
+    expect(tester.getTopLeft(header), headerBefore, reason: '页头固定贴顶，不随列表滚动');
+    expect(
+      tester.getTopLeft(find.text('我的书架')).dy,
+      lessThan(shelfBefore.dy),
+      reason: '页头下面的书架内容应该正常滚动',
+    );
+  });
+
   /// 短剧是镜像版式：标题/图标靠右；设置按钮只有一枚，随面板在屏幕内
   /// 从右侧滑到左侧，不再由两个面板各画一个。
   testWidgets('我的页-短剧标题与设置按钮左右镜像', (tester) async {
