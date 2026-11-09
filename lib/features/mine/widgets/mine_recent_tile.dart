@@ -12,6 +12,7 @@ class MineRecentTile extends StatelessWidget {
   const MineRecentTile({
     super.key,
     required this.cover,
+    required this.coverAspect,
     required this.title,
     required this.subtitle,
     required this.updatedAt,
@@ -19,6 +20,9 @@ class MineRecentTile extends StatelessWidget {
   });
 
   final String cover;
+
+  /// 封面原生比例（高 / 宽）：小说 3:4、短剧 7:10。
+  final double coverAspect;
   final String title;
   final String subtitle;
   final DateTime updatedAt;
@@ -38,7 +42,7 @@ class MineRecentTile extends StatelessWidget {
             NovelCover(
               url: cover,
               width: 44,
-              height: 44 * kCoverAspect,
+              height: 44 * coverAspect,
               radius: 8,
             ),
             const SizedBox(width: 12),

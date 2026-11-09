@@ -10,8 +10,9 @@ import 'package:flutter/material.dart';
 ///   - prefixIcon 在固定高度里不垂直居中。
 /// 改成 Row 自己排：固定 [height] 高，图标/输入/清空都在同一行里垂直居中。
 ///
-/// 高度从 48 收到 40：搜索框是每屏都占着的常驻元素，iOS 原生搜索栏内容高
-/// 一般 36–40；40pt 仍远大于触控下限，且页面滚动时会整条收起（见 RecommendPage）。
+/// 高度 40：搜索框是每屏都占着的常驻元素，iOS 原生搜索栏内容高一般 36–40；
+/// 40pt 仍远大于触控下限。圆角 [radius] 从整圆（高的一半）收到 10，与右侧
+/// 「已缓存」入口保持一致；搜索框常驻顶部，不再随列表滚动收起。
 class FeedSearchField extends StatelessWidget {
   const FeedSearchField({
     super.key,
@@ -34,6 +35,20 @@ class FeedSearchField extends StatelessWidget {
 
   static const double height = 40;
 
+  /// 搜索框圆角；右侧「已缓存」入口也用这个值，两块并排时圆角一致。
+  static const double radius = 10;
+
+  /// 搜索框 /「已缓存」按钮底色。
+  ///
+  /// 浅色主题用**纯白**（顶部有淡蓝粉渐变时白块更干净）；深色主题保持
+  /// 深色容器底，避免一块纯白在暗色页里刺眼。
+  static Color surfaceColor(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.brightness == Brightness.dark
+        ? theme.colorScheme.surfaceContainerHighest
+        : Colors.white;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -48,8 +63,8 @@ class FeedSearchField extends StatelessWidget {
           child: DecoratedBox(
             // 只留底色不画描边：iOS 搜索栏观感，避免和列表卡片分隔线叠在一起。
             decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(height / 2),
+              color: FeedSearchField.surfaceColor(context),
+              borderRadius: BorderRadius.circular(radius),
             ),
             child: SizedBox(
               height: height,

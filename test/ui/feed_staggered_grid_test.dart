@@ -108,10 +108,16 @@ void main() {
       hasLength(3),
       reason: '三列：卡片左边距有三种',
     );
-    // 三列时卡宽 = (390 - 16*2 - 12*2) / 3。
+    // 三列时卡宽 = (390 - 左右留白*2 - 列间距*2) / 3。
     expect(
       rects.first.width,
-      closeTo((390 - 32 - FeedStaggeredGrid.crossAxisSpacing * 2) / 3, 0.5),
+      closeTo(
+        (390 -
+                FeedStaggeredGrid.horizontalPadding * 2 -
+                FeedStaggeredGrid.crossAxisSpacing * 2) /
+            3,
+        0.5,
+      ),
     );
   });
 }

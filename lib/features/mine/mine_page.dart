@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/router.dart';
+import '../../app/widgets/top_glow.dart';
 import 'mine_drama_providers.dart';
 import 'widgets/mine_drama_panel.dart';
 import 'widgets/mine_novel_panel.dart';
@@ -34,9 +35,6 @@ class MinePage extends ConsumerStatefulWidget {
   static const dramaPanelKey = Key('mine-panel-drama');
   static const switchButtonKey = Key('mine-panel-switch');
 
-  /// 右下角悬浮「缓存」入口（切换按钮左侧）。
-  static const cacheButtonKey = Key('mine-cache-entry');
-
   @override
   ConsumerState<MinePage> createState() => _MinePageState();
 }
@@ -62,10 +60,6 @@ class _MinePageState extends ConsumerState<MinePage>
 
   void _openSettings() {
     context.pushAppRoute(const SettingsRoute());
-  }
-
-  void _openCacheCenter() {
-    context.pushAppRoute(const CacheCenterRoute());
   }
 
   void _togglePanel() => _animateTo(_panel == 1 ? 0 : 1);
@@ -127,85 +121,99 @@ class _MinePageState extends ConsumerState<MinePage>
     // 看剧存进度会让整个 MinePage（含两个面板、两个动画控制器、设置按钮）
     // 重建一次，而它还在 PageView 里 keep-alive，看不见时也照建。
     ref.listen(mineDramaDataProvider, (_, _) {});
+    // 渐变要盖到状态栏那一条（安全区不参与布局），否则顶部会留一条纯白。
+    final topInset = MediaQuery.paddingOf(context).top;
     return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Stack(
-          children: [
-            GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onHorizontalDragStart: _onHorizontalDragStart,
-              onHorizontalDragUpdate: _onHorizontalDragUpdate,
-              onHorizontalDragEnd: _onHorizontalDragEnd,
-              child: Stack(
-                children: [
-                  _panelSurface(
-                    index: 0,
-                    child: MineNovelPanel(
-                      key: MinePage.novelPanelKey,
-                      bottomInset: widget.bottomInset,
-                      progress: _controller,
-                    ),
-                  ),
-                  _panelSurface(
-                    index: 1,
-                    child: MineDramaPanel(
-                      key: MinePage.dramaPanelKey,
-                      bottomInset: widget.bottomInset,
-                      progress: _controller,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // 唯一一个设置按钮：小说面板时在右、短剧面板时在左，切换过程中
-            // 跟着 _controller 在屏幕内左右移动（不会被滑出屏幕）。
-            Positioned(
-              top: 20,
-              left: 16,
-              right: 16,
-              height: 40,
-              child: AnimatedBuilder(
-                animation: _controller,
-                builder: (context, child) {
-                  return Align(
-                    alignment: Alignment(1 - 2 * _controller.value, 0),
-                    child: child,
-                  );
-                },
-                child: IconButton(
-                  onPressed: _openSettings,
-                  tooltip: '设置',
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 22,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  icon: const Icon(Icons.settings_outlined),
+      body: Stack(
+        children: [
+          // 顶部固定模块（图标 + 标题 + 副标题）的氛围渐变：跟着面板切换进度
+          // 在小说/短剧两套渐变之间连续插值，左右滑动时背景是过渡而非硬切。
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 150 + topInset,
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) => TopGlow(
+                spec: TopGlowSpec.lerp(
+                  kNovelTopGlow,
+                  kDramaTopGlow,
+                  _controller.value,
                 ),
               ),
             ),
-            // 右下角两个悬浮按钮：缓存中心 + 小说/短剧切换。都贴在悬浮底栏
-            // 上方，缓存入口固定在切换按钮左侧，不遮胶囊。
-            Positioned(
-              right: 16,
-              bottom: widget.bottomInset + 16,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _CacheCenterButton(
-                    key: MinePage.cacheButtonKey,
-                    onTap: _openCacheCenter,
+          ),
+          SafeArea(
+            bottom: false,
+            child: Stack(
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragStart: _onHorizontalDragStart,
+                  onHorizontalDragUpdate: _onHorizontalDragUpdate,
+                  onHorizontalDragEnd: _onHorizontalDragEnd,
+                  child: Stack(
+                    children: [
+                      _panelSurface(
+                        index: 0,
+                        child: MineNovelPanel(
+                          key: MinePage.novelPanelKey,
+                          bottomInset: widget.bottomInset,
+                          progress: _controller,
+                        ),
+                      ),
+                      _panelSurface(
+                        index: 1,
+                        child: MineDramaPanel(
+                          key: MinePage.dramaPanelKey,
+                          bottomInset: widget.bottomInset,
+                          progress: _controller,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  _PanelSwitchButton(
+                ),
+                // 唯一一个设置按钮：小说面板时在右、短剧面板时在左，切换过程中
+                // 跟着 _controller 在屏幕内左右移动（不会被滑出屏幕）。
+                Positioned(
+                  top: 20,
+                  left: 8,
+                  right: 8,
+                  height: 40,
+                  child: AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, child) {
+                      return Align(
+                        alignment: Alignment(1 - 2 * _controller.value, 0),
+                        child: child,
+                      );
+                    },
+                    child: IconButton(
+                      onPressed: _openSettings,
+                      tooltip: '设置',
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 22,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      icon: const Icon(Icons.settings_outlined),
+                    ),
+                  ),
+                ),
+                // 右下角只剩面板切换按钮：缓存入口已挪到推荐页搜索框右侧的
+                // 「已缓存」按钮，不再悬浮在这一页（避免和胶囊/切换按钮挤在一起）。
+                Positioned(
+                  right: 8,
+                  bottom: widget.bottomInset + 16,
+                  child: _PanelSwitchButton(
                     key: MinePage.switchButtonKey,
                     showingDrama: _showingDrama,
                     onTap: _togglePanel,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -221,47 +229,6 @@ class _MinePageState extends ConsumerState<MinePage>
           child: ExcludeSemantics(excluding: !settled, child: child),
         );
       },
-    );
-  }
-}
-
-/// 悬浮「缓存中心」按钮：与 [_PanelSwitchButton] 同一套圆形悬浮样式，但用
-/// secondaryContainer 配色与主色切换按钮区分开，避免两个按钮抢注意力。
-class _CacheCenterButton extends StatelessWidget {
-  const _CacheCenterButton({super.key, required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: '缓存中心',
-      child: Semantics(
-        button: true,
-        label: '缓存中心',
-        child: Material(
-          color: scheme.secondaryContainer,
-          shape: const CircleBorder(),
-          elevation: 4,
-          shadowColor: Colors.black38,
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: SizedBox(
-              width: 52,
-              height: 52,
-              child: Center(
-                child: Icon(
-                  Icons.download_outlined,
-                  size: 24,
-                  color: scheme.onSecondaryContainer,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

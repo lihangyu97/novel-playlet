@@ -42,7 +42,7 @@ class MineHeader extends StatelessWidget {
     // 同宽的占位，保证两侧页头高度与文字位置不因移除按钮而变化。
     const settingsPlaceholder = SizedBox(width: 40, height: 40);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+      padding: const EdgeInsets.fromLTRB(8, 20, 8, 4),
       child: Column(
         crossAxisAlignment: mirrored
             ? CrossAxisAlignment.end
@@ -110,7 +110,8 @@ class MineSectionHeader extends StatelessWidget {
             ),
           );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
+      // 区块标题上下也统一 8（与左右留白一致）。
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       child: Row(
         children: mirrored
             ? [

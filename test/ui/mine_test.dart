@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
-import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,20 +15,22 @@ import 'preview_harness.dart';
 /// 我的页预览：小说/短剧双面板、悬浮切换、书架与最近观看。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/mine_test.dart`。
-/// 这一页所有封面的高宽比都必须 = [kCoverAspect]（11:8）。
+/// 这一页的封面都必须是各自内容类型的原生比例：小说 3:4、短剧 7:10。
 void _expectCoverAspect(WidgetTester tester, String label) {
   final bad = tester
       .widgetList<NovelCover>(find.byType(NovelCover))
-      .where(
-        (cover) => (cover.height / cover.width - kCoverAspect).abs() > 0.002,
-      )
+      .where((cover) {
+        final ratio = cover.height / cover.width;
+        return (ratio - kNovelCoverAspect).abs() > 0.002 &&
+            (ratio - kVideoCoverAspect).abs() > 0.002;
+      })
       .map(
         (cover) =>
             '${cover.width.toStringAsFixed(1)}×${cover.height.toStringAsFixed(1)}'
             '(h/w=${(cover.height / cover.width).toStringAsFixed(3)})',
       )
       .toSet();
-  expect(bad, isEmpty, reason: '$label 有封面比例不是 11:8：$bad');
+  expect(bad, isEmpty, reason: '$label 有封面既不是小说 3:4 也不是短剧 7:10：$bad');
 }
 
 void main() {
@@ -164,7 +166,7 @@ void main() {
     // 短剧标题块（延迟 0）已就位；小说标题整块滑到屏幕左侧外。
     expect(
       tester.getTopRight(find.text('短剧')).dx,
-      closeTo(330, 1),
+      closeTo(338, 1),
       reason: '短剧标题应停在镜像位置',
     );
     expect(tester.getTopLeft(find.text('小说')).dx, lessThan(-300));
@@ -180,7 +182,7 @@ void main() {
     // 再点回小说。
     await tester.tap(find.byKey(MinePage.switchButtonKey));
     await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(60, 1));
+    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(52, 1));
     expect(find.text('我的书架'), findsOneWidget);
   });
 
@@ -191,7 +193,7 @@ void main() {
     // 往左滑 → 短剧。
     await tester.drag(find.byType(MinePage), const Offset(-300, 0));
     await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(tester.getTopRight(find.text('短剧')).dx, closeTo(330, 1));
+    expect(tester.getTopRight(find.text('短剧')).dx, closeTo(338, 1));
     expect(
       find.descendant(
         of: find.byKey(MinePage.switchButtonKey),
@@ -203,7 +205,7 @@ void main() {
     // 往右滑 → 回小说。
     await tester.drag(find.byType(MinePage), const Offset(300, 0));
     await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(60, 1));
+    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(52, 1));
   });
 
   /// 过渡不是整页一起动：标题块 0ms 先走，最近阅读块晚 100ms，书架块晚 200ms。
@@ -252,12 +254,68 @@ void main() {
     expect(find.text('短剧'), findsWidgets);
   });
 
+  /// 顶部渐变必须盖住状态栏（安全区）那一条。
+  testWidgets('我的页-顶部渐变盖住状态栏', (tester) async {
+    tester.view.padding = const FakeViewPadding(top: 44);
+    await pumpPreview(tester, const MinePage());
+    final glow = tester.getRect(find.byType(TopGlow));
+    expect(glow.top, 0, reason: '渐变必须从屏幕最顶端开始');
+    expect(
+      glow.height,
+      greaterThanOrEqualTo(150 + 44),
+      reason: '高度要包含状态栏安全区，否则顶部会留一条纯白',
+    );
+  });
+
+  /// 顶部固定页头的氛围渐变：小说/短剧各一套角度，切换面板时过渡到另一套。
+  testWidgets('我的页-页头渐变随面板切换过渡', (tester) async {
+    await pumpPreview(tester, const MinePage());
+    TopGlow glow() => tester.widget<TopGlow>(find.byType(TopGlow));
+    expect(glow().spec.begin, kNovelTopGlow.begin);
+
+    await tester.tap(find.byKey(MinePage.switchButtonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+    expect(
+      glow().spec.begin,
+      kDramaTopGlow.begin,
+      reason: '切到短剧后页头渐变应过渡成短剧那一套角度',
+    );
+  });
+
+  /// 页头（图标 + 主标题 + 副标题）固定贴顶，和推荐页搜索框一样不跟着列表滚。
+  testWidgets('我的页-页头固定贴顶不随列表滚动', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'shelf_books_v1': jsonEncode([
+        for (var i = 1; i <= 12; i++)
+          {'id': '$i', 'title': '书$i', 'cover': '', 'author': '作者$i'},
+      ]),
+    });
+    await pumpPreview(tester, const MinePage());
+    final header = find.text('小说');
+    final headerBefore = tester.getTopLeft(header);
+    final shelfBefore = tester.getTopLeft(find.text('我的书架'));
+
+    await tester.drag(
+      find.byType(CustomScrollView).first,
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.text('小说'), findsOneWidget, reason: '页头必须始终可见');
+    expect(tester.getTopLeft(header), headerBefore, reason: '页头固定贴顶，不随列表滚动');
+    expect(
+      tester.getTopLeft(find.text('我的书架')).dy,
+      lessThan(shelfBefore.dy),
+      reason: '页头下面的书架内容应该正常滚动',
+    );
+  });
+
   /// 短剧是镜像版式：标题/图标靠右；设置按钮只有一枚，随面板在屏幕内
   /// 从右侧滑到左侧，不再由两个面板各画一个。
   testWidgets('我的页-短剧标题与设置按钮左右镜像', (tester) async {
     await pumpPreview(tester, const MinePage());
     const pageWidth = 390.0;
-    const gutter = 16.0;
+    const gutter = 8.0;
     const iconBox = 34.0;
     const iconGap = 10.0;
 
@@ -289,36 +347,16 @@ void main() {
     );
   });
 
-  /// 缓存入口是右下角悬浮按钮（与切换按钮同款圆形），固定在切换按钮左侧；
-  /// 右上角只剩设置按钮。
-  testWidgets('我的页-悬浮缓存入口在切换按钮左侧并打开缓存中心', (tester) async {
+  /// 缓存入口已挪到推荐页搜索框右侧的「已缓存」，这一页右下角只剩切换按钮。
+  testWidgets('我的页-右下角只剩面板切换按钮', (tester) async {
     await pumpPreview(tester, const MinePage());
-    final cacheButton = find.byKey(MinePage.cacheButtonKey);
-    final switchButton = find.byKey(MinePage.switchButtonKey);
-    expect(cacheButton, findsOneWidget);
-    expect(switchButton, findsOneWidget);
-    expect(find.byIcon(Icons.download_outlined), findsOneWidget);
-
-    // 上图标是悬浮缓存按钮、右上角只剩设置按钮。
+    expect(find.byKey(MinePage.switchButtonKey), findsOneWidget);
+    expect(
+      find.byIcon(Icons.download_outlined),
+      findsNothing,
+      reason: '悬浮缓存入口已删除',
+    );
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
-
-    final cacheRect = tester.getRect(cacheButton);
-    final switchRect = tester.getRect(switchButton);
-    expect(
-      cacheRect.right,
-      lessThan(switchRect.left),
-      reason: '缓存悬浮按钮应固定在切换按钮左侧',
-    );
-    expect(
-      cacheRect.center.dy,
-      closeTo(switchRect.center.dy, 0.5),
-      reason: '两个悬浮按钮应同一行垂直居中',
-    );
-    expect(cacheRect.size, switchRect.size, reason: '两个悬浮按钮同尺寸（52×52）');
-
-    await tester.tap(cacheButton);
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(CacheCenterPage), findsOneWidget);
   });
 
   testWidgets('我的页（短剧）', (tester) async {

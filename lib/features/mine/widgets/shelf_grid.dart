@@ -44,12 +44,12 @@ class ShelfGrid<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
         child: SizedBox(height: 200, child: emptyState),
       );
     }
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       child: GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -57,7 +57,7 @@ class ShelfGrid<T> extends StatelessWidget {
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
           crossAxisSpacing: spacing,
-          mainAxisSpacing: 18,
+          mainAxisSpacing: 8,
           mainAxisExtent: itemHeight,
         ),
         itemCount: items.length,
