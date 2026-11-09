@@ -4,11 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/theme_settings.dart';
 import '../../core/cache/app_cache.dart';
+// 设置页集中放全站偏好，会跨 feature 引用偏好 provider（视频清晰度 / 推荐布局）。
+// 偏好本身归功能域所有，但入口统一在设置页，所以这里的跨域 import 是约定的。
 import '../cache/download_quality.dart';
+import '../recommend/recommend_layout.dart';
 import 'settings_providers.dart';
 import 'widgets/theme_color_picker.dart';
 
-/// 设置页：主题色 + 存储。
+/// 设置页：主题（主题色 / 深浅色 / 首页推荐布局）+ 存储 + 视频。
 ///
 /// 从「我的」右上角进。这里只放全局偏好与可重建缓存，书架/阅读进度属于用户
 /// 数据，不给清理入口（那些在「我的」页里操作）。
@@ -29,6 +32,8 @@ class SettingsPage extends StatelessWidget {
             _ThemeColorCard(),
             SizedBox(height: 12),
             _AppearanceCard(),
+            SizedBox(height: 12),
+            _FeedLayoutCard(),
             _SectionTitle('存储'),
             _StorageCard(),
             _StorageHint(),
@@ -373,6 +378,76 @@ class _SwitchRow extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Switch(value: value, onChanged: onChanged),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 首页推荐布局
+// ---------------------------------------------------------------------------
+
+/// 每个布局选项的 key：测试直接点，不依赖文案。
+///
+/// 用枚举名生成而不是三元表达式：以后加第三个选项时不会两个 chip 拿到同一个
+/// key（同一 children 列表里重复 key 会在运行期直接抛错）。
+Key recommendLayoutOptionKey(RecommendLayout layout) =>
+    ValueKey('recommend-layout-${layout.name}');
+
+const Key recommendLayoutTwoKey = ValueKey('recommend-layout-two');
+const Key recommendLayoutThreeKey = ValueKey('recommend-layout-three');
+
+/// 首页推荐布局：双列 / 三列瀑布流。
+///
+/// 与「离线下载清晰度」同一套控件（小标题 + 一排 ChoiceChip）；这里多留一行
+/// 说明文案，是因为两张卡片宽度/信息密度对普通用户没有直觉，需要一句
+/// "封面更大 vs 一屏更多"的取舍提示（清晰度选项本身含义自明，所以那张卡不加）。
+/// 默认双列，改完立即生效（推荐页 watch 同一个 provider）。
+class _FeedLayoutCard extends ConsumerWidget {
+  const _FeedLayoutCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final layout = ref.watch(recommendLayoutProvider);
+    final controller = ref.read(recommendLayoutProvider.notifier);
+    return _Card(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '首页推荐布局',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final option in RecommendLayout.values)
+                ChoiceChip(
+                  key: recommendLayoutOptionKey(option),
+                  label: Text(option.label),
+                  selected: option == layout,
+                  onSelected: (_) => controller.setLayout(option),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            layout == RecommendLayout.two
+                ? '双列：封面更大，一屏看到的少一点'
+                : '三列：封面更小，一屏看到的多一点',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+              height: 1.4,
+            ),
+          ),
         ],
       ),
     );

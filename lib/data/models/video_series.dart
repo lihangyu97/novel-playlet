@@ -17,6 +17,7 @@ class VideoSeries {
     this.score = '',
     this.recommendReason = '',
     this.rankScore = '',
+    this.colorDominate = '',
   });
 
   /// 剧集 id（`series_id_str` 优先：数字型 `series_id` 会被上游截断）。
@@ -40,6 +41,11 @@ class VideoSeries {
   /// 热度（`rec_text`，如「4691万热度」），短剧没有 `rank_score`，用它对位。
   final String rankScore;
 
+  /// 封面主色（上游 `color_dominate` / `back_color_dominate`，如 `#201818`）；
+  /// 短剧 payload 里这个字段还没在抓包样本里确认过，有就用于封面占位色，
+  /// 没有则退回系统灰。
+  final String colorDominate;
+
   bool get isValid => id.isNotEmpty && title.isNotEmpty;
 
   Map<String, dynamic> toStorageJson() => {
@@ -48,6 +54,7 @@ class VideoSeries {
     'cover': cover,
     'intro': intro,
     if (episodeCount > 0) 'episodeCount': episodeCount,
+    if (colorDominate.isNotEmpty) 'colorDominate': colorDominate,
   };
 
   static VideoSeries fromStorageJson(Map<String, dynamic> json) => VideoSeries(
@@ -56,6 +63,7 @@ class VideoSeries {
     cover: asString(json['cover']),
     intro: asString(json['intro']),
     episodeCount: asInt(json['episodeCount']),
+    colorDominate: asString(json['colorDominate']),
   );
 
   /// 按"所有参与展示的字段"比较，不是只比 id：
@@ -73,7 +81,8 @@ class VideoSeries {
       other.isManju == isManju &&
       other.score == score &&
       other.recommendReason == recommendReason &&
-      other.rankScore == rankScore;
+      other.rankScore == rankScore &&
+      other.colorDominate == colorDominate;
 
   @override
   int get hashCode => Object.hash(
@@ -86,5 +95,6 @@ class VideoSeries {
     score,
     recommendReason,
     rankScore,
+    colorDominate,
   );
 }

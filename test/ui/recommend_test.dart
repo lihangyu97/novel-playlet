@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/features/feed/feed_results.dart';
 import 'package:novel_playlet/features/feed/feed_search_field.dart';
+import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,6 +40,18 @@ List<Size> _searchCoverSizes(WidgetTester tester) {
       .toList();
 }
 
+/// 前 [count] 张卡片各自的左边距去重后的列表：列数 = 左边距种类数。
+///
+/// 瀑布流里同一列卡片的 x 相同，所以这比数卡片总数更直接；用前几张卡是因为
+/// 首屏内容一定已布局（不依赖滚动）。
+List<double> _firstCardLefts(WidgetTester tester, {required int count}) {
+  final cards = tester
+      .widgetList<NovelGridCard>(find.byType(NovelGridCard))
+      .take(count);
+  return {for (final card in cards) tester.getTopLeft(find.byWidget(card)).dx}
+      .toList();
+}
+
 void main() {
   setUpAll(() async {
     await loadPreviewFont();
@@ -57,31 +72,59 @@ void main() {
     );
   });
 
-  testWidgets('推荐页-小说卡元信息按「推荐理由 → 热度 → 作者」，评分在角标', (tester) async {
+  testWidgets('推荐页-小说卡：作者固定一行，推荐理由/热度各自有就显示', (tester) async {
     await pumpPreview(tester, const RecommendPage());
-    // fake 推荐流：i%3==1 带 rank_score，i%3==2 只有作者，i%3==0 带推荐理由。
-    expect(find.text('1万热度'), findsOneWidget, reason: '无理由时展示热度');
-    expect(find.text('爱潜水的乌贼'), findsOneWidget, reason: '无理由/热度时退回作者');
-    expect(find.text('巅峰榜No.3'), findsOneWidget, reason: '有推荐理由时优先展示');
+    // fake 推荐流：每本都有作者；i%3==0 带推荐理由，i%3==1 带 rank_score。
+    expect(find.text('1万热度'), findsWidgets, reason: '热度有就显示（i=1）');
+    expect(find.text('巅峰榜No.3'), findsWidgets, reason: '推荐理由有就显示（i=3）');
+    expect(find.text('烽火戏诸侯'), findsWidgets, reason: '作者无条件显示');
+    // 双列：热度右对齐到作者同一行，行尾不空着；作者不被顶掉。
+    final heatCard = find.ancestor(
+      of: find.text('1万热度').first,
+      matching: find.byType(NovelGridCard),
+    );
+    final authorInHeatCard = find.descendant(
+      of: heatCard,
+      matching: find.text('烽火戏诸侯'),
+    );
+    expect(authorInHeatCard, findsOneWidget, reason: '作者与热度显示在同一张卡上');
+    expect(
+      tester.getTopLeft(find.text('1万热度').first).dy,
+      closeTo(tester.getTopLeft(authorInHeatCard).dy, 0.5),
+      reason: '热度与作者同一行',
+    );
+    expect(
+      tester.getTopLeft(find.text('1万热度').first).dx,
+      greaterThan(tester.getTopLeft(authorInHeatCard).dx),
+      reason: '热度靠右',
+    );
+    final reasonCard = find.ancestor(
+      of: find.text('巅峰榜No.3').first,
+      matching: find.byType(NovelGridCard),
+    );
+    expect(
+      find.descendant(of: reasonCard, matching: find.text('卖报小郎君')),
+      findsOneWidget,
+      reason: '作者与推荐理由显示在同一张卡上',
+    );
     // 评分从作者行移到封面右上角角标（i=1 8.8 / i=2 9.3）。
     expect(find.text('8.8分'), findsWidgets, reason: '评分在封面右上角角标');
     expect(find.text('9.3分'), findsWidgets, reason: '评分在封面右上角角标');
   });
 
-  testWidgets('推荐页-短剧卡元信息按同一优先级（理由 → 热度 → 集数 · 评分）', (tester) async {
+  testWidgets('推荐页-短剧卡：集数固定一行，推荐理由/热度各自有就显示', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     await tester.tap(find.text('短剧'));
     await tester.pumpAndSettle();
-    // 集数永远在最前；i=3/6/9 带推荐理由，i=1 带 rec_text，i=2 只有集数+评分。
+    // i=3/6/9 带推荐理由，i=1 带 rec_text（热度），i=2 只有集数。
+    expect(find.text('全 43 集'), findsOneWidget, reason: '集数固定一行');
+    expect(find.text('系列剧·40万人在追'), findsWidgets, reason: '推荐理由单独一行，有就显示');
+    expect(find.text('全 41 集'), findsOneWidget);
+    expect(find.text('10万热度'), findsOneWidget, reason: '热度有就显示');
     expect(
-      find.text('全 43 集 · 系列剧·40万人在追'),
-      findsOneWidget,
-      reason: '集数在最前，有推荐理由时优先展示',
-    );
-    expect(
-      find.text('全 41 集 · 10万热度'),
-      findsOneWidget,
-      reason: '无理由时展示「集数 + rec_text 热度」',
+      tester.getTopLeft(find.text('10万热度')).dy,
+      closeTo(tester.getTopLeft(find.text('全 41 集')).dy, 0.5),
+      reason: '双列：热度与集数同一行（右对齐）',
     );
     expect(find.text('全 42 集'), findsOneWidget, reason: '没有理由/热度时只显示集数');
     // 评分进封面角标（短剧 i=1 8.0 / i=2 8.2）。
@@ -216,19 +259,21 @@ void main() {
     );
   });
 
-  /// 封面尺寸回归：三个分类的推荐流封面必须同宽同高。
+  /// 封面尺寸回归：推荐流按内容域原生比例出封面（小说 240×320、短剧/漫剧 400×571，都是高/宽）。
   ///
-  /// 上游原生比例不同（小说 240×320 = 3:4，短剧 400×571 ≈ 1.427），以前两条
-  /// 流各用各的 `coverAspect`；合并成一个页面后更不能出现切分类封面大小跳变。
+  /// 以前统一裁成 kCoverAspect（11:8），是为了让三个分类的封面同宽同高、切 tab
+  /// 不跳；改成不定高瀑布流后这个约束没必要了：按上游原生比例出图不裁封面，
+  /// 小说会比短剧/漫剧略矮。列宽仍然只由列数决定，同一分类里封面尺寸必须一致。
   /// 切分类后旧页面会被 TabBarView 保活，所以按卡片类型圈定当前分类的封面。
-  testWidgets('封面尺寸-三个分类的推荐流一致', (tester) async {
+  testWidgets('封面尺寸-推荐流按内容域原生比例', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     final novel = _gridCoverSizes(tester, novel: true);
     expect(novel, isNotEmpty);
     expect(novel.map((size) => size.width).toSet(), hasLength(1));
     expect(
       novel.first.height / novel.first.width,
-      closeTo(kCoverAspect, 0.001),
+      closeTo(kNovelCoverAspect, 0.001),
+      reason: '小说封面按 240×320（高/宽 4:3）出图，不再裁成 11:8',
     );
 
     await tester.tap(find.text('短剧'));
@@ -238,7 +283,8 @@ void main() {
     expect(drama.map((size) => size.width).toSet(), hasLength(1));
     expect(
       drama.first.height / drama.first.width,
-      closeTo(kCoverAspect, 0.001),
+      closeTo(kVideoCoverAspect, 0.001),
+      reason: '短剧/漫剧封面按 400×571 原生比例出图',
     );
 
     await tester.tap(find.text('漫剧'));
@@ -246,8 +292,85 @@ void main() {
     final anime = _gridCoverSizes(tester, novel: false);
     expect(anime, isNotEmpty);
 
-    expect(drama.first, novel.first, reason: '短剧与小说封面尺寸必须一致');
-    expect(anime.first, novel.first, reason: '漫剧与小说封面尺寸必须一致');
+    expect(drama.first.width, novel.first.width, reason: '同一套列宽，封面宽度必须一致');
+    expect(anime.first.width, novel.first.width, reason: '同一套列宽，封面宽度必须一致');
+    expect(
+      drama.first.height,
+      greaterThan(novel.first.height),
+      reason: '短剧原生比例（高/宽 571/400 ≈ 1.4275）比小说（4/3 ≈ 1.333）更高',
+    );
+  });
+
+  /// 默认双列瀑布流：前两张卡片分列左右，卡片是白底卡。
+  testWidgets('推荐页-默认双列瀑布流', (tester) async {
+    await pumpPreview(tester, const RecommendPage());
+    expect(
+      _firstCardLefts(tester, count: 2),
+      hasLength(2),
+      reason: '默认双列：前两张卡片左右各一张',
+    );
+    expect(find.byType(AppSurfaceCard), findsWidgets, reason: '推荐卡是白底卡片');
+  });
+
+  /// 布局偏好是全局状态：设置页把布局切成三列后，推荐页立即按三列排版。
+  testWidgets('推荐页-三列布局每行三张', (tester) async {
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      extraOverrides: [
+        recommendLayoutProvider.overrideWith(
+          () => RecommendLayoutController(initialLayout: RecommendLayout.three),
+        ),
+      ],
+    );
+    expect(
+      _firstCardLefts(tester, count: 3),
+      hasLength(3),
+      reason: '三列：前三张卡片各占一列',
+    );
+  });
+
+  /// 切列数立即生效，不需要重新进页面（推荐页 watch 同一个 provider）。
+  testWidgets('推荐页-切换布局立即生效', (tester) async {
+    await pumpPreview(tester, const RecommendPage());
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(RecommendPage)),
+    );
+    container
+        .read(recommendLayoutProvider.notifier)
+        .setLayout(RecommendLayout.three);
+    await tester.pumpAndSettle();
+    expect(_firstCardLefts(tester, count: 3), hasLength(3));
+  });
+
+  /// 三列基线：列数换掉后卡宽变窄，锁住整页观感。
+  testWidgets('推荐页-三列', (tester) async {
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      extraOverrides: [
+        recommendLayoutProvider.overrideWith(
+          () => RecommendLayoutController(initialLayout: RecommendLayout.three),
+        ),
+      ],
+    );
+    await expectLater(
+      find.byType(RecommendPage),
+      matchesGoldenFile('../goldens/recommend_three_columns.png'),
+    );
+  });
+
+  /// 深色基线：白底卡在暗色下换成 surfaceContainerHigh，靠底色差分层（不画阴影）。
+  testWidgets('推荐页-深色', (tester) async {
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      brightness: Brightness.dark,
+    );
+    await expectLater(
+      find.byType(RecommendPage),
+      matchesGoldenFile('../goldens/recommend_dark.png'),
+    );
   });
 
   /// 搜索态也统一：三个分类都是横向列表 + 同一套条目，封面同宽同高。

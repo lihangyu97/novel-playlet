@@ -67,6 +67,17 @@ Widget _wrap(Widget child, {List<Override> overrides = const []}) {
   );
 }
 
+/// 设置页新增「首页推荐布局」卡片后内容变长，「清理缓存」会落到 800×600 的
+/// 测试首屏外：点击前先把它滚到可见，否则 tap 会因命中不到而静默失败。
+Future<void> _scrollToClearCache(WidgetTester tester) async {
+  await tester.scrollUntilVisible(
+    find.text('清理缓存'),
+    200,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await tester.pumpAndSettle();
+}
+
 final _hexFinder = find.byWidgetPredicate(
   (widget) =>
       widget is Text &&
@@ -326,6 +337,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('12 MB'), findsOneWidget);
+    await _scrollToClearCache(tester);
     await tester.tap(find.text('清理缓存'));
     await tester.pumpAndSettle();
     expect(find.text('清理缓存？'), findsOneWidget);
@@ -361,6 +373,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await _scrollToClearCache(tester);
     await tester.tap(find.text('清理缓存'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('清理'));
@@ -386,6 +399,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await _scrollToClearCache(tester);
     await tester.tap(find.text('清理缓存'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('清理'));

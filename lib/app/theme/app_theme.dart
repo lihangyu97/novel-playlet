@@ -60,6 +60,24 @@ class AppTheme {
 
   static const double cardRadius = 14;
 
+  /// 媒体卡片（推荐流封面卡）圆角。
+  ///
+  /// 比通用 [cardRadius] 小一档：卡片是纯白底、封面满宽出血，14 在双列宽卡上
+  /// 会显得又圆又笨重；设置页等通用 Card 保持 [cardRadius]，两者不合并。
+  static const double mediaCardRadius = 10;
+
+  /// 媒体卡片底色：浅色纯白（跟 Card 主题一致），暗色用比画布亮一档的
+  /// `surfaceContainerHigh`。
+  ///
+  /// 暗色不画阴影：阴影在深色底上几乎不可见，靠底色差分层更干净；浅色画布
+  /// 是 [canvas]，纯白卡片才有「浮起一张卡」的层次。
+  static Color mediaCardColor(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.brightness == Brightness.dark
+        ? theme.colorScheme.surfaceContainerHigh
+        : Colors.white;
+  }
+
   static ThemeData light([Color seed = appSeedColor]) =>
       _build(seed, Brightness.light);
 

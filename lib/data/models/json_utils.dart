@@ -54,6 +54,11 @@ List<dynamic> asList(Object? value) {
 /// 单张 1~3 MB）。全 App 的封面位最大也就 108pt 宽，一律取最小的那张。
 const coverKeys = ['thumb_url', 'detail_page_thumb_url', 'cover_url', 'cover'];
 
+/// 封面主色（上游 `color_dominate`，如 `#201818`）；少数条目只带
+/// `back_color_dominate`。列表卡片用它当封面还没加载出来时的占位底色，
+/// 避免一片灰块（见 `NovelCover.placeholderColor`）。
+const coverColorKeys = ['color_dominate', 'back_color_dominate'];
+
 /// 取第一个非空字符串字段。
 String firstString(Map<String, dynamic> map, List<String> keys) {
   for (final key in keys) {

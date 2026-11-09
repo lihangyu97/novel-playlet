@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
+import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/settings/settings_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 
-/// 设置页预览：主题色（3 个预设 + 自定义）、深浅色模式、存储与视频区块。
+/// 设置页预览：主题色（3 个预设 + 自定义）、深浅色模式、首页推荐布局、存储与视频区块。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/settings_page_test.dart`。
 void main() {
@@ -145,6 +146,34 @@ void main() {
       find.byType(SettingsPage),
       matchesGoldenFile('../goldens/settings_theme_red.png'),
     );
+  });
+
+  /// 首页推荐布局：默认双列，可切三列并落盘（推荐页 watch 同一个 provider）。
+  testWidgets('设置页-首页推荐布局默认双列，可切三列', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(SettingsPage)),
+    );
+
+    expect(find.text('首页推荐布局'), findsOneWidget);
+    expect(container.read(recommendLayoutProvider), RecommendLayout.two);
+    expect(
+      tester.widget<ChoiceChip>(find.byKey(recommendLayoutTwoKey)).selected,
+      isTrue,
+    );
+    expect(find.text('双列：封面更大，一屏看到的少一点'), findsOneWidget);
+
+    // ListView 懒加载：先滚到选项再点，避免以后上面再加一张卡就点不到。
+    await tester.ensureVisible(find.byKey(recommendLayoutThreeKey));
+    await tester.tap(find.byKey(recommendLayoutThreeKey));
+    await tester.pump();
+    expect(container.read(recommendLayoutProvider), RecommendLayout.three);
+    expect(
+      tester.widget<ChoiceChip>(find.byKey(recommendLayoutThreeKey)).selected,
+      isTrue,
+    );
+    expect(find.text('三列：封面更小，一屏看到的多一点'), findsOneWidget);
+    // 落盘由 test/recommend_layout_test.dart 覆盖（页面测试只验证交互与联动）。
   });
 
   testWidgets('设置页-深色', (tester) async {
