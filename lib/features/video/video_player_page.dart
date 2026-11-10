@@ -52,6 +52,12 @@ final playbackControllerFactoryProvider = Provider<PlaybackControllerFactory>((
 /// 一集一个 controller：切集就换 controller（换档/换集都走同一条路），
 /// 播放中的 controller 不跨集复用——AVPlayer 对同一 item 换源不如重建稳。
 ///
+/// 切集交互是整页竖向翻页（上滑下一集 / 下滑上一集，类似短视频 feed），
+/// 不再提供上一集/下一集按钮。手指滑过一半就开始加载目标集：旧 controller
+/// 暂停后继续画在旧页上随页滑出，新集在滑入过程中初始化、出画面后才释放
+/// 旧帧；下一集的取流结果在当前集播 5s 后预取，加上 spinner 250ms 延迟，
+/// 已缓存集切换时看不到「正在准备视频」。
+///
 /// 后台/画中画/HDR 本轮不做（见 docs/implementation.md）：退后台不做显式
 /// 暂停，回前台仍在播放就继续。
 ///
@@ -110,6 +116,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   /// 就绪，观感也是「卡了一下」；保留旧画面可以把这个空窗盖住。
   VideoPlayerController? _retained;
 
+  /// [_retained] 属于哪一集：翻页时旧页还在屏幕上滑出，要在旧页继续画这一帧。
+  int? _retainedIndex;
+
   /// 有旧画面兜底时延迟显示 spinner：本地文件通常在新画面出来前就绪，
   /// 不应该闪一下「正在准备视频…」。
   Timer? _spinnerTimer;
@@ -128,6 +137,14 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   final Set<String> _prefetching = {};
   Timer? _prefetchTimer;
 
+  /// 竖向翻页控制器：上滑下一集 / 下滑上一集。
+  late final PageController _pageController;
+
+  /// 程序化翻页（选集弹层 / 播完自动续播）进行中：忽略 ScrollEndNotification，
+  /// 由 [_changeEpisode] 自己 await 翻页结束后再加载目标集，避免重复 _open。
+  bool _jumping = false;
+  int? _programmaticTarget;
+
   /// 横屏判定：接近 1 的方图不算，避免给错按钮。
   static const double _landscapeAspect = 1.05;
 
@@ -143,6 +160,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _index = widget.args.index < 0
         ? 0
         : (widget.args.index > lastIndex ? lastIndex : widget.args.index);
+    _pageController = PageController(initialPage: _index);
     unawaited(_open(_index));
   }
 
@@ -155,6 +173,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _cancelSpeedReapplyTimers();
     _disposeController();
     _disposeRetained();
+    _pageController.dispose();
     // 带着全屏状态退出播放页时，下一次进别的页面还在横屏就糟了。
     if (_fullscreen) unawaited(_restorePortrait());
     super.dispose();
@@ -184,11 +203,13 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     unawaited(controller.pause());
     _disposeRetained();
     _retained = controller;
+    _retainedIndex = _index;
   }
 
   void _disposeRetained() {
     final retained = _retained;
     _retained = null;
+    _retainedIndex = null;
     if (retained != null) unawaited(retained.dispose());
   }
 
@@ -210,8 +231,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _cancelSpeedReapplyTimers();
     _wasPlaying = false;
     _speedReapplyPending = false;
-    // 旧画面先留着垫底，等新集真正出画面再释放（见
-    // docs/implementation.md）。
+    // 旧画面先留着垫底：同页重试时盖住加载空窗；翻页切集时旧 controller
+    // 停在旧页上随页滑出，新集真正出画面后再释放（见 _buildRetainedVideo）。
     _retainCurrentController();
     String sourceUrl = '';
     String localPath = '';
@@ -219,21 +240,19 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       _index = index;
       _loading = true;
       _error = null;
-      // 控制条只在首次进入播放页、或用户点屏幕后出现；播完自动切下一集
-      // 是「被动续播」，不应该再把控制条弹出来打断观看（见
-      // docs/implementation.md）。
-      _controlsVisible = !autoAdvance;
+      // 控制条：自动续播不弹出来打断观看；其它切集/重试保持用户当前显隐
+      // （正在沉浸观看就别因为滑了一集把控制条弹出来）。首次进入默认可见。
+      if (autoAdvance) _controlsVisible = false;
       _dragValue = null;
-      // 有上一帧兜底时先不闪 spinner：本地文件往往 200ms 内就绪。
-      _showSpinner = _retained == null;
+      // spinner 一律延迟 250ms：已缓存/预取的集通常在这之前就出画面，
+      // 不要先闪一下「正在准备视频」再切过去（真机体感差）。
+      _showSpinner = false;
     });
     _spinnerTimer?.cancel();
-    if (!_showSpinner) {
-      _spinnerTimer = Timer(const Duration(milliseconds: 250), () {
-        if (!mounted || !_loading) return;
-        setState(() => _showSpinner = true);
-      });
-    }
+    _spinnerTimer = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted || !_loading) return;
+      setState(() => _showSpinner = true);
+    });
 
     try {
       // 离线副本优先：命中就直接开本地明文 mp4，不请求内核、不等待
@@ -505,8 +524,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         !value.isPlaying) {
       _advancing = true;
       if (_index + 1 < _episodes.length) {
-        // 播完自动续播：不要像首次进入那样弹出控制条。
-        unawaited(_open(_index + 1, autoAdvance: true));
+        // 播完自动续播：整页滑到下一集，控制条保持隐藏（见 _open 的说明）。
+        unawaited(_changeEpisode(_index + 1, autoAdvance: true));
       }
     }
   }
@@ -882,17 +901,64 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       seriesTitle: widget.args.seriesTitle,
     );
     if (!mounted || picked == null || picked == _index) return;
-    await _open(picked);
+    await _changeEpisode(picked, animate: false);
   }
 
-  void _openPrevious() {
-    if (_index <= 0) return;
-    unawaited(_open(_index - 1));
+  /// 当前 PageView 停在的页码（翻页动画期间取动画中的中间页）。
+  int get _currentPage => _pageController.hasClients
+      ? (_pageController.page ?? _index).round()
+      : _index;
+
+  /// 整页切到第 [target] 集：先开始加载（旧画面留在旧页上随页滑出），
+  /// 同时翻页；加载与翻页动画并行，翻到目标页时通常已经能直接出画面。
+  /// 选集弹层的大跨集跳转用 jump，播完自动续播用相邻页动画。
+  Future<void> _changeEpisode(
+    int target, {
+    bool autoAdvance = false,
+    bool animate = true,
+  }) async {
+    if (target < 0 || target >= _episodes.length || target == _index) return;
+    unawaited(_open(target, autoAdvance: autoAdvance));
+    if (!_pageController.hasClients) return;
+    // 程序化翻页期间屏蔽手势回调；翻完时 _index 已经是 target，重复通知会
+    // 被 page == _index 挡掉。
+    _programmaticTarget = target;
+    _jumping = true;
+    try {
+      if (!animate || (target - _currentPage).abs() > 1) {
+        _pageController.jumpToPage(target);
+      } else {
+        await _pageController.animateToPage(
+          target,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    } finally {
+      _jumping = false;
+      _programmaticTarget = null;
+    }
   }
 
-  void _openNext() {
-    if (_index + 1 >= _episodes.length) return;
-    unawaited(_open(_index + 1));
+  /// 用户滑过一半就提前开始加载目标集：旧页继续画暂停的上一帧，新页在
+  /// 滑动过程中初始化。已缓存集通常落定前就绪，不再闪「正在准备视频」。
+  void _onPagerPageChanged(int index) {
+    if (_jumping || _programmaticTarget != null) return;
+    if (index == _index) return;
+    unawaited(_open(index));
+  }
+
+  /// 兜底：极端情况下 onPageChanged 没覆盖到（比如程序化跳页后的迟到通知），
+  /// 落定页仍与当前集不一致时就补一次加载。
+  bool _onPagerScrollEnd(ScrollEndNotification notification) {
+    if (_jumping || _programmaticTarget != null) return false;
+    final page = _pageController.hasClients
+        ? _pageController.page?.round()
+        : null;
+    if (page != null && page != _index) {
+      unawaited(_open(page));
+    }
+    return false;
   }
 
   /// 打开倍速弹层：只写 provider，由 build 里的 listener 统一下发给 controller。
@@ -954,15 +1020,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                 // 否则画面下方会留一道黑边。顶部控制条始终避让状态栏；底部控制条
                 // 只在竖屏避让安全区——全屏横屏时贴到屏幕最底边，否则 Home 指示条
                 // 那一条会在控件下面留出空隙。
-                Positioned.fill(child: _buildVideo()),
-                // 点按层放在视频之上、控制条之下：点画面切换控制条显隐。
-                if (showChrome)
-                  Positioned.fill(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _toggleControls,
-                    ),
-                  ),
+                Positioned.fill(child: _buildPager(showChrome: showChrome)),
                 if (showChrome)
                   Positioned(
                     top: 0,
@@ -1048,20 +1106,98 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     );
   }
 
-  Widget _buildVideo() {
+  /// 竖向翻页：上滑下一集、下滑上一集。
+  ///
+  /// 只有「当前页」持有真实视频画面，其它页是黑底 + 集数占位（不预建
+  /// controller）；拖动过程中 _index 不变，落定后才切源。全屏横屏时禁用
+  /// 翻页：那是对画面的聚焦查看，不是 feed 浏览。
+  Widget _buildPager({required bool showChrome}) {
+    return NotificationListener<ScrollEndNotification>(
+      onNotification: _onPagerScrollEnd,
+      child: PageView.builder(
+        key: const ValueKey('video-episode-pager'),
+        controller: _pageController,
+        scrollDirection: Axis.vertical,
+        physics: _fullscreen
+            ? const NeverScrollableScrollPhysics()
+            : const PageScrollPhysics(),
+        onPageChanged: _onPagerPageChanged,
+        itemCount: _episodes.length,
+        itemBuilder: (context, index) {
+          final page = _buildEpisodePage(index);
+          if (index != _index || !showChrome) return page;
+          // 点画面切换控制条显隐。放在 PageView 的页内而不是整屏叠加层：
+          // 叠加层会挡住 PageView，上下滑手势到不了翻页。
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggleControls,
+            child: page,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildEpisodePage(int index) {
+    if (index == _index) return _buildCurrentVideo();
+    if (_retained != null && index == _retainedIndex) {
+      return _buildRetainedVideo();
+    }
+    return _buildEpisodePlaceholder(index);
+  }
+
+  /// 非当前页的占位：黑底 + 集数/集名。不放 spinner，避免看起来像在加载
+  /// 一个还没开始加载的页面。
+  Widget _buildEpisodePlaceholder(int index) {
+    final episode = _episodes[index];
+    final title = episode.title.isNotEmpty ? episode.title : '第 ${index + 1} 集';
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '第 ${index + 1} 集',
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 15),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 当前页：当前 controller 优先；加载中时同一页有旧的上一帧（同页重试）
+  /// 就继续垫底，否则黑屏等 250ms 的 spinner 延迟，避免一滑过去就闪「正在
+  /// 准备视频」。
+  Widget _buildCurrentVideo() {
     if (_error != null) return _buildErrorView();
     final controller = _controller;
-    final retained = _retained;
-    final retainedReady = retained != null && retained.value.isInitialized;
     final currentReady =
         controller != null && controller.value.isInitialized && !_loading;
+    final retained = _retained;
+    final samePageRetained =
+        retained != null &&
+        retained.value.isInitialized &&
+        _retainedIndex == _index;
     // 固定两个插槽：旧帧在最底层、当前视频在第二层。旧帧释放时用
     // SizedBox 占住第 0 个位置，避免第二层的平台视图因为 children 下标变化
     // 被重建（iOS platformView 重建会闪一下黑）。
     return Stack(
       alignment: Alignment.center,
       children: [
-        if (retainedReady)
+        if (samePageRetained)
           Center(
             child: AspectRatio(
               aspectRatio: _aspectOf(retained.value),
@@ -1095,11 +1231,26 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
               ],
             ),
           )
-        else if (!retainedReady || _showSpinner)
+        else if (_showSpinner)
           _buildLoading()
-        else
-          const SizedBox.shrink(),
+        else if (!samePageRetained)
+          // 先留黑：已缓存集一般 250ms 内出画面，不闪加载文案。
+          const ColoredBox(color: Colors.black),
       ],
+    );
+  }
+
+  /// 翻页时旧页上的上一集最后一帧：随旧页滑出，新集出画面后由 _onTick 释放。
+  Widget _buildRetainedVideo() {
+    final retained = _retained;
+    if (retained == null || !retained.value.isInitialized) {
+      return const ColoredBox(color: Colors.black);
+    }
+    return Center(
+      child: AspectRatio(
+        aspectRatio: _aspectOf(retained.value),
+        child: VideoPlayer(retained),
+      ),
     );
   }
 
@@ -1189,6 +1340,18 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                   ),
                   child: const Text('重新下载这一集'),
                 ),
+                // 错误页的内容可能占满整屏、上下滑会被内部滚动区吃掉，
+                // 给一个明确的「下一集」出口，别让用户只能开选集。
+                if (_index + 1 < _episodes.length)
+                  OutlinedButton.icon(
+                    onPressed: () => unawaited(_changeEpisode(_index + 1)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white38),
+                    ),
+                    icon: const Icon(Icons.skip_next_rounded, size: 16),
+                    label: const Text('下一集'),
+                  ),
                 TextButton.icon(
                   onPressed: () => unawaited(_copyError()),
                   style: TextButton.styleFrom(foregroundColor: Colors.white70),
@@ -1333,35 +1496,14 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          onPressed: _openPrevious,
-                          icon: const Icon(Icons.skip_previous_rounded),
-                          color: _index > 0 ? Colors.white : Colors.white38,
-                          iconSize: 30,
-                        ),
-                        const SizedBox(width: 12),
-                        IconButton.filled(
-                          onPressed: _togglePlay,
-                          icon: Icon(
-                            value.isPlaying
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                          ),
-                          iconSize: 30,
-                        ),
-                        const SizedBox(width: 12),
-                        IconButton(
-                          onPressed: _openNext,
-                          icon: const Icon(Icons.skip_next_rounded),
-                          color: _index + 1 < _episodes.length
-                              ? Colors.white
-                              : Colors.white38,
-                          iconSize: 30,
-                        ),
-                      ],
+                    IconButton.filled(
+                      onPressed: _togglePlay,
+                      icon: Icon(
+                        value.isPlaying
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                      ),
+                      iconSize: 30,
                     ),
                     // 左侧「选集」：像阅读器目录弹层一样快速跳集。
                     Positioned(
