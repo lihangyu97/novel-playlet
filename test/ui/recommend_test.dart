@@ -165,6 +165,12 @@ void main() {
       findsOneWidget,
       reason: '与我的页共用同一套 tabs',
     );
+    // 首个 tab 的文字左边缘与搜索框左边缘对齐（同一个内容留白）。
+    expect(
+      tester.getTopLeft(find.text('小说')).dx,
+      closeTo(tester.getTopLeft(find.byType(FeedSearchField)).dx, 0.5),
+      reason: '首个 tab 文字应与搜索框左对齐',
+    );
     final scrollView = tester.widget<SingleChildScrollView>(
       find.descendant(
         of: find.byType(CategoryTabBar),

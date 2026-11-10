@@ -183,7 +183,7 @@ class RecommendPageState extends ConsumerState<RecommendPage>
               ),
               // tabs 与列表之间留呼吸空间；样式与我的页共用 CategoryTabBar。
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: 4),
                 child: CategoryTabBar(
                   controller: _tabController,
                   labels: const ['小说', '短剧', '漫剧'],
