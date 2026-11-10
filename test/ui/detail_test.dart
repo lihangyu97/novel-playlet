@@ -6,6 +6,7 @@ import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
+import 'package:novel_playlet/features/reader/reader_page.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -246,6 +247,28 @@ void main() {
         reason: '数据回来后 ID 行才出现',
       );
     });
+  });
+
+  testWidgets('阅读页加入书架后返回详情，底栏收藏态同步', (tester) async {
+    await pumpPreview(tester, const DetailPage(bookId: '1'));
+    expect(find.text('收藏'), findsOneWidget);
+
+    // 详情 → 开始阅读 → 阅读页顶部「加入书架」。
+    await tester.tap(find.text('开始阅读'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.byType(ReaderPage), findsOneWidget);
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('加入书架'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('已在书架'), findsOneWidget);
+
+    // 返回详情：底栏不能还停留在「收藏」（书架数据已写，状态必须刷新）。
+    Navigator.of(tester.element(find.byType(ReaderPage))).pop();
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(DetailPage), findsOneWidget);
+    expect(find.text('已收藏'), findsOneWidget);
+    expect(find.text('收藏'), findsNothing);
   });
 
   testWidgets('详情页', (tester) async {

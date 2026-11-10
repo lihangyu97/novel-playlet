@@ -640,10 +640,20 @@ class EmptyOfflineSeriesStore extends OfflineSeriesStore {
 }
 
 /// 预览页面的离线依赖覆写：pumpPreview 的页面一律不碰真实离线目录。
+///
+/// 需要观察「已缓存 / 下载中」形态的用例传内存版 store（见
+/// test/ui/reader_test.dart 的缓存点击用例），其余页面沿用空实现。
 // ignore: strict_top_level_inference
-previewOfflineOverrides() => [
-  offlineBookStoreProvider.overrideWithValue(EmptyOfflineBookStore()),
-  offlineSeriesStoreProvider.overrideWithValue(EmptyOfflineSeriesStore()),
+previewOfflineOverrides({
+  OfflineBookStore? bookStore,
+  OfflineSeriesStore? seriesStore,
+}) => [
+  offlineBookStoreProvider.overrideWithValue(
+    bookStore ?? EmptyOfflineBookStore(),
+  ),
+  offlineSeriesStoreProvider.overrideWithValue(
+    seriesStore ?? EmptyOfflineSeriesStore(),
+  ),
 ];
 
 /// 测试环境默认没有中文字体（渲染成豆腐块）。加载系统里的 Arial Unicode
@@ -726,6 +736,10 @@ Future<void> pumpPreview(
   /// 重复 override，重复会直接断言。需要换掉列表类 provider 的页面请自建
   /// ProviderScope（示例见 test/ui/cache_center_test.dart 的 pumpCenter）。
   List<Override> extraOverrides = const [],
+
+  /// 离线区 store：默认空实现，观察缓存状态的用例传内存版。
+  OfflineBookStore? offlineBookStore,
+  OfflineSeriesStore? offlineSeriesStore,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
@@ -736,7 +750,10 @@ Future<void> pumpPreview(
       overrides: [
         apiClientProvider.overrideWithValue(api),
         readerChapterCacheProvider.overrideWithValue(PreviewChapterCache()),
-        ...previewOfflineOverrides(),
+        ...previewOfflineOverrides(
+          bookStore: offlineBookStore,
+          seriesStore: offlineSeriesStore,
+        ),
         cacheUsageProvider.overrideWith((ref) async => previewCacheUsage),
         // 离线缓存：widget 测试没有 path_provider，给一组确定性的空数据，
         // 避免设置页/管理页停在「统计中…」（真实数据由离线管理页测试单独注入）。

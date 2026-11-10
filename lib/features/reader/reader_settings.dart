@@ -14,8 +14,9 @@ class ReaderSettings {
     this.fontSize = 21,
     this.lineHeight = 1.8,
     this.paper = ReaderPaper.parchment,
+    this.dayPaper = ReaderPaper.parchment,
     this.showBubbles = true,
-  });
+  }) : assert(dayPaper != ReaderPaper.night, '日间底色必须是浅色纸');
 
   /// 15–30，单位与 Flutter 逻辑像素一致。
   final double fontSize;
@@ -25,6 +26,12 @@ class ReaderSettings {
 
   final ReaderPaper paper;
 
+  /// 最近一次选择的浅色纸：工具栏「日间」按钮从夜间切回来时用它。
+  ///
+  /// 单独存一份而不是从 [paper] 猜：夜间只是临时切换，用户在设置里挑的
+  /// 白/纸/护眼要在退出阅读页、甚至重启 App 后仍然记得。
+  final ReaderPaper dayPaper;
+
   /// 是否在段尾画段评气泡。关掉只影响气泡渲染，章末/工具栏评论入口仍在。
   final bool showBubbles;
 
@@ -32,11 +39,13 @@ class ReaderSettings {
     double? fontSize,
     double? lineHeight,
     ReaderPaper? paper,
+    ReaderPaper? dayPaper,
     bool? showBubbles,
   }) => ReaderSettings(
     fontSize: fontSize ?? this.fontSize,
     lineHeight: lineHeight ?? this.lineHeight,
     paper: paper ?? this.paper,
+    dayPaper: dayPaper ?? this.dayPaper,
     showBubbles: showBubbles ?? this.showBubbles,
   );
 
@@ -46,10 +55,12 @@ class ReaderSettings {
       other.fontSize == fontSize &&
       other.lineHeight == lineHeight &&
       other.paper == paper &&
+      other.dayPaper == dayPaper &&
       other.showBubbles == showBubbles;
 
   @override
-  int get hashCode => Object.hash(fontSize, lineHeight, paper, showBubbles);
+  int get hashCode =>
+      Object.hash(fontSize, lineHeight, paper, dayPaper, showBubbles);
 }
 
 final readerSettingsProvider =
@@ -62,6 +73,7 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
   static const _fontSizeKey = 'reader_font_size_v1';
   static const _lineHeightKey = 'reader_line_height_v1';
   static const _paperKey = 'reader_paper_v1';
+  static const _dayPaperKey = 'reader_day_paper_v1';
   static const _bubblesKey = 'reader_show_bubbles_v1';
 
   static const double minFontSize = 15;
@@ -112,8 +124,19 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
   void setPaper(ReaderPaper paper) {
     if (paper == state.paper) return;
     _userChanged = true;
-    state = state.copyWith(paper: paper);
+    // 选浅色纸时同步记住「日间底色」；选夜间只切换当前纸，不动记忆，
+    // 这样切回日间能回到用户上次挑的纸色。
+    final dayPaper = paper == ReaderPaper.night ? state.dayPaper : paper;
+    state = state.copyWith(paper: paper, dayPaper: dayPaper);
     _persist();
+  }
+
+  /// 日间/夜间切换：夜间回到上次选择的浅色纸，浅色进夜间。
+  void toggleDayNight() {
+    final next = state.paper == ReaderPaper.night
+        ? state.dayPaper
+        : ReaderPaper.night;
+    setPaper(next);
   }
 
   void setShowBubbles(bool value) {
@@ -133,6 +156,14 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
         (candidate) => candidate.name == paperName,
         orElse: () => fallback.paper,
       );
+      final storedDayPaper = ReaderPaper.values.firstWhere(
+        (candidate) => candidate.name == prefs.getString(_dayPaperKey),
+        orElse: () => paper == ReaderPaper.night ? fallback.dayPaper : paper,
+      );
+      // 老版本只存了 paper：若存的正是浅色纸就沿用它，夜间则退回默认纸。
+      final dayPaper = storedDayPaper == ReaderPaper.night
+          ? fallback.dayPaper
+          : storedDayPaper;
       final restored = ReaderSettings(
         fontSize: (prefs.getDouble(_fontSizeKey) ?? fallback.fontSize)
             .clamp(minFontSize, maxFontSize)
@@ -141,6 +172,7 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
             .clamp(minLineHeight, maxLineHeight)
             .toDouble(),
         paper: paper,
+        dayPaper: dayPaper,
         showBubbles: prefs.getBool(_bubblesKey) ?? fallback.showBubbles,
       );
       if (restored != state) state = restored;
@@ -159,6 +191,7 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
       await prefs.setDouble(_fontSizeKey, snapshot.fontSize);
       await prefs.setDouble(_lineHeightKey, snapshot.lineHeight);
       await prefs.setString(_paperKey, snapshot.paper.name);
+      await prefs.setString(_dayPaperKey, snapshot.dayPaper.name);
       await prefs.setBool(_bubblesKey, snapshot.showBubbles);
     } catch (_) {
       // 偏好落盘失败只影响下次启动的默认值，不打扰当前阅读。

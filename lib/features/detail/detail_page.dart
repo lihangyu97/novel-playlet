@@ -320,6 +320,9 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     );
     if (!context.mounted) return;
     ref.invalidate(detailProgressProvider(widget.bookId));
+    // 阅读页顶部可以「加入书架」，回来时详情底栏的收藏态必须跟着刷新，
+    // 否则会出现「书架里已有这本书，详情还显示收藏」。
+    ref.invalidate(detailShelfProvider(widget.bookId));
   }
 
   Future<void> _openDirectory(

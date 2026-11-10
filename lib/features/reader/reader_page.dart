@@ -12,6 +12,11 @@ import '../../core/storage/reading_store.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/chapter_content.dart';
 import '../../data/models/chapter_ideas.dart';
+import '../../data/models/novel_item.dart';
+import '../cache/cache_providers.dart';
+import '../cache/offline_task.dart';
+import '../cache/widgets/offline_download_button.dart';
+import 'reader_actions.dart';
 import 'reader_comments.dart';
 import 'reader_comments_sheet.dart';
 import 'reader_controller.dart';
@@ -234,7 +239,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               left: 0,
               right: 0,
               bottom: 0,
-              child: _buildBottomBar(session, settings, controller, ideas),
+              child: _buildBottomBar(settings),
             ),
           ],
         ),
@@ -869,9 +874,27 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   Widget _buildTopBar(ReaderSessionState session, ReaderSettings settings) {
     final paper = settings.paper;
-    final title = session.bookTitle.isNotEmpty
-        ? session.bookTitle
-        : (session.displayedChapter?.title ?? '');
+    final bookId = widget.args.bookId;
+    // 加入书架只加不移：书架状态以存储为准，加入成功后再 invalidate 重读。
+    final onShelf = ref.watch(readerShelfProvider(bookId)).value ?? false;
+    final cacheStatus = ref.watch(
+      offlineEntryStatusProvider((kind: OfflineTaskKind.novel, id: bookId)),
+    );
+    final cacheLabel = switch (cacheStatus) {
+      OfflineEntryStatus.none => '缓存小说',
+      OfflineEntryStatus.inProgress => '缓存中',
+      OfflineEntryStatus.cached => '已缓存',
+    };
+    // 未缓存：就地开始整本下载；下载中/暂停/半截/排队：去缓存中心继续或
+    // 重试——阅读页没有别的出口，不能让「缓存中」变成点不动的死状态；
+    // 已缓存是只读状态。
+    final VoidCallback? onCacheTap = switch (cacheStatus) {
+      OfflineEntryStatus.none => () => unawaited(_startCaching(session)),
+      OfflineEntryStatus.inProgress => () => unawaited(
+        context.pushAppRoute(const CacheCenterRoute()),
+      ),
+      OfflineEntryStatus.cached => null,
+    };
     return IgnorePointer(
       ignoring: !_toolbarVisible,
       child: AnimatedSlide(
@@ -880,22 +903,77 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         curve: Curves.easeOutCubic,
         child: ReaderTopBar(
           topInset: MediaQuery.paddingOf(context).top,
-          title: title,
-          subtitle: session.displayedChapter?.title ?? '',
           background: paper.background,
           foreground: paper.foreground,
           onBack: _onBack,
+          shelfLabel: onShelf ? '已在书架' : '加入书架',
+          onShelfTap: onShelf ? null : () => unawaited(_addToShelf(session)),
+          cacheLabel: cacheLabel,
+          onCacheTap: onCacheTap,
         ),
       ),
     );
   }
 
-  Widget _buildBottomBar(
-    ReaderSessionState session,
-    ReaderSettings settings,
-    ReaderController controller,
-    ChapterIdeas ideas,
-  ) {
+  /// 顶部「加入书架」：只加不移除。
+  ///
+  /// 已经在书架时按钮不再是按钮（[ReaderTopBar.onShelfTap] 传 null），所以
+  /// 这里没有 remove 分支：阅读页里书架状态只读，移出统一回详情页做。
+  ///
+  /// 会话里只有书名/封面，没有作者与分类，所以书架条目比详情页加入的精简
+  /// （书架卡副标题会少一行）；为补全这两个字段在阅读页多发一次详情请求
+  /// 不值得，书架里点进去就能看到完整详情。
+  Future<void> _addToShelf(ReaderSessionState session) async {
+    final item = NovelItem(
+      id: widget.args.bookId,
+      title: session.bookTitle.isNotEmpty
+          ? session.bookTitle
+          : widget.args.bookTitle,
+      cover: session.cover.isNotEmpty ? session.cover : widget.args.cover,
+    );
+    if (!item.isValid) {
+      _showMessage('书名还没加载好，请稍后再试');
+      return;
+    }
+    try {
+      await ref.read(readingStoreProvider).addToShelf(item);
+    } catch (_) {
+      _showMessage('加入书架失败，请重试');
+      return;
+    }
+    // 落盘成功才刷新按钮文案；失败时保持「加入书架」让用户重试。
+    // await 之后页面可能已经被返回键关掉，此时 invalidate 会访问已卸载的
+    // ConsumerState 而抛 StateError（调用方是 unawaited，会变成未捕获异常）。
+    if (!mounted) return;
+    ref.invalidate(readerShelfProvider(widget.args.bookId));
+  }
+
+  /// 顶部「缓存小说」：整本离线缓存，章节列表复用阅读会话已加载的目录。
+  Future<void> _startCaching(ReaderSessionState session) async {
+    if (session.chapters.isEmpty) {
+      _showMessage('目录还没加载好，请稍后再试');
+      return;
+    }
+    await startOfflineDownload(
+      context,
+      ref,
+      kind: OfflineTaskKind.novel,
+      id: widget.args.bookId,
+      title: session.bookTitle.isNotEmpty
+          ? session.bookTitle
+          : widget.args.bookTitle,
+      cover: session.cover.isNotEmpty ? session.cover : widget.args.cover,
+      items: session.chapters,
+    );
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Widget _buildBottomBar(ReaderSettings settings) {
     final paper = settings.paper;
     return IgnorePointer(
       ignoring: !_toolbarVisible,
@@ -907,22 +985,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           bottomInset: MediaQuery.paddingOf(context).bottom,
           background: paper.background,
           foreground: paper.foreground,
-          hasPrevious: session.hasPrevious,
-          hasNext: session.hasNext,
+          isNight: paper == ReaderPaper.night,
           onComments: () => unawaited(_openChapterComments()),
-          onDirectory: () => _openDirectory(session, settings, controller),
-          onPrevious: () {
-            _hideToolbar();
-            _pendingEntry = null;
-            _rememberPosition();
-            controller.previousChapter();
-          },
-          onNext: () {
-            _hideToolbar();
-            _pendingEntry = null;
-            _rememberPosition();
-            controller.nextChapter();
-          },
+          onDirectory: () => _openDirectory(
+            ref.read(readerSessionProvider(widget.args)),
+            settings,
+            ref.read(readerSessionProvider(widget.args).notifier),
+          ),
+          onToggleDayNight: () =>
+              ref.read(readerSettingsProvider.notifier).toggleDayNight(),
           onSettings: _openSettings,
         ),
       ),
