@@ -90,10 +90,10 @@ class ReaderPageContent extends StatelessWidget {
   }
 }
 
-/// 工具栏顶部：返回 + 右侧「书架状态 / 缓存状态」两个文本动作。
+/// 工具栏顶部：返回 + 书名 + 右侧「书架状态 / 缓存状态」两个文本动作。
 ///
-/// 顶部不再显示书名/章节名：章节名在底部常驻信息条里一直可见；两个状态动作
-/// 只占文字宽度、整体靠右，不和正文抢视觉重心。
+/// 书名与右侧状态动作同字号、占返回键与动作之间的剩余宽度，超宽省略；章节名
+/// 在底部常驻信息条里一直可见，不在顶部重复。
 class ReaderTopBar extends StatelessWidget {
   const ReaderTopBar({
     super.key,
@@ -101,6 +101,7 @@ class ReaderTopBar extends StatelessWidget {
     required this.background,
     required this.foreground,
     required this.onBack,
+    this.title = '',
     required this.shelfLabel,
     this.onShelfTap,
     required this.cacheLabel,
@@ -112,6 +113,9 @@ class ReaderTopBar extends StatelessWidget {
   final Color background;
   final Color foreground;
   final VoidCallback onBack;
+
+  /// 书名：和右侧状态动作同字号，占剩余宽度、超宽省略（不挤压右侧按钮）。
+  final String title;
 
   /// 左：`加入书架`（可点）或 `已在书架`（只读状态，点击无响应）。
   final String shelfLabel;
@@ -144,7 +148,25 @@ class ReaderTopBar extends StatelessWidget {
               color: foreground,
               icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
             ),
-            const Spacer(),
+            // 书名占返回键与右侧动作之间的全部剩余宽度：右侧动作宽度固定，
+            // 书名再长也只会自己省略，不会把按钮挤出屏幕。
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: _actionFontSize,
+                    height: 1.2,
+                    fontWeight: FontWeight.w500,
+                    color: foreground,
+                  ),
+                ),
+              ),
+            ),
             _ReaderTextAction(
               label: shelfLabel,
               color: foreground,
