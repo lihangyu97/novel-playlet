@@ -240,11 +240,11 @@ ChapterContent{id,title,paragraphs}
 - 工具栏：点中间 1/3 区域呼出；打开时横向翻页锁定（PageView `NeverScrollableScrollPhysics`），
   压暗遮罩保留但不接收点击（点击穿透到正文，用于收起工具栏）。
   顶部只留返回 + 右对齐的两个文本动作：书架状态（`加入书架` → `已在书架`，加入后只读、
-  只加不移，状态读 `readerShelfProvider`）与整本缓存状态（`缓存小说`/`缓存中`/`已缓存`，
-  已缓存只读，状态与详情页 `OfflineDownloadButton` 共用 `offlineEntryStatusProvider`；
-  底部为目录/评论/日间·夜间/设置，上一章/下一章不再占按钮位（点正文左右分区、章边界
-  继续滑动、目录跳章都能切章）。日/夜切换：夜间用 `ReaderPaper.night`，切回日间回到
-  上次选择的浅色纸（落盘 `reader_day_paper_v1`）。
+  只加不移，状态读 `readerShelfProvider`）与整本缓存状态（`缓存小说` 可点开始下载，
+  `缓存中` / `已缓存` 点击进缓存中心；状态与详情页 `OfflineDownloadButton` 共用
+  `offlineEntryStatusProvider`）。底部为目录/评论/日间·夜间/设置，上一章/下一章不再占
+  按钮位（点正文左右分区、章边界继续滑动、目录跳章都能切章）。日/夜切换：夜间用
+  `ReaderPaper.night`，切回日间回到上次选择的浅色纸（落盘 `reader_day_paper_v1`）。
 
 ### 4.6 进度与设置
 

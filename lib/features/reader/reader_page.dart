@@ -885,15 +885,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       OfflineEntryStatus.inProgress => '缓存中',
       OfflineEntryStatus.cached => '已缓存',
     };
-    // 未缓存：就地开始整本下载；下载中/暂停/半截/排队：去缓存中心继续或
-    // 重试——阅读页没有别的出口，不能让「缓存中」变成点不动的死状态；
-    // 已缓存是只读状态。
-    final VoidCallback? onCacheTap = switch (cacheStatus) {
+    // 未缓存：就地开始整本下载；下载中/暂停/半截/排队/已缓存：去缓存中心
+    // 看进度、继续/重试或删除。阅读页里除「已在书架」外都能点，不能让
+    // 「缓存中」「已缓存」变成点不动的死状态。
+    final VoidCallback onCacheTap = switch (cacheStatus) {
       OfflineEntryStatus.none => () => unawaited(_startCaching(session)),
-      OfflineEntryStatus.inProgress => () => unawaited(
-        context.pushAppRoute(const CacheCenterRoute()),
-      ),
-      OfflineEntryStatus.cached => null,
+      OfflineEntryStatus.inProgress || OfflineEntryStatus.cached =>
+        () => unawaited(context.pushAppRoute(const CacheCenterRoute())),
     };
     return IgnorePointer(
       ignoring: !_toolbarVisible,

@@ -117,7 +117,7 @@ class ReaderTopBar extends StatelessWidget {
   final String shelfLabel;
   final VoidCallback? onShelfTap;
 
-  /// 右：`缓存小说`（可点）/ `缓存中` / `已缓存`（只读状态）。
+  /// 右：`缓存小说`（可点开始下载）/ `缓存中` / `已缓存`（点击进缓存中心）。
   final String cacheLabel;
   final VoidCallback? onCacheTap;
 

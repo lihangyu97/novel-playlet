@@ -287,7 +287,7 @@ void main() {
     expect(find.text('缓存小说'), findsNothing);
   });
 
-  testWidgets('阅读页-顶部只读状态：已在书架 + 已缓存', (tester) async {
+  testWidgets('阅读页-顶部状态：已在书架只读、已缓存点击进缓存中心', (tester) async {
     await pumpPreview(
       tester,
       const ReaderPage(
@@ -310,15 +310,24 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(find.text('已在书架'), findsOneWidget);
     expect(find.text('已缓存'), findsOneWidget);
-    // 只读态不能是按钮：不渲染任何手势控件，点击也不会触发动作。
+    // 「已在书架」是只读态：不渲染任何手势控件，点击也不会触发动作。
     expect(
       find.ancestor(of: find.text('已在书架'), matching: find.byType(TextButton)),
       findsNothing,
+    );
+    // 「已缓存」是按钮：点了进缓存中心（看已下载内容/删除）。
+    expect(
+      find.ancestor(of: find.text('已缓存'), matching: find.byType(TextButton)),
+      findsOneWidget,
     );
     await expectLater(
       find.byType(ReaderPage),
       matchesGoldenFile('../goldens/reader_toolbar_readonly.png'),
     );
+
+    await tester.tap(find.text('已缓存'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(CacheCenterPage), findsOneWidget);
   });
 
   testWidgets('阅读页-缓存中点进缓存中心（暂停/失败后能继续）', (tester) async {
