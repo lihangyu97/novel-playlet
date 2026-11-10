@@ -19,7 +19,7 @@
   推荐卡元信息：**双列**（默认）时推荐理由做成封面左上角角标，文字区只有「标题 + 作者（短剧为「全 N 集」）左 / 热度右」一行；**三列**卡片太窄，角标放不下，理由/热度退回文字区逐行。热度 = 小说 `rank_score` / 短剧 `rec_text`（如「4691万热度」），推荐理由 = `recommend_reason_list` 第一条（小说是数组元素 `content`，如「巅峰榜No.3」；短剧是 JSON 串里的 `rec_tags[0].content` / `tag_info.text`）。**评分不进元信息行**，而是封面右上角角标（白字 + 半透明深色底 + 轻阴影，`9.3分`），小说与短剧/漫剧一致；短剧详情页也会展示星标评分。
 - **详情**：小说与短剧共用一套「封面头 + 简介卡 + 标签」版式；小说有目录 + 书评卡片（首条 + 弹窗看全部），短剧有选集（36 集/组）。
 - **阅读页**：`TextPainter` 真实分页、左右翻页、点击分区、工具栏（顶部「加入书架/已在书架 + 缓存小说/缓存中/已缓存」文本动作，底部目录/评论/日间·夜间/设置）、字号/行距/4 种底色、日/夜切换、段评气泡、工具栏「评论」/评论面板（只读）、目录跳章、邻章预取、进度保存。
-- **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下集/播完自动下一集、选集弹层、横屏全屏、失败分类与「重新下载这一集」。
+- **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下滑切集（竖向翻页）/播完自动下一集、选集弹层、横屏全屏、失败分类与「重新下载这一集」。
 - **我的**：统一页头（图标 + 「我的」 + 合并统计 + 右上角设置入口，固定贴顶、不随内容滚动，带一套蓝粉氛围渐变）+ 小说 / 短剧两个 tab（无下划线，当前 tab 主题色高亮且字号稍大，可点击或左右滑动切换，内容各自保活）；小说 tab = 书架 + 最近阅读，短剧 tab = 收藏 + 最近观看；缓存入口在推荐页搜索框右侧。
 - **缓存中心**：离线整本 / 整剧下载的进度、网速、排队、暂停/继续/删除/清空；入口在推荐页搜索框右侧的下载图标按钮（原「我的」页右下角悬浮入口已删除）。
 - **设置**：主题色（天蓝 / 草绿 / 绯红 + 自定义取色）、深浅色模式（跟随系统 / 手动）、首页推荐布局（双列 / 三列，默认双列）、存储占用与清理、离线下载清晰度。
@@ -333,8 +333,8 @@ loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（
 ### 5.2 `_open`：四段来源，顺序固定
 
 ```text
-_open(index)
-  ├─ sync：_generation++、取消定时器、_retainCurrentController()（旧帧留下垫底）
+_open(index, {retainPrevious})
+  ├─ sync：_generation++、取消定时器、_retainCurrentController()（旧帧暂停后留在旧页，出画面再释放）
   ├─ sync：loading=true；有旧帧 → spinner 延迟 250ms，无旧帧 → 立即显示
   │
   ├─ ① 离线 pinned：_offlineFile(episodeId)
@@ -349,7 +349,7 @@ _open(index)
 _startController：initialize → setPlaybackSpeed → setLooping(false)
   → 上屏（loading=false）→ play() → 控制条 3.5s 自动隐藏 → 5s 后预取下一集 → 记进度
   ▼
-_onTick：新集 position>0 才释放旧帧；播到尾部自动 _open(+1, autoAdvance)
+_onTick：同页重载时新集 position>0 才释放旧帧；播到尾部自动 _changeEpisode(+1) 整页续播
 ```
 
 每一步都有 `mounted + generation` 校验，切集/退出时旧结果直接丢弃。
@@ -386,8 +386,18 @@ AVPlayer/ExoPlayer
 ### 5.5 渲染与交互
 
 - 渲染通路：固定 `VideoViewType.platformView`（iOS = AVPlayerLayer，Android = ExoPlayer 平台视图），避免逐帧纹理拷贝。
-- 切集：保留上一帧 + spinner 延迟 250ms；新集 `position>0` 后才释放旧帧。
+- 切集：整页竖向 `PageView`（上滑下一集 / 下滑上一集），控制条里不再有上一集/下一集按钮；
+  选集弹层跨集跳转直接 jump 到目标页，播完自动续播走相邻页 280ms 动画。手势滑过一半
+  （`onPageChanged`）就开始加载目标集，**旧 controller 暂停后继续画在旧页上**随页滑出，
+  新集在滑入过程中初始化；已缓存/预取命中时落定前就出画面，`ScrollEndNotification` 只作兜底。
+  新集 `position>0` 后释放旧帧（同旧行为）。spinner 一律延迟 250ms，避免已缓存集先闪
+  「正在准备视频」。非当前页只渲染黑底集数占位，不预建 controller；错误页额外给「下一集」
+  出口（错误页内部滚动区可能吃掉上下滑手势）。
 - 预取：当前集播 5s 后预取下一集；离线命中跳过；先探 `mode=cached` 再 `videoSource`；页内 LRU 2 条；失败静默。
+- 缓存与卸载（切集相关）：同一时刻最多 2 个 AVPlayer（当前 + 暂停中的旧帧，新集出画面后立即释放
+  旧帧），非当前页不预建 controller；页内只预取下一集的取流地址（LRU 2 条 `/src`，不预建
+  controller）；磁盘侧由内核 `src/` 128 MiB 预算按 mtime 自动淘汰，离线 pinned 区不受影响；
+  离开播放页 dispose 所有 controller 与定时器。
 - 倍速：1.0–3.0x 全局持久化（`video_playback_speed_v1`）；`_startController` 统一 apply，首帧/seek/恢复再补设一次；
   iOS 根因修复在 `third_party/video_player_avfoundation`（补 `AVPlayer.defaultRate`）。chip 放在
   操作行最右（右下角）；时间行只留「当前位置 — 总时长」。

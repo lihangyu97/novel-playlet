@@ -150,7 +150,80 @@ void main() {
     await _disposePlayer(tester);
   });
 
-  testWidgets('播完自动续播：保留上一帧、倍速继承、控制条不弹出', (tester) async {
+  testWidgets('上滑切下一集、下滑回上一集；不再有上下集按钮', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    // 底部控制条不再提供上一集/下一集按钮：切集只靠上下滑与选集弹层。
+    expect(find.byIcon(Icons.skip_previous_rounded), findsNothing);
+    expect(find.byIcon(Icons.skip_next_rounded), findsNothing);
+    expect(factory.created, hasLength(1));
+
+    // 第 1 集继续下滑：没有上一集，回弹，不创建新 controller。
+    await tester.drag(find.byType(PageView), const Offset(0, 600));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(factory.created, hasLength(1), reason: '第 1 集下滑不应切集');
+    expect(find.text('第 1 集'), findsWidgets);
+
+    // 上滑：翻到第 2 集；旧画面在旧页上留到新集真正出画面（同旧行为）。
+    await tester.drag(find.byType(PageView), const Offset(0, -600));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(factory.created, hasLength(2), reason: '上滑应切到下一集');
+    expect(find.text('第 2 集'), findsWidgets);
+    expect(tester.widget<PageView>(find.byType(PageView)).controller?.page, 1);
+    final second = factory.created[1];
+    expect(factory.created.first.disposeCount, 0, reason: '新集出画面前旧帧还在');
+    second.value = second.value.copyWith(
+      position: const Duration(seconds: 1),
+      isPlaying: true,
+    );
+    await tester.pump();
+    expect(
+      factory.created.first.disposeCount,
+      1,
+      reason: '新集出画面后释放旧 controller',
+    );
+
+    // 下滑回第 1 集。
+    await tester.drag(find.byType(PageView), const Offset(0, 600));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(factory.created, hasLength(3), reason: '下滑应回到上一集并重建 controller');
+    expect(find.text('第 1 集'), findsWidgets);
+    final third = factory.created[2];
+    third.value = third.value.copyWith(
+      position: const Duration(seconds: 1),
+      isPlaying: true,
+    );
+    await tester.pump();
+    expect(factory.created[1].disposeCount, 1);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('选集弹层跳集：翻到目标页并加载', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    await tester.tap(find.byTooltip('选集'));
+    await tester.pumpAndSettle();
+    // 弹层里集数只显示数字，点「2」回到播放页选中第 2 集。
+    await tester.tap(find.text('2'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(factory.created, hasLength(2), reason: '选集跳集应加载目标集');
+    expect(
+      tester.widget<PageView>(find.byType(PageView)).controller?.page,
+      1,
+      reason: '选集跳集后 PageView 应停在目标页',
+    );
+    expect(find.text('第 2 集'), findsWidgets);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('播完自动续播：整页滑到下一集、倍速继承、控制条不弹出', (tester) async {
     final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
     final factory = _FakeFactory();
     final container = await _pumpPlayer(tester, store: store, factory: factory);
@@ -158,17 +231,27 @@ void main() {
     await tester.pump();
 
     final first = factory.created.single;
-    // 模拟播完：position 到尾部且不再播放 → 页面触发自动下一集。
+    // 模拟播完：position 到尾部且不再播放 → 页面触发自动翻页续播。
     first.value = first.value.copyWith(
       position: first.value.duration,
       isPlaying: false,
     );
+    await tester.pump();
+    // 翻页动画 280ms + 新集初始化。
+    await tester.pump(const Duration(milliseconds: 320));
     await tester.pump();
     await tester.pump();
 
     expect(factory.created, hasLength(2), reason: '自动续播应创建下一集 controller');
     final second = factory.created[1];
     expect(second.speeds, contains(2.0), reason: '新 controller 必须继承倍速');
+    // 保留帧在新集出画面后才释放（翻页动画期间旧画面不会提前变黑）。
+    second.value = second.value.copyWith(
+      position: const Duration(seconds: 1),
+      isPlaying: true,
+    );
+    await tester.pump();
+    expect(first.disposeCount, 1, reason: '新集出画面后释放旧 controller');
 
     // 自动续播不弹控制条：两处 chrome 都是隐藏态。
     final opacities = tester
@@ -180,18 +263,6 @@ void main() {
       isTrue,
       reason: '自动切集不应该把控制条弹出来',
     );
-
-    // 新集还没出画面时，旧集最后一帧继续垫在下面。
-    expect(find.byType(VideoPlayer), findsNWidgets(2));
-
-    // 新集 position 前进后释放旧帧。
-    second.value = second.value.copyWith(
-      position: const Duration(seconds: 1),
-      isPlaying: true,
-    );
-    await tester.pump();
-    await tester.pump();
-    expect(find.byType(VideoPlayer), findsOneWidget);
 
     await _disposePlayer(tester);
   });
