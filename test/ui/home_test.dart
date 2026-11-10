@@ -144,14 +144,17 @@ void main() {
     );
   });
 
-  /// 首页里切到「我的」：验证悬浮切换按钮与悬浮底栏胶囊的相对位置（真机
-  /// 是同一个 Scaffold 里叠加，单独 pump MinePage 看不到胶囊）。
-  testWidgets('首页-我的（双面板与悬浮按钮）', (tester) async {
+  /// 首页里切到「我的」：统一页头 + 小说/短剧两个 tab（真机是同一个
+  /// Scaffold 里叠加悬浮胶囊，单独 pump MinePage 看不到胶囊）。
+  testWidgets('首页-我的（统一页头与两个 tab）', (tester) async {
     await pumpPreview(tester, const HomeShell());
     await tester.tap(find.text('我的'));
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
-    expect(find.text('小说'), findsWidgets);
-    expect(find.byKey(MinePage.switchButtonKey), findsOneWidget);
+    // 底栏「我的」+ 页头「我的」各一个。
+    expect(find.text('我的'), findsNWidgets(2));
+    expect(find.text('小说'), findsOneWidget);
+    expect(find.text('短剧'), findsOneWidget);
+    expect(find.byKey(MinePage.novelTabKey), findsOneWidget);
     await expectLater(
       find.byType(HomeShell),
       matchesGoldenFile('../goldens/home_mine.png'),

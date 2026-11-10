@@ -4,8 +4,8 @@ import 'package:flutter/widgets.dart';
 
 /// 我的页书架/收藏网格的尺寸换算。
 ///
-/// 小说与短剧两侧共用一套规则，保证切换面板时卡片尺寸完全一致；宽屏
-/// （iPad）自动增列，避免封面被拉得过大。
+/// 小说与短剧两个 tab 共用一套规则，保证卡片尺寸完全一致；宽屏（iPad）
+/// 自动增列，避免封面被拉得过大。
 class MineGridMetrics {
   const MineGridMetrics._({
     required this.columns,

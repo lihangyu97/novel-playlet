@@ -5,7 +5,7 @@ import '../../../data/models/video_series.dart';
 import '../../video/widgets/video_card.dart';
 import 'shelf_grid.dart';
 
-/// 短剧收藏区：网格展示 + 空态，长按交给父级弹管理菜单。
+/// 短剧 tab 的收藏区：网格展示 + 空态，长按交给父级弹管理菜单。
 ///
 /// 与小说侧的 [MineShelfGrid] 同一套网格尺寸/间距/空态（骨架见 [ShelfGrid]），
 /// 只是卡片换成 [VideoCard]（元信息是集数）。
@@ -40,10 +40,8 @@ class MineDramaShelfGrid extends StatelessWidget {
     return ShelfGrid<VideoSeries>(
       items: items,
       crossAxisCount: crossAxisCount,
-      itemWidth: itemWidth,
       itemHeight: itemHeight,
       spacing: spacing,
-      onOpen: onOpen,
       onLongPress: onLongPress,
       heroTagOf: heroTagOf,
       emptyState: const EmptyView(

@@ -11,11 +11,11 @@
 - 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读、短剧收藏/观看进度）；阅读进度表按最近 200 本做 LRU 上限（`progressLimit`）。缓存：`lib/core/cache/`（封面缓存 `AppImageCache`、占用统计与清理 `AppCache`，入口在「我的 → 设置 → 存储」）
 - 离线缓存：`lib/core/storage/offline/`（小说/短剧两个 pinned 区的 manifest 与原子读写）+ `lib/features/cache/`（单任务下载器、等待队列、任务持久化、providers、详情底栏三态按钮、缓存中心）。缓存中心同时负责浏览、暂停/继续/重试、删除/清空；设置页不再有离线入口。与自动缓存物理隔离、只手动清理，见下文「离线缓存」
 - 主题：`lib/app/theme/app_theme.dart`（Material 3 seed 主题 + `AppAccent` 扩展 + `ReaderPaper` 阅读底色 + 媒体卡圆角/底色 `mediaCardRadius` / `mediaCardColor`）；主题色偏好：`lib/app/theme/theme_settings.dart`（`themeSeedProvider`、`themeModeProvider`，持久化在 `shared_preferences`）。页面颜色一律走 `Theme.of(context).colorScheme`（M3 保证对比度），不要引用 `AppTheme.accent` 常量；只有「需要原始 seed 再自己派生 scheme」的场景（如阅读页按纸色明暗重建主题）才用 `AppTheme.accentOf(context)` + `AppTheme.schemeFor(seed, brightness)`
-- 共享组件：`lib/app/widgets/`（`NovelCover`、`AppSurfaceCard`（通用白底卡容器：纯白底 / 暗色 surfaceContainerHigh + 小圆角 + 点击反馈；水波纹在封面图下层、实际只在文字区可见，后续列表逐步卡片化时复用它）、`MediaCard`（列表卡共用骨架：封面 + 标题 + 元信息；`surface` 开白底卡、`naturalTitleHeight` 开标题自然高度、`coverAspect` 换封面比例）、`NovelGridCard` / `VideoCard`（把模型映射成卡片文案的薄适配）、`LoadingView`、`ErrorView`、`EmptyView`）。我的页通用块在 `lib/features/mine/widgets/`（`ShelfGrid<T>`、`RecentList<T>`、`PanelShell<TData>`）。小说/短剧两侧只注入数据与文案，不要各写一套
+- 共享组件：`lib/app/widgets/`（`NovelCover`、`AppSurfaceCard`（通用白底卡容器：纯白底 / 暗色 surfaceContainerHigh + 小圆角 + 点击反馈；水波纹在封面图下层、实际只在文字区可见，后续列表逐步卡片化时复用它）、`MediaCard`（列表卡共用骨架：封面 + 标题 + 元信息；`surface` 开白底卡、`naturalTitleHeight` 开标题自然高度、`coverAspect` 换封面比例）、`NovelGridCard` / `VideoCard`（把模型映射成卡片文案的薄适配）、`CategoryTabBar`（一级分类 tabs 通用样式：高度固定 44、无下划线、文字贴同一条底线（选中 17 / 未选 15，变大只向上长）、字号/颜色/字重都在过半时直接切换——不做逐帧插值，避免文字每帧重排重栅格化导致抖动）、`LoadingView`、`ErrorView`、`EmptyView`）。我的页通用块在 `lib/features/mine/widgets/`（`ShelfGrid<T>`、`RecentList<T>`、`MineTabBody<TData>`）。小说/短剧两侧只注入数据与文案，不要各写一套
 - 列表页通用骨架：`lib/features/feed/`（`FeedState<T>` 分页状态、`FeedView<T>` 滚动/补屏/下拉刷新/底部状态、`FeedStaggeredGrid<T>` 瀑布流网格（列数 2/3，卡片不定高）、`FeedResultsSliver<T>` + `FeedResultTile` 搜索结果横向列表（推荐页各分类共用）、`FeedSearchField`、`FeedSectionTitle`、`FeedFooter`）。新列表页优先复用它，不要各写一套
 - 详情页通用组件：`lib/app/widgets/detail/detail_common.dart`（`DetailCoverHeader` 封面头、`DetailIntroCard` 简介+标签、`ExpandableIntro`、`DetailSectionHeader`、`DetailTagChip`）。小说/短剧详情共用，特殊模块（目录/选集）各自在 feature 内实现
 - 详情状态：小说走 `lib/features/detail/detail_providers.dart`（`detailBundleProvider` / `detailShelfProvider`，autoDispose + 乐观更新）；短剧走 `lib/features/video/video_detail_providers.dart`（`videoDetailBundleProvider`；收藏态在 `lib/features/video/video_library_providers.dart` 的 `VideoShelfController`，同样乐观更新），两侧对称
-- 我的页：两个面板共用 `lib/features/mine/widgets/panel_shell.dart` 的 `PanelShell<TData>`（数据未就绪时只渲染页头 + 占位）；小说数据在 `lib/features/mine/mine_providers.dart`，短剧在 `lib/features/mine/mine_drama_providers.dart`
+- 我的页：统一页头 + 小说/短剧两个 tab（`CategoryTabBar` + `TabBarView`，内容保活、可左右滑）；两个 tab 共用 `lib/features/mine/widgets/mine_tab_body.dart` 的 `MineTabBody<TData>`（数据未就绪时只渲染占位）；小说数据在 `lib/features/mine/mine_providers.dart`，短剧在 `lib/features/mine/mine_drama_providers.dart`
 - 路由：`lib/app/router.dart` 的 `sealed class AppRoute<T>` + 每个路由一个 `final class`（`DetailRoute` / `VideoDetailRoute` / `ReaderRoute` / `VideoPlayRoute` / `SettingsRoute` / `CacheCenterRoute`），各自实现 `toRoute()`；页面用 `context.pushAppRoute(route)`。`MaterialApp` 不再注册路由表（没有 `AppRoutes` / `onGenerateRoute`）；`ReaderArgs` / `VideoPlayArgs` 仍是阅读页 / 播放页自己的入参
 - providers：`lib/app/providers.dart`（`apiClientProvider`、`readingStoreProvider`、`bootstrapProvider`）；主题色 / 深浅色模式见上面的 `themeSeedProvider` / `themeModeProvider`；首页推荐布局见 `lib/features/recommend/recommend_layout.dart` 的 `recommendLayoutProvider`（同样持久化，启动时由 `main.dart` 预读，避免首页先按双列渲染再跳）
 - ProviderScope 已在 `lib/main.dart` 里，页面直接用 `ConsumerWidget` / `ConsumerStatefulWidget`
@@ -221,7 +221,7 @@ context.pushAppRoute(const CacheCenterRoute());    // 我的 → 缓存的下载
 
 ## 测试与工程质量
 
-- UI 测试在 `test/ui/`（按页面拆：recommend / home / detail / video / reader / mine / settings / 缓存中心，共享 `test/ui/preview_harness.dart`），共 27 张 golden；瀑布流布局本身另有 `test/ui/feed_staggered_grid_test.dart`（不定高卡片按列排 + 双列/三列基线），推荐布局偏好见 `test/recommend_layout_test.dart`；根目录 `test/*_test.dart` 是解析 / 缓存 / 并发 / 存储 / 主题测试。
+- UI 测试在 `test/ui/`（按页面拆：recommend / home / detail / video / reader / mine / settings / 缓存中心，共享 `test/ui/preview_harness.dart`），共 28 张 golden；瀑布流布局本身另有 `test/ui/feed_staggered_grid_test.dart`（不定高卡片按列排 + 双列/三列基线），推荐布局偏好见 `test/recommend_layout_test.dart`；根目录 `test/*_test.dart` 是解析 / 缓存 / 并发 / 存储 / 主题测试。
 - 评论/段评：`test/comment_models_test.dart`（响应形状 + 段落锚点）、`test/reader_comments_sheet_test.dart`（面板分页/回复/失败态）、`test/reader_pagination_bubble_test.dart`（气泡占位与重排）、`test/ui/detail_reviews_test.dart`（书评卡片/弹窗）。
 - 真机性能 harness：`integration_test/reader_pagination_perf_test.dart`（`flutter drive --profile`，不进 `flutter test` / CI；结论见 `docs/implementation.md` §8）。
 - CI 在 `.github/workflows/ci.yml`：Dart format / analyze / test、Rust fmt / clippy / test、FRB 绑定漂移校验、iOS 无签名构建。本地等价命令 `make check`（只做格式化用 `make format`）。
@@ -229,11 +229,11 @@ context.pushAppRoute(const CacheCenterRoute());    // 我的 → 缓存的下载
 
 ## 页面清单（已实现）
 
-1. 推荐页：顶部**常驻**搜索输入框（40pt、圆角 10，不随列表滚动收起；右侧固定「已缓存」圆角按钮 → 缓存中心）；顶部固定模块（搜索框 + tabs）带很淡的蓝粉氛围渐变（左→右、向下淡出，`TopGlow`）+ 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧）+ 各分类推荐流（白底卡片 + 不定高瀑布流，默认双列、设置里可切三列；左右留白与行/列间距都 8；封面按内容域原生比例出图；底部导航只剩「推荐 / 我的」）
+1. 推荐页：顶部**常驻**搜索输入框（40pt、圆角 10，不随列表滚动收起；右侧固定下载图标按钮（`download_outlined`，Tooltip/无障碍文案为「已缓存」） → 缓存中心）；顶部固定模块（搜索框 + tabs）带很淡的蓝粉氛围渐变（左→右、向下淡出，`TopGlow`）+ 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧，与我的页共用 `CategoryTabBar`）+ 各分类推荐流（白底卡片 + 不定高瀑布流，默认双列、设置里可切三列；左右留白与行/列间距都 8；封面按内容域原生比例出图；底部导航只剩「推荐 / 我的」）
 2. 详情页：封面/书名/作者/分类/状态/字数/简介/标签 + 书评卡片（首条 + 弹窗查看全部）+ 目录 + 底部「开始阅读」
 3. 阅读页：分页正文 + 段评气泡 + 工具栏「评论」/评论面板（分页/回复只读）+ 点击呼出工具栏 + 顶部书架状态（加入书架→已在书架，只读，只加不移）/整本缓存状态（缓存小说/缓存中/已缓存，缓存中与已缓存点击进缓存中心）文本动作 + 底部日间/夜间切换（夜间黑色纸，日间回上次选的浅色纸）+ 字号/行距/底色/段评气泡开关 + 进度保存；上一章/下一章不占工具栏按钮（空章兜底仍保留），点正文左右分区/章边界滑动/目录跳章都能切章
-4. 我的页：小说 / 短剧两块镜像面板（右下角悬浮切换按钮或左右滑动切换；切换按标题/最近/书架三块 0/100/200ms 阶梯延迟）；页头（图标 + 主标题 + 副标题）**固定贴顶、不随列表滚动**（与推荐页搜索框一致），并带很淡的蓝粉氛围渐变（方向与推荐页略有差异）；切换面板时渐变按切换进度在小说/短剧两套之间连续过渡，最近阅读/观看与书架/收藏在下面滚动- 小说侧 = 书架 + 最近阅读；短剧侧 = 收藏网格 + 最近观看（点击直接续播对应集）；两面板共用 `PanelShell`；右下角只剩小说/短剧悬浮切换按钮（缓存入口已移到推荐页搜索框右侧，不再悬浮在这一页），设置入口只有一枚、在小说面板时靠右、短剧面板时靠左，切换时随面板在屏幕内移动
+4. 我的页：**统一页头**（图标 + 「我的」 + 合并统计「书架 N 本 · 收藏 M 部」 + 右上角唯一设置入口，固定贴顶、不随内容滚动；缓存入口在推荐页搜索框右侧）+ 小说 / 短剧两个 tab（与推荐页共用 `CategoryTabBar`：左对齐、**无下划线**、整行高度固定 44，当前 tab 主题色高亮、字号 17 / 未选中 15；文字贴同一条底线（变大只向上长），字号/颜色/字重都在过半时直接切换（不做逐帧插值，拖动时一过中线新 tab 就亮）；点击或左右滑动切换，tab 内容各自独立滚动并保活）；整页共用一套蓝粉氛围渐变（方向与推荐页略有差异），不随 tab 变化。小说 tab = 最近阅读 + 我的书架；短剧 tab = 最近观看 + 我的收藏（点击直接续播对应集）；两个 tab 共用 `MineTabBody` 骨架与页头，数据/空态/长按管理各自独立
 5. 设置页：主题色（3 个预设 + HSV 自定义取色，全站生效并持久化）+ 深浅色模式（跟随系统 / 手动深色，持久化）+ 首页推荐布局（双列 / 三列二选一，默认双列，持久化）+ 存储占用与清理（离线缓存提示去「我的 → 缓存」页处理）
-6. 缓存中心：推荐页搜索框右侧「已缓存」按钮进入（不再是「我的」页悬浮按钮）；小说/短剧分区列出下载中/排队中/已下载，进度条 + 实时网速，暂停/继续/重试/取消排队，M3 删除与按区清空（确认框），点条目 Hero 进详情
+6. 缓存中心：推荐页搜索框右侧的下载图标按钮进入（不再是「我的」页悬浮按钮）；小说/短剧分区列出下载中/排队中/已下载，进度条 + 实时网速，暂停/继续/重试/取消排队，M3 删除与按区清空（确认框），点条目 Hero 进详情
 
 不在本期范围：听书、漫画、登录；评论/段评只做**只读**（不发评论、不点赞、不回复）。

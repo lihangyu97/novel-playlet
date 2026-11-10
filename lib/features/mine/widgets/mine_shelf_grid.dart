@@ -5,7 +5,7 @@ import '../../../app/widgets/states.dart';
 import '../../../data/models/novel_item.dart';
 import 'shelf_grid.dart';
 
-/// 书架区：网格展示 + 空态，长按交给父级弹管理菜单。
+/// 小说 tab 的书架区：网格展示 + 空态，长按交给父级弹管理菜单。
 ///
 /// 网格骨架见 [ShelfGrid]；这里只负责把 [NovelItem] 映射成 [NovelGridCard]、
 /// 给出小说侧的空白文案。
@@ -42,10 +42,8 @@ class MineShelfGrid extends StatelessWidget {
     return ShelfGrid<NovelItem>(
       items: shelf,
       crossAxisCount: crossAxisCount,
-      itemWidth: itemWidth,
       itemHeight: itemHeight,
       spacing: spacing,
-      onOpen: onOpen,
       onLongPress: onLongPress,
       heroTagOf: heroTagOf,
       emptyState: const EmptyView(

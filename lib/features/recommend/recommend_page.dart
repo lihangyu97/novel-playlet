@@ -6,6 +6,7 @@ import '../feed/feed_search_field.dart';
 import '../feed/feed_staggered_grid.dart';
 import '../feed/feed_view.dart';
 import '../../app/router.dart';
+import '../../app/widgets/category_tab_bar.dart';
 import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/novel_card.dart';
 import '../../app/widgets/novel_cover.dart';
@@ -22,8 +23,8 @@ import 'recommend_state.dart';
 ///
 /// 以前小说/短剧是底部两个 tab、各自一套搜索框和页面状态；合并后分类变成
 /// 搜索框下方的一级 tabs，三个分类共用同一个搜索词，各自保留自己的列表、
-/// 游标与滚动位置。分类 tabs 与内容都支持左右滑动（`TabBar(isScrollable)` +
-/// `TabBarView`）。
+/// 游标与滚动位置。分类 tabs 与内容都支持左右滑动（tabs 用与我页共用的
+/// [CategoryTabBar]，内容用 `TabBarView`）。
 ///
 /// 页面只保留输入框/焦点这类 UI 状态；列表数据全部在
 /// [recommendFeedProvider] 里，切分类、搜索往返都不丢已加载的内容。
@@ -47,6 +48,8 @@ class RecommendPageState extends ConsumerState<RecommendPage>
   late final TabController _tabController = TabController(
     length: _categories.length,
     vsync: this,
+    // 与我的页一致：比默认 300ms 略快，切分类更跟手。
+    animationDuration: const Duration(milliseconds: 220),
   );
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
@@ -152,7 +155,7 @@ class RecommendPageState extends ConsumerState<RecommendPage>
           bottom: false,
           child: Column(
             children: [
-              // 搜索框常驻顶部，不随列表滚动收起；右侧固定「已缓存」入口。
+              // 搜索框常驻顶部，不随列表滚动收起；右侧固定下载图标入口。
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
                 child: Row(
@@ -178,10 +181,14 @@ class RecommendPageState extends ConsumerState<RecommendPage>
                   ],
                 ),
               ),
-              // tabs 与列表之间留呼吸空间。
+              // tabs 与列表之间留呼吸空间；样式与我的页共用 CategoryTabBar。
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: _buildCategoryTabs(context),
+                child: CategoryTabBar(
+                  controller: _tabController,
+                  labels: const ['小说', '短剧', '漫剧'],
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
               ),
               Expanded(
                 child: TabBarView(
@@ -200,38 +207,6 @@ class RecommendPageState extends ConsumerState<RecommendPage>
             ],
           ),
         ),
-      ],
-    );
-  }
-
-  /// 分类 tabs：横向可滚动、左对齐。只有 3 个分类时一屏放得下，但后续加
-  /// 分类（听书/漫画）不需要再改布局。
-  Widget _buildCategoryTabs(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return TabBar(
-      controller: _tabController,
-      isScrollable: true,
-      tabAlignment: TabAlignment.start,
-      // 高度从 M3 默认的 46 收到 36：分类只有两三个字，46pt 会让顶部显得很厚。
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      labelPadding: const EdgeInsets.symmetric(horizontal: 10),
-      labelColor: scheme.primary,
-      unselectedLabelColor: scheme.onSurfaceVariant,
-      labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-      unselectedLabelStyle: const TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w400,
-      ),
-      indicatorSize: TabBarIndicatorSize.label,
-      indicator: UnderlineTabIndicator(
-        borderSide: BorderSide(width: 2.5, color: scheme.primary),
-        insets: const EdgeInsets.symmetric(horizontal: 4),
-      ),
-      dividerColor: Colors.transparent,
-      tabs: [
-        for (final category in _categories)
-          Tab(height: 36, text: category.label),
       ],
     );
   }
@@ -429,10 +404,11 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
   }
 }
 
-/// 搜索框右侧的「已缓存」入口：跳转缓存中心（离线下载的书 / 短剧）。
+/// 搜索框右侧的缓存中心入口：跳转缓存中心（离线下载的书 / 短剧）。
 ///
-/// 与搜索框同高、同底色、同圆角（[FeedSearchField.radius]），只放文字，把
-/// 视觉重心留给输入框；高度 40 满足触控下限。
+/// 只放一个下载图标（`download_outlined`，与详情页「缓存」态同一套图标），
+/// 40×40 与搜索框同高、同底色、同圆角（[FeedSearchField.radius]），把视觉
+/// 重心留给输入框；文案只走 Tooltip / 无障碍标签，不再占一行文字。
 class _CachedEntryButton extends StatelessWidget {
   const _CachedEntryButton({required this.onTap});
 
@@ -440,8 +416,7 @@ class _CachedEntryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final scheme = Theme.of(context).colorScheme;
     final radius = BorderRadius.circular(FeedSearchField.radius);
     return Tooltip(
       message: '已缓存',
@@ -455,17 +430,13 @@ class _CachedEntryButton extends StatelessWidget {
             borderRadius: radius,
             onTap: onTap,
             child: SizedBox(
+              width: FeedSearchField.height,
               height: FeedSearchField.height,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Center(
-                  child: Text(
-                    '已缓存',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+              child: Center(
+                child: Icon(
+                  Icons.download_outlined,
+                  size: 20,
+                  color: scheme.primary,
                 ),
               ),
             ),
