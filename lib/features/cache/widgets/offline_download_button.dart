@@ -42,29 +42,11 @@ class OfflineDownloadButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final task = ref.watch(offlineDownloaderProvider);
-    final cachedCompleted = kind == OfflineTaskKind.novel
-        ? (ref.watch(offlineNovelProvider(id)).value?.completed ?? 0)
-        : (ref.watch(offlineSeriesProvider(id)).value?.completed ?? 0);
-    final cachedTotal = kind == OfflineTaskKind.novel
-        ? (ref.watch(offlineNovelProvider(id)).value?.total ?? 0)
-        : (ref.watch(offlineSeriesProvider(id)).value?.total ?? 0);
-    final manifestComplete = cachedTotal > 0 && cachedCompleted >= cachedTotal;
-    final active = task != null && task.kind == kind && task.id == id;
-    // 已排队：单任务下载器正在跑别的任务，等它收尾后自动开始本任务。
-    final queued = ref
-        .watch(offlineQueueProvider)
-        .any((item) => item.kind == kind && item.id == id);
-    // done 直接算已缓存：manifest 可能还没被 provider 刷新，不能只依赖 isCached。
-    final isCached = manifestComplete || (active && task.isDone);
-    // 任务失败回到「缓存」态（点击即重新 start，下载器会按文件缺口续传）；
-    // 没有活动任务但 manifest 只完成了一部分（取消/重启残留）也算缓存中。
-    final inProgress =
-        !isCached &&
-        (queued ||
-            (active
-                ? (task.isRunning || task.isPaused)
-                : (cachedTotal > 0 && cachedCompleted > 0)));
+    // 与阅读页顶部缓存文案共用同一份三态判定（见 offlineEntryStatusProvider），
+    // 两个入口不会各算一套、各显示一个状态。
+    final status = ref.watch(offlineEntryStatusProvider((kind: kind, id: id)));
+    final isCached = status == OfflineEntryStatus.cached;
+    final inProgress = status == OfflineEntryStatus.inProgress;
 
     final IconData icon;
     final String label;
@@ -89,48 +71,70 @@ class OfflineDownloadButton extends ConsumerWidget {
     );
   }
 
-  Future<void> _start(BuildContext context, WidgetRef ref) async {
-    final downloader = ref.read(offlineDownloaderProvider.notifier);
-    try {
-      final disposition = switch (kind) {
-        OfflineTaskKind.novel => await downloader.startNovelBook(
-          bookId: id,
-          title: title,
-          cover: cover,
-          chapters: items,
-        ),
-        OfflineTaskKind.video => await downloader.startVideoSeries(
-          seriesId: id,
-          title: title,
-          cover: cover,
-          episodes: items,
-        ),
-      };
-      if (disposition != OfflineStartDisposition.queued) return;
-      if (!context.mounted) return;
-      // 单任务下载器正在跑别的任务：这次点击只是入队，给用户一个明确回执，
-      // 否则点了没反应会以为失败。
-      _showMessage(context, '已加入缓存队列，等前面的任务完成后自动开始');
-    } on OfflineQuotaExceeded catch (error) {
-      if (!context.mounted) return;
-      _showMessage(
+  Future<void> _start(BuildContext context, WidgetRef ref) =>
+      startOfflineDownload(
         context,
-        '离线区空间不足（已用 ${_formatBytes(error.usedBytes)} / 上限 '
-        '${_formatBytes(error.capBytes)}），请先在「我的 → 缓存」页删除不需要的缓存',
+        ref,
+        kind: kind,
+        id: id,
+        title: title,
+        cover: cover,
+        items: items,
       );
-    } on OfflineQueueFullException catch (error) {
-      if (!context.mounted) return;
-      _showMessage(context, '缓存队列已满（最多 ${error.maxLength} 个），请先等前面的任务完成');
-    } catch (error) {
-      if (!context.mounted) return;
-      _showMessage(context, apiErrorCopy(error, fallback: '离线缓存失败，请重试'));
-    }
-  }
+}
 
-  void _showMessage(BuildContext context, String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+/// 启动一次离线下载（小说整本 / 短剧整剧）。
+///
+/// 详情页「缓存」按钮与阅读页顶部「缓存小说」共用：入口不同，但入队回执、
+/// 空间不足/队列满的引导、失败文案必须一致，避免两处各写一套。
+Future<void> startOfflineDownload(
+  BuildContext context,
+  WidgetRef ref, {
+  required OfflineTaskKind kind,
+  required String id,
+  required String title,
+  required String cover,
+  required List<Chapter> items,
+}) async {
+  final downloader = ref.read(offlineDownloaderProvider.notifier);
+  try {
+    final disposition = switch (kind) {
+      OfflineTaskKind.novel => await downloader.startNovelBook(
+        bookId: id,
+        title: title,
+        cover: cover,
+        chapters: items,
+      ),
+      OfflineTaskKind.video => await downloader.startVideoSeries(
+        seriesId: id,
+        title: title,
+        cover: cover,
+        episodes: items,
+      ),
+    };
+    if (disposition != OfflineStartDisposition.queued) return;
+    if (!context.mounted) return;
+    // 单任务下载器正在跑别的任务：这次点击只是入队，给用户一个明确回执，
+    // 否则点了没反应会以为失败。
+    _showMessage(context, '已加入缓存队列，等前面的任务完成后自动开始');
+  } on OfflineQuotaExceeded catch (error) {
+    if (!context.mounted) return;
+    _showMessage(
+      context,
+      '离线区空间不足（已用 ${_formatBytes(error.usedBytes)} / 上限 '
+      '${_formatBytes(error.capBytes)}），请先在「我的 → 缓存」页删除不需要的缓存',
+    );
+  } on OfflineQueueFullException catch (error) {
+    if (!context.mounted) return;
+    _showMessage(context, '缓存队列已满（最多 ${error.maxLength} 个），请先等前面的任务完成');
+  } catch (error) {
+    if (!context.mounted) return;
+    _showMessage(context, apiErrorCopy(error, fallback: '离线缓存失败，请重试'));
   }
+}
+
+void _showMessage(BuildContext context, String message) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }
 
 String _formatBytes(int bytes) {

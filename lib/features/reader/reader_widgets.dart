@@ -90,27 +90,36 @@ class ReaderPageContent extends StatelessWidget {
   }
 }
 
-/// 工具栏顶部：书名 + 返回。
+/// 工具栏顶部：返回 + 右侧「书架状态 / 缓存状态」两个文本动作。
+///
+/// 顶部不再显示书名/章节名：章节名在底部常驻信息条里一直可见；两个状态动作
+/// 只占文字宽度、整体靠右，不和正文抢视觉重心。
 class ReaderTopBar extends StatelessWidget {
   const ReaderTopBar({
     super.key,
     this.topInset = 0,
-    required this.title,
     required this.background,
     required this.foreground,
     required this.onBack,
-    this.subtitle = '',
+    required this.shelfLabel,
+    this.onShelfTap,
+    required this.cacheLabel,
+    this.onCacheTap,
   });
 
   /// 状态栏高度：工具栏贴屏幕顶，背景要铺到状态栏后面。
   final double topInset;
-  final String title;
-
-  /// 当前章节名。正文页不再常驻页眉，章节信息随工具栏一起出现。
-  final String subtitle;
   final Color background;
   final Color foreground;
   final VoidCallback onBack;
+
+  /// 左：`加入书架`（可点）或 `已在书架`（只读状态，点击无响应）。
+  final String shelfLabel;
+  final VoidCallback? onShelfTap;
+
+  /// 右：`缓存小说`（可点开始下载）/ `缓存中` / `已缓存`（点击进缓存中心）。
+  final String cacheLabel;
+  final VoidCallback? onCacheTap;
 
   @override
   Widget build(BuildContext context) {
@@ -135,39 +144,18 @@ class ReaderTopBar extends StatelessWidget {
               color: foreground,
               icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
             ),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: foreground,
-                    ),
-                  ),
-                  if (subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: foreground.withValues(alpha: 0.55),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+            const Spacer(),
+            _ReaderTextAction(
+              label: shelfLabel,
+              color: foreground,
+              onTap: onShelfTap,
             ),
-            // 与左侧返回按钮等宽，标题保持视觉居中。
-            const SizedBox(width: 48),
+            _ReaderTextAction(
+              label: cacheLabel,
+              color: foreground,
+              onTap: onCacheTap,
+            ),
+            const SizedBox(width: 8),
           ],
         ),
       ),
@@ -175,18 +163,69 @@ class ReaderTopBar extends StatelessWidget {
   }
 }
 
-/// 工具栏底部：目录 / 上一章 / 下一章 / 设置。
+/// 顶部状态动作字号：13 在真机上偏小、20 又太大，取 16 兼顾易读与克制的层级。
+const double _actionFontSize = 16;
+
+/// 顶部文字动作：有回调才是按钮，没回调只作状态文案（不可点、压暗一档）。
+class _ReaderTextAction extends StatelessWidget {
+  const _ReaderTextAction({
+    required this.label,
+    required this.color,
+    this.onTap,
+  });
+
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final onTap = this.onTap;
+    if (onTap == null) {
+      // 状态文案不接收点击：`已在书架`/`已缓存` 点击必须无响应。
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: _actionFontSize,
+            height: 1.2,
+            // 状态文字要读得清：0.55 在纸色/夜间底上只有 ~3.4:1，低于 WCAG AA。
+            color: color.withValues(alpha: 0.7),
+          ),
+        ),
+      );
+    }
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        foregroundColor: color,
+        minimumSize: const Size(0, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        // 从主题 labelLarge 派生：textStyle 会整体替换按钮默认文字样式，
+        // 直接给 const TextStyle 会丢掉主题字体（自定义字体下中文变豆腐块）。
+        textStyle: Theme.of(context).textTheme.labelLarge
+            ?.copyWith(fontSize: _actionFontSize, fontWeight: FontWeight.w500),
+      ),
+      child: Text(label),
+    );
+  }
+}
+
+/// 工具栏底部：目录 / 评论 / 日间·夜间 / 设置。
+///
+/// 上一章/下一章不再占按钮位：点击正文左右分区、章边界继续滑动、目录跳章都
+/// 能切章；空出来的位置给日间/夜间切换。
 class ReaderBottomBar extends StatelessWidget {
   const ReaderBottomBar({
     super.key,
     this.bottomInset = 0,
     required this.background,
     required this.foreground,
-    required this.hasPrevious,
-    required this.hasNext,
+    required this.isNight,
     required this.onDirectory,
-    required this.onPrevious,
-    required this.onNext,
+    required this.onToggleDayNight,
     required this.onSettings,
     this.onComments,
   });
@@ -196,12 +235,12 @@ class ReaderBottomBar extends StatelessWidget {
 
   final Color background;
   final Color foreground;
-  final bool hasPrevious;
-  final bool hasNext;
+
+  /// 当前是不是夜间纸：决定切换按钮显示「日间」还是「夜间」。
+  final bool isNight;
 
   final VoidCallback onDirectory;
-  final VoidCallback onPrevious;
-  final VoidCallback onNext;
+  final VoidCallback onToggleDayNight;
   final VoidCallback onSettings;
   final VoidCallback? onComments;
 
@@ -234,16 +273,12 @@ class ReaderBottomBar extends StatelessWidget {
               onTap: onComments,
             ),
             _ReaderToolButton(
-              icon: Icons.skip_previous_rounded,
-              label: '上一章',
+              icon: isNight
+                  ? Icons.light_mode_rounded
+                  : Icons.dark_mode_rounded,
+              label: isNight ? '日间' : '夜间',
               color: foreground,
-              onTap: hasPrevious ? onPrevious : null,
-            ),
-            _ReaderToolButton(
-              icon: Icons.skip_next_rounded,
-              label: '下一章',
-              color: foreground,
-              onTap: hasNext ? onNext : null,
+              onTap: onToggleDayNight,
             ),
             _ReaderToolButton(
               icon: Icons.text_fields_rounded,

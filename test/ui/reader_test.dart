@@ -1,10 +1,23 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/core/storage/offline/offline_book.dart';
+import 'package:novel_playlet/core/storage/offline/offline_book_store.dart';
+import 'package:novel_playlet/core/storage/offline/offline_paths.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
+import 'package:novel_playlet/data/models/chapter.dart';
+import 'package:novel_playlet/data/models/chapter_content.dart';
+import 'package:novel_playlet/data/models/video_source.dart';
+import 'package:novel_playlet/features/cache/cache_center_page.dart';
+import 'package:novel_playlet/features/cache/cache_providers.dart';
+import 'package:novel_playlet/features/cache/offline_downloader.dart';
+import 'package:novel_playlet/features/cache/offline_queue.dart';
+import 'package:novel_playlet/features/cache/offline_task.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_controller.dart';
 import 'package:novel_playlet/features/reader/reader_bubble.dart';
@@ -51,10 +64,303 @@ void main() {
     await tester.tapAt(const Offset(195, 420));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.text('评论'), findsOneWidget, reason: '工具栏应提供本章评论入口');
+    // 顶部只剩返回 + 两个状态文本动作（书名/章节名已移除）。
+    expect(find.text('加入书架'), findsOneWidget);
+    expect(find.text('缓存小说'), findsOneWidget);
+    expect(find.text('剑来'), findsNothing, reason: '顶部不再显示书名');
+    // 底部：上一章/下一章换成日间/夜间切换。
+    expect(find.text('上一章'), findsNothing);
+    expect(find.text('下一章'), findsNothing);
+    expect(find.text('夜间'), findsOneWidget);
+    expect(find.text('目录'), findsOneWidget);
+    expect(find.text('设置'), findsOneWidget);
     await expectLater(
       find.byType(ReaderPage),
       matchesGoldenFile('../goldens/reader_toolbar.png'),
     );
+  });
+
+  testWidgets('阅读页-加入书架后变只读状态，点已在书架不会移出', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('加入书架'), findsOneWidget);
+
+    await tester.tap(find.text('加入书架'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('加入书架'), findsNothing);
+    expect(find.text('已在书架'), findsOneWidget);
+    expect(
+      await container.read(readingStoreProvider).isOnShelf('1'),
+      isTrue,
+      reason: '点加入书架应真的写进书架',
+    );
+
+    // 已在书架是只读状态：点击不响应、更不能把书移出书架。
+    await tester.tap(find.text('已在书架'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('已在书架'), findsOneWidget);
+    expect(
+      await container.read(readingStoreProvider).isOnShelf('1'),
+      isTrue,
+      reason: '点已在书架不应移除书架',
+    );
+  });
+
+  testWidgets('阅读页-日间/夜间切换回到上次选择的浅色纸', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    final settingsController = container.read(readerSettingsProvider.notifier);
+    // 先选一个浅色纸（设置弹层里的「护眼」）。
+    settingsController.setPaper(ReaderPaper.green);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('夜间'), findsOneWidget);
+
+    await tester.tap(find.text('夜间'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(container.read(readerSettingsProvider).paper, ReaderPaper.night);
+    expect(find.text('日间'), findsOneWidget);
+    final scaffold = tester.widget<Scaffold>(find.byType(Scaffold).last);
+    expect(
+      scaffold.backgroundColor,
+      ReaderPaper.night.background,
+      reason: '夜间底色应为黑色纸',
+    );
+    await expectLater(
+      find.byType(ReaderPage),
+      matchesGoldenFile('../goldens/reader_toolbar_night.png'),
+    );
+
+    // 切回日间＝回到上次选的浅色纸，不是默认纸。
+    await tester.tap(find.text('日间'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(container.read(readerSettingsProvider).paper, ReaderPaper.green);
+    expect(find.text('夜间'), findsOneWidget);
+  });
+
+  testWidgets('阅读页-夜间偏好恢复后日间回到落盘的浅色纸', (tester) async {
+    // 上次退出时是夜间、日间记忆是护眼：重进阅读页点「日间」应回护眼，
+    // 不能回默认纸色（偏好落盘 reader_day_paper_v1）。
+    SharedPreferences.setMockInitialValues({
+      'reader_paper_v1': 'night',
+      'reader_day_paper_v1': 'green',
+    });
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    await container.read(readerSettingsProvider.notifier).restoreFuture;
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(container.read(readerSettingsProvider).paper, ReaderPaper.night);
+
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('日间'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(container.read(readerSettingsProvider).paper, ReaderPaper.green);
+  });
+
+  testWidgets('阅读页-缓存状态：未缓存显示缓存小说', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('缓存小说'), findsOneWidget);
+    expect(find.text('已缓存'), findsNothing);
+  });
+
+  testWidgets('阅读页-缓存状态：整本下载完显示已缓存', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      extraOverrides: [
+        offlineNovelProvider.overrideWith((ref, bookId) async {
+          return OfflineBook(
+            bookId: bookId,
+            title: '剑来',
+            chapters: const [OfflineChapter(id: 'c1', title: '第一章', index: 0)],
+            completed: 1,
+          );
+        }),
+      ],
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('已缓存'), findsOneWidget);
+    expect(find.text('缓存小说'), findsNothing);
+  });
+
+  testWidgets('阅读页-缓存状态：已排队显示缓存中', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    container
+        .read(offlineQueueProvider.notifier)
+        .enqueue(
+          const OfflineQueueJob(
+            kind: OfflineTaskKind.novel,
+            id: '1',
+            title: '剑来',
+            cover: '',
+            items: <Chapter>[],
+          ),
+        );
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('缓存中'), findsOneWidget);
+    expect(find.text('缓存小说'), findsNothing);
+  });
+
+  testWidgets('阅读页-点缓存小说开始整本缓存，文案变缓存中', (tester) async {
+    final bookStore = _DownloadingBookStore();
+    final network = _GatedOfflineNetwork();
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      offlineBookStore: bookStore,
+      extraOverrides: [
+        offlineNetworkProvider.overrideWithValue(network),
+        // 下载器节奏全置 0：用例只关心「点下去后进入下载中」，不等待真实间隔。
+        offlineDownloadSettingsProvider.overrideWithValue(
+          const OfflineDownloadSettings(
+            batchGap: Duration.zero,
+            retryDelay: Duration.zero,
+            progressInterval: Duration.zero,
+            manifestInterval: Duration.zero,
+          ),
+        ),
+      ],
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('缓存小说'), findsOneWidget);
+
+    await tester.tap(find.text('缓存小说'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(
+      container.read(offlineDownloaderProvider)?.id,
+      '1',
+      reason: '点缓存小说应真的启动整本下载',
+    );
+    expect(find.text('缓存中'), findsOneWidget);
+    expect(find.text('缓存小说'), findsNothing);
+  });
+
+  testWidgets('阅读页-顶部状态：已在书架只读、已缓存点击进缓存中心', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      extraOverrides: [
+        offlineNovelProvider.overrideWith((ref, bookId) async {
+          return OfflineBook(
+            bookId: bookId,
+            title: '剑来',
+            chapters: const [OfflineChapter(id: 'c1', title: '第一章', index: 0)],
+            completed: 1,
+          );
+        }),
+      ],
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('加入书架'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('已在书架'), findsOneWidget);
+    expect(find.text('已缓存'), findsOneWidget);
+    // 「已在书架」是只读态：不渲染任何手势控件，点击也不会触发动作。
+    expect(
+      find.ancestor(of: find.text('已在书架'), matching: find.byType(TextButton)),
+      findsNothing,
+    );
+    // 「已缓存」是按钮：点了进缓存中心（看已下载内容/删除）。
+    expect(
+      find.ancestor(of: find.text('已缓存'), matching: find.byType(TextButton)),
+      findsOneWidget,
+    );
+    await expectLater(
+      find.byType(ReaderPage),
+      matchesGoldenFile('../goldens/reader_toolbar_readonly.png'),
+    );
+
+    await tester.tap(find.text('已缓存'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(CacheCenterPage), findsOneWidget);
+  });
+
+  testWidgets('阅读页-缓存中点进缓存中心（暂停/失败后能继续）', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    // 模拟「暂停 / 取消后 manifest 只完成一部分」：没有活动任务但也不是
+    // 可从头开始的状态，阅读页不能让它成为点不动的死状态。
+    container
+        .read(offlineQueueProvider.notifier)
+        .enqueue(
+          const OfflineQueueJob(
+            kind: OfflineTaskKind.novel,
+            id: '1',
+            title: '剑来',
+            cover: '',
+            items: <Chapter>[],
+          ),
+        );
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('缓存中'), findsOneWidget);
+
+    await tester.tap(find.text('缓存中'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(CacheCenterPage), findsOneWidget);
   });
 
   testWidgets('阅读页-工具栏收起后必须完全移出屏幕', (tester) async {
@@ -325,4 +631,70 @@ String _pageIndicator(WidgetTester tester) {
         (data) => RegExp(r'^\d+/\d+$').hasMatch(data),
         orElse: () => '',
       );
+}
+
+/// 只用于「点缓存小说」用例的内存离线区：stats/缺口立即返回，不碰真实磁盘。
+class _DownloadingBookStore extends OfflineBookStore {
+  _DownloadingBookStore()
+    : super(paths: OfflinePaths(rootDirectory: unsupportedDirectory));
+
+  final Map<String, OfflineBook> _books = <String, OfflineBook>{};
+
+  /// 只写内存：真实 store 会落到 path_provider 目录，widget 测试里不会完成。
+  @override
+  Future<void> begin(OfflineBook book) async {
+    _books[book.bookId] = book;
+  }
+
+  @override
+  Future<OfflineBook?> read(String bookId) async => _books[bookId];
+
+  @override
+  Future<ChapterContent?> readChapter(String bookId, String chapterId) async =>
+      null;
+
+  /// 全部章节都还没下：下载器会从头开始，任务进入 running。
+  @override
+  Future<List<String>> missingChapterIds(
+    String bookId,
+    List<Chapter> chapters,
+  ) async => [for (final chapter in chapters) chapter.id];
+
+  @override
+  Future<void> cleanupPartFiles() async {}
+
+  @override
+  Future<OfflineStats> stats() async => OfflineStats(
+    count: _books.length,
+    bytes: 0,
+    capBytes: OfflineBookStore.novelCapBytes,
+  );
+}
+
+/// 卡住第一批正文的假网络：下载停在「进行中」，可以稳定断言「缓存中」。
+///
+/// 不用 Future.delayed：widget 测试结束时未完成的定时器会直接失败。
+class _GatedOfflineNetwork implements OfflineNetwork {
+  final Completer<void> _gate = Completer<void>();
+
+  @override
+  Future<Map<String, ChapterContent>> chaptersBatch(
+    List<Chapter> chapters, {
+    Duration timeout = const Duration(seconds: 40),
+  }) async {
+    await _gate.future;
+    return const {};
+  }
+
+  @override
+  Future<ChapterContent> chapter(String chapterId, {String title = ''}) async =>
+      throw UnimplementedError('批量接口已覆盖，用例不需要单章回退');
+
+  @override
+  Future<VideoSource> videoSource(String episodeId, {int? maxHeight}) async =>
+      throw UnimplementedError('小说下载不取视频流');
+
+  @override
+  Future<OfflineVideoStream> openVideoStream(String url) async =>
+      throw UnimplementedError('小说下载不取视频流');
 }

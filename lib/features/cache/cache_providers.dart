@@ -85,3 +85,51 @@ final offlineNovelProvider = FutureProvider.family<OfflineBook?, String>(
 final offlineSeriesProvider = FutureProvider.family<OfflineSeries?, String>(
   (ref, seriesId) => ref.watch(offlineSeriesStoreProvider).read(seriesId),
 );
+
+/// 一个离线条目（小说 / 短剧）的三态。
+enum OfflineEntryStatus { none, inProgress, cached }
+
+/// 离线条目的缓存状态，`(kind, id)` 为键。
+///
+/// 状态以离线区 manifest 为准（进程重启后仍正确），进行中还要看当前任务与
+/// 等待队列。详情页 OfflineDownloadButton 与阅读页顶部「缓存小说」共用这
+/// 一份判定，避免两处各写一套后漂移。
+final offlineEntryStatusProvider = Provider.autoDispose
+    .family<OfflineEntryStatus, ({OfflineTaskKind kind, String id})>((
+      ref,
+      entry,
+    ) {
+      final int cachedTotal;
+      final int cachedCompleted;
+      switch (entry.kind) {
+        case OfflineTaskKind.novel:
+          final manifest = ref.watch(offlineNovelProvider(entry.id)).value;
+          cachedTotal = manifest?.total ?? 0;
+          cachedCompleted = manifest?.completed ?? 0;
+        case OfflineTaskKind.video:
+          final manifest = ref.watch(offlineSeriesProvider(entry.id)).value;
+          cachedTotal = manifest?.total ?? 0;
+          cachedCompleted = manifest?.completed ?? 0;
+      }
+      // 已下载完整：manifest 完整或任务已完成（manifest provider 可能还没刷新）。
+      if (cachedTotal > 0 && cachedCompleted >= cachedTotal) {
+        return OfflineEntryStatus.cached;
+      }
+      final task = ref.watch(offlineDownloaderProvider);
+      final active =
+          task != null && task.kind == entry.kind && task.id == entry.id;
+      if (active && task.isDone) return OfflineEntryStatus.cached;
+      final queued = ref
+          .watch(offlineQueueProvider)
+          .any((job) => job.kind == entry.kind && job.id == entry.id);
+      // 任务失败会回到 none（可重新 start，按文件缺口续传）；没有活动任务但
+      // manifest 只完成一部分（取消/重启残留）算进行中，交给缓存中心继续。
+      final inProgress =
+          queued ||
+          (active
+              ? (task.isRunning || task.isPaused)
+              : (cachedTotal > 0 && cachedCompleted > 0));
+      return inProgress
+          ? OfflineEntryStatus.inProgress
+          : OfflineEntryStatus.none;
+    });
