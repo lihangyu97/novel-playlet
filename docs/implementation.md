@@ -334,7 +334,8 @@ loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（
 
 ```text
 _open(index, {retainPrevious})
-  ├─ sync：_generation++、取消定时器、_retainCurrentController()（旧帧暂停后留在旧页，出画面再释放）
+  ├─ sync：_generation++、取消定时器；同页重载 → _retainCurrentController()（旧帧垫底）；
+  │        翻页兜底加载 → 直接释放旧 controller（旧页已滑出）
   ├─ sync：loading=true；有旧帧 → spinner 延迟 250ms，无旧帧 → 立即显示
   │
   ├─ ① 离线 pinned：_offlineFile(episodeId)
@@ -387,17 +388,20 @@ AVPlayer/ExoPlayer
 
 - 渲染通路：固定 `VideoViewType.platformView`（iOS = AVPlayerLayer，Android = ExoPlayer 平台视图），避免逐帧纹理拷贝。
 - 切集：整页竖向 `PageView`（上滑下一集 / 下滑上一集），控制条里不再有上一集/下一集按钮；
-  选集弹层跨集跳转直接 jump 到目标页，播完自动续播走相邻页 280ms 动画。手势滑过一半
-  （`onPageChanged`）就开始加载目标集，**旧 controller 暂停后继续画在旧页上**随页滑出，
-  新集在滑入过程中初始化；已缓存/预取命中时落定前就出画面，`ScrollEndNotification` 只作兜底。
-  新集 `position>0` 后释放旧帧（同旧行为）。spinner 一律延迟 250ms，避免已缓存集先闪
-  「正在准备视频」。非当前页只渲染黑底集数占位，不预建 controller；错误页额外给「下一集」
-  出口（错误页内部滚动区可能吃掉上下滑手势）。
+  选集弹层跨集跳转直接 jump 到目标页，播完自动续播走相邻页 280ms 动画。
+  - 滑过一半（`onPageChanged`）只**预热**目标集：解析来源（离线 / 预取 / `mode=cached` /
+    `videoSource`）+ `initialize` + 暂停在第 0 帧，不碰当前播放；拖动期间当前集暂停。
+  - `ScrollEndNotification` 落定后提交：预热命中就直接接管（首帧立即可见，不闪「正在准备
+    视频」），并释放旧 controller；滑回落定则丢弃预热、恢复原集播放（**不重播**）。
+  - 预热失败或未预热（程序化跳页等）才走 `_open` 兜底（错误展示与 -1004 恢复都在这）。
+    预热页滑入时已能显示新集第一帧，未就绪则显示轻量占位（小 spinner + 集名），不是大
+    「正在准备视频」页。
+  - 错误页额外给上一集/下一集出口（错误页内部滚动区可能吃掉上下滑手势）。
 - 预取：当前集播 5s 后预取下一集；离线命中跳过；先探 `mode=cached` 再 `videoSource`；页内 LRU 2 条；失败静默。
-- 缓存与卸载（切集相关）：同一时刻最多 2 个 AVPlayer（当前 + 暂停中的旧帧，新集出画面后立即释放
-  旧帧），非当前页不预建 controller；页内只预取下一集的取流地址（LRU 2 条 `/src`，不预建
-  controller）；磁盘侧由内核 `src/` 128 MiB 预算按 mtime 自动淘汰，离线 pinned 区不受影响；
-  离开播放页 dispose 所有 controller 与定时器。
+- 缓存与卸载（切集相关）：峰值最多 2 个 AVPlayer（当前 + 预热中的目标集，暂停在第 0 帧），
+  提交/取消时立刻释放不要的那个；未预热的页面不建 controller；页内只预取下一集取流地址
+  （LRU 2 条 `/src`，不预建 controller）；磁盘侧由内核 `src/` 128 MiB 预算按 mtime 自动淘汰，
+  离线 pinned 区不受影响；离开播放页 dispose 所有 controller 与定时器。
 - 倍速：1.0–3.0x 全局持久化（`video_playback_speed_v1`）；`_startController` 统一 apply，首帧/seek/恢复再补设一次；
   iOS 根因修复在 `third_party/video_player_avfoundation`（补 `AVPlayer.defaultRate`）。chip 放在
   操作行最右（右下角）；时间行只留「当前位置 — 总时长」。
