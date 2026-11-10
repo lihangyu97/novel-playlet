@@ -163,8 +163,8 @@ class ReaderTopBar extends StatelessWidget {
   }
 }
 
-/// 顶部状态动作字号：13 在真机上偏小，放大到与正文相近的易读尺寸。
-const double _actionFontSize = 20;
+/// 顶部状态动作字号：13 在真机上偏小、20 又太大，取 16 兼顾易读与克制的层级。
+const double _actionFontSize = 16;
 
 /// 顶部文字动作：有回调才是按钮，没回调只作状态文案（不可点、压暗一档）。
 class _ReaderTextAction extends StatelessWidget {
