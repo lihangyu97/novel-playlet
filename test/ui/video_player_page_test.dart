@@ -166,37 +166,67 @@ void main() {
     expect(factory.created, hasLength(1), reason: '第 1 集下滑不应切集');
     expect(find.text('第 1 集'), findsWidgets);
 
-    // 上滑：翻到第 2 集；旧画面在旧页上留到新集真正出画面（同旧行为）。
+    // 上滑：滑过半预热第 2 集，落定后提交；旧 controller 落定即释放。
     await tester.drag(find.byType(PageView), const Offset(0, -600));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(factory.created, hasLength(2), reason: '上滑应切到下一集');
     expect(find.text('第 2 集'), findsWidgets);
     expect(tester.widget<PageView>(find.byType(PageView)).controller?.page, 1);
-    final second = factory.created[1];
-    expect(factory.created.first.disposeCount, 0, reason: '新集出画面前旧帧还在');
-    second.value = second.value.copyWith(
-      position: const Duration(seconds: 1),
-      isPlaying: true,
-    );
-    await tester.pump();
     expect(
       factory.created.first.disposeCount,
       1,
-      reason: '新集出画面后释放旧 controller',
+      reason: '落定提交时旧 controller 立即释放',
     );
+    expect(factory.created[1].value.isPlaying, isTrue, reason: '提交后新集开始播放');
 
-    // 下滑回第 1 集。
+    // 下滑回第 1 集：预热上一集并提交。
     await tester.drag(find.byType(PageView), const Offset(0, 600));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(factory.created, hasLength(3), reason: '下滑应回到上一集并重建 controller');
     expect(find.text('第 1 集'), findsWidgets);
-    final third = factory.created[2];
-    third.value = third.value.copyWith(
-      position: const Duration(seconds: 1),
-      isPlaying: true,
-    );
-    await tester.pump();
     expect(factory.created[1].disposeCount, 1);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('滑过半又滑回原页：不换集、不重播，预热 controller 被丢弃', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+    final first = factory.created.single;
+    expect(first.value.isPlaying, isTrue);
+
+    // 600 高视口：拖过 300 会让 PageView 判定翻到下一页；不松手再拖回来。
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    await gesture.moveBy(const Offset(0, -420));
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, 420));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    // 预热可能已完成（多一个 controller，被丢弃）或还在飞（token 失效后
+    // 自行 dispose），两种都不算错；关键是原集 controller 不能被重建/释放。
+    expect(
+      factory.created.length,
+      lessThanOrEqualTo(2),
+      reason: '回弹不应触发 _open 重建原集',
+    );
+    if (factory.created.length == 2) {
+      expect(
+        factory.created[1].disposeCount,
+        1,
+        reason: '滑回原页应丢弃预热 controller，不能留着占内存',
+      );
+    }
+    expect(
+      factory.created.first.disposeCount,
+      0,
+      reason: '原集 controller 不能被释放/重建（否则会从头重播）',
+    );
+    expect(tester.widget<PageView>(find.byType(PageView)).controller?.page, 0);
+    expect(find.text('第 1 集'), findsWidgets);
+    expect(first.value.isPlaying, isTrue, reason: '取消滑动后继续播放');
 
     await _disposePlayer(tester);
   });
