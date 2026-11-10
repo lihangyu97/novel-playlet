@@ -2,36 +2,31 @@ import 'package:flutter/material.dart';
 
 /// 我的页的网格块：网格 + 空态，长按交给父级弹管理菜单。
 ///
-/// 返回普通 Box 而不是 sliver：我的页把内容拆成三块做独立的横向延迟动画，
-/// sliver 没法单独平移。书架是个人数据、量级不大，`shrinkWrap` 的 GridView
-/// 一次性布局足够，换来的「能按块做动画」更重要。
+/// 返回普通 Box 而不是 sliver：作为 [SliverToBoxAdapter] 的内容使用，书架/
+/// 收藏是个人数据、量级不大，`shrinkWrap` 的 GridView 一次性布局足够。
 ///
-/// 小说 / 短剧共用这层骨架：列数、卡片宽高、间距、空态高度都按同一套规则，
-/// 两侧只注入卡片类型与空态文案。
+/// 小说 / 短剧两个 tab 共用这层骨架：列数、卡片宽高、间距、空态高度都按同
+/// 一套规则，两侧只注入卡片类型与空态文案。
 class ShelfGrid<T> extends StatelessWidget {
   const ShelfGrid({
     super.key,
     required this.items,
     required this.crossAxisCount,
-    required this.itemWidth,
     required this.itemHeight,
     required this.spacing,
     required this.cardBuilder,
     required this.emptyState,
-    required this.onOpen,
     required this.onLongPress,
     this.heroTagOf,
   });
 
   final List<T> items;
   final int crossAxisCount;
-  final double itemWidth;
   final double itemHeight;
   final double spacing;
 
   /// 卡片构建：拿到条目与 [heroTagOf] 算出的 Hero tag。
   final Widget Function(T item, String? heroTag) cardBuilder;
-  final ValueChanged<T> onOpen;
   final ValueChanged<T> onLongPress;
 
   /// 空态内容（图标 + 文案）；外层留白与高度由本组件统一。

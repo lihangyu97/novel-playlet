@@ -14,32 +14,24 @@ import 'mine_grid_metrics.dart';
 import 'mine_header.dart';
 import 'mine_recent_reading.dart';
 import 'mine_shelf_grid.dart';
-import 'panel_shell.dart';
+import 'mine_tab_body.dart';
 
-/// 小说面板：读本地书架/阅读进度，注入 [PanelShell] 的骨架。
-class MineNovelPanel extends ConsumerWidget {
-  const MineNovelPanel({
-    super.key,
-    required this.bottomInset,
-    required this.progress,
-  });
+/// 「小说」tab：书架 + 最近阅读。
+///
+/// 页头与 tabs 由 [MinePage] 固定贴顶；这里只读本地数据并注入 [MineTabBody]。
+class MineNovelTab extends ConsumerWidget {
+  const MineNovelTab({super.key, required this.bottomInset});
 
   final double bottomInset;
-  final Animation<double> progress;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineDataProvider);
     final data = async.value;
     final metrics = MineGridMetrics.of(context, coverAspect: kNovelCoverAspect);
-    return PanelShell<MineData>(
+    return MineTabBody<MineData>(
       data: data,
-      progress: progress,
-      mirrored: false,
       bottomInset: bottomInset,
-      title: '小说',
-      icon: Icons.auto_stories_rounded,
-      stats: _statsOf(async, data),
       placeholder: async.hasError
           ? ErrorView(
               message: '读取本地书架失败，请重试',
@@ -77,13 +69,6 @@ class MineNovelPanel extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  String _statsOf(AsyncValue<MineData> async, MineData? data) {
-    if (data != null) {
-      return '最近阅读 ${data.recent.length} 本 · 书架 ${data.shelf.length} 本';
-    }
-    return async.hasError ? '本地书架暂时读不出来' : '正在读取书架…';
   }
 
   void _openDetail(BuildContext context, NovelItem item) {

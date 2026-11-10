@@ -3,9 +3,8 @@ import 'package:flutter/material.dart';
 /// 顶部固定模块的「蓝 → 粉」氛围渐变。
 ///
 /// 只是一点点氛围：低透明度、纯装饰、不承载任何信息（不参与语义与点击）。
-/// 推荐页的搜索栏、我的页小说页头、短剧页头三处各用一套**略微不同**的角度
-/// 与色标，避免看到三条一模一样的色带；我的页切换面板时按进度在小说/短剧
-/// 两套之间插值，背景是连续过渡而不是硬切。
+/// 推荐页（搜索栏）与我的页（页头 + tabs）各用一套**略微不同**的角度与色标，
+/// 避免两页看到一模一样的色带；我的页整页共用一套，不随小说/短剧 tab 切换。
 @immutable
 class TopGlowSpec {
   const TopGlowSpec({
@@ -17,7 +16,7 @@ class TopGlowSpec {
   final Alignment begin;
   final Alignment end;
 
-  /// 蓝 → 紫 → 粉三档的色标位置，三处略微不同。
+  /// 蓝 → 紫 → 粉三档的色标位置，两处略微不同。
   final List<double> stops;
 
   LinearGradient gradient(Color blue, Color mid, Color pink) => LinearGradient(
@@ -26,19 +25,6 @@ class TopGlowSpec {
     colors: [blue, mid, pink],
     stops: stops,
   );
-
-  /// 面板切换过程中的渐变过渡：位置/角度与色标一起线性插值。
-  static TopGlowSpec lerp(TopGlowSpec a, TopGlowSpec b, double t) {
-    final k = t.clamp(0.0, 1.0);
-    return TopGlowSpec(
-      begin: Alignment.lerp(a.begin, b.begin, k) ?? a.begin,
-      end: Alignment.lerp(a.end, b.end, k) ?? a.end,
-      stops: [
-        for (var i = 0; i < a.stops.length; i++)
-          a.stops[i] + (b.stops[i] - a.stops[i]) * k,
-      ],
-    );
-  }
 }
 
 /// 推荐页顶部（搜索框 + 分类 tabs）：接近水平、略微下斜。
@@ -48,18 +34,13 @@ const kRecommendTopGlow = TopGlowSpec(
   stops: [0.0, 0.5, 1.0],
 );
 
-/// 我的页-小说页头：略微上斜，和短剧侧形成一点差异。
-const kNovelTopGlow = TopGlowSpec(
+/// 我的页（页头 + 小说/短剧 tabs）：略微上斜，与推荐页形成一点差异。
+///
+/// 小说/短剧两个 tab 共用这一套：页头是统一的，渐变不该跟着 tab 变。
+const kMineTopGlow = TopGlowSpec(
   begin: Alignment(-1, 0.35),
   end: Alignment(1, -0.2),
   stops: [0.0, 0.55, 1.0],
-);
-
-/// 我的页-短剧页头：略微下斜，倾斜方向与小说侧相反。
-const kDramaTopGlow = TopGlowSpec(
-  begin: Alignment(-1, -0.35),
-  end: Alignment(1, 0.3),
-  stops: [0.05, 0.5, 0.95],
 );
 
 /// 顶部装饰渐变层：横向蓝 → 粉，向下淡出，固定不滚动。

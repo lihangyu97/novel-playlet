@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
@@ -159,9 +160,22 @@ void main() {
 
   testWidgets('推荐页-分类 tabs 横向可滚动', (tester) async {
     await pumpPreview(tester, const RecommendPage());
-    final tabBar = tester.widget<TabBar>(find.byType(TabBar));
-    expect(tabBar.isScrollable, isTrue, reason: '分类 tabs 必须能左右滑动');
-    expect(find.byType(Tab), findsNWidgets(3));
+    expect(
+      find.byType(CategoryTabBar),
+      findsOneWidget,
+      reason: '与我的页共用同一套 tabs',
+    );
+    final scrollView = tester.widget<SingleChildScrollView>(
+      find.descendant(
+        of: find.byType(CategoryTabBar),
+        matching: find.byType(SingleChildScrollView),
+      ),
+    );
+    expect(
+      scrollView.scrollDirection,
+      Axis.horizontal,
+      reason: '分类 tabs 必须能左右滑动',
+    );
     for (final label in ['小说', '短剧', '漫剧']) {
       expect(find.text(label), findsOneWidget, reason: '缺少分类 $label');
     }
@@ -175,7 +189,7 @@ void main() {
       FeedSearchField.height,
     );
     expect(FeedSearchField.height, 40, reason: '搜索框高度应为 40');
-    final tabsBottom = tester.getBottomLeft(find.byType(TabBar)).dy;
+    final tabsBottom = tester.getBottomLeft(find.byType(CategoryTabBar)).dy;
     expect(
       tabsBottom,
       lessThanOrEqualTo(100),
@@ -221,11 +235,20 @@ void main() {
     );
   });
 
-  /// 搜索框右侧的「已缓存」入口直接进缓存中心。
-  testWidgets('推荐页-已缓存入口打开缓存中心', (tester) async {
+  /// 搜索框右侧的下载图标入口直接进缓存中心（不再是一段文字）。
+  testWidgets('推荐页-下载图标入口打开缓存中心', (tester) async {
     await pumpPreview(tester, const RecommendPage());
-    expect(find.text('已缓存'), findsOneWidget);
-    await tester.tap(find.text('已缓存'));
+    expect(find.text('已缓存'), findsNothing, reason: '入口只放图标，不占文字');
+    final entry = find.byTooltip('已缓存');
+    expect(entry, findsOneWidget);
+    expect(
+      find.descendant(
+        of: entry,
+        matching: find.byIcon(Icons.download_outlined),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(entry);
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.byType(CacheCenterPage), findsOneWidget);
   });

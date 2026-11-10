@@ -15,32 +15,24 @@ import 'mine_drama_shelf_grid.dart';
 import 'mine_grid_metrics.dart';
 import 'mine_header.dart';
 import 'mine_recent_watching.dart';
-import 'panel_shell.dart';
+import 'mine_tab_body.dart';
 
-/// 短剧面板：读本地收藏/观看记录，注入 [PanelShell] 的骨架（镜像版式）。
-class MineDramaPanel extends ConsumerWidget {
-  const MineDramaPanel({
-    super.key,
-    required this.bottomInset,
-    required this.progress,
-  });
+/// 「短剧」tab：收藏 + 最近观看。
+///
+/// 页头与 tabs 由 [MinePage] 固定贴顶；这里只读本地数据并注入 [MineTabBody]。
+class MineDramaTab extends ConsumerWidget {
+  const MineDramaTab({super.key, required this.bottomInset});
 
   final double bottomInset;
-  final Animation<double> progress;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineDramaDataProvider);
     final data = async.value;
     final metrics = MineGridMetrics.of(context, coverAspect: kVideoCoverAspect);
-    return PanelShell<MineDramaData>(
+    return MineTabBody<MineDramaData>(
       data: data,
-      progress: progress,
-      mirrored: true,
       bottomInset: bottomInset,
-      title: '短剧',
-      icon: Icons.theaters_rounded,
-      stats: _statsOf(async, data),
       placeholder: async.hasError
           ? ErrorView(
               message: '读取短剧收藏失败，请重试',
@@ -49,7 +41,7 @@ class MineDramaPanel extends ConsumerWidget {
           : const LoadingView(label: '正在读取短剧数据…'),
       recentOf: (data) => Column(
         children: [
-          const MineSectionHeader(title: '最近观看', mirrored: true),
+          const MineSectionHeader(title: '最近观看'),
           if (data.history.isEmpty)
             const SizedBox(
               height: 140,
@@ -69,7 +61,6 @@ class MineDramaPanel extends ConsumerWidget {
         children: [
           MineSectionHeader(
             title: '我的收藏',
-            mirrored: true,
             hint: data.collections.isEmpty ? null : '长按管理',
           ),
           MineDramaShelfGrid(
@@ -87,13 +78,6 @@ class MineDramaPanel extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  String _statsOf(AsyncValue<MineDramaData> async, MineDramaData? data) {
-    if (data != null) {
-      return '最近观看 ${data.history.length} 条 · 收藏 ${data.collections.length} 部';
-    }
-    return async.hasError ? '本地短剧数据暂时读不出来' : '正在读取短剧数据…';
   }
 
   void _openDetail(BuildContext context, VideoSeries item) {

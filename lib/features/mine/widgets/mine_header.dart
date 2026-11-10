@@ -1,74 +1,67 @@
 import 'package:flutter/material.dart';
 
-/// 页头：标题 + 图标 + 一行统计 + 设置入口。
+/// 我的页页头：图标 + 主标题 + 一行合并统计 + 设置入口。
 ///
-/// [mirrored] 为 true 时整行左右镜像（短剧）：设置按钮在左、标题与图标在右、
-/// 统计文字右对齐，和小说侧形成对称。
+/// 小说/短剧两个 tab 共用**同一个**页头（固定贴顶、不随内容滚动），不再按
+/// 内容类型做镜像版式；设置入口只有右上角这一枚。
 class MineHeader extends StatelessWidget {
   const MineHeader({
     super.key,
     required this.title,
     required this.icon,
     required this.stats,
-    this.mirrored = false,
+    required this.onSettings,
   });
 
   final String title;
   final IconData icon;
+
+  /// 两个 tab 合并后的一行统计，例如「书架 12 本 · 收藏 4 部」。
   final String stats;
-  final bool mirrored;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final titleText = Text(
-      title,
-      style: theme.textTheme.headlineSmall?.copyWith(
-        fontWeight: FontWeight.w700,
-        letterSpacing: -0.2,
-      ),
-    );
-    final iconBox = Container(
-      width: 34,
-      height: 34,
-      decoration: BoxDecoration(
-        color: scheme.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Icon(icon, size: 19, color: scheme.primary),
-    );
-    // 设置按钮由页面统一画在 Stack 顶层（切换时在屏幕内左右滑动），这里只留
-    // 同宽的占位，保证两侧页头高度与文字位置不因移除按钮而变化。
-    const settingsPlaceholder = SizedBox(width: 40, height: 40);
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 20, 8, 4),
       child: Column(
-        crossAxisAlignment: mirrored
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: mirrored
-                ? [
-                    settingsPlaceholder,
-                    const Spacer(),
-                    titleText,
-                    const SizedBox(width: 10),
-                    iconBox,
-                  ]
-                : [
-                    iconBox,
-                    const SizedBox(width: 10),
-                    titleText,
-                    const Spacer(),
-                    settingsPlaceholder,
-                  ],
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 19, color: scheme.primary),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                title,
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: onSettings,
+                tooltip: '设置',
+                visualDensity: VisualDensity.compact,
+                iconSize: 22,
+                color: scheme.onSurfaceVariant,
+                icon: const Icon(Icons.settings_outlined),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
             stats,
-            textAlign: mirrored ? TextAlign.right : TextAlign.left,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
@@ -79,18 +72,14 @@ class MineHeader extends StatelessWidget {
   }
 }
 
-/// 区块标题（我的书架 / 最近阅读 / 最近观看 / 我的收藏）。
+/// 区块标题（最近阅读 / 最近观看 / 我的书架 / 我的收藏）。
+///
+/// 小说/短剧两个 tab 的版式已经统一为左对齐，不再有镜像参数。
 class MineSectionHeader extends StatelessWidget {
-  const MineSectionHeader({
-    super.key,
-    required this.title,
-    this.hint,
-    this.mirrored = false,
-  });
+  const MineSectionHeader({super.key, required this.title, this.hint});
 
   final String title;
   final String? hint;
-  final bool mirrored;
 
   @override
   Widget build(BuildContext context) {
@@ -113,16 +102,10 @@ class MineSectionHeader extends StatelessWidget {
       // 区块标题上下也统一 8（与左右留白一致）。
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       child: Row(
-        children: mirrored
-            ? [
-                if (hintText != null) ...[hintText, const SizedBox(width: 8)],
-                const Spacer(),
-                titleText,
-              ]
-            : [
-                Expanded(child: titleText),
-                if (hintText != null) ...[const SizedBox(width: 8), hintText],
-              ],
+        children: [
+          Expanded(child: titleText),
+          if (hintText != null) ...[const SizedBox(width: 8), hintText],
+        ],
       ),
     );
   }

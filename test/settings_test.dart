@@ -451,8 +451,8 @@ void main() {
     expect(find.text('设置'), findsWidgets);
   });
 
-  /// 短剧是镜像面板：同一枚设置按钮滑到左侧，点它打开的仍是同一个设置页。
-  testWidgets('我的页-短剧左侧设置按钮也能打开设置页', (tester) async {
+  /// 切到短剧 tab 后，设置入口仍是右上角同一枚按钮。
+  testWidgets('我的页-短剧 tab 的设置入口也能打开设置页', (tester) async {
     await tester.pumpWidget(
       _wrap(
         const Scaffold(body: MinePage()),
@@ -461,7 +461,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(MinePage.switchButtonKey));
+    await tester.tap(find.text('短剧'));
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
 
     final dramaSettings = find.byIcon(Icons.settings_outlined);

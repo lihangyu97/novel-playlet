@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
@@ -12,7 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 
-/// 我的页预览：小说/短剧双面板、悬浮切换、书架与最近观看。
+/// 我的页预览：统一页头（我的 + 统计 + 设置）+ 小说/短剧两个 tab。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/mine_test.dart`。
 /// 这一页的封面都必须是各自内容类型的原生比例：小说 3:4、短剧 7:10。
@@ -31,6 +32,34 @@ void _expectCoverAspect(WidgetTester tester, String label) {
       )
       .toSet();
   expect(bad, isEmpty, reason: '$label 有封面既不是小说 3:4 也不是短剧 7:10：$bad');
+}
+
+/// 点 tab 栏里的「小说 / 短剧」切 tab（标签在页头下方的 tabs 行里）。
+Future<void> _openTab(WidgetTester tester, String label) async {
+  await tester.tap(find.text(label));
+  await tester.pumpAndSettle(const Duration(milliseconds: 400));
+}
+
+Map<String, Object> _videoHistoryPrefs() {
+  final progress = VideoWatchProgress(
+    seriesId: 'v1',
+    title: '太奶奶的短剧',
+    cover: '',
+    episodeIndex: 4,
+    updatedAt: DateTime.now(),
+  );
+  return {
+    'video_shelf_v1': jsonEncode([
+      VideoSeries(id: 'v1', title: '太奶奶的短剧', episodeCount: 40).toStorageJson(),
+      const VideoSeries(
+        id: 'v2',
+        title: '另一部短剧',
+        episodeCount: 12,
+      ).toStorageJson(),
+    ]),
+    'video_progress_v1': jsonEncode({'v1': progress.toJson()}),
+    'video_history_v1': jsonEncode([progress.toJson()]),
+  };
 }
 
 void main() {
@@ -54,8 +83,7 @@ void main() {
       'video_history_v1': jsonEncode([progress.toJson()]),
     });
     await pumpPreview(tester, const MinePage());
-    await tester.tap(find.byKey(MinePage.switchButtonKey));
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+    await _openTab(tester, '短剧');
 
     await tester.tap(find.text('看到第 5 集'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
@@ -63,35 +91,15 @@ void main() {
   });
 
   testWidgets('我的页（短剧收藏与历史）', (tester) async {
-    final progress = VideoWatchProgress(
-      seriesId: 'v1',
-      title: '太奶奶的短剧',
-      cover: '',
-      episodeIndex: 4,
-      updatedAt: DateTime.now(),
-    );
-    SharedPreferences.setMockInitialValues({
-      'video_shelf_v1': jsonEncode([
-        VideoSeries(
-          id: 'v1',
-          title: '太奶奶的短剧',
-          episodeCount: 40,
-        ).toStorageJson(),
-        const VideoSeries(
-          id: 'v2',
-          title: '另一部短剧',
-          episodeCount: 12,
-        ).toStorageJson(),
-      ]),
-      'video_progress_v1': jsonEncode({'v1': progress.toJson()}),
-      'video_history_v1': jsonEncode([progress.toJson()]),
-    });
-
+    SharedPreferences.setMockInitialValues(_videoHistoryPrefs());
     await pumpPreview(tester, const MinePage());
-    await tester.tap(find.byKey(MinePage.switchButtonKey));
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
 
-    expect(find.text('最近观看 1 条 · 收藏 2 部'), findsOneWidget);
+    // 页头统计是两边合并的，切 tab 前后都不变。
+    expect(find.text('书架 0 本 · 收藏 2 部'), findsOneWidget);
+
+    await _openTab(tester, '短剧');
+    expect(find.text('最近观看'), findsOneWidget);
+    expect(find.text('我的收藏'), findsOneWidget);
     expect(find.text('太奶奶的短剧'), findsWidgets);
     expect(find.text('看到第 5 集'), findsOneWidget);
     expect(find.text('另一部短剧'), findsOneWidget);
@@ -106,6 +114,10 @@ void main() {
 
   testWidgets('我的页（空书架）', (tester) async {
     await pumpPreview(tester, const MinePage());
+    expect(find.text('我的'), findsOneWidget, reason: '统一页头标题');
+    expect(find.text('书架 0 本 · 收藏 0 部'), findsOneWidget);
+    expect(find.text('我的书架'), findsOneWidget);
+    expect(find.text('书架还是空的，去推荐页看看'), findsOneWidget);
     await expectLater(
       find.byType(MinePage),
       matchesGoldenFile('../goldens/mine_empty.png'),
@@ -135,6 +147,8 @@ void main() {
       }),
     });
     await pumpPreview(tester, const MinePage());
+    expect(find.text('书架 4 本 · 收藏 0 部'), findsOneWidget);
+    expect(find.text('最近阅读'), findsOneWidget);
     // 最近阅读（44 宽）和书架卡（_maxCardWidth 内）封面比例也必须统一。
     _expectCoverAspect(tester, '我的页');
     await expectLater(
@@ -143,115 +157,85 @@ void main() {
     );
   });
 
-  /// 悬浮按钮切换：小说面板滑出、短剧滑入，按钮图标同时换成另一侧。
-  testWidgets('我的页-悬浮按钮切到短剧', (tester) async {
+  testWidgets('我的页（短剧空态）', (tester) async {
     await pumpPreview(tester, const MinePage());
-
-    // 初始：小说在屏幕内，按钮显示「短剧」图标（点它去看短剧）。
-    expect(find.text('小说'), findsWidgets);
-    expect(
-      find.descendant(
-        of: find.byKey(MinePage.switchButtonKey),
-        matching: find.byIcon(Icons.theaters_rounded),
-      ),
-      findsOneWidget,
+    await _openTab(tester, '短剧');
+    expect(find.text('还没有观看记录，去推荐页看看短剧'), findsOneWidget);
+    expect(find.text('还没有收藏的短剧，去推荐页看看'), findsOneWidget);
+    await expectLater(
+      find.byType(MinePage),
+      matchesGoldenFile('../goldens/mine_drama_empty.png'),
     );
+  });
 
-    await tester.tap(find.byKey(MinePage.switchButtonKey));
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
-
-    expect(find.text('短剧'), findsWidgets);
-    expect(find.text('最近观看'), findsOneWidget);
-    expect(find.text('我的收藏'), findsOneWidget);
-    // 短剧标题块（延迟 0）已就位；小说标题整块滑到屏幕左侧外。
-    expect(
-      tester.getTopRight(find.text('短剧')).dx,
-      closeTo(338, 1),
-      reason: '短剧标题应停在镜像位置',
-    );
-    expect(tester.getTopLeft(find.text('小说')).dx, lessThan(-300));
-    // 按钮换成「小说」图标。
-    expect(
-      find.descendant(
-        of: find.byKey(MinePage.switchButtonKey),
-        matching: find.byIcon(Icons.auto_stories_rounded),
-      ),
-      findsOneWidget,
-    );
-
-    // 再点回小说。
-    await tester.tap(find.byKey(MinePage.switchButtonKey));
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(52, 1));
+  /// tab 之间左右滑动切换（内容完全隔离，各自留着滚动位置）。
+  testWidgets('我的页-左右滑动切换 tab', (tester) async {
+    await pumpPreview(tester, const MinePage());
     expect(find.text('我的书架'), findsOneWidget);
+
+    await tester.drag(find.byType(TabBarView), const Offset(-300, 0));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(find.text('我的收藏'), findsOneWidget);
+    expect(find.text('我的书架'), findsNothing);
+
+    await tester.drag(find.byType(TabBarView), const Offset(300, 0));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(find.text('我的书架'), findsOneWidget);
+    expect(find.text('我的收藏'), findsNothing);
   });
 
-  /// 左右滑动也能切换（类似阅读器翻页），不依赖悬浮按钮。
-  testWidgets('我的页-左右滑动切换面板', (tester) async {
-    await pumpPreview(tester, const MinePage());
-
-    // 往左滑 → 短剧。
-    await tester.drag(find.byType(MinePage), const Offset(-300, 0));
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(tester.getTopRight(find.text('短剧')).dx, closeTo(338, 1));
-    expect(
-      find.descendant(
-        of: find.byKey(MinePage.switchButtonKey),
-        matching: find.byIcon(Icons.auto_stories_rounded),
-      ),
-      findsOneWidget,
-    );
-
-    // 往右滑 → 回小说。
-    await tester.drag(find.byType(MinePage), const Offset(300, 0));
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(tester.getTopLeft(find.text('小说')).dx, closeTo(52, 1));
-  });
-
-  /// 过渡不是整页一起动：标题块 0ms 先走，最近阅读块晚 100ms，书架块晚 200ms。
-  testWidgets('我的页-三块阶梯延迟切换', (tester) async {
-    // 需要有最近阅读内容，才能观察中间块（0ms）比标题块（100ms）先动。
+  /// 切走再切回来：保活让每个 tab 的滚动位置各自保留。
+  testWidgets('我的页-两个 tab 各自保留滚动位置', (tester) async {
     SharedPreferences.setMockInitialValues({
-      'recent_reading_v1': jsonEncode([
-        {
-          'bookId': '1',
-          'bookTitle': '剑来',
-          'cover': '',
-          'chapterId': 'c3',
-          'chapterIndex': 2,
-          'blockIndex': 0,
-          'updatedAt': DateTime.now().millisecondsSinceEpoch,
-        },
+      'shelf_books_v1': jsonEncode([
+        for (var i = 1; i <= 12; i++)
+          {'id': '$i', 'title': '书$i', 'cover': '', 'author': '作者$i'},
       ]),
     });
     await pumpPreview(tester, const MinePage());
-    final headerBefore = tester.getTopLeft(find.text('小说')).dx;
-    final recentBefore = tester.getTopLeft(find.text('最近阅读')).dx;
-    final shelfBefore = tester.getTopLeft(find.text('我的书架')).dx;
-
-    final gesture = await tester.startGesture(const Offset(200, 500));
-    // 吃掉触摸 slop 后再精确拖 100px：时间轴走到约 0.26，
-    // 最近阅读块（0ms）已滑走大半、标题块（100ms）刚起步、书架块（200ms）还没动。
-    await gesture.moveBy(const Offset(-20, 0));
-    await tester.pump();
-    await gesture.moveBy(const Offset(-100, 0));
-    await tester.pump();
-
-    final headerDelta = tester.getTopLeft(find.text('小说')).dx - headerBefore;
-    final recentDelta = tester.getTopLeft(find.text('最近阅读')).dx - recentBefore;
-    final shelfAfter = tester.getTopLeft(find.text('我的书架')).dx;
-    expect(recentDelta, lessThan(-120), reason: '最近阅读块（0ms）应该先滑');
-    expect(headerDelta, lessThan(0), reason: '标题块（100ms）随后开始');
-    expect(
-      headerDelta.abs(),
-      lessThan(recentDelta.abs()),
-      reason: '标题块应落后于最近阅读块',
+    await tester.drag(
+      find.byType(CustomScrollView).first,
+      const Offset(0, -300),
     );
-    expect(shelfAfter, closeTo(shelfBefore, 0.5), reason: '书架块（200ms）此时不应移动');
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    final scrolled = verticalOffset(tester);
+    expect(scrolled, greaterThan(100), reason: '前置：书架 tab 已滚离顶部');
 
-    await gesture.up();
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(find.text('短剧'), findsWidgets);
+    await _openTab(tester, '短剧');
+    await _openTab(tester, '小说');
+    expect(
+      verticalOffset(tester),
+      closeTo(scrolled, 0.5),
+      reason: '切走再回来滚动位置应保留',
+    );
+  });
+
+  /// 页头（我的 + 统计 + 设置）与 tabs 固定贴顶，只有 tab 内容滚动。
+  testWidgets('我的页-页头固定贴顶不随列表滚动', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'shelf_books_v1': jsonEncode([
+        for (var i = 1; i <= 12; i++)
+          {'id': '$i', 'title': '书$i', 'cover': '', 'author': '作者$i'},
+      ]),
+    });
+    await pumpPreview(tester, const MinePage());
+    final header = find.text('我的');
+    final headerBefore = tester.getTopLeft(header);
+    final shelfBefore = tester.getTopLeft(find.text('我的书架'));
+
+    await tester.drag(
+      find.byType(CustomScrollView).first,
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.text('我的'), findsOneWidget, reason: '页头必须始终可见');
+    expect(tester.getTopLeft(header), headerBefore, reason: '页头固定贴顶，不随列表滚动');
+    expect(
+      tester.getTopLeft(find.text('我的书架')).dy,
+      lessThan(shelfBefore.dy),
+      reason: '页头下面的书架内容应该正常滚动',
+    );
   });
 
   /// 顶部渐变必须盖住状态栏（安全区）那一条。
@@ -267,124 +251,104 @@ void main() {
     );
   });
 
-  /// 顶部固定页头的氛围渐变：小说/短剧各一套角度，切换面板时过渡到另一套。
-  testWidgets('我的页-页头渐变随面板切换过渡', (tester) async {
+  /// 顶部渐变整页统一：小说/短剧 tab 共用同一套，切 tab 不换色带。
+  testWidgets('我的页-顶部渐变整页统一', (tester) async {
     await pumpPreview(tester, const MinePage());
     TopGlow glow() => tester.widget<TopGlow>(find.byType(TopGlow));
-    expect(glow().spec.begin, kNovelTopGlow.begin);
+    expect(glow().spec, same(kMineTopGlow));
 
-    await tester.tap(find.byKey(MinePage.switchButtonKey));
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    expect(
-      glow().spec.begin,
-      kDramaTopGlow.begin,
-      reason: '切到短剧后页头渐变应过渡成短剧那一套角度',
-    );
+    await _openTab(tester, '短剧');
+    expect(glow().spec, same(kMineTopGlow), reason: '切到短剧 tab 后渐变不应变化');
   });
 
-  /// 页头（图标 + 主标题 + 副标题）固定贴顶，和推荐页搜索框一样不跟着列表滚。
-  testWidgets('我的页-页头固定贴顶不随列表滚动', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'shelf_books_v1': jsonEncode([
-        for (var i = 1; i <= 12; i++)
-          {'id': '$i', 'title': '书$i', 'cover': '', 'author': '作者$i'},
-      ]),
-    });
+  /// tab 样式：无下划线，当前 tab 主题色高亮且字号比未选中大一号。
+  testWidgets('我的页-当前 tab 高亮且布局稳定', (tester) async {
     await pumpPreview(tester, const MinePage());
-    final header = find.text('小说');
-    final headerBefore = tester.getTopLeft(header);
-    final shelfBefore = tester.getTopLeft(find.text('我的书架'));
+    final scheme = Theme.of(tester.element(find.byType(MinePage))).colorScheme;
 
-    await tester.drag(
-      find.byType(CustomScrollView).first,
-      const Offset(0, -300),
-    );
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    TextStyle styleOf(String label) {
+      final finder = find.descendant(
+        of: find.byType(CategoryTabBar),
+        matching: find.text(label),
+      );
+      return tester.widget<Text>(finder).style!;
+    }
 
-    expect(find.text('小说'), findsOneWidget, reason: '页头必须始终可见');
-    expect(tester.getTopLeft(header), headerBefore, reason: '页头固定贴顶，不随列表滚动');
+    expect(find.byType(TabBar), findsNothing, reason: '不用带下划线的 TabBar');
+    expect(styleOf('小说').color, scheme.primary, reason: '当前 tab 用主题色高亮');
+    expect(styleOf('短剧').color, scheme.onSurfaceVariant);
+    expect(styleOf('小说').fontSize, CategoryTabBar.selectedFontSize);
+    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
+
+    // 两个 tab 的字号不同，但文字都贴在同一条底线上：变大的字只向上长。
     expect(
-      tester.getTopLeft(find.text('我的书架')).dy,
-      lessThan(shelfBefore.dy),
-      reason: '页头下面的书架内容应该正常滚动',
+      tester.getBottomLeft(find.text('小说')).dy,
+      tester.getBottomLeft(find.text('短剧')).dy,
+      reason: '选中/未选中的文字必须贴同一条底线',
     );
+
+    // 固定高度 + 固定占位：切换中/切换后 tab 栏、文字底线、内容区都不挪位置。
+    expect(
+      tester.getSize(find.byType(CategoryTabBar)).height,
+      CategoryTabBar.height,
+    );
+    final barBefore = tester.getRect(find.byType(CategoryTabBar));
+    final novelBottomBefore = tester.getBottomLeft(find.text('小说')).dy;
+    final dramaBottomBefore = tester.getBottomLeft(find.text('短剧')).dy;
+    final bodyBefore = tester.getRect(find.byType(TabBarView));
+
+    await tester.tap(find.text('短剧'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getRect(find.byType(CategoryTabBar)), barBefore);
+    expect(tester.getBottomLeft(find.text('小说')).dy, novelBottomBefore);
+    expect(tester.getBottomLeft(find.text('短剧')).dy, dramaBottomBefore);
+    expect(tester.getRect(find.byType(TabBarView)), bodyBefore);
+
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(styleOf('短剧').color, scheme.primary);
+    expect(styleOf('小说').color, scheme.onSurfaceVariant);
+    expect(styleOf('短剧').fontSize, CategoryTabBar.selectedFontSize);
+    expect(tester.getRect(find.byType(CategoryTabBar)), barBefore);
+    expect(tester.getBottomLeft(find.text('小说')).dy, novelBottomBefore);
+    expect(tester.getBottomLeft(find.text('短剧')).dy, dramaBottomBefore);
   });
 
-  /// 短剧是镜像版式：标题/图标靠右；设置按钮只有一枚，随面板在屏幕内
-  /// 从右侧滑到左侧，不再由两个面板各画一个。
-  testWidgets('我的页-短剧标题与设置按钮左右镜像', (tester) async {
+  /// 拖动 TabBarView 时：未过半仍由原 tab 高亮；一过中线高亮/字号立刻切给
+  /// 新 tab（不等松手）。两种状态都是确定的字号，不做逐帧插值。
+  testWidgets('我的页-滑动过半才切换 tab 状态', (tester) async {
     await pumpPreview(tester, const MinePage());
-    const pageWidth = 390.0;
-    const gutter = 8.0;
-    const iconBox = 34.0;
-    const iconGap = 10.0;
+    final scheme = Theme.of(tester.element(find.byType(MinePage))).colorScheme;
+    TextStyle styleOf(String label) {
+      final finder = find.descendant(
+        of: find.byType(CategoryTabBar),
+        matching: find.text(label),
+      );
+      return tester.widget<Text>(finder).style!;
+    }
 
-    expect(
-      tester.getTopLeft(find.text('小说')).dx,
-      closeTo(gutter + iconBox + iconGap, 1),
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(TabBarView)),
     );
-    final settingsIcon = find.byIcon(Icons.settings_outlined);
-    expect(settingsIcon, findsOneWidget, reason: '小说/短剧共用同一个设置按钮');
-    expect(
-      tester.getTopLeft(settingsIcon).dx,
-      greaterThan(pageWidth / 2),
-      reason: '小说的设置按钮在右侧',
-    );
-
-    await tester.tap(find.byKey(MinePage.switchButtonKey));
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
-
-    expect(
-      tester.getTopRight(find.text('短剧')).dx,
-      closeTo(pageWidth - (gutter + iconBox + iconGap), 1),
-      reason: '短剧标题应与小说标题左右对称',
-    );
-    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
-    expect(
-      tester.getTopLeft(settingsIcon).dx,
-      lessThan(pageWidth / 2),
-      reason: '同一个设置按钮应过渡到左侧',
-    );
-  });
-
-  /// 缓存入口已挪到推荐页搜索框右侧的「已缓存」，这一页右下角只剩切换按钮。
-  testWidgets('我的页-右下角只剩面板切换按钮', (tester) async {
-    await pumpPreview(tester, const MinePage());
-    expect(find.byKey(MinePage.switchButtonKey), findsOneWidget);
-    expect(
-      find.byIcon(Icons.download_outlined),
-      findsNothing,
-      reason: '悬浮缓存入口已删除',
-    );
-    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
-  });
-
-  testWidgets('我的页（短剧）', (tester) async {
-    await pumpPreview(tester, const MinePage());
-    await tester.tap(find.byKey(MinePage.switchButtonKey));
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
-    await expectLater(
-      find.byType(MinePage),
-      matchesGoldenFile('../goldens/mine_drama_empty.png'),
-    );
-  });
-
-  /// 过渡中：标题块已滑走大半、最近阅读块刚起步、书架块还没动（三块阶梯）。
-  testWidgets('我的页-面板切换过程中', (tester) async {
-    await pumpPreview(tester, const MinePage());
-    final gesture = await tester.startGesture(const Offset(200, 500));
+    // 拖动约 24%：不过半，小说仍然是唯一的选中态。
     await gesture.moveBy(const Offset(-20, 0));
     await tester.pump();
-    await gesture.moveBy(const Offset(-100, 0));
+    await gesture.moveBy(const Offset(-90, 0));
     await tester.pump();
-    final settings = tester.getRect(find.byIcon(Icons.settings_outlined));
-    expect(settings.left, greaterThanOrEqualTo(0), reason: '设置按钮不能被滑出屏幕');
-    expect(settings.right, lessThanOrEqualTo(390), reason: '设置按钮不能被滑出屏幕');
-    await expectLater(
-      find.byType(MinePage),
-      matchesGoldenFile('../goldens/mine_switch_mid.png'),
-    );
+    expect(styleOf('小说').color, scheme.primary);
+    expect(styleOf('小说').fontSize, CategoryTabBar.selectedFontSize);
+    expect(styleOf('短剧').color, scheme.onSurfaceVariant);
+    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
+
+    // 再拖到约 57%：一过中线，高亮和字号一起切给短剧，不等松手。
+    await gesture.moveBy(const Offset(-130, 0));
+    await tester.pump();
+    expect(styleOf('短剧').color, scheme.primary, reason: '过半立即高亮新 tab');
+    expect(styleOf('短剧').fontSize, CategoryTabBar.selectedFontSize);
+    expect(styleOf('小说').color, scheme.onSurfaceVariant);
+    expect(styleOf('小说').fontSize, CategoryTabBar.fontSize);
+
     await gesture.up();
-    await tester.pumpAndSettle(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
   });
 }

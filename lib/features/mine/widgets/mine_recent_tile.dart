@@ -6,8 +6,8 @@ import 'mine_relative_time.dart';
 
 /// 「最近阅读 / 最近观看」共用的条目。
 ///
-/// 两侧刻意保持同一版式：封面在左、标题与副标题左对齐、相对时间与右箭头在
-/// 最右；小说/短剧面板只镜像页头，不镜像这种列表行，扫视习惯才会一致。
+/// 小说/短剧两个 tab 刻意保持同一版式：封面在左、标题与副标题左对齐、相对
+/// 时间与右箭头在最右，扫视习惯一致；只有副标题的进度文案不同。
 class MineRecentTile extends StatelessWidget {
   const MineRecentTile({
     super.key,
