@@ -64,10 +64,10 @@ void main() {
     await tester.tapAt(const Offset(195, 420));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.text('评论'), findsOneWidget, reason: '工具栏应提供本章评论入口');
-    // 顶部只剩返回 + 两个状态文本动作（书名/章节名已移除）。
+    // 顶部：返回 + 书名 + 两个状态文本动作（章节名在底部信息条）。
     expect(find.text('加入书架'), findsOneWidget);
     expect(find.text('缓存小说'), findsOneWidget);
-    expect(find.text('剑来'), findsNothing, reason: '顶部不再显示书名');
+    expect(find.text('剑来'), findsOneWidget, reason: '顶部左侧应显示书名');
     // 底部：上一章/下一章换成日间/夜间切换。
     expect(find.text('上一章'), findsNothing);
     expect(find.text('下一章'), findsNothing);
@@ -78,6 +78,30 @@ void main() {
       find.byType(ReaderPage),
       matchesGoldenFile('../goldens/reader_toolbar.png'),
     );
+  });
+
+  testWidgets('阅读页-书名超宽时省略且不挤压右侧按钮', (tester) async {
+    const longTitle = '这是一本名字非常非常长的小说标题专门用来验证顶部省略号';
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: longTitle),
+      ),
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    final titleText = tester.widget<Text>(find.text(longTitle));
+    expect(titleText.maxLines, 1);
+    expect(titleText.overflow, TextOverflow.ellipsis);
+    expect(tester.takeException(), isNull, reason: '超宽书名不能触发布局溢出');
+
+    // 书名只占返回键与右侧动作之间的宽度，两个状态动作仍完整可点。
+    final titleRect = tester.getRect(find.text(longTitle));
+    final shelfRect = tester.getRect(find.text('加入书架'));
+    expect(titleRect.right, lessThanOrEqualTo(shelfRect.left));
+    expect(find.text('缓存小说'), findsOneWidget);
+    expect(find.text('加入书架'), findsOneWidget);
   });
 
   testWidgets('阅读页-加入书架后变只读状态，点已在书架不会移出', (tester) async {

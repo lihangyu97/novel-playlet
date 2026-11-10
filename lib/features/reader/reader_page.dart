@@ -904,6 +904,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           background: paper.background,
           foreground: paper.foreground,
           onBack: _onBack,
+          // 会话里书名来自入参/详情/离线 manifest，兜底再用路由参数。
+          title: session.bookTitle.isNotEmpty
+              ? session.bookTitle
+              : widget.args.bookTitle,
           shelfLabel: onShelf ? '已在书架' : '加入书架',
           onShelfTap: onShelf ? null : () => unawaited(_addToShelf(session)),
           cacheLabel: cacheLabel,
