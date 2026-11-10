@@ -163,6 +163,9 @@ class ReaderTopBar extends StatelessWidget {
   }
 }
 
+/// 顶部状态动作字号：13 在真机上偏小，放大到与正文相近的易读尺寸。
+const double _actionFontSize = 20;
+
 /// 顶部文字动作：有回调才是按钮，没回调只作状态文案（不可点、压暗一档）。
 class _ReaderTextAction extends StatelessWidget {
   const _ReaderTextAction({
@@ -185,7 +188,7 @@ class _ReaderTextAction extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 13,
+            fontSize: _actionFontSize,
             height: 1.2,
             // 状态文字要读得清：0.55 在纸色/夜间底上只有 ~3.4:1，低于 WCAG AA。
             color: color.withValues(alpha: 0.7),
@@ -203,7 +206,7 @@ class _ReaderTextAction extends StatelessWidget {
         // 从主题 labelLarge 派生：textStyle 会整体替换按钮默认文字样式，
         // 直接给 const TextStyle 会丢掉主题字体（自定义字体下中文变豆腐块）。
         textStyle: Theme.of(context).textTheme.labelLarge
-            ?.copyWith(fontSize: 13, fontWeight: FontWeight.w500),
+            ?.copyWith(fontSize: _actionFontSize, fontWeight: FontWeight.w500),
       ),
       child: Text(label),
     );
