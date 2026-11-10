@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 ///
 /// 视觉约定：
 /// - 左对齐、**无下划线/指示条**；当前 tab 用主题色高亮、字号比未选中略大；
+/// - 首个 tab 的文字左边缘与内容留白（8pt）对齐，**按选中字号（最大字号）
+///   预留宽度**：字号在 15/17 间切换时左边缘和相邻 tab 都不挪位；
 /// - 每个 tab 宽度固定、整行高度固定、文字**贴同一条底线**：选中/未选中只
 ///   有"字号 15 / 17"两种确定状态，变大的字只向上长，不会推挤邻居；
 /// - 高亮跟随 [TabController.animation] 的**过半阈值**切换（拖动时一过中线
@@ -18,15 +20,18 @@ class CategoryTabBar extends StatefulWidget {
     this.padding = const EdgeInsets.symmetric(horizontal: 8),
   }) : assert(labels.length == controller.length);
 
-  /// 整行固定高度（含上下触控留白）。
-  static const double height = 44;
+  /// 整行固定高度（含上下触控留白）：比搜索框 40 略矮，顶栏更紧凑。
+  static const double height = 34;
 
   /// 未选中 / 选中字号，两者差值就是高亮时的"放大"幅度。
   static const double fontSize = 15;
   static const double selectedFontSize = 17;
 
-  /// 每个 tab 的左右可点留白（宽度按选中态文字 + 两边留白预留）。
-  static const double _itemPadding = 10;
+  /// 每个 tab 文字右侧的间距（同时作为该 tab 的尾部可点区域）。
+  ///
+  /// 左侧不留内边距：首个 tab 的文字左边缘直接贴整行留白，和页头/区块标题对齐；
+  /// 宽度仍按**选中字号**预留，所以字号变化时左边缘不动、相邻 tab 也不挪。
+  static const double _tabGap = 20;
 
   /// 与 [TabBarView] 共用的 tab 控制器。
   final TabController controller;
@@ -148,7 +153,7 @@ class _CategoryTabBarState extends State<CategoryTabBar> {
       maxLines: 1,
     )..layout();
     final metric = (
-      width: painter.width + CategoryTabBar._itemPadding * 2,
+      width: painter.width + CategoryTabBar._tabGap,
       lineHeight: painter.height,
     );
     painter.dispose();
@@ -189,13 +194,13 @@ class _CategoryTab extends StatelessWidget {
           width: width,
           height: CategoryTabBar.height,
           child: Align(
-            alignment: Alignment.bottomCenter,
+            // 左下对齐：左边缘始终贴内容留白，字号变化只向右/向上长。
+            alignment: Alignment.bottomLeft,
             child: Padding(
               padding: EdgeInsets.only(bottom: bottomInset),
               child: Text(
                 label,
                 maxLines: 1,
-                textAlign: TextAlign.center,
                 style: selected ? activeStyle : inactiveStyle,
               ),
             ),

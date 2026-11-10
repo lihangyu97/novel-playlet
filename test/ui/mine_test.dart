@@ -287,12 +287,22 @@ void main() {
       reason: '选中/未选中的文字必须贴同一条底线',
     );
 
-    // 固定高度 + 固定占位：切换中/切换后 tab 栏、文字底线、内容区都不挪位置。
+    // 首个 tab 文字左边缘与内容留白（8）对齐，按最大字号预留宽度。
+    expect(
+      tester.getTopLeft(find.text('小说')).dx,
+      closeTo(8, 0.5),
+      reason: 'tab 文字应与页头/区块标题左对齐',
+    );
+
+    // 固定高度 + 固定占位：切换中/切换后 tab 栏、文字左边缘/底线、内容区
+    // 都不挪位置。
     expect(
       tester.getSize(find.byType(CategoryTabBar)).height,
       CategoryTabBar.height,
     );
     final barBefore = tester.getRect(find.byType(CategoryTabBar));
+    final novelLeftBefore = tester.getTopLeft(find.text('小说')).dx;
+    final dramaLeftBefore = tester.getTopLeft(find.text('短剧')).dx;
     final novelBottomBefore = tester.getBottomLeft(find.text('小说')).dy;
     final dramaBottomBefore = tester.getBottomLeft(find.text('短剧')).dy;
     final bodyBefore = tester.getRect(find.byType(TabBarView));
@@ -301,6 +311,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(tester.getRect(find.byType(CategoryTabBar)), barBefore);
+    expect(tester.getTopLeft(find.text('小说')).dx, novelLeftBefore);
+    expect(tester.getTopLeft(find.text('短剧')).dx, dramaLeftBefore);
     expect(tester.getBottomLeft(find.text('小说')).dy, novelBottomBefore);
     expect(tester.getBottomLeft(find.text('短剧')).dy, dramaBottomBefore);
     expect(tester.getRect(find.byType(TabBarView)), bodyBefore);
@@ -310,6 +322,8 @@ void main() {
     expect(styleOf('小说').color, scheme.onSurfaceVariant);
     expect(styleOf('短剧').fontSize, CategoryTabBar.selectedFontSize);
     expect(tester.getRect(find.byType(CategoryTabBar)), barBefore);
+    expect(tester.getTopLeft(find.text('小说')).dx, novelLeftBefore);
+    expect(tester.getTopLeft(find.text('短剧')).dx, dramaLeftBefore);
     expect(tester.getBottomLeft(find.text('小说')).dy, novelBottomBefore);
     expect(tester.getBottomLeft(find.text('短剧')).dy, dramaBottomBefore);
   });
