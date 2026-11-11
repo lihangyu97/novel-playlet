@@ -294,9 +294,7 @@ void main() {
 
   group('翻页失败策略', () {
     test('FeedState 记录 retryable 并随 with* 保留', () {
-      final clear = FeedState<RecommendItem>.feed(
-        items: const <RecommendItem>[],
-      );
+      final clear = FeedState<RecommendItem>(items: const <RecommendItem>[]);
       expect(clear.loadMoreRetryable, isTrue, reason: '没有错误时默认值不影响 UI');
 
       final failed = clear.withLoadMoreError('内容过大', retryable: false);

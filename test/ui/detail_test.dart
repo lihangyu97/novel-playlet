@@ -71,6 +71,29 @@ void main() {
       expect(find.byType(NovelGridCard), findsWidgets);
     });
 
+    testWidgets('返回落位时 shuttle 下两角是直角，不会被卡片接管时「圆变尖」', (tester) async {
+      final fake = FakePreviewTransport()
+        ..bookCoverUrl = 'https://example.com/cover-1.jpg';
+      await pumpPreview(tester, const RecommendPage(), transport: fake);
+      await tester.tap(find.byType(NovelGridCard).first);
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+      // 返程飞到一半：shuttle 仍在，下两角必须已经是直角（卡片封面形状），
+      // 上两角保留卡片顶部圆角，Hero 结束时不会出现「下两角由圆变尖」。
+      Navigator.of(tester.element(find.byType(DetailPage))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      final shuttle = tester.widget<ClipRRect>(
+        find.byKey(const ValueKey('cover-hero-flight')),
+      );
+      final radius = shuttle.borderRadius.resolve(TextDirection.ltr);
+      expect(radius.bottomLeft, Radius.zero);
+      expect(radius.bottomRight, Radius.zero);
+      expect(radius.topLeft.x, greaterThan(0), reason: '上两角要跟着列表卡片的顶部圆角收');
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.byType(DetailPage), findsNothing);
+    });
+
     testWidgets('小说详情-接口回来后不替换列表封面（不闪）', (tester) async {
       const preview = NovelItem(
         id: '1',

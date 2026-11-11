@@ -2,9 +2,6 @@ import 'package:flutter/foundation.dart';
 
 import '../../data/models/json_utils.dart';
 
-/// 首页流当前展示的是推荐流还是搜索结果。
-enum FeedMode { feed, search }
-
 /// 分页列表的通用状态（推荐页各分类共用）。
 ///
 /// 首屏加载/失败由外层 `AsyncValue` 承载；这个类只描述"已有数据、正在追加
@@ -12,8 +9,6 @@ enum FeedMode { feed, search }
 @immutable
 class FeedState<T> {
   const FeedState({
-    required this.mode,
-    required this.query,
     required this.items,
     this.nextOffset,
     this.sessionId,
@@ -22,39 +17,12 @@ class FeedState<T> {
     this.loadMoreRetryable = true,
   });
 
-  /// 推荐流：没有关键词，翻页必须回传 [sessionId]（上游否则会换设备）。
-  factory FeedState.feed({
-    required List<T> items,
-    int? nextOffset,
-    String? sessionId,
-  }) => FeedState<T>(
-    mode: FeedMode.feed,
-    query: '',
-    items: items,
-    nextOffset: nextOffset,
-    sessionId: sessionId,
-  );
-
-  /// 搜索结果：关键词即上下文，翻页只带 offset。
-  factory FeedState.search({
-    required String query,
-    required List<T> items,
-    int? nextOffset,
-  }) => FeedState<T>(
-    mode: FeedMode.search,
-    query: query,
-    items: items,
-    nextOffset: nextOffset,
-  );
-
-  final FeedMode mode;
-  final String query;
   final List<T> items;
 
   /// 上游给的下一页游标，null 表示到底。
   final int? nextOffset;
 
-  /// 推荐流的会话 id。只对推荐流有意义，搜索结果恒为 null。
+  /// 推荐流的会话 id：翻页必须回传（上游否则会换设备）。搜索不需要 session。
   final String? sessionId;
 
   /// 是否正在加载下一页。既给底部 footer 用，也是控制器的并发守卫依据。
@@ -68,7 +36,6 @@ class FeedState<T> {
   /// 不给"重试"入口，控制器也不再发请求，避免用户点一次失败一次。
   final bool loadMoreRetryable;
 
-  bool get isSearchMode => mode == FeedMode.search;
   bool get hasMore => nextOffset != null && nextOffset! > 0;
   bool get isEmpty => items.isEmpty;
 
@@ -76,8 +43,6 @@ class FeedState<T> {
   // `withLoadingMore(true).withLoadMoreError(null)`，任何一边漏字段都会让
   // 并发守卫失效（真机上表现为同一 offset 每帧连发，列表被并发响应覆盖）。
   FeedState<T> withLoadingMore(bool value) => FeedState<T>(
-    mode: mode,
-    query: query,
     items: items,
     nextOffset: nextOffset,
     sessionId: sessionId,
@@ -88,8 +53,6 @@ class FeedState<T> {
 
   FeedState<T> withLoadMoreError(String? message, {bool retryable = true}) =>
       FeedState<T>(
-        mode: mode,
-        query: query,
         items: items,
         nextOffset: nextOffset,
         sessionId: sessionId,
@@ -115,8 +78,6 @@ class FeedState<T> {
     }
     final advanced = nextOffset != null && nextOffset > (this.nextOffset ?? 0);
     return FeedState<T>(
-      mode: mode,
-      query: query,
       items: merged,
       nextOffset: advanced ? nextOffset : null,
       sessionId: sessionId ?? this.sessionId,
@@ -128,8 +89,6 @@ class FeedState<T> {
   @override
   bool operator ==(Object other) =>
       other is FeedState<T> &&
-      other.mode == mode &&
-      other.query == query &&
       listEquals(other.items, items) &&
       other.nextOffset == nextOffset &&
       other.sessionId == sessionId &&
@@ -139,8 +98,6 @@ class FeedState<T> {
 
   @override
   int get hashCode => Object.hash(
-    mode,
-    query,
     Object.hashAll(items),
     nextOffset,
     sessionId,

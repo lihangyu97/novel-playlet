@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/cache/app_image_cache.dart';
+import '../../theme/app_theme.dart';
 import '../cover_hero.dart';
 
 /// 详情页左右留白。卡片、目录行、底部操作栏共用，保证竖线对齐。
@@ -128,10 +129,15 @@ Widget _coverFlightShuttle(
       // 1→0（背景 → 卡片），所以两个方向都用 animation.value 当"背景化"
       // 的进度即可；不要再按方向取反，否则返回时会先变清晰再变模糊。
       final progress = animation.value;
+      // 落位目标是列表卡片的封面：卡片是「上圆下方」——上面两角跟着白底卡
+      // 的圆角，下面两角和文字区相接所以是直角。飞行中只圆上面两角、下面
+      // 两角始终直角；四角一起圆会在 Hero 结束、卡片接管的那一帧出现
+      // 「下两角由圆变尖」的闪动（详情背景本身是直角，start 端不受影响）。
+      final cornerRadius = AppTheme.mediaCardRadius * (1 - progress);
       return ClipRRect(
         // 飞行中的 shuttle 单独打 key，方便测试断言「进/出详情都有飞行动画」。
         key: const ValueKey('cover-hero-flight'),
-        borderRadius: BorderRadius.circular(12 * (1 - progress)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(cornerRadius)),
         child: ShaderMask(
           // 透明渐变也随飞行进度渐入：起飞时整张图都在，落位时正好和背景
           // 底部的全透明渐变对齐，不会在落地瞬间"啪"地切一下。

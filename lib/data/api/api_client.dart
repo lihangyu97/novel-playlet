@@ -10,6 +10,7 @@ import '../models/comment_reply.dart';
 import '../models/feed_page.dart';
 import '../models/json_utils.dart';
 import '../models/novel_item.dart';
+import '../models/search_cue.dart';
 import '../models/video_detail.dart';
 import '../models/video_series.dart';
 import '../models/video_source.dart';
@@ -64,6 +65,23 @@ class ApiClient {
     final items = parseSearchNovels(payload);
     final nextOffset = _searchNextOffset(payload, offset: offset);
     return FeedPage<NovelItem>(items: items, nextOffset: nextOffset);
+  }
+
+  /// 搜索框轮播热词（cue）。
+  ///
+  /// 上游一次返回一整组词 + 轮播间隔，由 UI 自己轮播；`tab_type` 是书城 tab
+  /// （默认 2 = 小说，见 `search_cue` 内核 handler）。
+  Future<SearchCue> searchCue({
+    int tabType = 2,
+    String tabName = '',
+    int cueType = 0,
+  }) async {
+    final payload = await _getJson('/api/v1/search/cue', {
+      'tab_type': '$tabType',
+      'cue_type': '$cueType',
+      if (tabName.isNotEmpty) 'tab_name': tabName,
+    });
+    return SearchCue.fromPayload(payload);
   }
 
   /// 视频类分类（短剧 / 漫剧）的推荐流。

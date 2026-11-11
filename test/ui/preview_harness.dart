@@ -67,6 +67,12 @@ class FakePreviewTransport extends BackendTransport {
   /// 搜索结果条数（默认 6；调大用于验证「搜索态滚动」等场景）。
   int searchItemCount = 6;
 
+  /// 搜索框轮播热词（cue）；默认空 = 接口没给词，搜索框回退静态提示语。
+  List<String> cueWords = const [];
+
+  /// cue 的轮播间隔；测试里调小可以在几帧内看到翻页。
+  int cueRotateIntervalMs = 5000;
+
   @override
   Future<BackendResponse> send(
     String method,
@@ -251,7 +257,19 @@ class FakePreviewTransport extends BackendTransport {
           };
       }
     }
+    if (path == '/api/v1/search/cue') {
+      return {
+        'code': 0,
+        'data_v1': [
+          for (final word in cueWords) {'display_text_v2': word},
+        ],
+        if (cueWords.isNotEmpty) 'rotate_interval_ms': cueRotateIntervalMs,
+      };
+    }
     if (path.startsWith('/api/v1/search')) {
+      // 关键词写进卡片标题：搜索页的「换词后旧结果不能回来」这类用例要能从
+      // 文案上区分是哪个关键词的结果。
+      final keyword = params['query'] ?? '';
       // 漫剧的搜索与翻页兜底：上游没有漫剧搜索 tab，卡片混在短剧搜索 tab
       // 里，靠 genre=205 / 「漫剧」标签区分（见 lib/features/recommend/content_source.dart 的 ManjuSource）。
       if (params['query'] == '漫剧') {
@@ -270,15 +288,42 @@ class FakePreviewTransport extends BackendTransport {
       // 搜索接口的 tab_type 与首页流不同：3 = 书籍、11 = 短剧。
       switch (params['tab_type']) {
         case '11':
+          // 短剧搜索 tab 里混着漫剧卡片（真实上游就是这样，漫剧搜索靠它过滤）；
+          // 这里按 1:1 混排，让搜索页的短剧行同时有短剧和漫剧卡片（漫剧不再单列一行）。
           return _videoSearchPayload(11, [
             for (var i = 1; i <= searchItemCount; i++)
               {
                 'series_id_str': 'vs$i',
                 'series_title':
-                    '搜索结果 ${_dramaTitles[(i - 1) % _dramaTitles.length]}',
-                'series_intro': '这是第 $i 条短剧搜索结果的简介，用来验证横向列表两行省略与排版是否和小说搜索一致。',
+                    '搜索结果 $keyword ${_dramaTitles[(i - 1) % _dramaTitles.length]}',
+                'series_intro': '这是第 $i 条短剧搜索结果的简介，用来验证横向卡片排版。',
                 'episode_cnt': '${40 + i}',
                 'series_cover': '',
+                'score': '8.0',
+                'color_dominate': _coverColors[(i - 1) % _coverColors.length],
+                // i=1 带「上新」这类推荐理由：搜索页整体隐藏该字段（与漫剧卡的
+                // 「漫剧」理由同源），只保留集数+热度。
+                if (i == 1)
+                  'recommend_reason_list': '{"tag_info":{"text":"上新"}}',
+                'rec_text': '${i * 10}万热度',
+                'show_rec_text': true,
+              },
+            for (var i = 1; i <= searchItemCount; i++)
+              {
+                'pseries_id': 'ps$i',
+                'series_name':
+                    '搜索结果 $keyword ${_animeTitles[(i - 1) % _animeTitles.length]}',
+                'series_intro': '这是第 $i 条漫剧搜索结果的简介。',
+                'episode_cnt': '${12 + i * 2}',
+                'series_cover': '',
+                'genre': 205,
+                'score': '8.0',
+                'color_dominate': _coverColors[(i + 2) % _coverColors.length],
+                // 上游把分类名塞进推荐理由：搜索页和「漫剧」行标题重复，应隐藏；
+                // 热度（rec_text）要保留。
+                'recommend_reason_list': '{"tag_info":{"text":"漫剧"}}',
+                'rec_text': '4105万热度',
+                'show_rec_text': true,
               },
           ]);
         default:
@@ -296,10 +341,13 @@ class FakePreviewTransport extends BackendTransport {
                         'book_data': {
                           'book_id': 's$i',
                           'book_name':
-                              '搜索结果 ${titles[(i - 1) % titles.length]}',
+                              '搜索结果 $keyword ${titles[(i - 1) % titles.length]}',
                           'author': '作者$i',
                           'abstract': '这是第 $i 条搜索结果的简介，用来验证两行省略与排版。',
                           'thumb_url': '',
+                          'score': i.isEven ? '9.3' : '8.8',
+                          'color_dominate':
+                              _coverColors[(i - 1) % _coverColors.length],
                         },
                       },
                   ],

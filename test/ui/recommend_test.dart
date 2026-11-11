@@ -7,10 +7,10 @@ import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/features/cache/cache_center_page.dart';
-import 'package:novel_playlet/features/feed/feed_results.dart';
 import 'package:novel_playlet/features/feed/feed_search_field.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
+import 'package:novel_playlet/features/search/search_page.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -25,18 +25,6 @@ import 'preview_harness.dart';
 List<Size> _gridCoverSizes(WidgetTester tester, {required bool novel}) {
   final cards = novel ? find.byType(NovelGridCard) : find.byType(VideoCard);
   final covers = find.descendant(of: cards, matching: find.byType(NovelCover));
-  return tester
-      .widgetList<NovelCover>(covers)
-      .map((cover) => Size(cover.width, cover.height))
-      .toList();
-}
-
-/// 搜索结果横向列表里的封面尺寸（[FeedResultTile] 圈定）。
-List<Size> _searchCoverSizes(WidgetTester tester) {
-  final covers = find.descendant(
-    of: find.byType(FeedResultTile),
-    matching: find.byType(NovelCover),
-  );
   return tester
       .widgetList<NovelCover>(covers)
       .map((cover) => Size(cover.width, cover.height))
@@ -241,6 +229,75 @@ void main() {
     );
   });
 
+  /// 顶部搜索框是只读入口：点一下（输入区或左图标都算）进独立搜索页，
+  /// 推荐页本身不再做内联搜索。
+  testWidgets('推荐页-点搜索框进独立搜索页', (tester) async {
+    await pumpPreview(tester, const RecommendPage());
+    expect(find.byType(FeedSearchField), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(SearchPage), findsOneWidget);
+    expect(find.text('搜索小说 / 短剧'), findsWidgets);
+  });
+
+  /// 搜索页返回后推荐流不重拉、搜索词不残留（搜索词随页面 autoDispose 清掉）。
+  testWidgets('推荐页-搜索页返回不重拉推荐流且搜索词已清空', (tester) async {
+    final fake = FakePreviewTransport();
+    await pumpPreview(tester, const RecommendPage(), transport: fake);
+    int feedCalls() => fake.calls
+        .where((call) => call.startsWith('/api/v1/recommend/homepage'))
+        .length;
+    final before = feedCalls();
+
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.enterText(find.byType(TextField), '剑来');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.byType(SearchPage), findsNothing);
+    expect(feedCalls(), before, reason: '搜索/返回不应重拉推荐流');
+
+    // 再进搜索页：上一次的关键词已被 autoDispose 清掉，应回到引导空态。
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.textContaining('输入关键词'), findsOneWidget);
+  });
+
+  /// 搜索框轮播热词：热词只做 placeholder，不写进输入框；点进搜索页时把
+  /// 当前轮播到的那条带过去，搜索页从同一条接着显示。
+  testWidgets('推荐页-搜索框轮播热词，点进搜索页带过去', (tester) async {
+    final fake = FakePreviewTransport()
+      ..cueWords = ['热词一', '热词二']
+      ..cueRotateIntervalMs = 500;
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      transport: fake,
+      settle: false,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('热词一'), findsOneWidget);
+
+    // 到一个轮播间隔：淡入淡出后换成下一条。
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('热词二'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(SearchPage), findsOneWidget);
+    expect(
+      find.descendant(of: find.byType(SearchPage), matching: find.text('热词二')),
+      findsOneWidget,
+      reason: '搜索页占位应从推荐页当前那条热词接着显示',
+    );
+  });
+
   /// 搜索框右侧的下载图标入口直接进缓存中心（不再是一段文字）。
   testWidgets('推荐页-下载图标入口打开缓存中心', (tester) async {
     await pumpPreview(tester, const RecommendPage());
@@ -373,46 +430,6 @@ void main() {
     );
   });
 
-  /// 搜索态：三个分类共用同一套条目，但封面高宽比跟各自分类走。
-  testWidgets('封面尺寸-各分类搜索结果使用原生比例', (tester) async {
-    Future<Size> searchOn(
-      String query, {
-      String? tab,
-      required double aspect,
-    }) async {
-      await pumpPreview(tester, const RecommendPage());
-      if (tab != null) {
-        await tester.tap(find.text(tab));
-        await tester.pumpAndSettle();
-      }
-      await tester.enterText(find.byType(TextField), query);
-      await tester.testTextInput.receiveAction(TextInputAction.search);
-      await tester.pumpAndSettle(const Duration(milliseconds: 100));
-      final sizes = _searchCoverSizes(tester);
-      expect(sizes, isNotEmpty);
-      expect(sizes.map((size) => size.width).toSet(), hasLength(1));
-      expect(
-        sizes.first.width,
-        FeedResultTile.coverWidth,
-        reason: '搜索结果封面宽度应走 FeedResultTile.coverWidth',
-      );
-      expect(sizes.first.height / sizes.first.width, closeTo(aspect, 0.001));
-      return sizes.first;
-    }
-
-    final novel = await searchOn('剑来', aspect: kNovelCoverAspect);
-    final drama = await searchOn('太奶奶', tab: '短剧', aspect: kVideoCoverAspect);
-    final anime = await searchOn('漫剧', tab: '漫剧', aspect: kVideoCoverAspect);
-
-    expect(drama.width, novel.width, reason: '搜索结果封面同宽');
-    expect(
-      drama.height,
-      greaterThan(novel.height),
-      reason: '短剧 7:10 比小说 3:4 高',
-    );
-    expect(anime.height, closeTo(drama.height, 0.001), reason: '漫剧同 7:10');
-  });
-
   group('封面 Hero 飞入', () {
     testWidgets('推荐页-卡片封面都带唯一 Hero tag', (tester) async {
       await pumpPreview(tester, const RecommendPage());
@@ -429,7 +446,7 @@ void main() {
 
   testWidgets('推荐页-搜索框内容垂直居中', (tester) async {
     await pumpPreview(tester, const RecommendPage());
-    final hint = tester.getRect(find.text('搜索书名/作者'));
+    final hint = tester.getRect(find.text('搜索小说 / 短剧'));
     final icon = tester.getRect(find.byIcon(Icons.search_rounded));
     final field = tester.getRect(find.byType(TextField));
     expect(
@@ -444,36 +461,15 @@ void main() {
     );
   });
 
-  testWidgets('推荐页-搜索框输入前后高度不变', (tester) async {
-    await pumpPreview(tester, const RecommendPage());
-    final before = tester.getSize(find.byType(TextField)).height;
-    await tester.enterText(find.byType(TextField), '剑来');
-    await tester.pump();
-    final after = tester.getSize(find.byType(TextField)).height;
-    expect(after, before, reason: '输入后出现清空按钮不应把搜索框撑高');
-  });
-
-  testWidgets('推荐页-搜索态', (tester) async {
-    await pumpPreview(tester, const RecommendPage());
-    await tester.enterText(find.byType(TextField), '剑来');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    await expectLater(
-      find.byType(RecommendPage),
-      matchesGoldenFile('../goldens/recommend_search.png'),
-    );
-  });
-
   testWidgets('推荐页-内容区左右滑动切分类', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     await tester.drag(find.byType(TabBarView), const Offset(-320, 0));
     await tester.pumpAndSettle();
-    expect(find.text('搜索短剧'), findsOneWidget);
     expect(find.textContaining('太奶奶'), findsWidgets);
 
     await tester.drag(find.byType(TabBarView), const Offset(320, 0));
     await tester.pumpAndSettle();
-    expect(find.text('搜索书名/作者'), findsOneWidget);
+    expect(find.text('搜索小说 / 短剧'), findsOneWidget);
   });
 
   testWidgets('推荐页-切分类回来保留滚动位置', (tester) async {
@@ -495,82 +491,6 @@ void main() {
       closeTo(scrolled, 0.5),
       reason: '保活后滚动位置必须保持',
     );
-  });
-
-  /// 搜索结果的滚动不能污染推荐流的折叠状态：取消搜索后推荐流还在顶部，
-  /// 搜索框必须重新展开（不能还停在「搜索时滚过」的收起态）。
-  testWidgets('推荐页-取消搜索后按推荐流位置展开', (tester) async {
-    final fake = FakePreviewTransport()..searchItemCount = 30;
-    await pumpPreview(tester, const RecommendPage(), transport: fake);
-    await tester.enterText(find.byType(TextField), '剑来');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(verticalOffset(tester), greaterThan(100), reason: '搜索结果应能滚动');
-    expect(
-      find.byType(FeedSearchField),
-      findsOneWidget,
-      reason: '搜索态滚动时输入框必须保持可见',
-    );
-
-    await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(
-      find.byType(FeedSearchField),
-      findsOneWidget,
-      reason: '取消搜索后推荐流在顶部，搜索框应展开而不是继承搜索结果的滚动位置',
-    );
-  });
-
-  testWidgets('推荐页-取消搜索回显推荐流且不重新请求', (tester) async {
-    final fake = FakePreviewTransport();
-    await pumpPreview(tester, const RecommendPage(), transport: fake);
-    int countOf(String prefix) =>
-        fake.calls.where((call) => call.startsWith(prefix)).length;
-
-    expect(countOf('/api/v1/search'), 0);
-
-    await tester.enterText(find.byType(TextField), '剑来');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    final searchCalls = countOf('/api/v1/search');
-    expect(searchCalls, greaterThanOrEqualTo(1));
-
-    final feedCalls = countOf('/api/v1/recommend/homepage');
-    await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    expect(find.text('取消'), findsNothing);
-    expect(countOf('/api/v1/search'), searchCalls, reason: '取消搜索只回显快照，不应再发请求');
-    expect(
-      countOf('/api/v1/recommend/homepage'),
-      feedCalls,
-      reason: '取消搜索不应重新拉推荐流',
-    );
-    expect(find.text('剑来'), findsWidgets, reason: '应回到推荐流');
-  });
-
-  testWidgets('推荐页-搜索失败后换关键词先显示 loading 而不是旧错误', (tester) async {
-    final fake = FakePreviewTransport()
-      ..failingQueries.add('失败')
-      ..responseDelay = const Duration(milliseconds: 60);
-    await pumpPreview(tester, const RecommendPage(), transport: fake);
-
-    await tester.enterText(find.byType(TextField), '失败');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    expect(find.text('boom'), findsOneWidget);
-
-    await tester.enterText(find.byType(TextField), '剑来');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    // 请求还没回来：必须显示 loading，而不是把上一次的 ErrorView 钉住。
-    await tester.pump();
-    expect(find.text('boom'), findsNothing);
-    expect(find.text('搜索中…'), findsOneWidget);
-
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    expect(find.text('搜索结果 剑来'), findsOneWidget);
   });
 
   testWidgets('推荐页-首屏失败立即显示错误页（不等待自动重试）', (tester) async {

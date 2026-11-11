@@ -160,72 +160,6 @@ class _StaticTransport extends BackendTransport {
   }
 }
 
-/// 搜索 A 慢、搜索 B 快，用来验证「旧关键词的结果不能覆盖新关键词」。
-class _SearchRaceFake extends BackendTransport {
-  _SearchRaceFake() : super(port: 0);
-
-  @override
-  Future<BackendResponse> send(
-    String method,
-    String path, {
-    String? query,
-    Uint8List? body,
-    Duration timeout = BackendTransport.defaultTimeout,
-  }) async {
-    final params = Uri.splitQueryString(query ?? '');
-    if (path.startsWith('/api/v1/search')) {
-      final keyword = params['query'] ?? '';
-      await Future<void>.delayed(
-        keyword == 'A'
-            ? const Duration(milliseconds: 120)
-            : const Duration(milliseconds: 10),
-      );
-      return _json({
-        'code': 0,
-        'data': {
-          'search_tabs': [
-            {
-              'tab_type': 3,
-              'next_offset': 10,
-              'data': [
-                {
-                  'book_data': {'book_id': keyword, 'book_name': '结果$keyword'},
-                },
-              ],
-            },
-          ],
-        },
-      });
-    }
-    return _json({
-      'code': 0,
-      'data': {
-        'tab_index': 0,
-        'tab_item': [
-          {
-            'tab_type': 2,
-            'next_offset': 10,
-            'session_id': 'sess',
-            'cell_data': [
-              {
-                'book_data': [
-                  {'book_id': 'b1', 'book_name': '书1'},
-                ],
-              },
-            ],
-          },
-        ],
-      },
-    });
-  }
-
-  BackendResponse _json(Map<String, dynamic> payload) => BackendResponse(
-    200,
-    Uint8List.fromList(utf8.encode(jsonEncode(payload))),
-    'application/json',
-  );
-}
-
 Future<(ProviderContainer, RecommendFeedController, _SlowFake)> _feedFor(
   RecommendCategory category,
 ) async {
@@ -241,9 +175,9 @@ Future<(ProviderContainer, RecommendFeedController, _SlowFake)> _feedFor(
 void main() {
   group('分页状态字段', () {
     test('RecommendState.withLoadMoreError 保留 loadingMore', () {
-      final state = FeedState<RecommendItem>.feed(
-        items: const <RecommendItem>[],
-      ).withLoadingMore(true).withLoadMoreError('boom');
+      final state = FeedState<RecommendItem>(items: const <RecommendItem>[])
+          .withLoadingMore(true)
+          .withLoadMoreError('boom');
       expect(state.loadingMore, isTrue, reason: '清错误不能把 loadingMore 清掉');
       expect(state.loadMoreError, 'boom');
     });
@@ -344,30 +278,5 @@ void main() {
       expect(page.items.single.id, 'a1');
       expect(page.hasMore, isFalse);
     });
-  });
-
-  test('搜索 A 未返回就提交 B：只保留 B 的结果', () async {
-    final container = ProviderContainer(
-      overrides: [
-        apiClientProvider.overrideWithValue(ApiClient(_SearchRaceFake())),
-      ],
-    );
-    addTearDown(container.dispose);
-    final provider = recommendFeedProvider(RecommendCategory.novel);
-    await container.read(provider.future);
-
-    container.read(searchQueryProvider.notifier).submit('A');
-    container.read(provider); // 触发 build，让 A 的请求真正发出去
-    await Future<void>.delayed(const Duration(milliseconds: 20));
-
-    container.read(searchQueryProvider.notifier).submit('B');
-    container.read(provider);
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-
-    final state = container.read(provider).value!;
-    expect(state.query, 'B', reason: '最终状态必须是最新关键词');
-    expect(state.items.map((item) => item.id), [
-      'B',
-    ], reason: 'A 的迟到结果必须被 generation 丢弃');
   });
 }
