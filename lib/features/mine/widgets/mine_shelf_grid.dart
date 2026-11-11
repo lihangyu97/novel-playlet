@@ -15,7 +15,6 @@ class MineShelfGrid extends StatelessWidget {
     required this.shelf,
     required this.crossAxisCount,
     required this.itemWidth,
-    required this.itemHeight,
     required this.spacing,
     required this.coverAspect,
     required this.onOpen,
@@ -26,7 +25,6 @@ class MineShelfGrid extends StatelessWidget {
   final List<NovelItem> shelf;
   final int crossAxisCount;
   final double itemWidth;
-  final double itemHeight;
   final double spacing;
 
   /// 封面原生比例（高 / 宽）：小说 3:4。
@@ -42,7 +40,6 @@ class MineShelfGrid extends StatelessWidget {
     return ShelfGrid<NovelItem>(
       items: shelf,
       crossAxisCount: crossAxisCount,
-      itemHeight: itemHeight,
       spacing: spacing,
       onLongPress: onLongPress,
       heroTagOf: heroTagOf,
@@ -53,9 +50,14 @@ class MineShelfGrid extends StatelessWidget {
       cardBuilder: (item, heroTag) => NovelGridCard(
         item: item,
         width: itemWidth,
-        coverAspect: coverAspect,
         onTap: () => onOpen(item),
         heroTag: heroTag,
+        // 与首页同款白底不定高卡片；书架只展示书名 + 作者，作者缺失时
+        // 不拿分类顶替（[NovelGridCard.fallbackToCategory]）。
+        surface: true,
+        naturalTitleHeight: true,
+        fallbackToCategory: false,
+        coverAspect: coverAspect,
       ),
     );
   }

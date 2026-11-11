@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
-/// 我的页的网格块：网格 + 空态，长按交给父级弹管理菜单。
+/// 我的页的卡片网格：白底不定高卡片 + 瀑布流 + 空态，长按交给父级弹管理菜单。
 ///
-/// 返回普通 Box 而不是 sliver：作为 [SliverToBoxAdapter] 的内容使用，书架/
-/// 收藏是个人数据、量级不大，`shrinkWrap` 的 GridView 一次性布局足够。
+/// 与推荐页同一套卡片视觉（`MediaCard.surface` + 内容域原生封面比例 +
+/// 标题自然高度），卡片高度由内容决定，所以用瀑布流而不是固定行高的
+/// `GridView`。个人数据量级不大，`MasonryGridView` 的 shrinkWrap 形态直接
+/// 嵌在 [MineTabBody] 的 Column 里，不另起滚动物理。
 ///
-/// 小说 / 短剧两个 tab 共用这层骨架：列数、卡片宽高、间距、空态高度都按同
-/// 一套规则，两侧只注入卡片类型与空态文案。
+/// 小说 / 短剧两个 tab 共用这层骨架：列数、列宽、间距、空态高度都按同一套
+/// 规则，两侧只注入卡片类型、元信息与空态文案。
 class ShelfGrid<T> extends StatelessWidget {
   const ShelfGrid({
     super.key,
     required this.items,
     required this.crossAxisCount,
-    required this.itemHeight,
     required this.spacing,
     required this.cardBuilder,
     required this.emptyState,
@@ -22,7 +24,6 @@ class ShelfGrid<T> extends StatelessWidget {
 
   final List<T> items;
   final int crossAxisCount;
-  final double itemHeight;
   final double spacing;
 
   /// 卡片构建：拿到条目与 [heroTagOf] 算出的 Hero tag。
@@ -45,16 +46,13 @@ class ShelfGrid<T> extends StatelessWidget {
     }
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: GridView.builder(
+      child: MasonryGridView.count(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         padding: EdgeInsets.zero,
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: crossAxisCount,
-          crossAxisSpacing: spacing,
-          mainAxisSpacing: 8,
-          mainAxisExtent: itemHeight,
-        ),
+        crossAxisCount: crossAxisCount,
+        crossAxisSpacing: spacing,
+        mainAxisSpacing: 8,
         itemCount: items.length,
         itemBuilder: (context, index) {
           final item = items[index];

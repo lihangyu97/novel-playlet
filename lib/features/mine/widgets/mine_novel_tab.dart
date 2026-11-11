@@ -28,7 +28,7 @@ class MineNovelTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineDataProvider);
     final data = async.value;
-    final metrics = MineGridMetrics.of(context, coverAspect: kNovelCoverAspect);
+    final metrics = MineGridMetrics.of(context);
     return MineTabBody<MineData>(
       data: data,
       bottomInset: bottomInset,
@@ -59,7 +59,6 @@ class MineNovelTab extends ConsumerWidget {
             shelf: data.shelf,
             crossAxisCount: metrics.columns,
             itemWidth: metrics.itemWidth,
-            itemHeight: metrics.itemHeight,
             spacing: MineGridMetrics.spacing,
             coverAspect: kNovelCoverAspect,
             heroTagOf: (item) => CoverHeroTag.novel('mine-shelf', item.id),
