@@ -716,6 +716,89 @@ void main() {
 
     await _disposePlayer(tester);
   });
+  testWidgets('横屏全屏下也能上下滑切集，并保持全屏', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    await tester.tap(find.text('全屏观看'));
+    await tester.pumpAndSettle();
+    expect(find.text('全屏观看'), findsNothing);
+
+    // 全屏横屏里上滑：应切到第 2 集，并留在全屏。
+    await tester.drag(find.byType(PageView), const Offset(0, -700));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(factory.created, hasLength(2));
+    expect(tester.widget<PageView>(find.byType(PageView)).controller?.page, 1);
+    expect(factory.created[1].value.isPlaying, isTrue);
+    expect(find.text('第 2 集'), findsWidgets);
+    expect(find.text('全屏观看'), findsNothing, reason: '横屏视频切集后仍应留在全屏，不弹回竖屏');
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('全屏横屏切到竖屏视频会自动退回竖屏', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory(
+      sizes: const [Size(1280, 720), Size(720, 1280)],
+    );
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    await tester.tap(find.text('全屏观看'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(PageView), const Offset(0, -700));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(factory.created, hasLength(2));
+    expect(
+      systemCalls.any(
+        (call) =>
+            call.method == 'SystemChrome.setPreferredOrientations' &&
+            (call.arguments as List<Object?>).contains(
+              'DeviceOrientation.portraitUp',
+            ),
+      ),
+      isTrue,
+      reason: '切到竖屏视频应恢复竖屏',
+    );
+    expect(find.text('全屏观看'), findsNothing, reason: '竖屏视频没有全屏入口');
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('旋转（进出全屏）后 PageView 仍停在当前集', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    await tester.tap(find.text('全屏观看'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(PageView), const Offset(0, -700));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(tester.widget<PageView>(find.byType(PageView)).controller?.page, 1);
+
+    // 模拟横屏后的 viewport（高度变矮）：pixel offset 不换算的话 page 会
+    // 变成 844/390 ≈ 2.16，停在两页之间。
+    tester.view.physicalSize = const Size(844, 390);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<PageView>(find.byType(PageView)).controller?.page,
+      1,
+      reason: '旋转后应拉回当前集，不能停在两页之间',
+    );
+    await _disposePlayer(tester);
+  });
 }
 
 const _episodes = <Chapter>[
@@ -886,10 +969,14 @@ class _FakeFactory implements _ControllerFactory {
   _FakeFactory({
     this.size = const Size(1280, 720),
     this.failFirstNetworkInitialize = false,
+    this.sizes,
   });
 
   /// 假视频的画面尺寸（决定横/竖屏与全屏入口是否出现）。
   final Size size;
+
+  /// 按创建顺序给每个 controller 指定尺寸（切换横/竖屏视频的用例）。
+  final List<Size>? sizes;
 
   /// 首个在线源 controller 的 initialize 抛错（模拟 stream 起播失败）。
   final bool failFirstNetworkInitialize;
@@ -907,7 +994,11 @@ class _FakeFactory implements _ControllerFactory {
     final fail =
         failFirstNetworkInitialize && !_failedOnce && networkUrl != null;
     if (fail) _failedOnce = true;
-    final controller = _FakeController(size: size, failInitialize: fail);
+    final index = created.length;
+    final controller = _FakeController(
+      size: sizes != null && index < sizes!.length ? sizes![index] : size,
+      failInitialize: fail,
+    );
     created.add(controller);
     return controller;
   }

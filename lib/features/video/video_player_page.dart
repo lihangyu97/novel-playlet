@@ -85,7 +85,8 @@ class _OfflineSuspected implements Exception {
   String toString() => 'network recently failed; skipped source resolution';
 }
 
-class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
+class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
+    with WidgetsBindingObserver {
   late int _index;
 
   VideoPlayerController? _controller;
@@ -169,6 +170,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final lastIndex = _episodes.isEmpty ? 0 : _episodes.length - 1;
     _index = widget.args.index < 0
         ? 0
@@ -179,6 +181,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _generation += 1;
     _hideTimer?.cancel();
     _spinnerTimer?.cancel();
@@ -191,6 +194,26 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     // 带着全屏状态退出播放页时，下一次进别的页面还在横屏就糟了。
     if (_fullscreen) unawaited(_restorePortrait());
     super.dispose();
+  }
+
+  /// 旋转屏幕（进出全屏）会改变 PageView 的 viewport 高度，而 PageController
+  /// 的 pixel offset 不会自动换算：横竖屏切换后不拉回当前页，就会停在半页上。
+  /// 全屏横屏现在也能上下滑切集，这个校正尤其重要。
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _jumping ||
+          _programmaticTarget != null ||
+          _pausedByDrag) {
+        return;
+      }
+      if (!_pageController.hasClients) return;
+      final page = _pageController.page;
+      if (page == null || (page - _index).abs() <= 0.01) return;
+      _pageController.jumpToPage(_index);
+    });
   }
 
   void _disposeController() {
@@ -1414,6 +1437,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   ///
   /// 当前页持有正在播放的 controller；滑过半后才预热目标页（暂停在第一帧），
   /// 落定后提交。全屏横屏时禁用翻页：那是对画面的聚焦查看，不是 feed 浏览。
+  /// 当前页持有正在播放的 controller；拖动一开始按方向预热目标页（暂停在第
+  /// 一帧），落定后提交。全屏横屏下也保留竖向翻页：横屏时同样上滑下一集 /
+  /// 下滑上一集。
   Widget _buildPager({required bool showChrome}) {
     return NotificationListener<ScrollNotification>(
       onNotification: _onPagerScrollNotification,
@@ -1421,9 +1447,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         key: const ValueKey('video-episode-pager'),
         controller: _pageController,
         scrollDirection: Axis.vertical,
-        physics: _fullscreen
-            ? const NeverScrollableScrollPhysics()
-            : const PageScrollPhysics(),
+        physics: const PageScrollPhysics(),
         onPageChanged: _onPagerPageChanged,
         itemCount: _episodes.length,
         itemBuilder: (context, index) {
