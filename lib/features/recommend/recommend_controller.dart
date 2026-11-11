@@ -9,37 +9,14 @@ import 'recommend_category.dart';
 import 'recommend_item.dart';
 import 'recommend_state.dart';
 
-/// 推荐页当前搜索关键词；null 表示停留在推荐流。
-///
-/// 三个分类共用一个搜索词：提交后各分类按自己的搜索 `tab_type` 取结果，
-/// 切换分类时搜索词和结果都还在；取消搜索只是改这一个值，各分类自动回显
-/// 自己的推荐流快照。
-final searchQueryProvider = NotifierProvider<SearchQueryController, String?>(
-  SearchQueryController.new,
-);
-
-class SearchQueryController extends Notifier<String?> {
-  @override
-  String? build() => null;
-
-  /// 提交搜索；空关键词等同取消。
-  void submit(String raw) {
-    final query = raw.trim();
-    if (query.isEmpty) {
-      cancel();
-      return;
-    }
-    state = query;
-  }
-
-  void cancel() => state = null;
-}
-
-/// 一个分类的推荐/搜索流。
+/// 一个分类的推荐流。
 ///
 /// family 按分类隔离：切分类时各自保留已加载的列表、游标与 session，不会
 /// 因为切走再切回来重新冷启动。首屏失败走 AsyncError，翻页失败留在
 /// [FeedState] 里（只影响底部提示，不清空列表）。
+///
+/// 搜索已经拆到独立搜索页（`lib/features/search/`），这里只负责推荐流：
+/// 搜索词不再影响推荐页的列表，返回推荐页永远看到原来的内容。
 final recommendFeedProvider =
     AsyncNotifierProvider.family<
       RecommendFeedController,
@@ -49,7 +26,7 @@ final recommendFeedProvider =
       RecommendFeedController.new,
       // 关闭 Riverpod 3 的默认自动重试（10 次、约 38 秒）。重试期间状态是
       // 「isLoading=true + 上一次的 error」，页面会一直转圈、既看不到错误也点不到
-      // 重试按钮；首屏/搜索失败应当立即给 ErrorView，由用户手动重试。
+      // 重试按钮；首屏失败应当立即给 ErrorView，由用户手动重试。
       retry: (retryCount, error) => null,
     );
 
@@ -58,11 +35,8 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
 
   final RecommendCategory category;
 
-  /// 推荐流快照：取消搜索时直接回显，不让"返回"再等一次冷启动请求。
-  RecommendState? _feedSnapshot;
-
-  /// build 每重跑一次 +1。异步结果回来时对不上，说明关键词已经变了，
-  /// 丢弃过期数据，避免"搜索 A 的结果覆盖搜索 B"。
+  /// build 每重跑一次 +1。异步结果回来时对不上，说明列表已经被 invalidate
+  /// 重建过，丢弃过期数据，避免旧响应覆盖新列表。
   int _generation = 0;
 
   /// 控制器级重入锁：状态里的 loadingMore 是给 UI 看的，这里再加一道，
@@ -73,13 +47,7 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
 
   @override
   FutureOr<RecommendState> build() {
-    final query = ref.watch(searchQueryProvider);
     _generation += 1;
-    if (query != null && query.isNotEmpty) {
-      return _fetchSearch(query);
-    }
-    final snapshot = _feedSnapshot;
-    if (snapshot != null) return snapshot;
     return _loadFeed();
   }
 
@@ -88,25 +56,19 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
   /// 已有数据时刷新失败只把异常抛给页面提示，不替换当前内容；没有数据时
   /// 走和首屏一样的加载/错误路径。
   Future<void> refresh() async {
-    final query = ref.read(searchQueryProvider);
     final current = state.value;
     final generation = _generation;
 
     if (current == null) {
       state = const AsyncLoading<RecommendState>();
-      final next = await AsyncValue.guard(
-        () => query == null ? _loadFeed() : _fetchSearch(query),
-      );
+      final next = await AsyncValue.guard(_loadFeed);
       if (generation != _generation) return;
       state = next;
       return;
     }
 
-    final fresh = query == null
-        ? await _fetchFeed()
-        : await _fetchSearch(query);
+    final fresh = await _fetchFeed();
     if (generation != _generation) return;
-    if (query == null) _feedSnapshot = fresh;
     state = AsyncData(fresh);
   }
 
@@ -130,20 +92,21 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
     try {
       final offset = current.nextOffset!;
       // 翻页请求的分类差异（含漫剧无游标时改走搜索兜底）都在 ContentSource 里。
-      final page = current.isSearchMode
-          ? await _fetchSearch(current.query, offset: offset)
-          : await _fetchFeed(offset: offset, sessionId: current.sessionId);
+      final page = await _fetchFeed(
+        offset: offset,
+        sessionId: current.sessionId,
+      );
       if (generation != _generation) return;
       final latest = state.value;
       if (latest == null) return;
-      final next = latest.appendPage(
-        newItems: page.items,
-        idOf: (item) => item.id,
-        nextOffset: page.nextOffset,
-        sessionId: page.sessionId,
+      state = AsyncData(
+        latest.appendPage(
+          newItems: page.items,
+          idOf: (item) => item.id,
+          nextOffset: page.nextOffset,
+          sessionId: page.sessionId,
+        ),
       );
-      state = AsyncData(next);
-      if (!next.isSearchMode) _feedSnapshot = next;
     } catch (error) {
       if (generation != _generation) return;
       final latest = state.value;
@@ -174,11 +137,7 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
     await loadMore();
   }
 
-  Future<RecommendState> _loadFeed() async {
-    final fresh = await _fetchFeed();
-    _feedSnapshot = fresh;
-    return fresh;
-  }
+  Future<RecommendState> _loadFeed() => _fetchFeed();
 
   /// 推荐流的一页。分类 → 上游请求的差异（tab、漫剧兜底）全在
   /// [RecommendCategory.source] 里。
@@ -188,19 +147,10 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
       offset: offset,
       sessionId: sessionId,
     );
-    return FeedState<RecommendItem>.feed(
+    return FeedState<RecommendItem>(
       items: page.items,
       nextOffset: page.nextOffset,
       sessionId: page.sessionId,
-    );
-  }
-
-  Future<RecommendState> _fetchSearch(String query, {int offset = 0}) async {
-    final page = await category.source.search(_api, query, offset: offset);
-    return FeedState<RecommendItem>.search(
-      query: query,
-      items: page.items,
-      nextOffset: page.nextOffset,
     );
   }
 }

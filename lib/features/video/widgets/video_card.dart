@@ -17,6 +17,7 @@ class VideoCard extends StatelessWidget {
     this.heroTag,
     this.showRecommendMeta = false,
     this.reasonOnCover = false,
+    this.showReason = true,
     this.coverAspect = kCoverAspect,
     this.surface = false,
     this.naturalTitleHeight = false,
@@ -41,6 +42,12 @@ class VideoCard extends StatelessWidget {
   /// 太窄，退回文字区独立一行。
   final bool reasonOnCover;
 
+  /// 是否展示推荐理由（`recommend_reason_list`）。
+  ///
+  /// 搜索页关掉：上游会把分类名塞进理由（如「漫剧」），和这一行的分类标题
+  /// 重复；关掉只影响理由，热度照常展示。
+  final bool showReason;
+
   /// 封面高 / 宽；推荐流传 [kVideoCoverAspect]，其它入口保持默认。
   final double coverAspect;
 
@@ -57,7 +64,7 @@ class VideoCard extends StatelessWidget {
       title: item.title,
       meta: _episodesOf(),
       // 双列：理由上封面角标、热度右对齐到集数行尾。
-      coverBadge: reasonOnCover ? _reasonOf() : null,
+      coverBadge: reasonOnCover && showReason ? _reasonOf() : null,
       metaTrailing: reasonOnCover ? _heatOf() : null,
       // 三列：理由/热度各自一行，有就显示。
       extraMeta: reasonOnCover ? const [] : _extraMetaOf(),
@@ -86,7 +93,7 @@ class VideoCard extends StatelessWidget {
   List<String> _extraMetaOf() {
     if (!showRecommendMeta) return const [];
     return [
-      if (item.recommendReason.isNotEmpty) item.recommendReason,
+      if (showReason && item.recommendReason.isNotEmpty) item.recommendReason,
       if (item.rankScore.isNotEmpty) item.rankScore,
     ];
   }

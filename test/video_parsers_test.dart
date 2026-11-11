@@ -385,7 +385,7 @@ void main() {
 
   group('FeedState<VideoSeries>', () {
     test('追加分页时按 id 去重，游标不前进视为到底', () {
-      final initial = FeedState<VideoSeries>.feed(
+      final initial = FeedState<VideoSeries>(
         items: const [VideoSeries(id: 's1', title: 'A')],
         nextOffset: 10,
       );
@@ -402,13 +402,13 @@ void main() {
     });
 
     test('FeedState 字段级相等：加载态/错误态变化算不同', () {
-      final state = FeedState<VideoSeries>.feed(
+      final state = FeedState<VideoSeries>(
         items: const [VideoSeries(id: 's1', title: 'A')],
         nextOffset: 10,
       );
       expect(
         state,
-        FeedState<VideoSeries>.feed(
+        FeedState<VideoSeries>(
           items: const [VideoSeries(id: 's1', title: 'A')],
           nextOffset: 10,
         ),
@@ -416,7 +416,7 @@ void main() {
       expect(
         state,
         isNot(
-          FeedState<VideoSeries>.feed(
+          FeedState<VideoSeries>(
             items: const [VideoSeries(id: 's1', title: 'A')],
             nextOffset: 10,
           ).withLoadingMore(true),

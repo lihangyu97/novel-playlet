@@ -1,4 +1,4 @@
-export '../feed/feed_state.dart' show FeedMode, FeedState, describeFeedError;
+export '../feed/feed_state.dart' show FeedState, describeFeedError;
 
 import '../feed/feed_state.dart';
 import 'recommend_item.dart';
