@@ -71,6 +71,15 @@ async fn confine(canonical_root: &Path, candidate: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Builds the confined candidate path for a request suffix **without**
+/// requiring the file to exist (or resolving symlinks). The router uses it to
+/// recognise a path that is still `<name>.part` because a streaming download
+/// is in progress; every actual file read still goes through
+/// [`resolve_confined`], so the confinement rules above are unchanged.
+pub fn confined_candidate(root: &Path, raw_suffix: &str) -> Option<PathBuf> {
+    candidate_path(root, raw_suffix)
+}
+
 /// Resolves a request suffix inside `root`, refusing anything that could leave
 /// it. Returns the canonical path of a regular file.
 pub async fn resolve_confined(root: &Path, raw_suffix: &str) -> Option<PathBuf> {

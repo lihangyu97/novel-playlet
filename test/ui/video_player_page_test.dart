@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -86,15 +87,102 @@ void main() {
     await _disposePlayer(tester);
   });
 
-  testWidgets('内核缓存未命中：回退正常取流', (tester) async {
+  testWidgets('内核缓存未命中：stream 不可用时回退正常整集取流', (tester) async {
     final store = _FakeSeriesStore();
     final factory = _FakeFactory();
-    final api = _FakeApi(sourceUrl: 'http://127.0.0.1:18931/src/e1.mp4');
+    // streamFails：模拟内核没有流式能力，验证整集下载兜底路径没被新优先级破坏。
+    final api = _FakeApi(
+      sourceUrl: 'http://127.0.0.1:18931/src/e1.mp4',
+      streamFails: true,
+    );
     await _pumpPlayer(tester, store: store, factory: factory, api: api);
 
     expect(api.cachedCalls, 1);
-    expect(api.sourceCalls, 1);
+    expect(api.streamCalls, 1, reason: '在线取流先试 stream');
+    expect(api.sourceCalls, 1, reason: 'stream 不可用时回退整集下载');
     expect(factory.created, hasLength(1));
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('在线优先 mode=stream：直接初始化 stream 地址，不等整集下载', (tester) async {
+    const streamUrl = 'http://127.0.0.1:18931/src/e1-stream.mp4';
+    const fallbackUrl = 'http://127.0.0.1:18931/src/e1-full.mp4';
+    final store = _FakeSeriesStore();
+    final factory = _FakeFactory();
+    final api = _FakeApi(streamUrl: streamUrl, sourceUrl: fallbackUrl);
+    await _pumpPlayer(tester, store: store, factory: factory, api: api);
+
+    expect(api.cachedCalls, 1, reason: '先探内核本地缓存');
+    expect(api.streamCalls, 1, reason: '缓存未命中应优先请求 mode=stream');
+    expect(api.sourceCalls, 0, reason: 'stream 成功就不该再走整集下载');
+    expect(factory.created, hasLength(1));
+    expect(
+      factory.networkUrls.single,
+      Uri.parse(streamUrl),
+      reason: 'stream 拿到的回环地址直接进 controller.initialize',
+    );
+    expect(factory.created.single.value.isPlaying, isTrue);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('stream 源初始化失败：回退一次默认整集取流并播放', (tester) async {
+    const streamUrl = 'http://127.0.0.1:18931/src/e1-stream.mp4';
+    const fallbackUrl = 'http://127.0.0.1:18931/src/e1-full.mp4';
+    final store = _FakeSeriesStore();
+    // 首个在线源 controller（stream 地址）initialize 抛错，模拟流式起播失败。
+    final factory = _FakeFactory(failFirstNetworkInitialize: true);
+    final api = _FakeApi(streamUrl: streamUrl, sourceUrl: fallbackUrl);
+    await _pumpPlayer(tester, store: store, factory: factory, api: api);
+
+    expect(api.streamCalls, 1);
+    expect(api.sourceCalls, 1, reason: 'stream 起播失败要回退一次默认取流');
+    expect(factory.created, hasLength(2));
+    expect(
+      factory.networkUrls[0],
+      Uri.parse(streamUrl),
+      reason: '第一次先尝试 stream 地址',
+    );
+    expect(
+      factory.networkUrls[1],
+      Uri.parse(fallbackUrl),
+      reason: '回退到默认整集下载地址',
+    );
+    expect(
+      factory.created.first.disposeCount,
+      1,
+      reason: '失败的 controller 必须释放',
+    );
+    expect(factory.created.last.value.isPlaying, isTrue, reason: '回退后仍要正常播放');
+    expect(find.text('视频播放失败'), findsNothing, reason: '不允许把原本能播的集变成错误页');
+    expect(find.byType(VideoPlayer), findsOneWidget);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('预取下一集使用 mode=stream：立即拿回 /src 地址并触发后台下载', (tester) async {
+    final store = _FakeSeriesStore();
+    final factory = _FakeFactory();
+    final api = _FakeApi();
+    await _pumpPlayer(tester, store: store, factory: factory, api: api);
+
+    // 当前集起播 5s 后预取下一集（_schedulePrefetch）。
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump();
+
+    expect(api.cachedCalls, greaterThanOrEqualTo(2), reason: '当前集与预取各探一次本地缓存');
+    expect(api.sourceCalls, 0, reason: '预取应优先 stream，而不是等整集下载');
+    expect(
+      api.streamEpisodeIds,
+      contains('e2'),
+      reason: '预取下一集应请求 mode=stream',
+    );
+    expect(
+      api.streamEpisodeIds.where((id) => id == 'e2'),
+      hasLength(1),
+      reason: '同一集只预取一次',
+    );
 
     await _disposePlayer(tester);
   });
@@ -103,7 +191,11 @@ void main() {
     final health = NetworkHealth()..recordFailure();
     final store = _FakeSeriesStore();
     final factory = _FakeFactory();
-    final api = _FakeApi(sourceUrl: 'http://127.0.0.1:18931/src/e1.mp4');
+    // streamFails：重试后先试 stream 失败、再回退整集取流，两条都算联网。
+    final api = _FakeApi(
+      sourceUrl: 'http://127.0.0.1:18931/src/e1.mp4',
+      streamFails: true,
+    );
     await _pumpPlayer(
       tester,
       store: store,
@@ -113,6 +205,7 @@ void main() {
     );
 
     expect(api.cachedCalls, 1, reason: '本地缓存探测照旧');
+    expect(api.streamCalls, 0, reason: '疑似离线时连 stream 也不再请求');
     expect(api.sourceCalls, 0, reason: '疑似离线时不应再付一次完整取流等待');
     expect(find.text('该集未离线缓存'), findsOneWidget);
 
@@ -120,7 +213,8 @@ void main() {
     await tester.tap(find.text('重试'));
     await tester.pump();
     await tester.pump();
-    expect(api.sourceCalls, 1, reason: '手动重试必须真的联网');
+    expect(api.streamCalls, 1, reason: '手动重试先试 stream，必须真的联网');
+    expect(api.sourceCalls, 1, reason: 'stream 不可用时回退整集取流');
     expect(health.isSuspectedOffline, isFalse, reason: '取流成功清除疑似离线');
 
     await _disposePlayer(tester);
@@ -494,6 +588,217 @@ void main() {
 
     await _disposePlayer(tester);
   });
+
+  testWidgets('相邻集占位：目录标题本身是「第 N 集」时不重复渲染集数', (tester) async {
+    // 预热 initialize 先挂起，让相邻页停在「预热中」占位，能稳定看到文案。
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _GatedFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    await gesture.moveBy(const Offset(0, -180));
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, -180));
+    await tester.pump();
+    await tester.pump();
+
+    expect(factory.gated, hasLength(1));
+    expect(
+      find.text('第 2 集'),
+      findsOneWidget,
+      reason: '标题已经是「第 2 集」，占位不要再把集数显示一遍',
+    );
+    expect(find.textContaining('第 2 集 · 第 2 集'), findsNothing);
+
+    factory.gated.single.gate.complete();
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('拖动过半、预热完成后，下一集首帧不等落定就上屏', (tester) async {
+    final store = _FakeSeriesStore();
+    final factory = _GatedFactory();
+    await _pumpPlayer(
+      tester,
+      store: store,
+      factory: factory,
+      api: _FakeApi(sourceUrl: 'http://127.0.0.1:18931/src/e2.mp4'),
+    );
+
+    // 视口 600：往上分多步拖动，越过一半（onPageChanged 触发预热）但不松手。
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    for (var i = 0; i < 3; i += 1) {
+      await gesture.moveBy(const Offset(0, -180));
+      await tester.pump();
+    }
+
+    expect(factory.gated, hasLength(1), reason: '滑过半应开始预热下一集');
+    expect(
+      find.byType(VideoPlayer),
+      findsOneWidget,
+      reason: '预热未完成时只有当前集挂了播放器',
+    );
+
+    // 预热完成：还没松手、没落定，相邻页就该切到真实的（暂停）首帧。
+    factory.gated.single.gate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.byType(VideoPlayer),
+      findsNWidgets(2),
+      reason: '预热完成后拖动中就要渲染下一集首帧，不能等落定',
+    );
+
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await _disposePlayer(tester);
+  });
+  testWidgets('拖动刚开始（未过半）就按方向预热目标集', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+    expect(factory.created, hasLength(1));
+
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    for (var i = 0; i < 2; i += 1) {
+      await gesture.moveBy(const Offset(0, -180));
+      await tester.pump();
+    }
+    await tester.pump();
+
+    final page = tester
+        .widget<PageView>(find.byType(PageView))
+        .controller
+        ?.page;
+    expect(page, isNotNull);
+    expect(page!, lessThan(0.5), reason: '此时还没滑过半');
+    expect(factory.created, hasLength(2), reason: '方向一确定（上滑下一集）就应开始预热，不等滑过半');
+
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('落定提交不重建相邻页的 VideoPlayer（避免 iOS 闪黑）', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    for (var i = 0; i < 3; i += 1) {
+      await gesture.moveBy(const Offset(0, -180));
+      await tester.pump();
+    }
+    await tester.pump();
+    expect(find.byType(VideoPlayer), findsNWidgets(2));
+
+    // 预热页（第 2 集）的 VideoPlayer element：提交后应原地保留。
+    final pendingElement = find
+        .byType(VideoPlayer)
+        .evaluate()
+        .firstWhere(
+          (element) =>
+              (element.widget as VideoPlayer).controller == factory.created[1],
+        );
+
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(find.byType(VideoPlayer), findsOneWidget);
+    expect(
+      identical(tester.element(find.byType(VideoPlayer)), pendingElement),
+      isTrue,
+      reason: '提交只应换 controller/onTap，不能重建 platform view',
+    );
+
+    await _disposePlayer(tester);
+  });
+  testWidgets('横屏全屏下也能上下滑切集，并保持全屏', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    await tester.tap(find.text('全屏观看'));
+    await tester.pumpAndSettle();
+    expect(find.text('全屏观看'), findsNothing);
+
+    // 全屏横屏里上滑：应切到第 2 集，并留在全屏。
+    await tester.drag(find.byType(PageView), const Offset(0, -700));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(factory.created, hasLength(2));
+    expect(tester.widget<PageView>(find.byType(PageView)).controller?.page, 1);
+    expect(factory.created[1].value.isPlaying, isTrue);
+    expect(find.text('第 2 集'), findsWidgets);
+    expect(find.text('全屏观看'), findsNothing, reason: '横屏视频切集后仍应留在全屏，不弹回竖屏');
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('全屏横屏切到竖屏视频会自动退回竖屏', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory(
+      sizes: const [Size(1280, 720), Size(720, 1280)],
+    );
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    await tester.tap(find.text('全屏观看'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(PageView), const Offset(0, -700));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(factory.created, hasLength(2));
+    expect(
+      systemCalls.any(
+        (call) =>
+            call.method == 'SystemChrome.setPreferredOrientations' &&
+            (call.arguments as List<Object?>).contains(
+              'DeviceOrientation.portraitUp',
+            ),
+      ),
+      isTrue,
+      reason: '切到竖屏视频应恢复竖屏',
+    );
+    expect(find.text('全屏观看'), findsNothing, reason: '竖屏视频没有全屏入口');
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('旋转（进出全屏）后 PageView 仍停在当前集', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    await tester.tap(find.text('全屏观看'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(PageView), const Offset(0, -700));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(tester.widget<PageView>(find.byType(PageView)).controller?.page, 1);
+
+    // 模拟横屏后的 viewport（高度变矮）：pixel offset 不换算的话 page 会
+    // 变成 844/390 ≈ 2.16，停在两页之间。
+    tester.view.physicalSize = const Size(844, 390);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<PageView>(find.byType(PageView)).controller?.page,
+      1,
+      reason: '旋转后应拉回当前集，不能停在两页之间',
+    );
+    await _disposePlayer(tester);
+  });
 }
 
 const _episodes = <Chapter>[
@@ -605,15 +910,30 @@ class _FakeSeriesStore extends OfflineSeriesStore {
       cachedFile;
 }
 
-/// ApiClient 测试替身：只关心缓存探测与正常取流的分流。
+/// ApiClient 测试替身：只关心缓存探测、`mode=stream` 优先与整集下载兜底的分流。
 class _FakeApi extends ApiClient {
-  _FakeApi({this.cachedUrl, this.sourceUrl})
-    : super(BackendTransport(port: 18931));
+  _FakeApi({
+    this.cachedUrl,
+    this.sourceUrl,
+    this.streamUrl,
+    this.streamFails = false,
+  }) : super(BackendTransport(port: 18931));
 
   final String? cachedUrl;
   final String? sourceUrl;
+
+  /// `mode=stream` 返回的地址；默认按集 id 拼 `/src/<id>.mp4`。
+  final String? streamUrl;
+
+  /// 模拟内核不支持/取不到 stream 源：让 stream 请求抛错，验证整集下载兜底。
+  final bool streamFails;
+
   int cachedCalls = 0;
   int sourceCalls = 0;
+  int streamCalls = 0;
+
+  /// 记录每次 stream 取流的集，断言「在线优先 stream」「预取也用 stream」。
+  final List<String> streamEpisodeIds = <String>[];
 
   @override
   Future<String?> cachedVideoUrl(String episodeId) async {
@@ -626,24 +946,59 @@ class _FakeApi extends ApiClient {
     String episodeId, {
     bool refresh = false,
     int? maxHeight,
+    bool stream = false,
   }) async {
+    if (stream) {
+      streamCalls += 1;
+      streamEpisodeIds.add(episodeId);
+      if (streamFails) throw Exception('stream 取流失败');
+      return VideoSource(
+        url: streamUrl ?? 'http://127.0.0.1:18931/src/$episodeId.mp4',
+        streaming: true,
+      );
+    }
     sourceCalls += 1;
-    return VideoSource(url: sourceUrl ?? 'http://127.0.0.1:18931/src/e1.mp4');
+    return VideoSource(
+      url: sourceUrl ?? 'http://127.0.0.1:18931/src/$episodeId.mp4',
+    );
   }
 }
 
-/// controller 工厂测试替身：记录创建次数与倍速下发记录。
+/// controller 工厂测试替身：记录创建次数、倍速下发与在线地址。
 class _FakeFactory implements _ControllerFactory {
-  _FakeFactory({this.size = const Size(1280, 720)});
+  _FakeFactory({
+    this.size = const Size(1280, 720),
+    this.failFirstNetworkInitialize = false,
+    this.sizes,
+  });
 
   /// 假视频的画面尺寸（决定横/竖屏与全屏入口是否出现）。
   final Size size;
 
+  /// 按创建顺序给每个 controller 指定尺寸（切换横/竖屏视频的用例）。
+  final List<Size>? sizes;
+
+  /// 首个在线源 controller 的 initialize 抛错（模拟 stream 起播失败）。
+  final bool failFirstNetworkInitialize;
+
   final List<_FakeController> created = <_FakeController>[];
+
+  /// 每次创建 controller 时传入的在线地址（file 源为 null）。
+  final List<Uri?> networkUrls = <Uri?>[];
+
+  bool _failedOnce = false;
 
   @override
   VideoPlayerController call({File? file, Uri? networkUrl}) {
-    final controller = _FakeController(size: size);
+    networkUrls.add(networkUrl);
+    final fail =
+        failFirstNetworkInitialize && !_failedOnce && networkUrl != null;
+    if (fail) _failedOnce = true;
+    final index = created.length;
+    final controller = _FakeController(
+      size: sizes != null && index < sizes!.length ? sizes![index] : size,
+      failInitialize: fail,
+    );
     created.add(controller);
     return controller;
   }
@@ -651,16 +1006,28 @@ class _FakeFactory implements _ControllerFactory {
 
 /// 不碰平台通道的 VideoPlayerController：只维护 VideoPlayerValue。
 class _FakeController extends VideoPlayerController {
-  _FakeController({this.size = const Size(1280, 720)})
-    : super.file(File('/tmp/fake.mp4'));
+  _FakeController({
+    this.size = const Size(1280, 720),
+    this.failInitialize = false,
+  }) : super.file(File('/tmp/fake.mp4'));
 
   /// 默认 16:9 横屏（全屏入口可见）；竖屏场景传 720x1280。
   final Size size;
+
+  /// initialize 是否抛错（模拟流式源起播失败，验证回退整集下载）。
+  final bool failInitialize;
 
   final List<double> speeds = <double>[];
 
   @override
   Future<void> initialize() async {
+    if (failInitialize) {
+      throw PlatformException(
+        code: 'VideoError',
+        message: 'Failed to load video: The operation could not be completed.',
+        details: null,
+      );
+    }
     value = VideoPlayerValue(
       duration: const Duration(seconds: 120),
       size: size,
@@ -703,6 +1070,35 @@ class _FakeController extends VideoPlayerController {
   }
 
   int disposeCount = 0;
+}
+
+/// 预热 controller 的 initialize 由测试放行：用来验证「预热完成时，
+/// 拖动中的相邻页要立即重建出首帧，而不是等到落定」。
+class _GatedController extends _FakeController {
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<void> initialize() async {
+    await gate.future;
+    await super.initialize();
+  }
+}
+
+/// 首个 controller（当前集）立即可用；后续 controller（预热）走 [_GatedController]。
+class _GatedFactory implements _ControllerFactory {
+  final List<_GatedController> gated = <_GatedController>[];
+  bool _first = true;
+
+  @override
+  VideoPlayerController call({File? file, Uri? networkUrl}) {
+    if (_first) {
+      _first = false;
+      return _FakeController();
+    }
+    final controller = _GatedController();
+    gated.add(controller);
+    return controller;
+  }
 }
 
 /// 前 [failures] 个 controller 在 initialize() 抛 -1004（iOS 长时间后台回来

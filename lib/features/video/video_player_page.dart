@@ -85,7 +85,8 @@ class _OfflineSuspected implements Exception {
   String toString() => 'network recently failed; skipped source resolution';
 }
 
-class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
+class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
+    with WidgetsBindingObserver {
   late int _index;
 
   VideoPlayerController? _controller;
@@ -139,8 +140,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   bool _speedReapplyPending = false;
   final List<Timer> _speedReapplyTimers = <Timer>[];
 
-  /// 预取下一集的取流结果（episodeId → source）。缓存未命中时内核会整集
-  /// 下载，把这段耗时移到当前集播放期间，切集只用拿现成的 `/src` 地址。
+  /// 预取下一集的取流结果（episodeId → source）。预取走 `mode=stream`：内核
+  /// 立即返回 `/src` 地址并在后台下载，把「上游往返 + 下载启动」移出关键路径，
+  /// 切集只用拿现成的回环地址起播。
   final Map<String, VideoSource> _prefetched = {};
   final Set<String> _prefetching = {};
   Timer? _prefetchTimer;
@@ -153,6 +155,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   bool _jumping = false;
   int? _programmaticTarget;
 
+  /// 本次拖动是否已经按方向预热过目标集。方向在第一个 ScrollUpdate 才能
+  /// 判断，所以预热不必等到滑过一半；早一点开始，相邻页更快出首帧。
+  bool _dragPreheatStarted = false;
+
   /// 横屏判定：接近 1 的方图不算，避免给错按钮。
   static const double _landscapeAspect = 1.05;
 
@@ -164,6 +170,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final lastIndex = _episodes.isEmpty ? 0 : _episodes.length - 1;
     _index = widget.args.index < 0
         ? 0
@@ -174,6 +181,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _generation += 1;
     _hideTimer?.cancel();
     _spinnerTimer?.cancel();
@@ -186,6 +194,26 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     // 带着全屏状态退出播放页时，下一次进别的页面还在横屏就糟了。
     if (_fullscreen) unawaited(_restorePortrait());
     super.dispose();
+  }
+
+  /// 旋转屏幕（进出全屏）会改变 PageView 的 viewport 高度，而 PageController
+  /// 的 pixel offset 不会自动换算：横竖屏切换后不拉回当前页，就会停在半页上。
+  /// 全屏横屏现在也能上下滑切集，这个校正尤其重要。
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _jumping ||
+          _programmaticTarget != null ||
+          _pausedByDrag) {
+        return;
+      }
+      if (!_pageController.hasClients) return;
+      final page = _pageController.page;
+      if (page == null || (page - _index).abs() <= 0.01) return;
+      _pageController.jumpToPage(_index);
+    });
   }
 
   void _disposeController() {
@@ -349,6 +377,24 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       // 用户点「重试」会清掉标记并强制走一次完整网络请求。
       if (!refresh && ref.read(networkHealthProvider).isSuspectedOffline) {
         throw const _OfflineSuspected();
+      }
+
+      // 在线优先走 mode=stream：内核立即返回 `/src` 地址并在后台继续下载，
+      // 起播不用等整集落盘。refresh（用户要求重新下载这一集）跳过它，直接
+      // 走整集重取。stream 取流/起播失败时回退下面的默认整集下载兜底，不能
+      // 因为新模式把原本能播的集变成错误页；-1004 是回环监听被回收，回退也
+      // 播不了，仍交给外层做一次有界自愈。
+      if (!refresh) {
+        try {
+          final streamed = await api.videoSource(episode.id, stream: true);
+          if (!mounted || generation != _generation) return;
+          ref.read(networkHealthProvider).recordSuccess();
+          await playUrl(streamed.url);
+          return;
+        } catch (error) {
+          if (!mounted || generation != _generation) return;
+          if (_isLoopbackConnectRefused(error)) rethrow;
+        }
       }
 
       final source = await api.videoSource(episode.id, refresh: refresh);
@@ -531,6 +577,25 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     return null;
   }
 
+  /// 在线取流（预热用）：优先 `mode=stream`，失败回退默认整集下载。
+  ///
+  /// stream 只让内核「开始下载并立即返回 `/src` 地址」，起播不再等整集落盘；
+  /// 内核不支持 stream / 本次取流异常时回退到原来的整集下载路径，避免预热
+  /// 因为新模式整体失效。正式取流（[_open]）的起播失败回退更细，单独实现。
+  Future<VideoSource> _onlineSource(String episodeId) async {
+    final api = ref.read(apiClientProvider);
+    try {
+      final source = await api.videoSource(episodeId, stream: true);
+      ref.read(networkHealthProvider).recordSuccess();
+      return source;
+    } catch (_) {
+      // 回退整集下载；失败原因由提交后的 _open 统一展示。
+    }
+    final source = await api.videoSource(episodeId);
+    ref.read(networkHealthProvider).recordSuccess();
+    return source;
+  }
+
   void _onTick() {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
@@ -579,9 +644,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
 
   /// 预取下一集的取流结果。
   ///
-  /// 缓存未命中时这次调用会把整集下载进内核缓存（产品已确认允许），切集时
-  /// 直接拿现成的 `/src` 地址，把下载移出关键路径。失败静默——切集时还有
-  /// 正常取流兜底，不需要打扰用户。
+  /// 预取请求 `mode=stream`：内核立即返回 `/src` 地址并开始后台下载下一集，
+  /// 切集时直接拿现成地址起播，不再等上游往返 + 整集落盘。失败静默——切集时
+  /// 还有正常取流兜底，不需要打扰用户。
   Future<void> _prefetchNext() async {
     final next = _index + 1;
     if (next >= _episodes.length) return;
@@ -610,7 +675,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _prefetching.add(episode.id);
     try {
       final api = ref.read(apiClientProvider);
-      // 先探本地缓存：命中就不用为预取再触发整集下载。
+      // 先探本地缓存：命中就不用为预取再触发一次取流。
       String? cachedUrl;
       try {
         cachedUrl = await api.cachedVideoUrl(episode.id);
@@ -618,24 +683,36 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         // 探测失败当 miss。
       }
       if (!mounted) return;
-      final source = cachedUrl != null
-          ? VideoSource(url: cachedUrl)
-          : await api.videoSource(episode.id);
+      if (cachedUrl != null) {
+        // 缓存命中：地址已经是完整文件，不需要再让内核启动下载。
+        _rememberPrefetched(episode.id, VideoSource(url: cachedUrl));
+        return;
+      }
+      // 预取优先用 stream 源：内核立即返回 `/src` 地址并在后台下载下一集，
+      // 切集时直接拿现成地址起播；内核不支持时回退旧的整集下载预取。
+      VideoSource source;
+      try {
+        source = await api.videoSource(episode.id, stream: true);
+      } catch (_) {
+        source = await api.videoSource(episode.id);
+      }
       if (!mounted) return;
       // 预取真的走了网络且成功：说明网络可用，清掉「疑似离线」。
-      if (cachedUrl == null) {
-        ref.read(networkHealthProvider).recordSuccess();
-      }
-      // 页内只留最近两条：追剧时无限积累没有意义。
-      while (_prefetched.length >= 2) {
-        _prefetched.remove(_prefetched.keys.first);
-      }
-      _prefetched[episode.id] = source;
+      ref.read(networkHealthProvider).recordSuccess();
+      _rememberPrefetched(episode.id, source);
     } catch (_) {
       // 预取失败静默：切集时走正常取流，失败原因由播放页统一展示。
     } finally {
       _prefetching.remove(episode.id);
     }
+  }
+
+  /// 记下预取结果。页内只留最近两条：追剧时无限积累没有意义。
+  void _rememberPrefetched(String episodeId, VideoSource source) {
+    while (_prefetched.length >= 2) {
+      _prefetched.remove(_prefetched.keys.first);
+    }
+    _prefetched[episodeId] = source;
   }
 
   /// 这次失败是不是「回环监听已死」——connect refused。
@@ -1009,6 +1086,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _pendingIndex = index;
     final ready = Completer<void>();
     _pendingReady = ready.future;
+    // 预热状态要立刻反映到相邻页：PageView 拖动过程中不会重建已经建好的页，
+    // 少了这次 setState，相邻页会一直停在拖动开始时构建的普通占位上，
+    // 预热完成后也看不到首帧。
+    if (mounted) setState(() {});
     final episode = _episodes[index];
     VideoPlayerController? controller;
     try {
@@ -1031,9 +1112,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           if (url == null) {
             // 疑似离线：不在预热里白等内核重试，落定后由 _open 给明确文案。
             if (ref.read(networkHealthProvider).isSuspectedOffline) return;
-            url = (await api.videoSource(episode.id)).url;
+            // 和正式取流同一优先级：先 stream（立即拿 /src + 后台下载），
+            // 失败再回退整集下载。
+            url = (await _onlineSource(episode.id)).url;
             if (!mounted || token != _prepareToken) return;
-            ref.read(networkHealthProvider).recordSuccess();
           }
         }
         controller = ref.read(playbackControllerFactoryProvider)(
@@ -1053,9 +1135,15 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         return;
       }
       _pending = controller;
+      // 预热完成也不能等落定：拖动中的相邻页要立刻重建、渲染首帧
+      // （[_buildEpisodePage] 看到 [_pending] 会换成真实视频画面）。
+      if (mounted) setState(() {});
     } catch (_) {
       if (controller != null) unawaited(controller.dispose());
-      _pending = null;
+      if (token == _prepareToken) {
+        _pending = null;
+        if (mounted) setState(() {});
+      }
     } finally {
       if (!ready.isCompleted) ready.complete();
     }
@@ -1101,8 +1189,29 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   bool _onPagerScrollNotification(ScrollNotification notification) {
     if (notification.depth != 0) return false;
     if (notification is ScrollStartNotification) {
+      _dragPreheatStarted = false;
       if (notification.dragDetails != null) _pauseForDrag();
+    } else if (notification is ScrollUpdateNotification) {
+      // 方向一确定就预热目标集，不等滑过半：相邻页从拖动一开始就按
+      // 「封面 → 首帧」的顺序出画面，滑到一半时通常已经能直接接上。
+      if (!_dragPreheatStarted &&
+          notification.dragDetails != null &&
+          !_jumping &&
+          _programmaticTarget == null) {
+        final viewport = notification.metrics.viewportDimension;
+        if (viewport > 0) {
+          final offset = notification.metrics.pixels - _index * viewport;
+          if (offset != 0) {
+            _dragPreheatStarted = true;
+            final target = offset > 0 ? _index + 1 : _index - 1;
+            if (target >= 0 && target < _episodes.length) {
+              unawaited(_prepare(target));
+            }
+          }
+        }
+      }
     } else if (notification is ScrollEndNotification) {
+      _dragPreheatStarted = false;
       if (_jumping || _programmaticTarget != null) return false;
       final page = _pageController.hasClients
           ? _pageController.page?.round()
@@ -1328,6 +1437,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   ///
   /// 当前页持有正在播放的 controller；滑过半后才预热目标页（暂停在第一帧），
   /// 落定后提交。全屏横屏时禁用翻页：那是对画面的聚焦查看，不是 feed 浏览。
+  /// 当前页持有正在播放的 controller；拖动一开始按方向预热目标页（暂停在第
+  /// 一帧），落定后提交。全屏横屏下也保留竖向翻页：横屏时同样上滑下一集 /
+  /// 下滑上一集。
   Widget _buildPager({required bool showChrome}) {
     return NotificationListener<ScrollNotification>(
       onNotification: _onPagerScrollNotification,
@@ -1335,19 +1447,18 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         key: const ValueKey('video-episode-pager'),
         controller: _pageController,
         scrollDirection: Axis.vertical,
-        physics: _fullscreen
-            ? const NeverScrollableScrollPhysics()
-            : const PageScrollPhysics(),
+        physics: const PageScrollPhysics(),
         onPageChanged: _onPagerPageChanged,
         itemCount: _episodes.length,
         itemBuilder: (context, index) {
           final page = _buildEpisodePage(index);
-          if (index != _index || !showChrome) return page;
-          // 点画面切换控制条显隐。放在 PageView 的页内而不是整屏叠加层：
-          // 叠加层会挡住 PageView，上下滑手势到不了翻页。
+          // 每一页都套同一层 GestureDetector（只让当前页响应点击）：落定
+          // 提交时 _index 变化，若这里按「是否当前页」增删 wrapper，widget
+          // 树类型会变，VideoPlayer 的 State/platform view 被重建，iOS 上会
+          // 闪一下黑。「始终套、只换 onTap」保证子树原地更新。
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: _toggleControls,
+            onTap: index == _index && showChrome ? _toggleControls : null,
             child: page,
           );
         },
@@ -1382,33 +1493,64 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     return _buildEpisodePlaceholder(index);
   }
 
-  /// 非当前页的占位：黑底 + 集数/集名。不放 spinner，避免看起来像在加载
-  /// 一个还没开始加载的页面。
+  /// 短剧目录的集标题本身常常就是「第 3 集」，占位里就不要再重复一遍集数。
+  static bool _titleHasEpisodeNumber(String title) =>
+      RegExp(r'^第\s*[0-9零一二三四五六七八九十百千]+\s*集').hasMatch(title);
+
+  /// 非当前页的底：优先铺剧封面（暗化）给滑动预告，没有封面就黑底。
+  /// 拖动刚开始、首帧还没就绪时，相邻页先显示封面而不是纯黑，滑动时能
+  /// 同时看到当前集画面和下一集封面。
+  Widget _buildEpisodeBackdrop({required Widget child}) {
+    final cover = widget.args.cover;
+    if (cover.isEmpty) {
+      return ColoredBox(
+        color: Colors.black,
+        child: Center(child: child),
+      );
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.network(
+          cover,
+          fit: BoxFit.cover,
+          // 封面加载失败退回纯黑，不阻塞占位文案/预热。
+          errorBuilder: (context, error, stackTrace) =>
+              const ColoredBox(color: Colors.black),
+        ),
+        const ColoredBox(color: Color(0x99000000)),
+        Center(child: child),
+      ],
+    );
+  }
+
+  /// 非当前页的占位：封面（或黑底）+ 集数/集名。不放 spinner，避免看起来
+  /// 像在加载一个还没开始加载的页面。
   Widget _buildEpisodePlaceholder(int index) {
     final episode = _episodes[index];
     final title = episode.title.isNotEmpty ? episode.title : '第 ${index + 1} 集';
-    return ColoredBox(
-      color: Colors.black,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+    // 标题已经是「第 N 集」时只渲染一次，避免黑底上出现两个「第 N 集」。
+    final showIndexLine = !_titleHasEpisodeNumber(title);
+    return _buildEpisodeBackdrop(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (showIndexLine)
               Text(
                 '第 ${index + 1} 集',
                 style: const TextStyle(color: Colors.white54, fontSize: 13),
               ),
-              const SizedBox(height: 6),
-              Text(
-                title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 15),
-              ),
-            ],
-          ),
+            if (showIndexLine) const SizedBox(height: 6),
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 15),
+            ),
+          ],
         ),
       ),
     );
@@ -1473,37 +1615,37 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     );
   }
 
-  /// 预热还没就绪的占位：黑底 + 轻量 spinner + 集数，避免大 spinner 文案
-  /// 在已缓存集上闪一下。
+  /// 预热还没就绪的占位：封面（或黑底）+ 轻量 spinner + 集数，避免大
+  /// spinner 文案在已缓存集上闪一下。
   Widget _buildPendingPlaceholder(int index) {
     final episode = _episodes[index];
     final title = episode.title.isNotEmpty ? episode.title : '第 ${index + 1} 集';
-    return ColoredBox(
-      color: Colors.black,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white38,
-                ),
+    final label = _titleHasEpisodeNumber(title)
+        ? title
+        : '第 ${index + 1} 集 · $title';
+    return _buildEpisodeBackdrop(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white38,
               ),
-              const SizedBox(height: 14),
-              Text(
-                '第 ${index + 1} 集 · $title',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white54, fontSize: 13),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+          ],
         ),
       ),
     );
