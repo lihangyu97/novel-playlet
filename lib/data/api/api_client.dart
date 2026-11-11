@@ -149,23 +149,29 @@ class ApiClient {
 
   /// 一集的可播放地址。
   ///
-  /// 当前走默认（非 stream）模式：内核把整集下载进加密缓存后返回
-  /// `/src/<id>.mp4`，播放器只需按普通 HTTP 拉明文分片。流式回环（边下边播）
-  /// 见 docs/implementation.md 的 M1 流式起播，接入后这里换成 `mode=stream`。
+  /// 默认模式：内核把整集下载进加密缓存后返回 `/src/<id>.mp4`，播放器按普通
+  /// HTTP 拉明文分片。`stream: true` 时带 `mode=stream`：内核立即返回同一个
+  /// 回环地址并**在后台继续下载**（边下边播），`/src` 的 Range 请求会等待尚未
+  /// 下载到的字节，播放页因此不用再等整集落盘。内核已有完整缓存时
+  /// stream 直接返回完成文件（`streaming: false`）；`.m4s/.ts` 等不支持流式的
+  /// 形态也由内核退回整集下载后返回 URL。
   Future<VideoSource> videoSource(
     String episodeId, {
     bool refresh = false,
     int? maxHeight,
+    bool stream = false,
   }) async {
     final payload = await _getJson(
       '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
       // refresh=1：内核删掉本地缓存文件后重新下载。播放失败（半截/坏缓存）
       // 时用它能真正重来，否则重试只会拿回同一份坏文件。
+      // mode=stream：边下边播（见方法注释），不传时保持整集下载语义。
       // variants=0：播放页不需要清晰度列表，别让内核为它多拉一次 fallback。
       // max_height：离线/下载清晰度上限（短边 ≤ N 的最高档）。
       {
         if (refresh) 'refresh': '1',
         if (maxHeight != null && maxHeight > 0) 'max_height': '$maxHeight',
+        if (stream) 'mode': 'stream',
         'variants': '0',
       },
       // 首次播放要等整集下载 + 写密钥 sidecar，默认 20s 不够。
@@ -177,11 +183,11 @@ class ApiClient {
       throw ApiException('上游没有返回可播放地址（video_url 为空）');
     }
     // 下载失败时内核会退回「远程地址 + key」的流式形态；那种地址是密文，
-    // 播放器不能直接播（流式回环见 M1），这里明确失败而不是让 AVPlayer 黑屏。
+    // 播放器不能直接播，这里明确失败而不是让 AVPlayer 黑屏。
     if (source.keyHex.isNotEmpty && !url.contains('/src/')) {
       throw ApiException(
         '整集缓存失败：内核只拿到了远程加密流（${Uri.tryParse(url)?.host ?? 'CDN'}），'
-        'M1 流式回环未接入。',
+        '播放器无法直接播放。',
       );
     }
     return VideoSource(
@@ -190,6 +196,7 @@ class ApiClient {
       variants: source.variants,
       appliedVariant: source.appliedVariant,
       qualityFallback: source.qualityFallback,
+      streaming: source.streaming,
     );
   }
 

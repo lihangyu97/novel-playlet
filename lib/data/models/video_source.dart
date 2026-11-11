@@ -2,10 +2,12 @@ import 'json_utils.dart';
 
 /// 一集的可播放源。
 ///
-/// `/api/v1/videos/{id}` 默认模式会先把整集下载进内核缓存（密文），返回
-/// `video_url: "/src/xxx.mp4"`；`?mode=stream` 则返回上游 CDN 地址 + 内容
-/// 密钥（需要客户端边读边解密，暂未接入）。两种形态共用这个模型，
-/// [url] 由 ApiClient 负责拼成绝对地址。
+/// 默认模式会先把整集下载进内核缓存（密文），返回
+/// `video_url: "/src/xxx.mp4"`；`?mode=stream` 则立即返回同一个回环地址并在
+/// 后台继续下载，播放器读到的字节会等待下载进度（边下边播），此时
+/// [streaming] 为 true。内核已有完整缓存、或 `.m4s/.ts` 等不支持流式的形态
+/// 退回整集下载后，`streaming` 为 false，地址同样是回环 `/src`，按「文件已
+/// 完整落盘」处理。两种形态共用这个模型，[url] 由 ApiClient 负责拼成绝对地址。
 class VideoSource {
   const VideoSource({
     required this.url,
@@ -13,6 +15,7 @@ class VideoSource {
     this.variants = const [],
     this.appliedVariant,
     this.qualityFallback = false,
+    this.streaming = false,
   });
 
   final String url;
@@ -28,6 +31,12 @@ class VideoSource {
 
   /// 请求档不可用、回退到了别的档（如要 480P 只有 720P）。
   final bool qualityFallback;
+
+  /// 本次地址是否为「边下边播」形态：true 时内核仍在后台下载这一集，`/src`
+  /// 的 Range 请求会等待尚未下载到的字节；false 表示文件已完整落盘。
+  final bool streaming;
+
+  bool get isStreaming => streaming;
 
   bool get isValid => url.isNotEmpty;
 
@@ -47,6 +56,7 @@ class VideoSource {
       variants: variants,
       appliedVariant: VideoVariant.tryFromRow(asMap(data['variant'])),
       qualityFallback: data['quality_fallback'] == true,
+      streaming: data['streaming'] == true,
     );
   }
 }

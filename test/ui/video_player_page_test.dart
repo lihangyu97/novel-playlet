@@ -87,15 +87,102 @@ void main() {
     await _disposePlayer(tester);
   });
 
-  testWidgets('内核缓存未命中：回退正常取流', (tester) async {
+  testWidgets('内核缓存未命中：stream 不可用时回退正常整集取流', (tester) async {
     final store = _FakeSeriesStore();
     final factory = _FakeFactory();
-    final api = _FakeApi(sourceUrl: 'http://127.0.0.1:18931/src/e1.mp4');
+    // streamFails：模拟内核没有流式能力，验证整集下载兜底路径没被新优先级破坏。
+    final api = _FakeApi(
+      sourceUrl: 'http://127.0.0.1:18931/src/e1.mp4',
+      streamFails: true,
+    );
     await _pumpPlayer(tester, store: store, factory: factory, api: api);
 
     expect(api.cachedCalls, 1);
-    expect(api.sourceCalls, 1);
+    expect(api.streamCalls, 1, reason: '在线取流先试 stream');
+    expect(api.sourceCalls, 1, reason: 'stream 不可用时回退整集下载');
     expect(factory.created, hasLength(1));
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('在线优先 mode=stream：直接初始化 stream 地址，不等整集下载', (tester) async {
+    const streamUrl = 'http://127.0.0.1:18931/src/e1-stream.mp4';
+    const fallbackUrl = 'http://127.0.0.1:18931/src/e1-full.mp4';
+    final store = _FakeSeriesStore();
+    final factory = _FakeFactory();
+    final api = _FakeApi(streamUrl: streamUrl, sourceUrl: fallbackUrl);
+    await _pumpPlayer(tester, store: store, factory: factory, api: api);
+
+    expect(api.cachedCalls, 1, reason: '先探内核本地缓存');
+    expect(api.streamCalls, 1, reason: '缓存未命中应优先请求 mode=stream');
+    expect(api.sourceCalls, 0, reason: 'stream 成功就不该再走整集下载');
+    expect(factory.created, hasLength(1));
+    expect(
+      factory.networkUrls.single,
+      Uri.parse(streamUrl),
+      reason: 'stream 拿到的回环地址直接进 controller.initialize',
+    );
+    expect(factory.created.single.value.isPlaying, isTrue);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('stream 源初始化失败：回退一次默认整集取流并播放', (tester) async {
+    const streamUrl = 'http://127.0.0.1:18931/src/e1-stream.mp4';
+    const fallbackUrl = 'http://127.0.0.1:18931/src/e1-full.mp4';
+    final store = _FakeSeriesStore();
+    // 首个在线源 controller（stream 地址）initialize 抛错，模拟流式起播失败。
+    final factory = _FakeFactory(failFirstNetworkInitialize: true);
+    final api = _FakeApi(streamUrl: streamUrl, sourceUrl: fallbackUrl);
+    await _pumpPlayer(tester, store: store, factory: factory, api: api);
+
+    expect(api.streamCalls, 1);
+    expect(api.sourceCalls, 1, reason: 'stream 起播失败要回退一次默认取流');
+    expect(factory.created, hasLength(2));
+    expect(
+      factory.networkUrls[0],
+      Uri.parse(streamUrl),
+      reason: '第一次先尝试 stream 地址',
+    );
+    expect(
+      factory.networkUrls[1],
+      Uri.parse(fallbackUrl),
+      reason: '回退到默认整集下载地址',
+    );
+    expect(
+      factory.created.first.disposeCount,
+      1,
+      reason: '失败的 controller 必须释放',
+    );
+    expect(factory.created.last.value.isPlaying, isTrue, reason: '回退后仍要正常播放');
+    expect(find.text('视频播放失败'), findsNothing, reason: '不允许把原本能播的集变成错误页');
+    expect(find.byType(VideoPlayer), findsOneWidget);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('预取下一集使用 mode=stream：立即拿回 /src 地址并触发后台下载', (tester) async {
+    final store = _FakeSeriesStore();
+    final factory = _FakeFactory();
+    final api = _FakeApi();
+    await _pumpPlayer(tester, store: store, factory: factory, api: api);
+
+    // 当前集起播 5s 后预取下一集（_schedulePrefetch）。
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump();
+
+    expect(api.cachedCalls, greaterThanOrEqualTo(2), reason: '当前集与预取各探一次本地缓存');
+    expect(api.sourceCalls, 0, reason: '预取应优先 stream，而不是等整集下载');
+    expect(
+      api.streamEpisodeIds,
+      contains('e2'),
+      reason: '预取下一集应请求 mode=stream',
+    );
+    expect(
+      api.streamEpisodeIds.where((id) => id == 'e2'),
+      hasLength(1),
+      reason: '同一集只预取一次',
+    );
 
     await _disposePlayer(tester);
   });
@@ -104,7 +191,11 @@ void main() {
     final health = NetworkHealth()..recordFailure();
     final store = _FakeSeriesStore();
     final factory = _FakeFactory();
-    final api = _FakeApi(sourceUrl: 'http://127.0.0.1:18931/src/e1.mp4');
+    // streamFails：重试后先试 stream 失败、再回退整集取流，两条都算联网。
+    final api = _FakeApi(
+      sourceUrl: 'http://127.0.0.1:18931/src/e1.mp4',
+      streamFails: true,
+    );
     await _pumpPlayer(
       tester,
       store: store,
@@ -114,6 +205,7 @@ void main() {
     );
 
     expect(api.cachedCalls, 1, reason: '本地缓存探测照旧');
+    expect(api.streamCalls, 0, reason: '疑似离线时连 stream 也不再请求');
     expect(api.sourceCalls, 0, reason: '疑似离线时不应再付一次完整取流等待');
     expect(find.text('该集未离线缓存'), findsOneWidget);
 
@@ -121,7 +213,8 @@ void main() {
     await tester.tap(find.text('重试'));
     await tester.pump();
     await tester.pump();
-    expect(api.sourceCalls, 1, reason: '手动重试必须真的联网');
+    expect(api.streamCalls, 1, reason: '手动重试先试 stream，必须真的联网');
+    expect(api.sourceCalls, 1, reason: 'stream 不可用时回退整集取流');
     expect(health.isSuspectedOffline, isFalse, reason: '取流成功清除疑似离线');
 
     await _disposePlayer(tester);
@@ -669,15 +762,30 @@ class _FakeSeriesStore extends OfflineSeriesStore {
       cachedFile;
 }
 
-/// ApiClient 测试替身：只关心缓存探测与正常取流的分流。
+/// ApiClient 测试替身：只关心缓存探测、`mode=stream` 优先与整集下载兜底的分流。
 class _FakeApi extends ApiClient {
-  _FakeApi({this.cachedUrl, this.sourceUrl})
-    : super(BackendTransport(port: 18931));
+  _FakeApi({
+    this.cachedUrl,
+    this.sourceUrl,
+    this.streamUrl,
+    this.streamFails = false,
+  }) : super(BackendTransport(port: 18931));
 
   final String? cachedUrl;
   final String? sourceUrl;
+
+  /// `mode=stream` 返回的地址；默认按集 id 拼 `/src/<id>.mp4`。
+  final String? streamUrl;
+
+  /// 模拟内核不支持/取不到 stream 源：让 stream 请求抛错，验证整集下载兜底。
+  final bool streamFails;
+
   int cachedCalls = 0;
   int sourceCalls = 0;
+  int streamCalls = 0;
+
+  /// 记录每次 stream 取流的集，断言「在线优先 stream」「预取也用 stream」。
+  final List<String> streamEpisodeIds = <String>[];
 
   @override
   Future<String?> cachedVideoUrl(String episodeId) async {
@@ -690,24 +798,51 @@ class _FakeApi extends ApiClient {
     String episodeId, {
     bool refresh = false,
     int? maxHeight,
+    bool stream = false,
   }) async {
+    if (stream) {
+      streamCalls += 1;
+      streamEpisodeIds.add(episodeId);
+      if (streamFails) throw Exception('stream 取流失败');
+      return VideoSource(
+        url: streamUrl ?? 'http://127.0.0.1:18931/src/$episodeId.mp4',
+        streaming: true,
+      );
+    }
     sourceCalls += 1;
-    return VideoSource(url: sourceUrl ?? 'http://127.0.0.1:18931/src/e1.mp4');
+    return VideoSource(
+      url: sourceUrl ?? 'http://127.0.0.1:18931/src/$episodeId.mp4',
+    );
   }
 }
 
-/// controller 工厂测试替身：记录创建次数与倍速下发记录。
+/// controller 工厂测试替身：记录创建次数、倍速下发与在线地址。
 class _FakeFactory implements _ControllerFactory {
-  _FakeFactory({this.size = const Size(1280, 720)});
+  _FakeFactory({
+    this.size = const Size(1280, 720),
+    this.failFirstNetworkInitialize = false,
+  });
 
   /// 假视频的画面尺寸（决定横/竖屏与全屏入口是否出现）。
   final Size size;
 
+  /// 首个在线源 controller 的 initialize 抛错（模拟 stream 起播失败）。
+  final bool failFirstNetworkInitialize;
+
   final List<_FakeController> created = <_FakeController>[];
+
+  /// 每次创建 controller 时传入的在线地址（file 源为 null）。
+  final List<Uri?> networkUrls = <Uri?>[];
+
+  bool _failedOnce = false;
 
   @override
   VideoPlayerController call({File? file, Uri? networkUrl}) {
-    final controller = _FakeController(size: size);
+    networkUrls.add(networkUrl);
+    final fail =
+        failFirstNetworkInitialize && !_failedOnce && networkUrl != null;
+    if (fail) _failedOnce = true;
+    final controller = _FakeController(size: size, failInitialize: fail);
     created.add(controller);
     return controller;
   }
@@ -715,16 +850,28 @@ class _FakeFactory implements _ControllerFactory {
 
 /// 不碰平台通道的 VideoPlayerController：只维护 VideoPlayerValue。
 class _FakeController extends VideoPlayerController {
-  _FakeController({this.size = const Size(1280, 720)})
-    : super.file(File('/tmp/fake.mp4'));
+  _FakeController({
+    this.size = const Size(1280, 720),
+    this.failInitialize = false,
+  }) : super.file(File('/tmp/fake.mp4'));
 
   /// 默认 16:9 横屏（全屏入口可见）；竖屏场景传 720x1280。
   final Size size;
+
+  /// initialize 是否抛错（模拟流式源起播失败，验证回退整集下载）。
+  final bool failInitialize;
 
   final List<double> speeds = <double>[];
 
   @override
   Future<void> initialize() async {
+    if (failInitialize) {
+      throw PlatformException(
+        code: 'VideoError',
+        message: 'Failed to load video: The operation could not be completed.',
+        details: null,
+      );
+    }
     value = VideoPlayerValue(
       duration: const Duration(seconds: 120),
       size: size,

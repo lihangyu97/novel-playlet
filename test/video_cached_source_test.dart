@@ -81,4 +81,26 @@ void main() {
     expect(transport.calls.single, contains('refresh=1'));
     expect(transport.calls.single, contains('variants=0'));
   });
+
+  test('stream 取流带 mode=stream，并解析 streaming 标记', () async {
+    final transport = _FakeTransport({
+      'code': 0,
+      'data': {'video_url': '/src/e1.mp4', 'streaming': true, 'cached': false},
+    });
+    final source = await ApiClient(transport).videoSource('e1', stream: true);
+    expect(transport.calls.single, contains('mode=stream'));
+    expect(transport.calls.single, contains('variants=0'));
+    expect(source.url, 'http://127.0.0.1:18931/src/e1.mp4');
+    expect(source.isStreaming, isTrue);
+  });
+
+  test('默认取流不带 mode=stream；streaming 缺省为 false', () async {
+    final transport = _FakeTransport({
+      'code': 0,
+      'data': {'video_url': '/src/e1.mp4'},
+    });
+    final source = await ApiClient(transport).videoSource('e1');
+    expect(transport.calls.single, isNot(contains('mode=stream')));
+    expect(source.isStreaming, isFalse);
+  });
 }

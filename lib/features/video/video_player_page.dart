@@ -139,8 +139,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   bool _speedReapplyPending = false;
   final List<Timer> _speedReapplyTimers = <Timer>[];
 
-  /// 预取下一集的取流结果（episodeId → source）。缓存未命中时内核会整集
-  /// 下载，把这段耗时移到当前集播放期间，切集只用拿现成的 `/src` 地址。
+  /// 预取下一集的取流结果（episodeId → source）。预取走 `mode=stream`：内核
+  /// 立即返回 `/src` 地址并在后台下载，把「上游往返 + 下载启动」移出关键路径，
+  /// 切集只用拿现成的回环地址起播。
   final Map<String, VideoSource> _prefetched = {};
   final Set<String> _prefetching = {};
   Timer? _prefetchTimer;
@@ -351,6 +352,24 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         throw const _OfflineSuspected();
       }
 
+      // 在线优先走 mode=stream：内核立即返回 `/src` 地址并在后台继续下载，
+      // 起播不用等整集落盘。refresh（用户要求重新下载这一集）跳过它，直接
+      // 走整集重取。stream 取流/起播失败时回退下面的默认整集下载兜底，不能
+      // 因为新模式把原本能播的集变成错误页；-1004 是回环监听被回收，回退也
+      // 播不了，仍交给外层做一次有界自愈。
+      if (!refresh) {
+        try {
+          final streamed = await api.videoSource(episode.id, stream: true);
+          if (!mounted || generation != _generation) return;
+          ref.read(networkHealthProvider).recordSuccess();
+          await playUrl(streamed.url);
+          return;
+        } catch (error) {
+          if (!mounted || generation != _generation) return;
+          if (_isLoopbackConnectRefused(error)) rethrow;
+        }
+      }
+
       final source = await api.videoSource(episode.id, refresh: refresh);
       if (!mounted || generation != _generation) return;
       ref.read(networkHealthProvider).recordSuccess();
@@ -531,6 +550,25 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     return null;
   }
 
+  /// 在线取流（预热用）：优先 `mode=stream`，失败回退默认整集下载。
+  ///
+  /// stream 只让内核「开始下载并立即返回 `/src` 地址」，起播不再等整集落盘；
+  /// 内核不支持 stream / 本次取流异常时回退到原来的整集下载路径，避免预热
+  /// 因为新模式整体失效。正式取流（[_open]）的起播失败回退更细，单独实现。
+  Future<VideoSource> _onlineSource(String episodeId) async {
+    final api = ref.read(apiClientProvider);
+    try {
+      final source = await api.videoSource(episodeId, stream: true);
+      ref.read(networkHealthProvider).recordSuccess();
+      return source;
+    } catch (_) {
+      // 回退整集下载；失败原因由提交后的 _open 统一展示。
+    }
+    final source = await api.videoSource(episodeId);
+    ref.read(networkHealthProvider).recordSuccess();
+    return source;
+  }
+
   void _onTick() {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
@@ -579,9 +617,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
 
   /// 预取下一集的取流结果。
   ///
-  /// 缓存未命中时这次调用会把整集下载进内核缓存（产品已确认允许），切集时
-  /// 直接拿现成的 `/src` 地址，把下载移出关键路径。失败静默——切集时还有
-  /// 正常取流兜底，不需要打扰用户。
+  /// 预取请求 `mode=stream`：内核立即返回 `/src` 地址并开始后台下载下一集，
+  /// 切集时直接拿现成地址起播，不再等上游往返 + 整集落盘。失败静默——切集时
+  /// 还有正常取流兜底，不需要打扰用户。
   Future<void> _prefetchNext() async {
     final next = _index + 1;
     if (next >= _episodes.length) return;
@@ -610,7 +648,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _prefetching.add(episode.id);
     try {
       final api = ref.read(apiClientProvider);
-      // 先探本地缓存：命中就不用为预取再触发整集下载。
+      // 先探本地缓存：命中就不用为预取再触发一次取流。
       String? cachedUrl;
       try {
         cachedUrl = await api.cachedVideoUrl(episode.id);
@@ -618,24 +656,36 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         // 探测失败当 miss。
       }
       if (!mounted) return;
-      final source = cachedUrl != null
-          ? VideoSource(url: cachedUrl)
-          : await api.videoSource(episode.id);
+      if (cachedUrl != null) {
+        // 缓存命中：地址已经是完整文件，不需要再让内核启动下载。
+        _rememberPrefetched(episode.id, VideoSource(url: cachedUrl));
+        return;
+      }
+      // 预取优先用 stream 源：内核立即返回 `/src` 地址并在后台下载下一集，
+      // 切集时直接拿现成地址起播；内核不支持时回退旧的整集下载预取。
+      VideoSource source;
+      try {
+        source = await api.videoSource(episode.id, stream: true);
+      } catch (_) {
+        source = await api.videoSource(episode.id);
+      }
       if (!mounted) return;
       // 预取真的走了网络且成功：说明网络可用，清掉「疑似离线」。
-      if (cachedUrl == null) {
-        ref.read(networkHealthProvider).recordSuccess();
-      }
-      // 页内只留最近两条：追剧时无限积累没有意义。
-      while (_prefetched.length >= 2) {
-        _prefetched.remove(_prefetched.keys.first);
-      }
-      _prefetched[episode.id] = source;
+      ref.read(networkHealthProvider).recordSuccess();
+      _rememberPrefetched(episode.id, source);
     } catch (_) {
       // 预取失败静默：切集时走正常取流，失败原因由播放页统一展示。
     } finally {
       _prefetching.remove(episode.id);
     }
+  }
+
+  /// 记下预取结果。页内只留最近两条：追剧时无限积累没有意义。
+  void _rememberPrefetched(String episodeId, VideoSource source) {
+    while (_prefetched.length >= 2) {
+      _prefetched.remove(_prefetched.keys.first);
+    }
+    _prefetched[episodeId] = source;
   }
 
   /// 这次失败是不是「回环监听已死」——connect refused。
@@ -1035,9 +1085,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           if (url == null) {
             // 疑似离线：不在预热里白等内核重试，落定后由 _open 给明确文案。
             if (ref.read(networkHealthProvider).isSuspectedOffline) return;
-            url = (await api.videoSource(episode.id)).url;
+            // 和正式取流同一优先级：先 stream（立即拿 /src + 后台下载），
+            // 失败再回退整集下载。
+            url = (await _onlineSource(episode.id)).url;
             if (!mounted || token != _prepareToken) return;
-            ref.read(networkHealthProvider).recordSuccess();
           }
         }
         controller = ref.read(playbackControllerFactoryProvider)(
