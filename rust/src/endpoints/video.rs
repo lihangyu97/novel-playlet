@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use once_cell::sync::Lazy;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha512};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::watch;
 
 use crate::endpoints::base::{
     dragon_read_json_headers, phoenix_player_headers, phoenix_player_url, Upstream, UpstreamMode,
@@ -266,7 +268,58 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             "variants": variants,
         });
         if stream_mode {
-            return Ok(source);
+            // M1: hand the player a local `/src` URL immediately and let the
+            // download continue in the background (see the streaming section
+            // below). Anything the streaming path cannot cover — `.m4s`/`.ts`,
+            // an upstream without `Content-Length`, or a failed stream start —
+            // falls back to the pre-M1 whole-episode download, so playback
+            // never regresses into an error page.
+            match stream_mode_start(
+                ctx,
+                &video_id,
+                &video_url,
+                &content_key,
+                force_refresh,
+                applied_variant.as_ref(),
+                vertical,
+                quality_fallback,
+                &variants,
+            )
+            .await
+            {
+                StreamModeOutcome::Response(response) => return Ok(response),
+                StreamModeOutcome::DownloadWholeEpisode => {
+                    return match download_and_save(
+                        ctx,
+                        &video_id,
+                        &video_url,
+                        &content_key,
+                        force_refresh,
+                        applied_variant.as_ref(),
+                        want_quality.then_some(requested_max_height),
+                    )
+                    .await
+                    {
+                        Ok(local_path) => Ok(saved_video_response(
+                            ctx,
+                            &local_path,
+                            &video_id,
+                            vertical,
+                            applied_variant.as_ref(),
+                            quality_fallback,
+                            Some(false),
+                        )
+                        .await),
+                        // A stream-mode caller's contract is "either a local
+                        // URL or an error it can fall back from"; handing back
+                        // the remote source would make the client play CENC
+                        // ciphertext from the CDN.
+                        Err(err) => Err(ApiError::Internal(format!(
+                            "stream fallback download failed: {err}"
+                        ))),
+                    };
+                }
+            }
         }
 
         match download_and_save(
@@ -280,37 +333,16 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         )
         .await
         {
-            Ok(local_path) => {
-                let main_url = local_path.clone();
-                // 下载/命中后会写档位 marker；以磁盘上的为准（缓存命中时可能
-                // 是之前下载的同档或更高档）。
-                let src_dir = if ctx.src_dir.is_empty() {
-                    "src".to_string()
-                } else {
-                    ctx.src_dir.clone()
-                };
-                let filename = local_path.trim_start_matches("/src/").to_string();
-                let fp = Path::new(&src_dir).join(filename);
-                let variant = tokio::task::spawn_blocking(move || read_variant_marker(&fp))
-                    .await
-                    .ok()
-                    .flatten()
-                    .or(applied_variant.clone());
-                Ok(json!({
-                    "video_url": local_path,
-                    "video_id": video_id,
-                    "vertical": vertical,
-                    "variant": variant,
-                    "quality_fallback": quality_fallback,
-                    "video_info": {
-                        "data": {
-                            "video_list": {
-                                "video_1": { "main_url": main_url },
-                            },
-                        },
-                    },
-                }))
-            }
+            Ok(local_path) => Ok(saved_video_response(
+                ctx,
+                &local_path,
+                &video_id,
+                vertical,
+                applied_variant.as_ref(),
+                quality_fallback,
+                None,
+            )
+            .await),
             // Legacy clients recursively extract URLs from raw payloads;
             // only the already-selected variant may survive a download error.
             Err(_) => Ok(source),
@@ -1425,6 +1457,24 @@ async fn stream_download_to_file_with_cap(
     part_path: &Path,
     cap_bytes: u64,
 ) -> Result<u64, String> {
+    stream_download_to_file_tracked(url, user_agent, part_path, cap_bytes, None).await
+}
+
+/// The shared streaming-download loop.
+///
+/// `session` (when given) is the loopback streaming session this download
+/// feeds: the loop publishes the advertised total as soon as the response
+/// headers arrive and the running byte count as the body arrives, so waiting
+/// `/src` range requests can see how far along it is. It also honours the
+/// session's cancellation flag (a `refresh=1` replacement). The plain
+/// whole-episode download passes `None` and behaves exactly as before.
+async fn stream_download_to_file_tracked(
+    url: &str,
+    user_agent: &str,
+    part_path: &Path,
+    cap_bytes: u64,
+    session: Option<&StreamSession>,
+) -> Result<u64, String> {
     let client = streaming_client().ok_or_else(|| "streaming client unavailable".to_string())?;
     let mut resp = client
         .get(url)
@@ -1443,12 +1493,18 @@ async fn stream_download_to_file_with_cap(
                 "download video: content-length {len} exceeds cap {cap_bytes}"
             ));
         }
+        if let Some(session) = session {
+            session.set_total(len);
+        }
     }
     let mut file = tokio::fs::File::create(part_path)
         .await
         .map_err(|e| e.to_string())?;
     let mut total: u64 = 0;
     loop {
+        if session.is_some_and(StreamSession::is_cancelled) {
+            return Err("download video: cancelled".to_string());
+        }
         match resp.chunk().await {
             Ok(Some(bytes)) => {
                 total = total
@@ -1460,6 +1516,9 @@ async fn stream_download_to_file_with_cap(
                     ));
                 }
                 file.write_all(&bytes).await.map_err(|e| e.to_string())?;
+                if let Some(session) = session {
+                    session.set_downloaded(total);
+                }
             }
             Ok(None) => break,
             Err(e) => return Err(format!("download video: {e}")),
@@ -1480,27 +1539,12 @@ async fn download_and_save(
     applied_variant: Option<&Value>,
     requested_max_height: Option<i64>,
 ) -> Result<String, String> {
-    let src_dir = if ctx.src_dir.is_empty() {
-        "src".to_string()
-    } else {
-        ctx.src_dir.clone()
-    };
+    let src_dir = video_src_dir(ctx);
     tokio::fs::create_dir_all(&src_dir)
         .await
         .map_err(|e| e.to_string())?;
 
-    let mut ext = ".mp4".to_string();
-    if let Some(idx) = video_url.rfind('.') {
-        if idx > 0 {
-            let candidate = video_url[idx..].to_lowercase();
-            if candidate.len() <= 5
-                && (candidate == ".mp4" || candidate == ".m4s" || candidate == ".ts")
-            {
-                ext = candidate;
-            }
-        }
-    }
-
+    let ext = video_url_extension(video_url);
     let filename = format!("{video_id}{ext}");
     let fp = Path::new(&src_dir).join(&filename);
     let guard = cache_entry_lock(&fp).lock_owned().await;
@@ -1634,6 +1678,973 @@ async fn download_and_save(
     schedule_prune_src_cache(&src_dir, fp);
 
     Ok(format!("/src/{filename}"))
+}
+
+/// The runtime `src/` directory (the FFI/loopback runtime default is `src`).
+fn video_src_dir(ctx: &Ctx) -> String {
+    if ctx.src_dir.is_empty() {
+        "src".to_string()
+    } else {
+        ctx.src_dir.clone()
+    }
+}
+
+/// The on-disk extension selected for a source URL. Streaming only applies to
+/// `.mp4`; `.m4s`/`.ts` (and URLs without a recognised extension, which the
+/// whole-episode path has always stored as `.mp4`) keep the old behaviour.
+fn video_url_extension(video_url: &str) -> String {
+    let mut ext = ".mp4".to_string();
+    if let Some(idx) = video_url.rfind('.') {
+        if idx > 0 {
+            let candidate = video_url[idx..].to_lowercase();
+            if candidate.len() <= 5
+                && (candidate == ".mp4" || candidate == ".m4s" || candidate == ".ts")
+            {
+                ext = candidate;
+            }
+        }
+    }
+    ext
+}
+
+/// The response shape of a successful whole-episode download (also used by the
+/// streaming fallback with `streaming: Some(false)`): `video_url` is the local
+/// `/src/...` path and the tier marker is read from disk, because a cache hit
+/// may have produced a different tier than this resolution picked.
+#[allow(clippy::too_many_arguments)]
+async fn saved_video_response(
+    ctx: &Ctx,
+    local_path: &str,
+    video_id: &str,
+    vertical: Option<bool>,
+    applied_variant: Option<&Value>,
+    quality_fallback: bool,
+    streaming: Option<bool>,
+) -> Value {
+    let main_url = local_path.to_string();
+    let src_dir = video_src_dir(ctx);
+    let filename = local_path.trim_start_matches("/src/").to_string();
+    let fp = Path::new(&src_dir).join(filename);
+    let variant = tokio::task::spawn_blocking(move || read_variant_marker(&fp))
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| applied_variant.cloned());
+    let mut response = json!({
+        "video_url": local_path,
+        "video_id": video_id,
+        "vertical": vertical,
+        "variant": variant,
+        "quality_fallback": quality_fallback,
+        "video_info": {
+            "data": {
+                "video_list": {
+                    "video_1": { "main_url": main_url },
+                },
+            },
+        },
+    });
+    if let Some(streaming) = streaming {
+        response["streaming"] = json!(streaming);
+    }
+    response
+}
+
+// ---------------------------------------------------------------------------
+// Loopback streaming (M1): serve `/src` while the episode is still downloading
+//
+// Every real cache entry is a faststart MP4 (ftyp + moov first, mdat after), so
+// the moov needed for CENC indexing arrives within the first ~200 KiB. A
+// `mode=stream` request resolves the source, starts the download into the same
+// `src/<id>.mp4.part` file the whole-episode path uses, and returns the local
+// `/src/<id>.mp4` URL as soon as the upstream size is known. The player's
+// Range requests are then answered from the `.part`: a request for bytes that
+// have not arrived yet waits (bounded) for the progress to reach them.
+//
+// Coordination with `download_and_save`: both paths take the same per-file
+// entry lock for the whole download/commit, so a default-mode request that
+// races a stream session (the client's fallback when streaming init fails)
+// waits for the session instead of truncating its `.part`.
+// ---------------------------------------------------------------------------
+
+/// How long one `/src` range request waits for its bytes (and for the moov)
+/// before answering 504: 30 s. The player retries the range and, if that keeps
+/// failing, falls back to the whole-episode path.
+const STREAM_RANGE_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Grace period for the hard-link snapshots handed to response bodies. A
+/// completion rename unlinks only the `.part` *name*; the snapshot keeps the
+/// inode readable, so a request that was built just before the commit can
+/// never hit a deleted path (the race the old static path would have had).
+const STREAM_SNAPSHOT_TTL: Duration = Duration::from_secs(60);
+
+/// Snapshots older than this are leftovers of a process that died between
+/// hand-out and cleanup; a new session sweeps them.
+const STREAM_SNAPSHOT_STALE_AFTER: Duration = Duration::from_secs(10 * 60);
+
+/// A session older than this is treated as orphaned by the registry (a task
+/// that panicked before publishing a terminal phase) and dropped, so requests
+/// can never wait on a dead session forever. The download's own 15 s request
+/// timeout bounds a live session well below this.
+const STREAM_SESSION_MAX_AGE: Duration = Duration::from_secs(2 * 60);
+
+#[derive(Debug, Clone)]
+enum StreamPhase {
+    /// Response headers not received yet: the upstream size is still unknown.
+    Probing,
+    /// Body bytes are arriving; `total` is known when upstream sent
+    /// `Content-Length`.
+    Downloading,
+    /// The complete file was already cached; nothing was downloaded.
+    Cached,
+    /// The download finished: `.part` renamed to the final name, sidecars
+    /// written. Later requests take the normal completed-file path.
+    Committed,
+    /// The download failed; waiting range requests report this as a 502.
+    Failed(String),
+}
+
+impl StreamPhase {
+    fn is_terminal(&self) -> bool {
+        matches!(self, Self::Cached | Self::Committed | Self::Failed(_))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StreamProgress {
+    phase: StreamPhase,
+    total: Option<u64>,
+    downloaded: u64,
+}
+
+struct StreamSession {
+    video_id: String,
+    filename: String,
+    src_dir: String,
+    final_path: PathBuf,
+    part_path: PathBuf,
+    /// CENC content key from source resolution; empty for clear sources.
+    key: Vec<u8>,
+    variant: Option<Value>,
+    progress: watch::Sender<StreamProgress>,
+    cancelled: AtomicBool,
+    started: std::time::Instant,
+}
+
+impl StreamSession {
+    fn snapshot(&self) -> StreamProgress {
+        let progress: StreamProgress = (*self.progress.borrow()).clone();
+        progress
+    }
+
+    fn set_total(&self, total: u64) {
+        self.progress
+            .send_modify(|progress| progress.total = Some(total));
+    }
+
+    fn set_downloaded(&self, downloaded: u64) {
+        self.progress
+            .send_modify(|progress| progress.downloaded = downloaded);
+    }
+
+    fn set_phase(&self, phase: StreamPhase) {
+        self.progress.send_modify(|progress| progress.phase = phase);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+
+    /// A session that outlived the whole download timeout cannot still be
+    /// doing useful work: treat it as orphaned.
+    fn is_orphaned(&self) -> bool {
+        self.started.elapsed() > STREAM_SESSION_MAX_AGE
+    }
+
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+}
+
+/// In-flight streaming downloads, keyed by the final (absolute) cache path.
+/// A terminal session is removed by the download task itself; the registry
+/// lock is never held across an await.
+static STREAM_SESSIONS: Lazy<Mutex<HashMap<PathBuf, Arc<StreamSession>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn stream_session_key(path: &Path) -> PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Drops terminal sessions and orphans (a task that died without publishing
+/// a terminal phase). Called with the registry lock held.
+fn prune_stream_sessions(sessions: &mut HashMap<PathBuf, Arc<StreamSession>>) {
+    sessions.retain(|_, session| {
+        if session.snapshot().phase.is_terminal() || session.is_orphaned() {
+            session.cancel();
+            return false;
+        }
+        true
+    });
+}
+
+/// Looks up the streaming session that would serve `path`. Terminal sessions
+/// are pruned eagerly, so callers never hand a completed entry down the
+/// `.part` path.
+fn stream_session_for(path: &Path) -> Option<Arc<StreamSession>> {
+    let key = stream_session_key(path);
+    let mut sessions = STREAM_SESSIONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_stream_sessions(&mut sessions);
+    sessions.get(&key).cloned()
+}
+
+/// Registers `candidate`, or returns the session that is already downloading
+/// the same entry (the "reuse an in-flight download" contract). With
+/// `replace`, an in-flight session is cancelled first: a `refresh=1` request
+/// must not keep playing a download the client already rejected.
+fn register_stream_session(candidate: Arc<StreamSession>, replace: bool) -> Arc<StreamSession> {
+    let key = stream_session_key(&candidate.final_path);
+    let mut sessions = STREAM_SESSIONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_stream_sessions(&mut sessions);
+    if replace {
+        if let Some(previous) = sessions.remove(&key) {
+            previous.cancel();
+        }
+    } else if let Some(existing) = sessions.get(&key) {
+        return existing.clone();
+    }
+    sessions.insert(key, candidate.clone());
+    candidate
+}
+
+fn unregister_stream_session(session: &Arc<StreamSession>) {
+    let key = stream_session_key(&session.final_path);
+    let mut sessions = STREAM_SESSIONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if sessions
+        .get(&key)
+        .is_some_and(|current| Arc::ptr_eq(current, session))
+    {
+        sessions.remove(&key);
+    }
+}
+
+/// What `mode=stream` should do after resolving the source.
+enum StreamModeOutcome {
+    /// Answer immediately (the URL may still be downloading, or is cached).
+    Response(Value),
+    /// Streaming is not possible for this source: run the pre-M1 whole-episode
+    /// download and answer with the finished file.
+    DownloadWholeEpisode,
+}
+
+/// Starts (or joins) the streaming download and waits only for the upstream
+/// size — never for body bytes or download retries. A streamable source
+/// therefore returns after source resolution plus the video response headers;
+/// everything else falls back to the whole-episode behaviour.
+#[allow(clippy::too_many_arguments)]
+async fn stream_mode_start(
+    ctx: &Ctx,
+    video_id: &str,
+    video_url: &str,
+    content_key: &[u8],
+    force_refresh: bool,
+    applied_variant: Option<&Value>,
+    vertical: Option<bool>,
+    quality_fallback: bool,
+    variants: &[Value],
+) -> StreamModeOutcome {
+    if video_url_extension(video_url) != ".mp4" {
+        return StreamModeOutcome::DownloadWholeEpisode;
+    }
+    let session = start_stream_session(
+        ctx,
+        video_id,
+        video_url,
+        content_key,
+        force_refresh,
+        applied_variant,
+    );
+    let mut progress = session.progress.subscribe();
+    let deadline = tokio::time::Instant::now() + STREAM_RANGE_WAIT_TIMEOUT;
+    loop {
+        let current: StreamProgress = (*progress.borrow_and_update()).clone();
+        match &current.phase {
+            StreamPhase::Cached => {
+                return StreamModeOutcome::Response(
+                    cached_stream_response(&session, vertical, quality_fallback, variants).await,
+                );
+            }
+            StreamPhase::Failed(err) => {
+                log::warn!("video {video_id}: streaming start failed: {err}");
+                return StreamModeOutcome::DownloadWholeEpisode;
+            }
+            StreamPhase::Committed => {
+                // The download finished before the client got its answer: the
+                // URL is the completed file either way.
+                return StreamModeOutcome::Response(if current.total.is_some() {
+                    streaming_response(&session, vertical, quality_fallback, variants)
+                } else {
+                    saved_video_response(
+                        ctx,
+                        &format!("/src/{}", session.filename),
+                        video_id,
+                        vertical,
+                        applied_variant,
+                        quality_fallback,
+                        Some(false),
+                    )
+                    .await
+                });
+            }
+            StreamPhase::Probing | StreamPhase::Downloading => {
+                if let Some(total) = current.total {
+                    if total == 0 {
+                        return StreamModeOutcome::DownloadWholeEpisode;
+                    }
+                    return StreamModeOutcome::Response(streaming_response(
+                        &session,
+                        vertical,
+                        quality_fallback,
+                        variants,
+                    ));
+                }
+                let now = tokio::time::Instant::now();
+                if now >= deadline
+                    || tokio::time::timeout(deadline - now, progress.changed())
+                        .await
+                        .is_err()
+                {
+                    // A dead/slow session must not hang the FFI call: cancel it
+                    // (the fallback download waits on the same entry lock, so it
+                    // cannot race the aborted download's `.part`).
+                    log::warn!("video {video_id}: streaming start timed out");
+                    session.cancel();
+                    unregister_stream_session(&session);
+                    return StreamModeOutcome::DownloadWholeEpisode;
+                }
+            }
+        }
+    }
+}
+
+fn streaming_response(
+    session: &StreamSession,
+    vertical: Option<bool>,
+    quality_fallback: bool,
+    variants: &[Value],
+) -> Value {
+    json!({
+        "video_url": format!("/src/{}", session.filename),
+        "video_id": session.video_id.clone(),
+        "vertical": vertical,
+        "cached": false,
+        "streaming": true,
+        "variant": session.variant.clone(),
+        "quality_fallback": quality_fallback,
+        "variants": variants,
+    })
+}
+
+async fn cached_stream_response(
+    session: &StreamSession,
+    vertical: Option<bool>,
+    quality_fallback: bool,
+    variants: &[Value],
+) -> Value {
+    let fp = session.final_path.clone();
+    let variant = tokio::task::spawn_blocking(move || read_variant_marker(&fp))
+        .await
+        .ok()
+        .flatten();
+    json!({
+        "video_url": format!("/src/{}", session.filename),
+        "video_id": session.video_id.clone(),
+        "vertical": vertical,
+        "cached": true,
+        "streaming": false,
+        "variant": variant,
+        "quality_fallback": quality_fallback,
+        "variants": variants,
+    })
+}
+
+fn start_stream_session(
+    ctx: &Ctx,
+    video_id: &str,
+    video_url: &str,
+    content_key: &[u8],
+    force_refresh: bool,
+    applied_variant: Option<&Value>,
+) -> Arc<StreamSession> {
+    let src_dir = video_src_dir(ctx);
+    let filename = format!("{video_id}.mp4");
+    let final_path = Path::new(&src_dir).join(&filename);
+    let part_path = PathBuf::from(format!("{}.part", final_path.display()));
+    let (progress, _receiver) = watch::channel(StreamProgress {
+        phase: StreamPhase::Probing,
+        total: None,
+        downloaded: 0,
+    });
+    let candidate = Arc::new(StreamSession {
+        video_id: video_id.to_string(),
+        filename,
+        src_dir,
+        final_path,
+        part_path,
+        key: content_key.to_vec(),
+        variant: applied_variant.cloned(),
+        progress,
+        cancelled: AtomicBool::new(false),
+        started: std::time::Instant::now(),
+    });
+    let session = register_stream_session(candidate.clone(), force_refresh);
+    if Arc::ptr_eq(&session, &candidate) {
+        // The streaming client bypasses `UpstreamClient::do_request`, so the
+        // mock-origin rewrite has to be applied explicitly (same as the
+        // whole-episode download).
+        let download_url = ctx.up.effective_url(video_url);
+        let task_session = session.clone();
+        tokio::spawn(async move {
+            run_stream_session(task_session, download_url, force_refresh).await;
+        });
+    }
+    session
+}
+
+async fn run_stream_session(session: Arc<StreamSession>, url: String, force_refresh: bool) {
+    match stream_session_body(&session, &url, force_refresh).await {
+        Ok(()) => {}
+        Err(err) => {
+            log::warn!(
+                "video {}: streaming download failed: {err}",
+                session.video_id
+            );
+            session.set_phase(StreamPhase::Failed(err));
+        }
+    }
+    unregister_stream_session(&session);
+}
+
+/// Owns the per-entry lock from before the cache check until the commit (or
+/// the failed-download cleanup) is done, so no other path can truncate or
+/// rename the `.part` underneath this download.
+async fn stream_session_body(
+    session: &Arc<StreamSession>,
+    url: &str,
+    force_refresh: bool,
+) -> Result<(), String> {
+    let guard = cache_entry_lock(&session.final_path).lock_owned().await;
+    let outcome = stream_session_locked(session, url, force_refresh).await;
+    if outcome.is_err() {
+        let _ = tokio::fs::remove_file(&session.part_path).await;
+        let _ = tokio::fs::remove_file(key_sidecar_path(&session.final_path)).await;
+    }
+    drop(guard);
+    outcome
+}
+
+async fn stream_session_locked(
+    session: &Arc<StreamSession>,
+    url: &str,
+    force_refresh: bool,
+) -> Result<(), String> {
+    let sweep_dir = session.src_dir.clone();
+    let _ = tokio::task::spawn_blocking(move || sweep_stale_stream_snapshots(&sweep_dir)).await;
+
+    if force_refresh {
+        let _ = tokio::fs::remove_file(&session.final_path).await;
+        let _ = tokio::fs::remove_file(key_sidecar_path(&session.final_path)).await;
+        let _ = tokio::fs::remove_file(variant_marker_path(&session.final_path)).await;
+    }
+
+    // A previous request may have completed the entry while this session was
+    // being started; a finished file always wins over a new download.
+    let final_path = session.final_path.clone();
+    let cached = tokio::task::spawn_blocking(move || completed_mp4_ready(&final_path))
+        .await
+        .map_err(|err| err.to_string())?;
+    if cached {
+        session.set_phase(StreamPhase::Cached);
+        return Ok(());
+    }
+
+    let _ = tokio::fs::remove_file(&session.part_path).await;
+    // The key sidecar is what a later process (and the completed-file serve
+    // path) needs; write it as soon as the download starts instead of waiting
+    // for the commit. A clear source drops it again at commit.
+    if !session.key.is_empty() {
+        let key_path = session.final_path.clone();
+        let key = session.key.clone();
+        tokio::task::spawn_blocking(move || write_key_sidecar(&key_path, &key))
+            .await
+            .map_err(|err| err.to_string())??;
+    }
+
+    // No `VIDEO_DOWNLOADS` permit here on purpose: a playback/prefetch stream
+    // must not queue behind the whole-episode downloads' IO budget — that
+    // would delay the very start-up latency M1 removes (and the entry lock is
+    // already held, so waiting for a permit could stall other callers of the
+    // same entry). The client bounds how many streams it starts (current page
+    // plus its LRU prefetch).
+    session.set_phase(StreamPhase::Downloading);
+    let written = stream_download_to_file_tracked(
+        url,
+        UA_WINDOWS_BROWSER,
+        &session.part_path,
+        MAX_VIDEO_DOWNLOAD_BYTES,
+        Some(session),
+    )
+    .await?;
+    if let Some(total) = session.snapshot().total {
+        if written != total {
+            return Err(format!(
+                "download video: short body ({written} of {total} bytes)"
+            ));
+        }
+    }
+
+    let commit_session = session.clone();
+    tokio::task::spawn_blocking(move || {
+        finalize_stream_download(&commit_session, written)?;
+        // Publish the terminal phase as soon as the rename is done: a range
+        // request that raced the rename must take the completed-file path
+        // instead of reporting the now-missing `.part` as an I/O error.
+        commit_session.set_phase(StreamPhase::Committed);
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|err| format!("stream commit task: {err}"))??;
+    schedule_prune_src_cache(&session.src_dir, session.final_path.clone());
+    Ok(())
+}
+
+/// Renames the finished `.part` into the final cache name and writes the
+/// sidecars, exactly like the whole-episode path's finalization.
+fn finalize_stream_download(session: &StreamSession, written: u64) -> Result<(), String> {
+    if written == 0 {
+        return Err("download video: empty body".to_string());
+    }
+    std::fs::rename(&session.part_path, &session.final_path).map_err(|e| e.to_string())?;
+    if cache_cenc_state(&session.final_path) == CacheCencState::Encrypted {
+        if session.key.len() == 16 || session.key.len() == 24 || session.key.len() == 32 {
+            write_key_sidecar(&session.final_path, &session.key)?;
+        }
+    } else {
+        // A clear source has no key sidecar; drop the early one.
+        let _ = std::fs::remove_file(key_sidecar_path(&session.final_path));
+    }
+    if let Some(marker) = &session.variant {
+        // marker 只影响档位显示/按档命中，写失败不影响文件可播。
+        if let Err(err) = write_variant_marker(&session.final_path, marker) {
+            log::warn!("write variant marker failed: {err}");
+        }
+    }
+    Ok(())
+}
+
+/// Whether a completed, servable `.mp4` already exists at `final_path`.
+fn completed_mp4_ready(final_path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(final_path) else {
+        return false;
+    };
+    if meta.len() == 0 {
+        return false;
+    }
+    cache_cenc_state(final_path) != CacheCencState::Encrypted
+        || read_key_sidecar(final_path).is_some()
+}
+
+/// Removes serve snapshots left behind by a process that died between the
+/// response hand-out and the delayed cleanup. Best effort; only names this
+/// module creates are touched.
+fn sweep_stale_stream_snapshots(src_dir: &str) {
+    let Ok(entries) = std::fs::read_dir(src_dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with(".stream-snap-") || !name.ends_with(".snap") {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|age| age > STREAM_SNAPSHOT_STALE_AFTER);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Hands the response body a stable path to read. A hard link keeps the inode
+/// readable after the completion rename removed the `.part` name (the loopback
+/// adapter opens the path after dispatch returns, so a bare `.part` path could
+/// otherwise vanish in that window). The link is deleted after
+/// [`STREAM_SNAPSHOT_TTL`]; a filesystem that refuses hard links falls back to
+/// the source path (only the tiny open-vs-rename window is exposed then).
+async fn stream_serve_path(source: &Path, src_dir: &str) -> std::io::Result<PathBuf> {
+    static SNAPSHOT_SEQ: AtomicU64 = AtomicU64::new(0);
+    let sequence = SNAPSHOT_SEQ.fetch_add(1, Ordering::Relaxed);
+    let snapshot = Path::new(src_dir).join(format!(
+        ".stream-snap-{}-{sequence}.snap",
+        std::process::id()
+    ));
+    let link_target = snapshot.clone();
+    let link_source = source.to_path_buf();
+    tokio::task::spawn_blocking(move || std::fs::hard_link(&link_source, &link_target))
+        .await
+        .map_err(|err| std::io::Error::other(err.to_string()))??;
+    let cleanup_path = snapshot.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(STREAM_SNAPSHOT_TTL).await;
+        let _ = tokio::fs::remove_file(&cleanup_path).await;
+    });
+    Ok(snapshot)
+}
+
+/// The state of the in-progress `.part` needed to answer one range: how many
+/// bytes must be present before the scan can proceed or the moov can be read,
+/// whether the file is CENC-encrypted, and the moov bytes for the index.
+enum StreamPartScan {
+    /// The box walk cannot get past `Need` bytes yet.
+    Need(u64),
+    /// The moov is complete and no track is encrypted (or the file carries no
+    /// parseable moov at all: the completed path serves those as plain files).
+    Plain,
+    /// The moov is complete and carries an encrypted sample entry.
+    Encrypted { moov_off: u64, moov: Vec<u8> },
+}
+
+/// Walks the box headers of the in-progress `.part` without reading sample
+/// data: moov is ahead of mdat in a faststart file, so it becomes readable
+/// after the first ~200 KiB. `total` is the upstream size (the final length).
+fn scan_stream_part(path: &Path, total: u64) -> Result<StreamPartScan, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len().min(total);
+    let mut off = 0u64;
+    while off < total {
+        if off + 8 > len {
+            return Ok(StreamPartScan::Need(off + 8));
+        }
+        file.seek(SeekFrom::Start(off)).map_err(|e| e.to_string())?;
+        let mut header = [0u8; 16];
+        file.read_exact(&mut header[..8])
+            .map_err(|e| e.to_string())?;
+        let size32 = u32::from_be_bytes(header[..4].try_into().expect("4 bytes"));
+        let (size, header_len) = if size32 == 1 {
+            if off + 16 > len {
+                return Ok(StreamPartScan::Need(off + 16));
+            }
+            file.read_exact(&mut header[8..16])
+                .map_err(|e| e.to_string())?;
+            (
+                u64::from_be_bytes(header[8..16].try_into().expect("8 bytes")),
+                16u64,
+            )
+        } else if size32 == 0 {
+            // Extends to the end of the file: its final size is the upstream
+            // size, which the caller is waiting for anyway.
+            (total.saturating_sub(off), 8u64)
+        } else {
+            (u64::from(size32), 8u64)
+        };
+        if size < header_len || off.saturating_add(size) > total {
+            // Not a box layout we can trust: let the completed-file path
+            // (which serves unparseable entries as plain files) decide.
+            return Ok(StreamPartScan::Plain);
+        }
+        if &header[4..8] == b"moov" {
+            if off + size > len {
+                return Ok(StreamPartScan::Need(off + size));
+            }
+            if size > MAX_MOOV_BYTES {
+                return Ok(StreamPartScan::Plain);
+            }
+            file.seek(SeekFrom::Start(off)).map_err(|e| e.to_string())?;
+            let mut moov = vec![0u8; size as usize];
+            file.read_exact(&mut moov).map_err(|e| e.to_string())?;
+            return Ok(if mp4_needs_cenc_decrypt(&moov) {
+                StreamPartScan::Encrypted {
+                    moov_off: off,
+                    moov,
+                }
+            } else {
+                StreamPartScan::Plain
+            });
+        }
+        off += size;
+    }
+    Ok(StreamPartScan::Plain)
+}
+
+async fn scan_stream_part_async(path: PathBuf, total: u64) -> Result<StreamPartScan, String> {
+    tokio::task::spawn_blocking(move || scan_stream_part(&path, total))
+        .await
+        .map_err(|err| format!("stream scan task: {err}"))?
+}
+
+enum StreamRangeReady {
+    /// Enough bytes and the moov are on disk; the body can be built.
+    Scanned(StreamPartScan),
+    /// The download committed (or was already complete) while waiting: serve
+    /// the finished file through the normal path instead.
+    Completed,
+}
+
+/// Waits until the requested range and the moov needed to decrypt it are in
+/// the `.part`, bounded by [`STREAM_RANGE_WAIT_TIMEOUT`].
+async fn wait_for_stream_range(
+    session: &StreamSession,
+    progress: &mut watch::Receiver<StreamProgress>,
+    required_end: u64,
+    total: u64,
+) -> Result<StreamRangeReady, String> {
+    let deadline = tokio::time::Instant::now() + STREAM_RANGE_WAIT_TIMEOUT;
+    let mut required = required_end.max(1);
+    loop {
+        let current: StreamProgress = (*progress.borrow_and_update()).clone();
+        match &current.phase {
+            StreamPhase::Failed(err) => return Err(err.clone()),
+            StreamPhase::Cached | StreamPhase::Committed => return Ok(StreamRangeReady::Completed),
+            StreamPhase::Probing | StreamPhase::Downloading => {}
+        }
+        if current.downloaded >= required {
+            let scan = match scan_stream_part_async(session.part_path.clone(), total).await {
+                Ok(scan) => scan,
+                Err(err) => {
+                    // The commit renames the `.part` while a range request is
+                    // being prepared. A terminal phase means "read the
+                    // finished file"; anything else is a real I/O failure.
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    match &session.snapshot().phase {
+                        StreamPhase::Cached | StreamPhase::Committed => {
+                            return Ok(StreamRangeReady::Completed);
+                        }
+                        StreamPhase::Failed(failure) => return Err(failure.clone()),
+                        _ => return Err(err),
+                    }
+                }
+            };
+            match scan {
+                StreamPartScan::Need(next) => {
+                    if next > required {
+                        required = next;
+                    } else {
+                        // The scan cannot get past a byte the download claims
+                        // to have written: the `.part` ended early.
+                        return Err("streaming part ended before its moov".to_string());
+                    }
+                }
+                ready => return Ok(StreamRangeReady::Scanned(ready)),
+            }
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err(format!(
+                "timed out waiting for streaming bytes ({required_end}/{total})"
+            ));
+        }
+        if tokio::time::timeout(deadline - now, progress.changed())
+            .await
+            .is_err()
+        {
+            return Err(format!(
+                "timed out waiting for streaming bytes ({required_end}/{total})"
+            ));
+        }
+    }
+}
+
+fn stream_failed_response(error: &str) -> crate::dispatch::Response {
+    crate::dispatch::Response::json(
+        502,
+        &json!({
+            "success": false,
+            "error": format!("streaming video unavailable: {error}"),
+        }),
+    )
+}
+
+/// Serves one `/src` request from an in-progress streaming download.
+async fn serve_stream_session(
+    session: Arc<StreamSession>,
+    src_dir: &str,
+    rest: &str,
+    req: &crate::dispatch::Request,
+) -> crate::dispatch::Response {
+    use crate::dispatch::{Response, ResponseBody};
+
+    let content_type = crate::dispatch::mime_for(&session.final_path).to_string();
+    let is_head = req.method.eq_ignore_ascii_case("HEAD");
+    let mut progress = session.progress.subscribe();
+
+    // The upstream size is the resource size for every range answer, so wait
+    // for the response headers (bounded: a stalled probe must not hang the
+    // player).
+    let total = {
+        let deadline = tokio::time::Instant::now() + STREAM_RANGE_WAIT_TIMEOUT;
+        loop {
+            let current: StreamProgress = (*progress.borrow_and_update()).clone();
+            match &current.phase {
+                StreamPhase::Failed(err) => return stream_failed_response(err),
+                StreamPhase::Cached | StreamPhase::Committed => {
+                    return serve_stream_completed(src_dir, rest, req).await;
+                }
+                StreamPhase::Probing | StreamPhase::Downloading => {
+                    if let Some(total) = current.total {
+                        break total;
+                    }
+                }
+            }
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                return stream_failed_response("timed out waiting for the upstream size");
+            }
+            if tokio::time::timeout(deadline - now, progress.changed())
+                .await
+                .is_err()
+            {
+                return stream_failed_response("timed out waiting for the upstream size");
+            }
+        }
+    };
+    if total == 0 {
+        return stream_failed_response("upstream reported an empty body");
+    }
+
+    let range = crate::static_files::parse_range(req.header("range"), total);
+    let (status, offset, length, extra) = match range {
+        crate::static_files::ByteRange::Full => (200u16, 0u64, total, Vec::new()),
+        crate::static_files::ByteRange::Partial { start, end } => (
+            206u16,
+            start,
+            end - start + 1,
+            vec![(
+                "content-range".to_string(),
+                format!("bytes {start}-{end}/{total}"),
+            )],
+        ),
+        crate::static_files::ByteRange::Unsatisfiable => {
+            return Response {
+                status: 416,
+                content_type,
+                headers: vec![
+                    ("accept-ranges".to_string(), "bytes".to_string()),
+                    ("content-range".to_string(), format!("bytes */{total}")),
+                    ("content-length".to_string(), "0".to_string()),
+                ],
+                body: ResponseBody::Bytes(Vec::new()),
+            };
+        }
+    };
+    let mut headers = vec![
+        ("accept-ranges".to_string(), "bytes".to_string()),
+        ("content-length".to_string(), length.to_string()),
+    ];
+    headers.extend(extra);
+
+    // HEAD only answers the headers; no bytes are needed (nor is the moov).
+    if is_head {
+        return Response {
+            status,
+            content_type,
+            headers,
+            body: ResponseBody::Bytes(Vec::new()),
+        };
+    }
+
+    let required_end = offset.saturating_add(length);
+    let scan = match wait_for_stream_range(&session, &mut progress, required_end, total).await {
+        Ok(StreamRangeReady::Completed) => {
+            return serve_stream_completed(src_dir, rest, req).await;
+        }
+        Ok(StreamRangeReady::Scanned(scan)) => scan,
+        Err(err) => return stream_failed_response(&err),
+    };
+    let serve_path = match stream_serve_path(&session.part_path, src_dir).await {
+        Ok(path) => path,
+        // The commit renamed the `.part` between the scan and the link: serve
+        // the finished file through the normal path instead of a 5xx.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return serve_stream_completed(src_dir, rest, req).await;
+        }
+        Err(err) => {
+            log::warn!(
+                "stream serve: hard link failed for {}: {err}; serving the live path",
+                session.part_path.display()
+            );
+            session.part_path.clone()
+        }
+    };
+
+    let body = match scan {
+        StreamPartScan::Encrypted { moov_off, moov } => {
+            let key = session.key.clone();
+            if key.len() != 16 && key.len() != 24 && key.len() != 32 {
+                return Response::json(
+                    503,
+                    &json!({
+                        "success": false,
+                        "error": "cached video key missing; re-resolve the source",
+                    }),
+                );
+            }
+            let index = match build_cenc_index(&moov, moov_off, total) {
+                Ok(Some(index)) => Arc::new(index),
+                Ok(None) => {
+                    return stream_failed_response("encrypted moov did not produce a CENC index");
+                }
+                Err(err) => {
+                    return Response::json(500, &json!({ "success": false, "error": err }));
+                }
+            };
+            ResponseBody::FileDecrypted {
+                path: serve_path,
+                offset,
+                length,
+                total,
+                index,
+                key,
+            }
+        }
+        // Plain (or unparseable) entries are served byte for byte: exactly
+        // what the completed static path would do.
+        StreamPartScan::Plain | StreamPartScan::Need(_) => ResponseBody::File {
+            path: serve_path,
+            offset,
+            length,
+            total,
+        },
+    };
+    Response {
+        status,
+        content_type,
+        headers,
+        body,
+    }
+}
+
+/// Serves the request through the completed-cache path: CENC ranges are
+/// decrypted on demand and everything else falls through to the static server.
+async fn serve_stream_completed(
+    src_dir: &str,
+    rest: &str,
+    req: &crate::dispatch::Request,
+) -> crate::dispatch::Response {
+    match serve_cached_request(src_dir, rest, req).await {
+        Some(response) => response,
+        None => crate::static_files::serve(Path::new(src_dir), rest, req).await,
+    }
 }
 
 /// Overall budget for the on-device `src/` cache (downloaded episodes and
@@ -2005,18 +3016,46 @@ fn cenc_index_for_file(path: &Path) -> Result<Option<Arc<CencIndex>>, String> {
     Ok(Some(index))
 }
 
-/// Serves one `/src/*` request for a CENC-encrypted cache file, decrypting
-/// only the requested range. Returns `None` for anything that is not an
-/// encrypted MP4 with a sidecar key question to answer — the caller falls
-/// back to the plain static file path (clear MP4s, manga images, ...).
+/// Serves one `/src/*` request.
+///
+/// An in-progress streaming download has no final cache file yet (only
+/// `<name>.part`), so it is intercepted before the confined lookup could
+/// report a 404. Everything else goes through the completed-file path.
 pub(crate) async fn serve_src_file(
     src_dir: &str,
     rest: &str,
     req: &crate::dispatch::Request,
 ) -> Option<crate::dispatch::Response> {
-    use crate::dispatch::{Response, ResponseBody};
+    let root = Path::new(src_dir);
+    if let Some(requested) = crate::static_files::confined_candidate(root, rest) {
+        if let Some(session) = stream_session_for(&requested) {
+            return Some(serve_stream_session(session, src_dir, rest, req).await);
+        }
+    }
+    serve_cached_request(src_dir, rest, req).await
+}
+
+/// Resolves `rest` inside `src_dir` and serves it through the completed-file
+/// path, if it exists.
+async fn serve_cached_request(
+    src_dir: &str,
+    rest: &str,
+    req: &crate::dispatch::Request,
+) -> Option<crate::dispatch::Response> {
     let root = Path::new(src_dir);
     let path = crate::static_files::resolve_confined(root, rest).await?;
+    serve_cached_src(path, req).await
+}
+
+/// Serves one `/src/*` request for an existing CENC-encrypted cache file,
+/// decrypting only the requested range. Returns `None` for anything that is
+/// not an encrypted MP4 with a sidecar key question to answer — the caller
+/// falls back to the plain static file path (clear MP4s, manga images, ...).
+async fn serve_cached_src(
+    path: PathBuf,
+    req: &crate::dispatch::Request,
+) -> Option<crate::dispatch::Response> {
+    use crate::dispatch::{Response, ResponseBody};
     if path.extension().and_then(|e| e.to_str()) != Some("mp4") {
         return None;
     }
@@ -2854,6 +3893,8 @@ pub fn register(s: &mut Server) {
 mod cenc_sample_fixture;
 #[cfg(test)]
 mod spade_vectors;
+#[cfg(test)]
+mod stream_loopback;
 #[cfg(test)]
 mod unsigned_get_cap;
 #[cfg(test)]

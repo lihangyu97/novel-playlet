@@ -137,7 +137,16 @@ async fn mixed_variants_keep_h264_preference_across_response_shapes() {
             build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
         let (status, body) = request_video(&server, "mode=stream").await;
         assert_eq!(status, 200, "{name}: {body}");
-        assert_eq!(body["video_url"], ALLOWED_URL, "{name}: {body}");
+        // M1: the selected source is downloaded in the background and the
+        // response carries the local URL; the chosen URL shows up as the
+        // download request the mock upstream receives.
+        assert_eq!(body["streaming"], true, "{name}: {body}");
+        assert_eq!(body["video_url"], "/src/episode.mp4", "{name}: {body}");
+        assert!(
+            upstream.requests().iter().any(|r| r.path == "/h264.mp4"),
+            "{name}: the h264 source must be the one downloaded: {:?}",
+            upstream.requests()
+        );
         assert!(!body.to_string().contains(REJECTED_URL), "{name}: {body}");
     }
 }

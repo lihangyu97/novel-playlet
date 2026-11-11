@@ -160,13 +160,18 @@ async fn max_height_picks_highest_tier_not_above_the_cap() {
 
     let (status, body) = request_video(&server, "mode=stream&max_height=720").await;
     assert_eq!(status, 200, "{body}");
-    assert_eq!(
-        body["video_url"], "https://example.invalid/720.mp4",
-        "{body}"
-    );
+    // M1: a streamable `.mp4` answers a local `/src` URL immediately and
+    // downloads the selected tier in the background.
+    assert_eq!(body["streaming"], true, "{body}");
+    assert_eq!(body["video_url"], "/src/episode.mp4", "{body}");
     assert_eq!(body["variant"]["name"], "720P", "{body}");
     assert_eq!(body["variant"]["short_edge"], 720, "{body}");
     assert_eq!(body["quality_fallback"], false, "{body}");
+    assert!(
+        upstream.requests().iter().any(|r| r.path == "/720.mp4"),
+        "应下载 720P 档：{:?}",
+        upstream.requests()
+    );
 }
 
 #[tokio::test]
@@ -192,10 +197,8 @@ async fn max_height_without_lower_tier_falls_back_to_lowest_available() {
 
     let (status, body) = request_video(&server, "mode=stream&max_height=480").await;
     assert_eq!(status, 200, "{body}");
-    assert_eq!(
-        body["video_url"], "https://example.invalid/720.mp4",
-        "{body}"
-    );
+    assert_eq!(body["streaming"], true, "{body}");
+    assert_eq!(body["video_url"], "/src/episode.mp4", "{body}");
     assert_eq!(body["variant"]["name"], "720P", "{body}");
     assert_eq!(body["quality_fallback"], true, "{body}");
 }
