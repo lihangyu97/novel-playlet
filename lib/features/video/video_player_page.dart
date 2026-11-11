@@ -154,6 +154,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   bool _jumping = false;
   int? _programmaticTarget;
 
+  /// 本次拖动是否已经按方向预热过目标集。方向在第一个 ScrollUpdate 才能
+  /// 判断，所以预热不必等到滑过一半；早一点开始，相邻页更快出首帧。
+  bool _dragPreheatStarted = false;
+
   /// 横屏判定：接近 1 的方图不算，避免给错按钮。
   static const double _landscapeAspect = 1.05;
 
@@ -1162,8 +1166,29 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   bool _onPagerScrollNotification(ScrollNotification notification) {
     if (notification.depth != 0) return false;
     if (notification is ScrollStartNotification) {
+      _dragPreheatStarted = false;
       if (notification.dragDetails != null) _pauseForDrag();
+    } else if (notification is ScrollUpdateNotification) {
+      // 方向一确定就预热目标集，不等滑过半：相邻页从拖动一开始就按
+      // 「封面 → 首帧」的顺序出画面，滑到一半时通常已经能直接接上。
+      if (!_dragPreheatStarted &&
+          notification.dragDetails != null &&
+          !_jumping &&
+          _programmaticTarget == null) {
+        final viewport = notification.metrics.viewportDimension;
+        if (viewport > 0) {
+          final offset = notification.metrics.pixels - _index * viewport;
+          if (offset != 0) {
+            _dragPreheatStarted = true;
+            final target = offset > 0 ? _index + 1 : _index - 1;
+            if (target >= 0 && target < _episodes.length) {
+              unawaited(_prepare(target));
+            }
+          }
+        }
+      }
     } else if (notification is ScrollEndNotification) {
+      _dragPreheatStarted = false;
       if (_jumping || _programmaticTarget != null) return false;
       final page = _pageController.hasClients
           ? _pageController.page?.round()
@@ -1403,12 +1428,13 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         itemCount: _episodes.length,
         itemBuilder: (context, index) {
           final page = _buildEpisodePage(index);
-          if (index != _index || !showChrome) return page;
-          // 点画面切换控制条显隐。放在 PageView 的页内而不是整屏叠加层：
-          // 叠加层会挡住 PageView，上下滑手势到不了翻页。
+          // 每一页都套同一层 GestureDetector（只让当前页响应点击）：落定
+          // 提交时 _index 变化，若这里按「是否当前页」增删 wrapper，widget
+          // 树类型会变，VideoPlayer 的 State/platform view 被重建，iOS 上会
+          // 闪一下黑。「始终套、只换 onTap」保证子树原地更新。
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: _toggleControls,
+            onTap: index == _index && showChrome ? _toggleControls : null,
             child: page,
           );
         },
@@ -1447,36 +1473,60 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   static bool _titleHasEpisodeNumber(String title) =>
       RegExp(r'^第\s*[0-9零一二三四五六七八九十百千]+\s*集').hasMatch(title);
 
-  /// 非当前页的占位：黑底 + 集数/集名。不放 spinner，避免看起来像在加载
-  /// 一个还没开始加载的页面。
+  /// 非当前页的底：优先铺剧封面（暗化）给滑动预告，没有封面就黑底。
+  /// 拖动刚开始、首帧还没就绪时，相邻页先显示封面而不是纯黑，滑动时能
+  /// 同时看到当前集画面和下一集封面。
+  Widget _buildEpisodeBackdrop({required Widget child}) {
+    final cover = widget.args.cover;
+    if (cover.isEmpty) {
+      return ColoredBox(
+        color: Colors.black,
+        child: Center(child: child),
+      );
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.network(
+          cover,
+          fit: BoxFit.cover,
+          // 封面加载失败退回纯黑，不阻塞占位文案/预热。
+          errorBuilder: (context, error, stackTrace) =>
+              const ColoredBox(color: Colors.black),
+        ),
+        const ColoredBox(color: Color(0x99000000)),
+        Center(child: child),
+      ],
+    );
+  }
+
+  /// 非当前页的占位：封面（或黑底）+ 集数/集名。不放 spinner，避免看起来
+  /// 像在加载一个还没开始加载的页面。
   Widget _buildEpisodePlaceholder(int index) {
     final episode = _episodes[index];
     final title = episode.title.isNotEmpty ? episode.title : '第 ${index + 1} 集';
     // 标题已经是「第 N 集」时只渲染一次，避免黑底上出现两个「第 N 集」。
     final showIndexLine = !_titleHasEpisodeNumber(title);
-    return ColoredBox(
-      color: Colors.black,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (showIndexLine)
-                Text(
-                  '第 ${index + 1} 集',
-                  style: const TextStyle(color: Colors.white54, fontSize: 13),
-                ),
-              if (showIndexLine) const SizedBox(height: 6),
+    return _buildEpisodeBackdrop(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (showIndexLine)
               Text(
-                title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 15),
+                '第 ${index + 1} 集',
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
               ),
-            ],
-          ),
+            if (showIndexLine) const SizedBox(height: 6),
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 15),
+            ),
+          ],
         ),
       ),
     );
@@ -1541,40 +1591,37 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     );
   }
 
-  /// 预热还没就绪的占位：黑底 + 轻量 spinner + 集数，避免大 spinner 文案
-  /// 在已缓存集上闪一下。
+  /// 预热还没就绪的占位：封面（或黑底）+ 轻量 spinner + 集数，避免大
+  /// spinner 文案在已缓存集上闪一下。
   Widget _buildPendingPlaceholder(int index) {
     final episode = _episodes[index];
     final title = episode.title.isNotEmpty ? episode.title : '第 ${index + 1} 集';
     final label = _titleHasEpisodeNumber(title)
         ? title
         : '第 ${index + 1} 集 · $title';
-    return ColoredBox(
-      color: Colors.black,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white38,
-                ),
+    return _buildEpisodeBackdrop(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white38,
               ),
-              const SizedBox(height: 14),
-              Text(
-                label,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white54, fontSize: 13),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+          ],
         ),
       ),
     );

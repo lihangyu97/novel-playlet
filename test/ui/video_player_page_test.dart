@@ -590,23 +590,28 @@ void main() {
   });
 
   testWidgets('相邻集占位：目录标题本身是「第 N 集」时不重复渲染集数', (tester) async {
+    // 预热 initialize 先挂起，让相邻页停在「预热中」占位，能稳定看到文案。
     final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
-    final factory = _FakeFactory();
+    final factory = _GatedFactory();
     await _pumpPlayer(tester, store: store, factory: factory);
 
-    // 只上滑一小段：露出下一集占位页，但还没到「滑过半预热」的阈值。
     final gesture = await tester.startGesture(const Offset(400, 300));
-    await gesture.moveBy(const Offset(0, -100));
+    await gesture.moveBy(const Offset(0, -180));
     await tester.pump();
-    await gesture.moveBy(const Offset(0, -100));
+    await gesture.moveBy(const Offset(0, -180));
+    await tester.pump();
     await tester.pump();
 
+    expect(factory.gated, hasLength(1));
     expect(
       find.text('第 2 集'),
       findsOneWidget,
       reason: '标题已经是「第 2 集」，占位不要再把集数显示一遍',
     );
+    expect(find.textContaining('第 2 集 · 第 2 集'), findsNothing);
 
+    factory.gated.single.gate.complete();
+    await tester.pump();
     await gesture.up();
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     await _disposePlayer(tester);
@@ -649,6 +654,66 @@ void main() {
 
     await gesture.up();
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await _disposePlayer(tester);
+  });
+  testWidgets('拖动刚开始（未过半）就按方向预热目标集', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+    expect(factory.created, hasLength(1));
+
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    for (var i = 0; i < 2; i += 1) {
+      await gesture.moveBy(const Offset(0, -180));
+      await tester.pump();
+    }
+    await tester.pump();
+
+    final page = tester
+        .widget<PageView>(find.byType(PageView))
+        .controller
+        ?.page;
+    expect(page, isNotNull);
+    expect(page!, lessThan(0.5), reason: '此时还没滑过半');
+    expect(factory.created, hasLength(2), reason: '方向一确定（上滑下一集）就应开始预热，不等滑过半');
+
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('落定提交不重建相邻页的 VideoPlayer（避免 iOS 闪黑）', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    for (var i = 0; i < 3; i += 1) {
+      await gesture.moveBy(const Offset(0, -180));
+      await tester.pump();
+    }
+    await tester.pump();
+    expect(find.byType(VideoPlayer), findsNWidgets(2));
+
+    // 预热页（第 2 集）的 VideoPlayer element：提交后应原地保留。
+    final pendingElement = find
+        .byType(VideoPlayer)
+        .evaluate()
+        .firstWhere(
+          (element) =>
+              (element.widget as VideoPlayer).controller == factory.created[1],
+        );
+
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(find.byType(VideoPlayer), findsOneWidget);
+    expect(
+      identical(tester.element(find.byType(VideoPlayer)), pendingElement),
+      isTrue,
+      reason: '提交只应换 controller/onTap，不能重建 platform view',
+    );
+
     await _disposePlayer(tester);
   });
 }

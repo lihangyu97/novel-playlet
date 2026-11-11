@@ -410,9 +410,12 @@ AVPlayer
 - 渲染通路：固定 `VideoViewType.platformView`（iOS = AVPlayerLayer，Android = ExoPlayer 平台视图），避免逐帧纹理拷贝。
 - 切集：整页竖向 `PageView`（上滑下一集 / 下滑上一集），控制条里不再有上一集/下一集按钮；
   选集弹层跨集跳转直接 jump 到目标页，播完自动续播走相邻页 280ms 动画。
-  - 滑过一半（`onPageChanged`）只**预热**目标集：解析来源（离线 / 预取 / `mode=cached` /
-    `mode=stream`）+ `initialize` + 暂停在第 0 帧，不碰当前播放；拖动期间当前集暂停。
-    预热完成即 `setState` 重建相邻页，**拖动中就能看到首帧**（不等落定）。
+  - 拖动一开始（第一个 `ScrollUpdate` 判断出方向）就**预热**目标集，不等滑过一半：解析来源
+    （离线 / 预取 / `mode=cached` / `mode=stream`）+ `initialize` + 暂停在第 0 帧，不碰当前播放。
+    未就绪时相邻页先显示**剧封面**（暗化；无封面退回黑底），预热完成即 `setState` 切成首帧，
+    所以滑动过程中能同时看到当前集画面和下一集封面/首帧。
+  - 落定提交时每页恒定套同一层 `GestureDetector`（只有当前页的 `onTap` 生效），widget 树类型
+    不随 `_index` 变化，`VideoPlayer` 的 State/platform view 原地保留，避免 iOS 闪一下黑。
   - `ScrollEndNotification` 落定后提交：预热命中就直接接管（首帧立即可见，不闪「正在准备
     视频」），并释放旧 controller；滑回落定则丢弃预热、恢复原集播放（**不重播**）。
   - 预热失败或未预热（程序化跳页等）才走 `_open` 兜底（错误展示与 -1004 恢复都在这）。
