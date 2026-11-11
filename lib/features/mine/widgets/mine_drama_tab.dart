@@ -29,7 +29,7 @@ class MineDramaTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineDramaDataProvider);
     final data = async.value;
-    final metrics = MineGridMetrics.of(context, coverAspect: kVideoCoverAspect);
+    final metrics = MineGridMetrics.of(context);
     return MineTabBody<MineDramaData>(
       data: data,
       bottomInset: bottomInset,
@@ -67,7 +67,6 @@ class MineDramaTab extends ConsumerWidget {
             items: data.collections,
             crossAxisCount: metrics.columns,
             itemWidth: metrics.itemWidth,
-            itemHeight: metrics.itemHeight,
             spacing: MineGridMetrics.spacing,
             coverAspect: kVideoCoverAspect,
             heroTagOf: (item) =>

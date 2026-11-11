@@ -15,7 +15,6 @@ class MineDramaShelfGrid extends StatelessWidget {
     required this.items,
     required this.crossAxisCount,
     required this.itemWidth,
-    required this.itemHeight,
     required this.spacing,
     required this.coverAspect,
     required this.onOpen,
@@ -26,7 +25,6 @@ class MineDramaShelfGrid extends StatelessWidget {
   final List<VideoSeries> items;
   final int crossAxisCount;
   final double itemWidth;
-  final double itemHeight;
   final double spacing;
 
   /// 封面原生比例（高 / 宽）：短剧 7:10。
@@ -40,7 +38,6 @@ class MineDramaShelfGrid extends StatelessWidget {
     return ShelfGrid<VideoSeries>(
       items: items,
       crossAxisCount: crossAxisCount,
-      itemHeight: itemHeight,
       spacing: spacing,
       onLongPress: onLongPress,
       heroTagOf: heroTagOf,
@@ -51,9 +48,12 @@ class MineDramaShelfGrid extends StatelessWidget {
       cardBuilder: (item, heroTag) => VideoCard(
         item: item,
         width: itemWidth,
-        coverAspect: coverAspect,
         onTap: () => onOpen(item),
         heroTag: heroTag,
+        // 与首页同款白底不定高卡片；收藏只展示剧名 + 集数。
+        surface: true,
+        naturalTitleHeight: true,
+        coverAspect: coverAspect,
       ),
     );
   }

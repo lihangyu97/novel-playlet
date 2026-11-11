@@ -21,6 +21,7 @@ class NovelGridCard extends StatelessWidget {
     this.coverAspect = kCoverAspect,
     this.surface = false,
     this.naturalTitleHeight = false,
+    this.fallbackToCategory = true,
   });
 
   final NovelItem item;
@@ -53,10 +54,19 @@ class NovelGridCard extends StatelessWidget {
   /// 标题是否按内容自然高度（见 [MediaCard.naturalTitleHeight]）。
   final bool naturalTitleHeight;
 
+  /// 作者为空时是否退回展示分类。
+  ///
+  /// 推荐流/搜索结果需要分类兜底；我的页书架只要求「书名 + 作者」，作者缺失
+  /// 时宁可留空也不拿分类顶替，所以传 false。
+  final bool fallbackToCategory;
+
   @override
   Widget build(BuildContext context) {
-    // 作者始终占元信息行；作者缺失时退回分类（两者都空则不占行）。
-    final head = item.author.isNotEmpty ? item.author : item.category;
+    // 作者始终占元信息行；作者缺失时按入口决定是否退回分类（两者都空则
+    // 不占行，白底卡片形态下空元信息不产生额外高度）。
+    final head = item.author.isNotEmpty
+        ? item.author
+        : (fallbackToCategory ? item.category : '');
     final reason = showRecommendMeta ? item.recommendReason : '';
     final heat = showRecommendMeta ? item.rankScore : '';
     return MediaCard(

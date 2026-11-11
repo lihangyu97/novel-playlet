@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
@@ -103,6 +104,10 @@ void main() {
     expect(find.text('太奶奶的短剧'), findsWidgets);
     expect(find.text('看到第 5 集'), findsOneWidget);
     expect(find.text('另一部短剧'), findsOneWidget);
+    // 收藏换成和首页一样的白底卡片：只展示剧名 + 全 N 集。
+    expect(find.byType(AppSurfaceCard), findsNWidgets(2));
+    expect(find.text('全 40 集'), findsWidgets);
+    expect(find.text('全 12 集'), findsWidgets);
     // 最近观看和最近阅读同一版式：封面在左、箭头在右。
     expect(find.byIcon(Icons.chevron_left_rounded), findsNothing);
     expect(find.byIcon(Icons.chevron_right_rounded), findsWidgets);
@@ -122,6 +127,21 @@ void main() {
       find.byType(MinePage),
       matchesGoldenFile('../goldens/mine_empty.png'),
     );
+  });
+
+  testWidgets('我的页-书架卡片只展示书名与作者，不退回分类', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'shelf_books_v1': jsonEncode([
+        {'id': '1', 'title': '剑来', 'cover': '', 'author': '烽火戏诸侯'},
+        {'id': '2', 'title': '无作者书', 'cover': '', 'category': '玄幻'},
+      ]),
+    });
+    await pumpPreview(tester, const MinePage());
+
+    expect(find.byType(AppSurfaceCard), findsNWidgets(2));
+    expect(find.text('剑来'), findsWidgets);
+    expect(find.text('烽火戏诸侯'), findsOneWidget);
+    expect(find.text('玄幻'), findsNothing, reason: '书架只要求书名+作者，作者缺失时不拿分类顶替');
   });
 
   testWidgets('我的页（有书架与进度）', (tester) async {
@@ -149,6 +169,10 @@ void main() {
     await pumpPreview(tester, const MinePage());
     expect(find.text('书架 4 本 · 收藏 0 部'), findsOneWidget);
     expect(find.text('最近阅读'), findsOneWidget);
+    // 书架换成和首页一样的白底卡片：书名 + 作者，不带分类/推荐元信息。
+    expect(find.byType(AppSurfaceCard), findsNWidgets(4));
+    expect(find.text('作者1'), findsWidgets);
+    expect(find.text('作者4'), findsWidgets);
     // 最近阅读（44 宽）和书架卡（_maxCardWidth 内）封面比例也必须统一。
     _expectCoverAspect(tester, '我的页');
     await expectLater(
