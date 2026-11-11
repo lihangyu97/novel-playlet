@@ -1009,6 +1009,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _pendingIndex = index;
     final ready = Completer<void>();
     _pendingReady = ready.future;
+    // 预热状态要立刻反映到相邻页：PageView 拖动过程中不会重建已经建好的页，
+    // 少了这次 setState，相邻页会一直停在拖动开始时构建的普通占位上，
+    // 预热完成后也看不到首帧。
+    if (mounted) setState(() {});
     final episode = _episodes[index];
     VideoPlayerController? controller;
     try {
@@ -1053,9 +1057,15 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         return;
       }
       _pending = controller;
+      // 预热完成也不能等落定：拖动中的相邻页要立刻重建、渲染首帧
+      // （[_buildEpisodePage] 看到 [_pending] 会换成真实视频画面）。
+      if (mounted) setState(() {});
     } catch (_) {
       if (controller != null) unawaited(controller.dispose());
-      _pending = null;
+      if (token == _prepareToken) {
+        _pending = null;
+        if (mounted) setState(() {});
+      }
     } finally {
       if (!ready.isCompleted) ready.complete();
     }
@@ -1382,11 +1392,17 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     return _buildEpisodePlaceholder(index);
   }
 
+  /// 短剧目录的集标题本身常常就是「第 3 集」，占位里就不要再重复一遍集数。
+  static bool _titleHasEpisodeNumber(String title) =>
+      RegExp(r'^第\s*[0-9零一二三四五六七八九十百千]+\s*集').hasMatch(title);
+
   /// 非当前页的占位：黑底 + 集数/集名。不放 spinner，避免看起来像在加载
   /// 一个还没开始加载的页面。
   Widget _buildEpisodePlaceholder(int index) {
     final episode = _episodes[index];
     final title = episode.title.isNotEmpty ? episode.title : '第 ${index + 1} 集';
+    // 标题已经是「第 N 集」时只渲染一次，避免黑底上出现两个「第 N 集」。
+    final showIndexLine = !_titleHasEpisodeNumber(title);
     return ColoredBox(
       color: Colors.black,
       child: Center(
@@ -1395,11 +1411,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                '第 ${index + 1} 集',
-                style: const TextStyle(color: Colors.white54, fontSize: 13),
-              ),
-              const SizedBox(height: 6),
+              if (showIndexLine)
+                Text(
+                  '第 ${index + 1} 集',
+                  style: const TextStyle(color: Colors.white54, fontSize: 13),
+                ),
+              if (showIndexLine) const SizedBox(height: 6),
               Text(
                 title,
                 maxLines: 2,
@@ -1478,6 +1495,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   Widget _buildPendingPlaceholder(int index) {
     final episode = _episodes[index];
     final title = episode.title.isNotEmpty ? episode.title : '第 ${index + 1} 集';
+    final label = _titleHasEpisodeNumber(title)
+        ? title
+        : '第 ${index + 1} 集 · $title';
     return ColoredBox(
       color: Colors.black,
       child: Center(
@@ -1496,7 +1516,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
               ),
               const SizedBox(height: 14),
               Text(
-                '第 ${index + 1} 集 · $title',
+                label,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,

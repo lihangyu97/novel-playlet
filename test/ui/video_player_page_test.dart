@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -494,6 +495,69 @@ void main() {
 
     await _disposePlayer(tester);
   });
+
+  testWidgets('相邻集占位：目录标题本身是「第 N 集」时不重复渲染集数', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    // 只上滑一小段：露出下一集占位页，但还没到「滑过半预热」的阈值。
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    await gesture.moveBy(const Offset(0, -100));
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, -100));
+    await tester.pump();
+
+    expect(
+      find.text('第 2 集'),
+      findsOneWidget,
+      reason: '标题已经是「第 2 集」，占位不要再把集数显示一遍',
+    );
+
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('拖动过半、预热完成后，下一集首帧不等落定就上屏', (tester) async {
+    final store = _FakeSeriesStore();
+    final factory = _GatedFactory();
+    await _pumpPlayer(
+      tester,
+      store: store,
+      factory: factory,
+      api: _FakeApi(sourceUrl: 'http://127.0.0.1:18931/src/e2.mp4'),
+    );
+
+    // 视口 600：往上分多步拖动，越过一半（onPageChanged 触发预热）但不松手。
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    for (var i = 0; i < 3; i += 1) {
+      await gesture.moveBy(const Offset(0, -180));
+      await tester.pump();
+    }
+
+    expect(factory.gated, hasLength(1), reason: '滑过半应开始预热下一集');
+    expect(
+      find.byType(VideoPlayer),
+      findsOneWidget,
+      reason: '预热未完成时只有当前集挂了播放器',
+    );
+
+    // 预热完成：还没松手、没落定，相邻页就该切到真实的（暂停）首帧。
+    factory.gated.single.gate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.byType(VideoPlayer),
+      findsNWidgets(2),
+      reason: '预热完成后拖动中就要渲染下一集首帧，不能等落定',
+    );
+
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await _disposePlayer(tester);
+  });
 }
 
 const _episodes = <Chapter>[
@@ -703,6 +767,35 @@ class _FakeController extends VideoPlayerController {
   }
 
   int disposeCount = 0;
+}
+
+/// 预热 controller 的 initialize 由测试放行：用来验证「预热完成时，
+/// 拖动中的相邻页要立即重建出首帧，而不是等到落定」。
+class _GatedController extends _FakeController {
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<void> initialize() async {
+    await gate.future;
+    await super.initialize();
+  }
+}
+
+/// 首个 controller（当前集）立即可用；后续 controller（预热）走 [_GatedController]。
+class _GatedFactory implements _ControllerFactory {
+  final List<_GatedController> gated = <_GatedController>[];
+  bool _first = true;
+
+  @override
+  VideoPlayerController call({File? file, Uri? networkUrl}) {
+    if (_first) {
+      _first = false;
+      return _FakeController();
+    }
+    final controller = _GatedController();
+    gated.add(controller);
+    return controller;
+  }
 }
 
 /// 前 [failures] 个 controller 在 initialize() 抛 -1004（iOS 长时间后台回来
