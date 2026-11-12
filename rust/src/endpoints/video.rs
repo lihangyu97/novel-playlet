@@ -560,8 +560,11 @@ fn extract_shortplay_video_model_source(model: &Map<String, Value>) -> VideoSour
 }
 
 /// Decrypts one `video_list` entry into a playable (url, content key) pair.
-/// Shared by the best-stream selector and the multi-variant listing so both
-/// apply the same URL decryption and per-variant spade key derivation.
+///
+/// This is the single implementation for both the primary `video_list` and the
+/// `fallback_api` list: `main_url` has two shapes (a base64-wrapped plain URL,
+/// or spade ciphertext) and every caller must handle both, so the fallback
+/// source calls this function instead of re-implementing it (P1-11).
 /// `key_seed` is the model-level decoded seed bytes shared by every variant.
 fn decrypt_variant_entry(
     info: &Map<String, Value>,
@@ -943,25 +946,9 @@ fn extract_fallback_video_source(root: &Map<String, Value>) -> VideoSourceResolu
     };
 
     select_video_source(video_list.values(), |info| {
-        let key_seed = key_seed.as_deref()?;
-        let mut raw_url = info
-            .get("main_url")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if raw_url.is_empty() {
-            raw_url = info
-                .get("backup_url_1")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-        }
-        let u = decrypt_spade_url(&raw_url, key_seed);
-        if u.is_empty() {
-            return None;
-        }
-        let spade_a = info.get("spade_a").and_then(|v| v.as_str()).unwrap_or("");
-        Some((u, derive_spade_content_key(spade_a)))
+        // Same two URL shapes as the primary list (base64-wrapped plain URL or
+        // spade ciphertext): use the shared resolver, never a copy (P1-11).
+        decrypt_variant_entry(info, key_seed.as_deref())
     })
 }
 
@@ -2879,7 +2866,11 @@ fn write_key_sidecar(fp: &Path, content_key: &[u8]) -> Result<(), String> {
     let sidecar = key_sidecar_path(fp);
     let tmp = PathBuf::from(format!("{}.tmp", sidecar.display()));
     std::fs::write(&tmp, hex::encode(content_key)).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &sidecar).map_err(|e| e.to_string())
+    std::fs::rename(&tmp, &sidecar).map_err(|e| e.to_string())?;
+    // The video file itself did not change, so the (len, mtime) metadata cache
+    // must be told explicitly that this entry's key changed.
+    invalidate_cenc_meta(fp);
+    Ok(())
 }
 
 /// `mode=cached` 的本地缓存查找：只 stat `src/<id>{.mp4,.m4s,.ts}`，不请求
@@ -2983,37 +2974,178 @@ fn cache_cenc_state(path: &Path) -> CacheCencState {
     }
 }
 
-/// Per-file CENC index cache: range requests from a player arrive in
-/// bursts, and re-reading the moov for each one would be wasteful. Keyed by
-/// path and invalidated by (length, mtime), which a re-download changes.
-type CencIndexCache =
-    std::sync::Mutex<HashMap<PathBuf, (u64, std::time::SystemTime, Arc<CencIndex>)>>;
+/// What the `/src` serve path needs to know about one cached MP4, built from a
+/// single `moov` read: whether its `moov` carries an encrypted sample entry,
+/// the sidecar content key (only meaningful when encrypted), and the range
+/// index. Keeping the three together means one cache lookup answers every
+/// question the serve path asks (P1-9).
+struct CencMeta {
+    encrypted: bool,
+    key: Option<Vec<u8>>,
+    index: Option<Arc<CencIndex>>,
+}
 
-static CENC_INDEX_CACHE: OnceLock<CencIndexCache> = OnceLock::new();
+struct CencMetaEntry {
+    len: u64,
+    modified: std::time::SystemTime,
+    meta: Arc<CencMeta>,
+}
 
-fn cenc_index_for_file(path: &Path) -> Result<Option<Arc<CencIndex>>, String> {
-    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
-    let len = meta.len();
-    let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
-    let cache = CENC_INDEX_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
-    if let Ok(guard) = cache.lock() {
-        if let Some((cached_len, cached_mtime, index)) = guard.get(path) {
-            if *cached_len == len && *cached_mtime == modified {
-                return Ok(Some(index.clone()));
-            }
+/// Per-file CENC metadata cache: a player's range requests arrive in bursts
+/// and every one of them used to re-stat/re-open the file, re-read the `moov`
+/// and re-detect encryption on the async worker. Keyed by path and invalidated
+/// by (length, mtime), which a re-download changes. Bounded so a long viewing
+/// session (episodes come and go from the 128 MiB `src` cache) cannot grow it
+/// without limit.
+type CencMetaCache = std::sync::Mutex<HashMap<PathBuf, CencMetaEntry>>;
+
+static CENC_META_CACHE: OnceLock<CencMetaCache> = OnceLock::new();
+
+/// Upper bound for entries; one entry is roughly the sidecar key plus the
+/// per-sample index (sub-MiB), so 128 entries cover several seasons while
+/// staying a few MiB at most.
+const CENC_META_CACHE_LIMIT: usize = 128;
+
+fn cenc_meta_cache() -> &'static CencMetaCache {
+    CENC_META_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn cached_cenc_meta(
+    path: &Path,
+    len: u64,
+    modified: std::time::SystemTime,
+) -> Option<Arc<CencMeta>> {
+    let guard = cenc_meta_cache().lock().ok()?;
+    guard
+        .get(path)
+        .filter(|entry| entry.len == len && entry.modified == modified)
+        .map(|entry| entry.meta.clone())
+}
+
+fn store_cenc_meta(path: &Path, len: u64, modified: std::time::SystemTime, meta: Arc<CencMeta>) {
+    let Ok(mut guard) = cenc_meta_cache().lock() else {
+        return;
+    };
+    if guard.len() >= CENC_META_CACHE_LIMIT && !guard.contains_key(path) {
+        // Bounded cache: drop one arbitrary entry rather than growing without
+        // limit. The cost of a dropped entry is one moov read on its next use.
+        if let Some(victim) = guard.keys().next().cloned() {
+            guard.remove(&victim);
         }
     }
-    let Some((moov_off, moov)) = read_moov_bytes(path) else {
-        return Ok(None);
-    };
-    let Some(index) = build_cenc_index(&moov, moov_off, len)? else {
-        return Ok(None);
-    };
-    let index = Arc::new(index);
-    if let Ok(mut guard) = cache.lock() {
-        guard.insert(path.to_path_buf(), (len, modified, index.clone()));
+    guard.insert(
+        path.to_path_buf(),
+        CencMetaEntry {
+            len,
+            modified,
+            meta,
+        },
+    );
+}
+
+/// Drops the cached metadata for `path`.
+///
+/// The (len, mtime) validity key covers rewrites of the video file, but not the
+/// `.key` sidecar: `download_and_save`'s cache-hit path repairs a missing
+/// sidecar without touching the video, and a cached "encrypted, no key" entry
+/// would otherwise keep answering 503 forever. Every sidecar write therefore
+/// invalidates the entry.
+fn invalidate_cenc_meta(path: &Path) {
+    if let Ok(mut guard) = cenc_meta_cache().lock() {
+        guard.remove(path);
     }
-    Ok(Some(index))
+}
+
+/// Why the CENC metadata could not be produced.
+#[derive(Debug)]
+enum CencMetaError {
+    /// The path cannot be stat'ed (it raced a delete/prune): the caller falls
+    /// back to the plain static path, which answers 404, like before.
+    Unavailable,
+    /// The encrypted `moov` did not produce an index: the serve path keeps
+    /// answering 500 with this message.
+    Invalid(String),
+}
+
+/// Builds [`CencMeta`] from disk and stores it in the bounded metadata cache.
+/// Every call site runs this on the blocking pool (or is already inside one):
+/// it is `std::fs` plus an in-memory box walk.
+///
+/// Behaviour mirrors the three helpers it replaces: an unreadable/`moov`-less
+/// file reports `encrypted: false` (the caller then falls back to the plain
+/// static path), an encrypted file carries its sidecar key when present and an
+/// index built from the same `moov` (`build_cenc_index` errors propagate so the
+/// serve path can keep answering 500).
+fn build_cenc_meta(
+    path: &Path,
+) -> Result<(u64, std::time::SystemTime, Arc<CencMeta>), CencMetaError> {
+    let file_meta = std::fs::metadata(path).map_err(|_| CencMetaError::Unavailable)?;
+    let len = file_meta.len();
+    let modified = file_meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+    if let Some(cached) = cached_cenc_meta(path, len, modified) {
+        return Ok((len, modified, cached));
+    }
+
+    let meta = match read_moov_bytes(path) {
+        // Unknown (truncated, not MP4, moov over the cap): the serve path
+        // treats it exactly like a clear file and lets the static server
+        // decide, so cache that decision too.
+        None => CencMeta {
+            encrypted: false,
+            key: None,
+            index: None,
+        },
+        Some((moov_off, moov)) => {
+            if mp4_needs_cenc_decrypt(&moov) {
+                // Key first: a missing sidecar is answered with 503 before the
+                // index is needed, exactly like the old `serve_cached_src`
+                // ordering.
+                let key = read_key_sidecar(path);
+                let index = match &key {
+                    Some(_) => build_cenc_index(&moov, moov_off, len)
+                        .map_err(CencMetaError::Invalid)?
+                        .map(Arc::new),
+                    None => None,
+                };
+                CencMeta {
+                    encrypted: true,
+                    key,
+                    index,
+                }
+            } else {
+                CencMeta {
+                    encrypted: false,
+                    key: None,
+                    index: None,
+                }
+            }
+        }
+    };
+    let meta = Arc::new(meta);
+    store_cenc_meta(path, len, modified, meta.clone());
+    Ok((len, modified, meta))
+}
+
+/// Cached CENC metadata for `path`, with the disk work off the async worker.
+///
+/// A cache hit costs exactly one `metadata()` call (the (len, mtime) validity
+/// check); a miss does the blocking build on the blocking pool, which also
+/// stores the result (P1-9).
+async fn cenc_meta_for(path: &Path) -> Result<(u64, Arc<CencMeta>), CencMetaError> {
+    let file_meta = tokio::fs::metadata(path)
+        .await
+        .map_err(|_| CencMetaError::Unavailable)?;
+    let len = file_meta.len();
+    let modified = file_meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+    if let Some(meta) = cached_cenc_meta(path, len, modified) {
+        return Ok((len, meta));
+    }
+
+    let build_path = path.to_path_buf();
+    let (len, _modified, meta) = tokio::task::spawn_blocking(move || build_cenc_meta(&build_path))
+        .await
+        .map_err(|err| CencMetaError::Invalid(format!("cenc metadata task: {err}")))??;
+    Ok((len, meta))
 }
 
 /// Serves one `/src/*` request.
@@ -3059,14 +3191,26 @@ async fn serve_cached_src(
     if path.extension().and_then(|e| e.to_str()) != Some("mp4") {
         return None;
     }
-    if cache_cenc_state(&path) != CacheCencState::Encrypted {
+    // A cache hit costs one metadata() call and no disk moov read; a miss does
+    // the whole (blocking) build on the blocking pool (P1-9).
+    let (total, cached_meta) = match cenc_meta_for(&path).await {
+        Ok(found) => found,
+        Err(CencMetaError::Unavailable) => return None,
+        Err(CencMetaError::Invalid(err)) => {
+            return Some(Response::json(
+                500,
+                &serde_json::json!({ "success": false, "error": err }),
+            ));
+        }
+    };
+    if !cached_meta.encrypted {
         return None;
     }
     // The file is encrypted: serving the raw bytes would hand the player
     // undecodable data with a success status, so a missing key is an
     // explicit error instead. Re-resolving the source rewrites the sidecar
     // through the cache-hit path in `download_and_save`.
-    let Some(key) = read_key_sidecar(&path) else {
+    let Some(key) = cached_meta.key.clone() else {
         return Some(Response::json(
             503,
             &serde_json::json!({
@@ -3075,18 +3219,9 @@ async fn serve_cached_src(
             }),
         ));
     };
-    let index = match cenc_index_for_file(&path) {
-        Ok(Some(index)) => index,
-        Ok(None) => return None,
-        Err(err) => {
-            return Some(Response::json(
-                500,
-                &serde_json::json!({ "success": false, "error": err }),
-            ));
-        }
+    let Some(index) = cached_meta.index.clone() else {
+        return None;
     };
-    let meta = std::fs::metadata(&path).ok()?;
-    let total = meta.len();
     let content_type = crate::dispatch::mime_for(&path).to_string();
     let range = crate::static_files::parse_range(req.header("range"), total);
     let is_head = req.method.eq_ignore_ascii_case("HEAD");
@@ -3617,6 +3752,12 @@ pub(crate) fn apply_cenc_index(
     if content_key.len() != 16 && content_key.len() != 24 && content_key.len() != 32 {
         return Err("invalid CENC content key length".to_string());
     }
+    // One key schedule for the whole call: the CTR keystream needs a block
+    // encryption per 16 ciphertext bytes, and building the cipher per block
+    // (the old `aes_encrypt_block`) repeated the key schedule for every block.
+    // Range requests decrypt whole episodes at once, so that was the dominant
+    // cost of serving an encrypted video (P1-2).
+    let cipher = CencCipher::new(content_key)?;
     let buf_start = buf_off;
     let buf_end = buf_off + buf.len() as u64;
     for patch in &index.patches {
@@ -3628,7 +3769,16 @@ pub(crate) fn apply_cenc_index(
             buf[(s - buf_start) as usize..(e - buf_start) as usize].copy_from_slice(src);
         }
     }
-    for range in &index.ranges {
+    // `ranges` is sorted by offset and non-overlapping, so the first range
+    // that can touch this buffer is found by binary search instead of scanning
+    // every sample of the file for every streamed chunk (P1-2).
+    let first = index
+        .ranges
+        .partition_point(|range| range.off + range.size <= buf_start);
+    for range in &index.ranges[first..] {
+        if range.off >= buf_end {
+            break;
+        }
         let range_end = range.off + range.size;
         let s = range.off.max(buf_start);
         let e = range_end.min(buf_end);
@@ -3641,7 +3791,7 @@ pub(crate) fn apply_cenc_index(
         let mut pos = s;
         while pos < e {
             let counter = ctr_counter_plus(&range.counter0, stream_pos / 16);
-            let keystream = aes_encrypt_block(content_key, &counter)?;
+            let keystream = cipher.encrypt_block(&counter);
             let block_off = (stream_pos % 16) as usize;
             let take = (16 - block_off).min((e - pos) as usize);
             let dst = (pos - buf_start) as usize;
@@ -3856,31 +4006,47 @@ fn parse_senc(data: &[u8], b: Mp4Box, iv_size: usize) -> Vec<SencEntry> {
     entries
 }
 
-fn aes_encrypt_block(key: &[u8], block: &[u8; 16]) -> Result<[u8; 16], String> {
-    use aes::cipher::generic_array::GenericArray;
-    use aes::cipher::{BlockEncrypt, KeyInit};
-    let mut b = GenericArray::clone_from_slice(block);
-    match key.len() {
-        16 => {
-            let cipher =
-                aes::Aes128::new_from_slice(key).map_err(|_| "invalid AES key".to_string())?;
-            cipher.encrypt_block(&mut b);
+/// One AES key schedule shared by every block of one `apply_cenc_index` call.
+///
+/// CENC-CTR needs `AES_K(counter)` once per 16-byte ciphertext block; the key
+/// schedule is the expensive part, so it is built once here instead of per
+/// block (P1-2).
+enum CencCipher {
+    Aes128(aes::Aes128),
+    Aes192(aes::Aes192),
+    Aes256(aes::Aes256),
+}
+
+impl CencCipher {
+    fn new(key: &[u8]) -> Result<Self, String> {
+        use aes::cipher::KeyInit;
+        match key.len() {
+            16 => aes::Aes128::new_from_slice(key)
+                .map(Self::Aes128)
+                .map_err(|_| "invalid AES key".to_string()),
+            24 => aes::Aes192::new_from_slice(key)
+                .map(Self::Aes192)
+                .map_err(|_| "invalid AES key".to_string()),
+            32 => aes::Aes256::new_from_slice(key)
+                .map(Self::Aes256)
+                .map_err(|_| "invalid AES key".to_string()),
+            n => Err(format!("invalid AES key length {n}")),
         }
-        24 => {
-            let cipher =
-                aes::Aes192::new_from_slice(key).map_err(|_| "invalid AES key".to_string())?;
-            cipher.encrypt_block(&mut b);
-        }
-        32 => {
-            let cipher =
-                aes::Aes256::new_from_slice(key).map_err(|_| "invalid AES key".to_string())?;
-            cipher.encrypt_block(&mut b);
-        }
-        n => return Err(format!("invalid AES key length {n}")),
     }
-    let mut out = [0u8; 16];
-    out.copy_from_slice(&b);
-    Ok(out)
+
+    fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+        use aes::cipher::generic_array::GenericArray;
+        use aes::cipher::BlockEncrypt;
+        let mut b = GenericArray::clone_from_slice(block);
+        match self {
+            Self::Aes128(cipher) => cipher.encrypt_block(&mut b),
+            Self::Aes192(cipher) => cipher.encrypt_block(&mut b),
+            Self::Aes256(cipher) => cipher.encrypt_block(&mut b),
+        }
+        let mut out = [0u8; 16];
+        out.copy_from_slice(&b);
+        out
+    }
 }
 
 pub fn register(s: &mut Server) {

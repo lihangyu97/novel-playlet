@@ -141,3 +141,123 @@ fn stsz_fixed_size_branch_rejects_absurd_sample_count() {
     let (data, b) = stsz_box(100, 3, 320);
     assert_eq!(parse_stsz(&data, b), vec![100, 100, 100]);
 }
+
+/// P1-9: the merged CENC metadata cache answers a serve-path lookup without
+/// re-reading the moov, invalidates when the video is rewritten, and still
+/// distinguishes "encrypted but sidecar key missing" from a clear file.
+#[test]
+fn cenc_metadata_cache_reuses_invalidates_and_keeps_the_missing_key_state() {
+    let f = fixture();
+    let c = &f["cenc"];
+    let encrypted = b64(c, "full_sample_b64");
+    let key = hex::decode(c["key_hex"].as_str().unwrap()).unwrap();
+    let mut plaintext = encrypted.clone();
+    decrypt_cenc_mp4(&mut plaintext, &key).expect("decrypt");
+    // A different length with the moov untouched: the (len, mtime) validity
+    // key changes, and the file still parses as a *clear* MP4.
+    plaintext.truncate(plaintext.len() - 8);
+
+    let dir = p17_temp_dir("meta-cache");
+    let path = dir.join("ep.mp4");
+    std::fs::write(&path, &encrypted).expect("write encrypted");
+
+    // Encrypted, no sidecar: explicit state, no key, no index (the serve path
+    // answers 503 on this without building an index).
+    let (len, _, meta) = build_cenc_meta(&path).expect("encrypted meta");
+    assert_eq!(len, encrypted.len() as u64);
+    assert!(meta.encrypted);
+    assert!(meta.key.is_none());
+    assert!(meta.index.is_none());
+
+    // A reused lookup returns the very same built value (no second moov parse).
+    let (_, _, again) = build_cenc_meta(&path).expect("cached meta");
+    assert!(
+        std::sync::Arc::ptr_eq(&meta, &again),
+        "the second lookup must reuse the cached metadata"
+    );
+
+    // Repairing the sidecar does not touch the video file's (len, mtime), so
+    // write_key_sidecar must invalidate explicitly or the cached "no key"
+    // entry would keep answering 503 forever.
+    write_key_sidecar(&path, &key).expect("sidecar");
+    let (_, _, meta) = build_cenc_meta(&path).expect("meta after sidecar repair");
+    assert_eq!(meta.key.as_deref(), Some(key.as_slice()));
+    assert!(
+        meta.index
+            .as_ref()
+            .is_some_and(|index| !index.ranges.is_empty()),
+        "an encrypted entry with a key must carry its range index"
+    );
+
+    // Rewriting the file changes the validity key: the path now reads clear.
+    std::fs::write(&path, &plaintext).expect("rewrite plaintext");
+    let (len, _, meta) = build_cenc_meta(&path).expect("rebuilt meta");
+    assert_eq!(len, plaintext.len() as u64);
+    assert!(
+        !meta.encrypted,
+        "a rewritten file must not reuse its encrypted metadata"
+    );
+    assert!(meta.key.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// P1-9: the metadata cache is bounded, so a long viewing session (episodes
+/// entering/leaving the 128 MiB `src` cache) cannot grow it without limit.
+/// `store_cenc_meta` is the only insertion point.
+#[test]
+fn cenc_metadata_cache_is_bounded() {
+    let meta = std::sync::Arc::new(CencMeta {
+        encrypted: false,
+        key: None,
+        index: None,
+    });
+    for index in 0..(CENC_META_CACHE_LIMIT + 32) {
+        let path = PathBuf::from(format!("/tmp/fqapp-meta-bound-{index}.mp4"));
+        store_cenc_meta(
+            &path,
+            index as u64,
+            std::time::UNIX_EPOCH,
+            std::sync::Arc::clone(&meta),
+        );
+    }
+    let entries = cenc_meta_cache().lock().unwrap().len();
+    assert!(
+        entries <= CENC_META_CACHE_LIMIT,
+        "cache grew to {entries} entries (limit {CENC_META_CACHE_LIMIT})"
+    );
+}
+
+/// P1-9: the async lookup used by `serve_cached_src` produces the same state
+/// as the blocking builder and reuses it on the next request.
+#[tokio::test]
+async fn async_metadata_lookup_matches_the_blocking_builder() {
+    let f = fixture();
+    let c = &f["cenc"];
+    let encrypted = b64(c, "full_sample_b64");
+    let key = hex::decode(c["key_hex"].as_str().unwrap()).unwrap();
+
+    let dir = p17_temp_dir("meta-async");
+    let path = dir.join("ep.mp4");
+    std::fs::write(&path, &encrypted).expect("write encrypted");
+    write_key_sidecar(&path, &key).expect("sidecar");
+
+    let (len, meta) = cenc_meta_for(&path).await.expect("async meta");
+    assert_eq!(len, encrypted.len() as u64);
+    assert!(meta.encrypted);
+    assert_eq!(meta.key.as_deref(), Some(key.as_slice()));
+    assert!(meta.index.is_some());
+
+    let (cached_len, cached_meta) = cenc_meta_for(&path).await.expect("cached async meta");
+    assert_eq!(cached_len, len);
+    assert!(
+        std::sync::Arc::ptr_eq(&meta, &cached_meta),
+        "the async lookup must reuse the cached metadata"
+    );
+
+    std::fs::remove_file(&path).expect("remove video");
+    assert!(
+        cenc_meta_for(&path).await.is_err(),
+        "a stat failure must surface as Unavailable, not as a fake clear file"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
