@@ -664,6 +664,22 @@ xcrun devicectl device copy from --device <UDID> \
 
 ---
 
+### 7.6 版本号与发版
+
+`pubspec.yaml` 的 `version: X.Y.Z+N` 是唯一来源（iOS 的 `CFBundleShortVersionString` / `CFBundleVersion`、Android 的 `versionName` / `versionCode` 都由它派生）。
+
+- **release 只从 main 构建**；每次发版版本名 patch +1、构建号 +1：`1.0.0+15` → `1.0.1+16` → `1.0.2+17` …
+- **beta / 开发包不改版本**，沿用当前 pubspec（两个版本靠 bundle id 与显示名区分，见 §7.2）。
+- 递增用脚本（默认 patch 与构建号各 +1；需要时再手动 `--minor` / `--major`）：
+
+```bash
+./scripts/bump_version.sh --dry-run   # 先看结果
+./scripts/bump_version.sh             # 1.0.0+15 → 1.0.1+16
+```
+
+- 发版顺序：在 main 上 bump → 构建 release（`flutter build ios --release --no-codesign`，双版本构建脚本见 §7.2）→ 自签覆盖安装。不要手改 Info.plist / Android 的版本号。
+- 构建号必须递增（Apple 的 `CFBundleVersion` 规则，覆盖安装和安全回滚都靠它），不要回退。
+
 ## 8. 性能记录：阅读页整章分页
 
 结论：**保持整章同步分页，不做分帧补页**。
