@@ -12,7 +12,6 @@ Future<double?> showPlaybackSpeedSheet(
 }) {
   return showModalBottomSheet<double>(
     context: context,
-    showDragHandle: true,
     useSafeArea: true,
     builder: (_) => _PlaybackSpeedSheet(current: current),
   );
@@ -30,7 +29,7 @@ class _PlaybackSpeedSheet extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         20,
-        0,
+        16,
         20,
         20 + MediaQuery.paddingOf(context).bottom,
       ),

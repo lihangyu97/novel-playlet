@@ -423,7 +423,7 @@ class ReaderSettingsSheet extends ConsumerWidget {
         color: paper.background,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      padding: EdgeInsets.fromLTRB(20, 10, 20, 18 + bottomInset),
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 18 + bottomInset),
       child: SliderTheme(
         data: SliderTheme.of(context).copyWith(
           activeTrackColor: highlight,
@@ -437,17 +437,6 @@ class ReaderSettingsSheet extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: muted.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
             Text(
               '阅读设置',
               style: TextStyle(
@@ -687,7 +676,7 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 8, 10),
+              padding: const EdgeInsets.fromLTRB(20, 16, 8, 10),
               child: Row(
                 children: [
                   Text(

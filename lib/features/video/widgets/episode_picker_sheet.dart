@@ -25,7 +25,6 @@ Future<int?> showEpisodePickerSheet(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    showDragHandle: true,
     builder: (_) => FractionallySizedBox(
       heightFactor: 0.7,
       child: _EpisodePickerBody(
@@ -90,7 +89,7 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
       children: [
         // 标题行沿用原弹层样式：选集 / 共 N 集 · 剧名 / 关闭。
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
+          padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
           child: Row(
             children: [
               Text(

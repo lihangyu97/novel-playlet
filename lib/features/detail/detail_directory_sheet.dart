@@ -12,7 +12,6 @@ Future<Chapter?> showDetailDirectorySheet(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    showDragHandle: true,
     builder: (_) => FractionallySizedBox(
       heightFactor: 0.85,
       child: _DirectorySheetBody(
@@ -36,7 +35,7 @@ class _DirectorySheetBody extends StatelessWidget {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
+          padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
           child: Row(
             children: [
               Text(

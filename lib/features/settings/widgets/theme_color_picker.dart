@@ -44,7 +44,7 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
       top: false,
       // 小屏/大字号时内容可能超出可用高度：包一层滚动，别把按钮挤出屏幕。
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
