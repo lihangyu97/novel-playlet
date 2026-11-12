@@ -229,14 +229,20 @@ ChapterContent{id,title,paragraphs}
   → _obtainPagination()：key = 正文对象身份 + 宽高 + 字号 + 行距 + 系统缩放 + 字体
   → ReaderPagination.build()：每段一个 TextSpan → TextPainter.layout → 按【行边界】装页
        （每页至少一行防死循环，段间距 = fontSize × 0.55）
+       同时用同一次 layout 的 getBoxesForSelection 算对话高亮矩形 → ReaderBlock
   → PageView.builder → ReaderPageContent
        每个 fragment：Positioned(top,height) + ClipRect + OverflowBox(段高)
-                     + Transform.translate(-sourceTop) + Text.rich(整段)
+                     + Transform.translate(-sourceTop)
+                     + Stack[对话色带 CustomPaint, Text.rich(整段)]
        只裁剪、不重排：上屏断行与测量永远同一套
 ```
 
 - 分页进度存「本页真正开头的段落下标」，不是跨页段落号；恢复时找包含该段的第一页。
 - 字号/行距/系统缩放变化 → 进 key，重新分页并按旧页锚点回位；换底色只改颜色，不重排。
+- 对话荧光笔：`“…”` / `「…」` / `『…』` 成对引号内的说话内容（不含引号）在测量阶段
+  用 `getBoxesForSelection` 算出段内矩形，渲染时在文字下方画「下半段」圆角色带
+  （浅色纸 34% 黄、夜间纸 22% 黄）；矩形来自这次 TextPainter 测量，渲染期不额外排版，
+  也不影响分页、选中和复制。
 - 空章显示「本章暂无正文」+ 上/下一章（空章没有可翻页的正文，保留这条兜底入口）。
 - 工具栏：点中间 1/3 区域呼出；打开时横向翻页锁定（PageView `NeverScrollableScrollPhysics`），
   压暗遮罩保留但不接收点击（点击穿透到正文，用于收起工具栏）。

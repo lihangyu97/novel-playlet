@@ -35,17 +35,22 @@ class ReaderPageContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 对话荧光笔底色：浅色纸用偏亮的黄，夜间纸压暗一档，避免在深色底上过跳。
+    final isDark = Theme.of(context).colorScheme.brightness == Brightness.dark;
+    final markerColor = const Color(0xFFFFD54F)
+        .withValues(alpha: isDark ? 0.22 : 0.34);
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
       child: Stack(
         children: [
-          for (final fragment in page.fragments) _buildFragment(fragment),
+          for (final fragment in page.fragments)
+            _buildFragment(fragment, markerColor),
         ],
       ),
     );
   }
 
-  Widget _buildFragment(ReaderFragment fragment) {
+  Widget _buildFragment(ReaderFragment fragment, Color markerColor) {
     // 与分页测量共用同一个 span 构建函数：首行缩进 / 段评气泡的占位度量
     // 在测量与渲染两侧完全一致，不能各自实现一套。
     final block = fragment.block;
@@ -73,15 +78,29 @@ class ReaderPageContent extends StatelessWidget {
           maxHeight: fragment.block.height,
           child: Transform.translate(
             offset: Offset(0, -fragment.sourceTop),
-            child: Text.rich(
-              paragraph.span,
-              style: textStyle,
-              textAlign: TextAlign.justify,
-              textDirection: TextDirection.ltr,
-              textScaler: textScaler,
-              textHeightBehavior: readerTextHeightBehavior,
-              textWidthBasis: TextWidthBasis.parent,
-              locale: const Locale('zh', 'CN'),
+            // StackFit.expand 保证 Text.rich 仍然拿到和测量时一致的紧约束，
+            // 底色只是画在文字后面的另一层，不参与排版。
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (fragment.block.dialogueRects.isNotEmpty)
+                  CustomPaint(
+                    painter: _DialogueHighlightPainter(
+                      rects: fragment.block.dialogueRects,
+                      color: markerColor,
+                    ),
+                  ),
+                Text.rich(
+                  paragraph.span,
+                  style: textStyle,
+                  textAlign: TextAlign.justify,
+                  textDirection: TextDirection.ltr,
+                  textScaler: textScaler,
+                  textHeightBehavior: readerTextHeightBehavior,
+                  textWidthBasis: TextWidthBasis.parent,
+                  locale: const Locale('zh', 'CN'),
+                ),
+              ],
             ),
           ),
         ),
@@ -771,4 +790,37 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
       ),
     );
   }
+}
+
+/// 给人物对话画「荧光笔」色带：只覆盖文字框的下半部分，圆角收边。
+///
+/// 矩形来自分页测量时的 `getBoxesForSelection`，和正文共用同一份排版结果，
+/// 所以不需要在渲染阶段再跑一次 TextPainter；色带画在文字下面，只影响观感，
+/// 不改变任何度量。
+class _DialogueHighlightPainter extends CustomPainter {
+  const _DialogueHighlightPainter({required this.rects, required this.color});
+
+  final List<Rect> rects;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (rects.isEmpty) return;
+    final paint = Paint()..color = color;
+    for (final rect in rects) {
+      if (rect.height <= 0 || rect.width <= 0) continue;
+      final top = rect.top + rect.height * 0.52;
+      final bottom = rect.bottom - rect.height * 0.04;
+      if (bottom <= top) continue;
+      final band = Rect.fromLTRB(rect.left - 1, top, rect.right + 1, bottom);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(band, Radius.circular((bottom - top) / 2)),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DialogueHighlightPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.rects != rects;
 }
