@@ -1,3 +1,5 @@
+import '../../app/widgets/app_snack_bar.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -291,8 +293,7 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
         .clearFor(entry.kind, entry.id);
     if (!mounted) return;
     _invalidateLists();
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('已删除《${entry.title}》的离线缓存')));
+    showAppSnackBar(context, '已删除《${entry.title}》的离线缓存');
   }
 
   String _deleteMessage(_CacheEntry entry) {
@@ -349,8 +350,7 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
     }
     if (!mounted) return;
     _invalidateLists();
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('已清空离线${_kindLabel(kind)}缓存')));
+    showAppSnackBar(context, '已清空离线${_kindLabel(kind)}缓存');
   }
 
   String _clearMessage(OfflineTaskKind kind, List<_CacheEntry> entries) {
@@ -476,8 +476,7 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
         );
     }
     if (disposition == OfflineStartDisposition.queued && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已加入缓存队列，等前面的任务完成后自动开始')));
+      showAppSnackBar(context, '已加入缓存队列，等前面的任务完成后自动开始');
     }
   }
 
@@ -491,8 +490,7 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
         '缓存队列已满（最多 ${error.maxLength} 个），请先等前面的任务完成。',
       _ => '开始下载失败，请重试',
     };
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    showAppSnackBar(context, message);
   }
 }
 

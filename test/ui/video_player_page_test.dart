@@ -15,6 +15,7 @@ import 'package:novel_playlet/data/models/chapter.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
 import 'package:novel_playlet/features/video/network_health.dart';
+import 'package:novel_playlet/features/video/video_library_providers.dart';
 import 'package:novel_playlet/features/video/playback_speed.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -69,6 +70,44 @@ void main() {
     await tester.pump();
     expect(controller.speeds.last, 2.0);
     expect(find.text('2.0x'), findsOneWidget);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('底栏新增收藏/缓存/本集评论入口，收藏只加不移、不弹提示条', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    final container = await _pumpPlayer(tester, store: store, factory: factory);
+
+    // 等收藏态从本地读回来（AsyncNotifier 首次 build 是异步的）。
+    final shelfProvider = videoShelfStatusProvider('s1');
+    for (var i = 0; i < 5 && container.read(shelfProvider).isLoading; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+
+    expect(find.byTooltip('选集'), findsOneWidget);
+    expect(find.byTooltip('本集评论'), findsOneWidget);
+    expect(find.byTooltip('收藏'), findsOneWidget);
+    expect(find.byTooltip('缓存'), findsOneWidget);
+    expect(find.byTooltip('剧集详情'), findsOneWidget, reason: '历史直进播放页后要能回详情');
+
+    await tester.tap(find.byTooltip('收藏'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(container.read(shelfProvider).value, isTrue);
+    expect(find.byTooltip('已收藏'), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing, reason: '收藏成功不弹提示条，图标自己变实心就够了');
+
+    // 只加不移：已收藏后按钮只读，再点不会取消。
+    await tester.tap(find.byTooltip('已收藏'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(container.read(shelfProvider).value, isTrue);
+    expect(
+      find.byIcon(Icons.favorite_rounded),
+      findsOneWidget,
+      reason: '已收藏后仍是实心收藏图标',
+    );
 
     await _disposePlayer(tester);
   });

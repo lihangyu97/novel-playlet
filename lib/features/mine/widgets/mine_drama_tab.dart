@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/widgets/app_snack_bar.dart';
 import '../../../app/providers.dart';
 import '../../../app/router.dart';
 import '../../../app/widgets/cover_hero.dart';
@@ -118,9 +119,7 @@ class MineDramaTab extends ConsumerWidget {
       );
     } catch (error) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(apiErrorCopy(error, fallback: '打开播放失败，请重试'))),
-      );
+      showAppSnackBar(context, apiErrorCopy(error, fallback: '打开播放失败，请重试'));
     }
   }
 

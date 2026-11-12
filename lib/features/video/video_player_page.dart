@@ -8,16 +8,22 @@ import 'package:video_player/video_player.dart';
 
 import '../../app/providers.dart';
 import '../../app/router.dart';
+import '../../app/widgets/app_snack_bar.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
+import '../../data/models/video_series.dart';
 import '../../data/models/video_source.dart';
 import '../cache/cache_providers.dart';
+import '../cache/offline_task.dart';
+import '../cache/widgets/offline_download_button.dart';
 import 'network_health.dart';
 import 'offline_playback.dart';
 import 'playback_speed.dart';
+import 'video_library_providers.dart';
 import 'widgets/episode_picker_sheet.dart';
 import 'widgets/playback_speed_sheet.dart';
 import 'widgets/player_option_chip.dart';
+import 'widgets/video_comments_sheet.dart';
 
 /// controller 工厂：生产环境走 `video_player` 的 platformView，测试可 override
 /// 成 FakeController（不碰平台通道），用于锁「切集保留旧画面/倍速继承」等行为。
@@ -862,8 +868,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       ClipboardData(text: '${error.title}\n${error.reason}\n${error.detail}'),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('错误信息已复制')));
+    showAppSnackBar(context, '错误信息已复制');
   }
 
   void _togglePlay() {
@@ -1301,6 +1306,94 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     }
     // 弹层关掉后恢复自动隐藏；暂停态由 _scheduleHide 自己判断不隐藏。
     _scheduleHide();
+  }
+
+  /// 当前剧的收藏项：从播放参数拼，收藏页展示标题/封面/集数就够。
+  VideoSeries get _shelfItem => VideoSeries(
+    id: widget.args.seriesId,
+    title: widget.args.seriesTitle,
+    cover: widget.args.cover,
+    episodeCount: _episodes.length,
+  );
+
+  /// 收藏：只加不移（与阅读页顶部「加入书架」一致）。
+  ///
+  /// 历史「最近观看」是直进播放页的，这里没有入口的话看过就收藏不了；
+  /// 已收藏后按钮变只读态，不再提供取消（取消入口在「我的 → 收藏」里）。
+  /// 成功不弹提示条：图标自己会变成实心，底部操作行不该被 SnackBar 压住。
+  Future<void> _addToShelf() async {
+    final seriesId = widget.args.seriesId;
+    if (seriesId.isEmpty || !_shelfItem.isValid) return;
+    final provider = videoShelfStatusProvider(seriesId);
+    if ((ref.read(provider).value ?? false) || ref.read(provider).isLoading) {
+      return;
+    }
+    try {
+      await ref.read(provider.notifier).add(_shelfItem);
+    } catch (_) {
+      if (!mounted) return;
+      showAppSnackBar(context, '收藏失败，请重试');
+    }
+  }
+
+  /// 缓存整剧：未缓存 → 开始/续传；缓存中、已缓存 → 进缓存中心看进度。
+  ///
+  /// 三态判定和小说阅读页顶部「缓存小说」共用 [offlineEntryStatusProvider]，
+  /// 两个入口不会各算一套。
+  Future<void> _handleCacheTap() async {
+    final args = widget.args;
+    if (args.seriesId.isEmpty) return;
+    final status = ref.read(
+      offlineEntryStatusProvider((
+        kind: OfflineTaskKind.video,
+        id: args.seriesId,
+      )),
+    );
+    if (status != OfflineEntryStatus.none) {
+      await context.pushAppRoute(const CacheCenterRoute());
+      return;
+    }
+    await startOfflineDownload(
+      context,
+      ref,
+      kind: OfflineTaskKind.video,
+      id: args.seriesId,
+      title: args.seriesTitle,
+      cover: args.cover,
+      items: _episodes,
+    );
+  }
+
+  /// 打开剧集详情。历史「最近观看」直进播放页，这是补回来的详情入口；
+  /// 进详情前先暂停，返回后原来在播就继续播，避免详情页的播放按钮和这里
+  /// 同时出声。
+  Future<void> _openVideoDetail() async {
+    final args = widget.args;
+    if (args.seriesId.isEmpty) return;
+    final wasPlaying = _controller?.value.isPlaying ?? false;
+    if (wasPlaying) unawaited(_controller?.pause());
+    _hideTimer?.cancel();
+    setState(() => _controlsVisible = true);
+    try {
+      await context.pushAppRoute(
+        VideoDetailRoute(seriesId: args.seriesId, preview: _shelfItem),
+      );
+    } finally {
+      if (mounted) {
+        if (wasPlaying) unawaited(_controller?.play());
+        _scheduleHide();
+      }
+    }
+  }
+
+  /// 本集评论：官方按集 vid 取的热评列表（一次最多 20 条），没有 vid 就不开。
+  Future<void> _openEpisodeComments() async {
+    final seriesId = widget.args.seriesId;
+    final episode = _episode;
+    if (seriesId.isEmpty || episode == null || episode.id.isEmpty) return;
+    _hideTimer?.cancel();
+    await showVideoCommentsSheet(context, seriesId: seriesId, vid: episode.id);
+    if (mounted) _scheduleHide();
   }
 
   @override
@@ -1814,8 +1907,81 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
               ],
             ),
           ),
+          // 历史「最近观看」直进播放页，详情页只能从这里回得去。
+          if (widget.args.seriesId.isNotEmpty)
+            IconButton(
+              tooltip: '剧集详情',
+              onPressed: () => unawaited(_openVideoDetail()),
+              icon: const Icon(Icons.info_outline_rounded),
+              color: Colors.white,
+            ),
         ],
       ),
+    );
+  }
+
+  /// 控制条上的纯图标按钮：暗色渐变上用白色，激活态用主题色。
+  Widget _barIconButton({
+    required IconData icon,
+    required String tooltip,
+    VoidCallback? onTap,
+    bool active = false,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      onPressed: onTap,
+      icon: Icon(icon),
+      color: active ? scheme.primary : Colors.white,
+      disabledColor: Colors.white38,
+      iconSize: 24,
+      tooltip: tooltip,
+      padding: EdgeInsets.zero,
+      // M3 的 IconButton 默认 48×48；这里收成 40×40，否则操作行在窄屏上
+      // 会挤到暂停键。
+      style: IconButton.styleFrom(
+        minimumSize: const Size(40, 40),
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+  }
+
+  /// 收藏按钮（播放页底栏）：状态与详情页共用同一个 provider。
+  Widget _buildShelfButton() {
+    final shelfAsync = ref.watch(
+      videoShelfStatusProvider(widget.args.seriesId),
+    );
+    final onShelf = shelfAsync.value ?? false;
+    // 首次读本地收藏表还没回来时禁用，避免「刚进页面就点」把已收藏的剧
+    // 又加一遍（toggle 依据的初始值会是 null）。
+    final busy = shelfAsync.isLoading && !shelfAsync.hasValue;
+    return _barIconButton(
+      icon: onShelf ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+      tooltip: onShelf ? '已收藏' : '收藏',
+      active: onShelf,
+      // 只加不移：已收藏后按钮只读（与阅读页「已在书架」一致）。
+      onTap: onShelf || busy ? null : () => unawaited(_addToShelf()),
+    );
+  }
+
+  /// 缓存按钮（播放页底栏）：未缓存 / 缓存中 / 已缓存三态。
+  Widget _buildCacheButton() {
+    final status = ref.watch(
+      offlineEntryStatusProvider((
+        kind: OfflineTaskKind.video,
+        id: widget.args.seriesId,
+      )),
+    );
+    final (icon, tooltip) = switch (status) {
+      OfflineEntryStatus.cached => (Icons.download_done_rounded, '已缓存'),
+      OfflineEntryStatus.inProgress => (Icons.downloading_rounded, '缓存中'),
+      OfflineEntryStatus.none => (Icons.download_outlined, '缓存'),
+    };
+    return _barIconButton(
+      icon: icon,
+      tooltip: tooltip,
+      active: status != OfflineEntryStatus.none,
+      onTap: () => unawaited(_handleCacheTap()),
     );
   }
 
@@ -1898,6 +2064,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                 ),
               ),
               const SizedBox(height: 4),
+              // 操作行：左侧「选集 + 本集评论」，中间播放/暂停，右侧
+              // 「收藏 + 缓存 + 倍速」。用 Stack 而不是等宽 Row：倍速 pill 是
+              // 固定宽度，等宽分组在 360 宽的机型上会挤到溢出；Stack 让暂停键
+              // 始终居中，两侧按自身宽度靠边（≥360pt 不会互相压到）。
               SizedBox(
                 width: double.infinity,
                 child: Stack(
@@ -1912,34 +2082,48 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                       ),
                       iconSize: 30,
                     ),
-                    // 左侧「选集」：像阅读器目录弹层一样快速跳集。
                     Positioned(
                       left: 0,
                       top: 0,
                       bottom: 0,
                       child: Center(
-                        child: IconButton(
-                          onPressed: () => unawaited(_openEpisodePicker()),
-                          icon: const Icon(Icons.video_library_outlined),
-                          color: Colors.white,
-                          iconSize: 26,
-                          tooltip: '选集',
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _barIconButton(
+                              icon: Icons.video_library_outlined,
+                              tooltip: '选集',
+                              onTap: () => unawaited(_openEpisodePicker()),
+                            ),
+                            if (widget.args.seriesId.isNotEmpty)
+                              _barIconButton(
+                                icon: Icons.chat_bubble_outline_rounded,
+                                tooltip: '本集评论',
+                                onTap: () => unawaited(_openEpisodeComments()),
+                              ),
+                          ],
                         ),
                       ),
                     ),
-                    // 倍速入口放在操作行最右（原全屏图标的位置）：时间行只留
-                    // 「当前/总时长」，左侧选集、中间播放控制、右侧倍速，一眼
-                    // 就能找到高频操作。全屏入口见视频下方的「全屏观看」。
                     Positioned(
                       right: 0,
                       top: 0,
                       bottom: 0,
                       child: Center(
-                        child: PlayerOptionChip(
-                          label: playbackSpeedLabel(speed),
-                          active: speed != 1.0,
-                          tooltip: '播放速度',
-                          onTap: () => unawaited(_openPlaybackSpeedSheet()),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (widget.args.seriesId.isNotEmpty) ...[
+                              _buildShelfButton(),
+                              _buildCacheButton(),
+                            ],
+                            PlayerOptionChip(
+                              label: playbackSpeedLabel(speed),
+                              active: speed != 1.0,
+                              tooltip: '播放速度',
+                              onTap: () => unawaited(_openPlaybackSpeedSheet()),
+                            ),
+                          ],
                         ),
                       ),
                     ),

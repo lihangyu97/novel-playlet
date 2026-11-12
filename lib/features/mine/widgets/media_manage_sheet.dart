@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/widgets/app_snack_bar.dart';
+
 enum _ManageAction { openDetail, remove }
 
 /// 长按管理菜单：书架/收藏共用同一套底部弹层。
@@ -65,7 +67,6 @@ Future<void> showMediaManageSheet({
     case _ManageAction.remove:
       await remove();
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(removedMessage)));
+      showAppSnackBar(context, removedMessage);
   }
 }

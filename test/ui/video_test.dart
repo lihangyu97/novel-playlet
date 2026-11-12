@@ -167,7 +167,9 @@ void main() {
       int bundleCalls() => fake.calls
           .where(
             (call) =>
-                call.startsWith('/api/v1/series/v1') ||
+                // 剧评是独立请求，不参与「详情/选集」的计数。
+                (call.startsWith('/api/v1/series/v1') &&
+                    !call.startsWith('/api/v1/series/v1/comments')) ||
                 call.startsWith('/api/v1/books/v1/directory'),
           )
           .length;
@@ -198,6 +200,65 @@ void main() {
 
       expect(bundleCalls(), 2, reason: '页面重建由 provider 驱动，不应重新请求上游');
     });
+  });
+
+  testWidgets('短剧详情-剧评卡片与「全部评论」弹层', (tester) async {
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
+    final fake = FakePreviewTransport()
+      ..seriesCommentsPayload = <String, dynamic>{
+        'code': 0,
+        'data': <String, dynamic>{
+          'data_list': <dynamic>[
+            <String, dynamic>{
+              'comment': <String, dynamic>{
+                'comment_id': 'c1',
+                'common': <String, dynamic>{
+                  'content': <String, dynamic>{'text': '这部剧节奏很好'},
+                  'user_info': <String, dynamic>{
+                    'base_info': <String, dynamic>{'user_name': '小明'},
+                  },
+                  'create_timestamp': 1700000000,
+                },
+                'stat': <String, dynamic>{
+                  'digg_count': '12',
+                  'reply_count': '2',
+                },
+              },
+            },
+            <String, dynamic>{
+              'comment': <String, dynamic>{
+                'comment_id': 'c2',
+                'common': <String, dynamic>{
+                  'content': <String, dynamic>{'text': '第二集开始上头'},
+                  'user_info': <String, dynamic>{
+                    'base_info': <String, dynamic>{'user_name': '小红'},
+                  },
+                },
+                'stat': <String, dynamic>{'digg_count': '3'},
+              },
+            },
+          ],
+          'common_list_info': <String, dynamic>{
+            'total': '2',
+            'cursor': '',
+            'has_more': false,
+          },
+        },
+      };
+    await pumpPreview(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: fake,
+    );
+
+    expect(find.text('剧评'), findsOneWidget, reason: '有剧评时应显示剧评区块');
+    expect(find.text('这部剧节奏很好'), findsOneWidget, reason: '卡片只露第一条');
+    expect(find.text('查看全部 2 条'), findsOneWidget);
+
+    await tester.tap(find.text('查看全部 2 条'));
+    await tester.pumpAndSettle();
+    expect(find.text('共 2 条'), findsOneWidget);
+    expect(find.text('第二集开始上头'), findsOneWidget, reason: '弹层里应能看到全部评论');
   });
 
   testWidgets('短剧详情-底部收藏与播放栏', (tester) async {

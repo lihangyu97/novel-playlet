@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/widgets/app_snack_bar.dart';
 import '../feed/feed_search_field.dart';
 import '../feed/feed_staggered_grid.dart';
 import '../feed/feed_view.dart';
@@ -221,8 +222,7 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
       await _controller.refresh();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(describeFeedError(error))));
+      showAppSnackBar(context, describeFeedError(error));
     }
   }
 

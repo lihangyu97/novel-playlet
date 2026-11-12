@@ -1,3 +1,5 @@
+import '../app_snack_bar.dart';
+
 import 'dart:async';
 import 'dart:ui' as ui;
 
@@ -562,15 +564,7 @@ class DetailIdFooter extends StatelessWidget {
   Future<void> _copy(BuildContext context) async {
     await Clipboard.setData(ClipboardData(text: id));
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(
-          content: Text('ID 已复制'),
-          duration: Duration(milliseconds: 1200),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    showAppSnackBar(context, 'ID 已复制', behavior: SnackBarBehavior.floating);
   }
 
   @override

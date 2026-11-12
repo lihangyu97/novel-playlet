@@ -402,6 +402,52 @@ class ApiClient {
     return CommentReplyPage.fromPayload(payload);
   }
 
+  /// 短剧整体剧评（「详情页」评论区），`cursor` 翻页。
+  ///
+  /// 与小说书评不是同一条上游：短剧剧评复用 `comment/list`，
+  /// `comment_source=1`、`group_type=1`（Book），`group_id` 就是剧集 id。
+  /// 返回形状与段评/书评一致（`data_list` + `common_list_info`）。
+  Future<BookCommentPage> seriesComments(
+    String seriesId, {
+    int count = 10,
+    String cursor = '',
+    int sort = 1,
+  }) async {
+    if (seriesId.isEmpty) return BookCommentPage.empty;
+    final payload = await _getJson(
+      '/api/v1/series/${Uri.encodeComponent(seriesId)}/comments',
+      {
+        'count': '$count',
+        'sort': '$sort',
+        if (cursor.isNotEmpty) 'cursor': cursor,
+      },
+      timeout: const Duration(seconds: 20),
+    );
+    return BookCommentPage.fromCommentListPayload(payload);
+  }
+
+  /// 某一集的评论（官方「右栏热评」：按 vid 取，`total` 就是该集评论数）。
+  ///
+  /// 上游还是同一条 `comment/list`，但 `group_id` 换成 vid、`group_type=30`
+  /// （SeriesVideo）、`comment_source=4` / `comment_type=4`；一次最多 20 条，
+  /// 没有 cursor，所以只当「本集评论」首屏用，不做翻页。
+  ///
+  /// [vid] 为空时接口会静默退回剧集 id（变成整部剧的评论），调用方必须先
+  /// 判断 vid 非空，否则「每集评论」会悄悄串成剧级评论。
+  Future<BookCommentPage> episodeComments(
+    String seriesId,
+    String vid, {
+    int serverChannel = 17,
+  }) async {
+    if (seriesId.isEmpty || vid.isEmpty) return BookCommentPage.empty;
+    final payload = await _getJson(
+      '/api/v1/series/${Uri.encodeComponent(seriesId)}/hot-comments',
+      {'vid': vid, 'server_channel': '$serverChannel'},
+      timeout: const Duration(seconds: 20),
+    );
+    return BookCommentPage.fromCommentListPayload(payload);
+  }
+
   Future<Map<String, dynamic>> _getJson(
     String path,
     Map<String, String> query, {

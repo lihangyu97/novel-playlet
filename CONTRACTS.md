@@ -66,6 +66,8 @@ Future<ChapterIdeas> chapterIdeas(String itemId, {String itemVersion = '', int c
 Future<BookCommentPage> paragraphComments(String bookId, String itemId, {required int paraIndex, required String itemVersion, int count = 20, String cursor = ''}); // 某段/章末桶的段评正文
 Future<BookCommentPage> bookComments(String bookId, {int count = 10, int offset = 0}); // 详情页书评（旧接口，带评分/context）
 Future<CommentReplyPage> commentReplies(String commentId, {required String bookId, required String groupId, int count = 10}); // 评论回复，groupId = 章节 itemId
+Future<BookCommentPage> seriesComments(String seriesId, {int count = 20, String cursor = '', int sort = 1}); // 短剧整体剧评，cursor 翻页
+Future<BookCommentPage> episodeComments(String seriesId, String vid); // 某一集评论（官方热评，≤20 条、无翻页）
 Future<VideoSource> videoSource(String episodeId, {bool refresh = false, int? maxHeight}); // refresh=1 删缓存重下；默认带 variants=0；maxHeight=下载清晰度上限
 Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 /src，不打上游
 // 以上错误统一抛 ApiException（message 可直接展示）
@@ -198,6 +200,27 @@ final task = ref.watch(offlineTaskProvider);   // OfflineTask?（含 speedBytesP
   `paraIndices`；读取时长度对不上就当没有锚点（宁可少画气泡，不能把段评挂错段）。
   没有 `v` 的老文件按 0 算，命中后标记 `ReaderChapterHit.anchorsOutdated`。
 
+### 短剧评论（只读）
+
+内核 `comments.rs` 里短剧读路由早就有了，Dart 侧直接走 FFI，不需要改 Rust：
+
+1. `seriesComments(seriesId)`：`GET /api/v1/series/{sid}/comments` → 整部剧的剧评。
+   上游 `comment_source=1 / group_type=1(Book)`，`cursor` 翻页；详情页剧评卡片取首屏，
+   同一页数据复用给「全部剧评」弹层，打开弹层不再重复拉首屏。
+2. `episodeComments(seriesId, vid)`：`GET /api/v1/series/{sid}/hot-comments?vid={vid}` → 某一集的评论
+   （`comment_source=4 / comment_type=4 / group_type=30(SeriesVideo)`），`common_list_info.total`
+   就是该集评论数。上游一次最多 20 条、没有 cursor，所以播放页「本集评论」只做首屏、不做翻页。
+3. 弹幕（`GET /api/v1/videos/{vid}/danmaku`）是另一条链路（按播放时间轴取数），本期不接。
+
+约定：
+
+- **vid 不能空**：上游 vid 为空时会静默退回剧集 id（变成整部剧的评论）；`episodeComments`
+  在 vid 为空时直接返回空页、不发请求。
+- **模型复用**：短剧评论与段评/书评共用 `BookComment` / `BookCommentPage`，但短剧评论没有
+  `score`，详情卡片和弹层都不画星级（`showStars: false`）。
+- **失败静默**：`videoSeriesCommentsProvider` 失败返回 null，详情页整块不插入剧评卡片，不制造错误态。
+- **只读**：不提供发评论/点赞/回复入口（内核有写接口，本期不接）。
+
 ## 导航
 
 ```dart
@@ -235,11 +258,14 @@ context.pushAppRoute(const SearchRoute());         // 推荐页搜索框 → 独
 ## 页面清单（已实现）
 
 1. 推荐页：顶部**常驻**搜索框（40pt、圆角 10，是**只读入口**：点一下进入独立搜索页，不弹键盘、不随列表滚动收起；占位轮播 cue 热词（`/api/v1/search/cue`，按 `rotate_interval_ms` 淡入淡出，无词/失败回退「搜索小说 / 短剧」），点进搜索页时把当前这条带过去；右侧固定下载图标按钮（`download_outlined`，Tooltip/无障碍文案为「已缓存」） → 缓存中心）；顶部固定模块（搜索框 + tabs）带很淡的蓝粉氛围渐变（左→右、向下淡出，`TopGlow`）+ 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧，与我的页共用 `CategoryTabBar`）+ 各分类推荐流（白底卡片 + 不定高瀑布流，默认双列、设置里可切三列；左右留白与行/列间距都 8；封面按内容域原生比例出图；底部导航只剩「推荐 / 我的」）
-2. 详情页：封面/书名/作者/分类/状态/字数/简介/标签 + 书评卡片（首条 + 弹窗查看全部）+ 目录 + 底部「开始阅读」
+2. 详情页：封面/书名/作者/分类/状态/字数/简介/标签 + 书评卡片（首条 + 弹窗查看全部）+ 目录 + 底部「开始阅读」；短剧详情是同一套版式，只是把书评/目录换成剧评卡片（首条 + 弹窗查看全部）与选集
 3. 阅读页：分页正文 + 段评气泡 + 工具栏「评论」/评论面板（分页/回复只读）+ 点击呼出工具栏 + 顶部左侧书名（与右侧动作同字号，占剩余宽度、超宽省略）+ 书架状态（加入书架→已在书架，只读，只加不移）/整本缓存状态（缓存小说/缓存中/已缓存，缓存中与已缓存点击进缓存中心）文本动作 + 底部日间/夜间切换（夜间黑色纸，日间回上次选的浅色纸）+ 字号/行距/底色/段评气泡开关 + 进度保存；上一章/下一章不占工具栏按钮（空章兜底仍保留），点正文左右分区/章边界滑动/目录跳章都能切章
-4. 我的页：**统一页头**（图标 + 「我的」 + 合并统计「书架 N 本 · 收藏 M 部」 + 右上角唯一设置入口，固定贴顶、不随内容滚动；缓存入口在推荐页搜索框右侧）+ 小说 / 短剧两个 tab（与推荐页共用 `CategoryTabBar`：左对齐、**无下划线**、整行高度固定 34，首个 tab 文字与内容留白左对齐（按最大字号预留宽度），当前 tab 主题色高亮、字号 17 / 未选中 15；文字贴同一条底线（变大只向上长），字号/颜色/字重都在过半时直接切换（不做逐帧插值，拖动时一过中线新 tab 就亮）；点击或左右滑动切换，tab 内容各自独立滚动并保活）；整页共用一套蓝粉氛围渐变（方向与推荐页略有差异），不随 tab 变化。小说 tab = 最近阅读 + 我的书架；短剧 tab = 最近观看 + 我的收藏（点击直接续播对应集）；两个 tab 共用 `MineTabBody` 骨架与页头，数据/空态/长按管理各自独立
-5. 设置页：主题色（3 个预设 + HSV 自定义取色，全站生效并持久化）+ 深浅色模式（跟随系统 / 手动深色，持久化）+ 首页推荐布局（双列 / 三列二选一，默认双列，持久化）+ 存储占用与清理（离线缓存提示去「我的 → 缓存」页处理）
-6. 缓存中心：推荐页搜索框右侧的下载图标按钮进入（不再是「我的」页悬浮按钮）；小说/短剧分区列出下载中/排队中/已下载，进度条 + 实时网速，暂停/继续/重试/取消排队，M3 删除与按区清空（确认框），点条目 Hero 进详情
-7. 搜索页（独立页，推荐页搜索框点进来）：顶部搜索框（自动聚焦，右侧「取消」返回；占位从推荐页带过来的热词接着轮播，**空输入提交时直接搜当前占位热词**并把它填回输入框）+ 一次提交**搜小说 / 短剧**，从上到下依次是 小说 / 短剧 两行；每行横向可滑、一屏露出约 3.5 张卡；卡片复用首页推荐流同款（白底卡 + 原生封面比例），卡宽按屏宽算（`SearchPage.cardWidthFor`）、字号整体缩一档（`SearchPage.cardFontScale` = 0.88）；每行独立 加载骨架（与真卡同宽同高的色块占位）/ 失败重试 / 空态；**不单列漫剧行**——漫剧没有独立搜索 tab，是借短剧搜索 tab 再按 `genre=205` 过滤的，和短剧行本质是同一份响应；单列会把同一份数据请求两遍并在两行重复出现，所以短剧行直接展示上游混排结果（漫剧卡片混在其中）；视频卡不展示推荐理由（`recommend_reason_list` 第一条：或为分类名「漫剧」、或为「上新」角标，都隐藏），只留「全 N 集 + 热度」；点卡片按内容域进详情（Hero tag 带 `search-<分类>` 来源）。v1 每个分类只取首屏一页（暂不接 `next_offset`，没有「查看更多」）
+4. 短剧播放页：控制条底排左侧「选集 + 本集评论」、中间播放/暂停、右侧「收藏 + 缓存 + 倍速」（历史「最近观看」直进播放页，这里就是收藏/缓存的唯一入口）；顶栏右侧「剧集详情」回详情；上下滑切集、播完自动续播、横屏全屏
+   - **收藏只加不移**（与阅读页顶部「加入书架」一致）：已收藏后按钮只读，取消走「我的 → 收藏」；成功不弹提示条，图标变实心即可。
+   - 缓存三态与详情页共用 `offlineEntryStatusProvider`：未缓存开下载，缓存中/已缓存进缓存中心。
+5. 我的页：**统一页头**（图标 + 「我的」 + 合并统计「书架 N 本 · 收藏 M 部」 + 右上角唯一设置入口，固定贴顶、不随内容滚动；缓存入口在推荐页搜索框右侧）+ 小说 / 短剧两个 tab（与推荐页共用 `CategoryTabBar`：左对齐、**无下划线**、整行高度固定 34，首个 tab 文字与内容留白左对齐（按最大字号预留宽度），当前 tab 主题色高亮、字号 17 / 未选中 15；文字贴同一条底线（变大只向上长），字号/颜色/字重都在过半时直接切换（不做逐帧插值，拖动时一过中线新 tab 就亮）；点击或左右滑动切换，tab 内容各自独立滚动并保活）；整页共用一套蓝粉氛围渐变（方向与推荐页略有差异），不随 tab 变化。小说 tab = 最近阅读 + 我的书架；短剧 tab = 最近观看 + 我的收藏（点击直接续播对应集）；两个 tab 共用 `MineTabBody` 骨架与页头，数据/空态/长按管理各自独立
+6. 设置页：主题色（3 个预设 + HSV 自定义取色，全站生效并持久化）+ 深浅色模式（跟随系统 / 手动深色，持久化）+ 首页推荐布局（双列 / 三列二选一，默认双列，持久化）+ 存储占用与清理（离线缓存提示去「我的 → 缓存」页处理）
+7. 缓存中心：推荐页搜索框右侧的下载图标按钮进入（不再是「我的」页悬浮按钮）；小说/短剧分区列出下载中/排队中/已下载，进度条 + 实时网速，暂停/继续/重试/取消排队，M3 删除与按区清空（确认框），点条目 Hero 进详情
+8. 搜索页（独立页，推荐页搜索框点进来）：顶部搜索框（自动聚焦，右侧「取消」返回；占位从推荐页带过来的热词接着轮播，**空输入提交时直接搜当前占位热词**并把它填回输入框）+ 一次提交**搜小说 / 短剧**，从上到下依次是 小说 / 短剧 两行；每行横向可滑、一屏露出约 3.5 张卡；卡片复用首页推荐流同款（白底卡 + 原生封面比例），卡宽按屏宽算（`SearchPage.cardWidthFor`）、字号整体缩一档（`SearchPage.cardFontScale` = 0.88）；每行独立 加载骨架（与真卡同宽同高的色块占位）/ 失败重试 / 空态；**不单列漫剧行**——漫剧没有独立搜索 tab，是借短剧搜索 tab 再按 `genre=205` 过滤的，和短剧行本质是同一份响应；单列会把同一份数据请求两遍并在两行重复出现，所以短剧行直接展示上游混排结果（漫剧卡片混在其中）；视频卡不展示推荐理由（`recommend_reason_list` 第一条：或为分类名「漫剧」、或为「上新」角标，都隐藏），只留「全 N 集 + 热度」；点卡片按内容域进详情（Hero tag 带 `search-<分类>` 来源）。v1 每个分类只取首屏一页（暂不接 `next_offset`，没有「查看更多」）
 
 不在本期范围：听书、漫画、登录；评论/段评只做**只读**（不发评论、不点赞、不回复）。
