@@ -10,45 +10,50 @@ import '../../data/models/novel_item.dart';
 /// 看到 20 本"的割裂感。
 const mineRecentLimit = 3;
 
-/// 「我的」页需要的一份本地快照。
-class MineData {
-  const MineData({required this.shelf, required this.recent});
-
-  /// 书架上的书，按加入时间倒序（存储层保证新加入的在前）。
-  final List<NovelItem> shelf;
-
-  /// 最近阅读，按阅读时间倒序。
-  final List<ReadingProgress> recent;
-}
-
-/// 把 [ReadingStore.novelRevision] 桥接成 Riverpod 可以 watch 的计数。
+/// 把 [ReadingStore.shelfRevision] 桥接成 Riverpod 可以 watch 的计数。
 ///
-/// 存储层刻意不依赖状态管理，只暴露 revision（`ValueNotifier<int>`）；
-/// 这里监听它并把变化写进 Notifier 状态，[mineDataProvider] 通过
-/// `ref.watch` 依赖本 provider，于是「加入书架 / 移出书架 / 保存进度」后
-/// 页面会自动重取数据，不需要命令式刷新，也不会把异步数据塞进 setState。
-///
-/// 只监听小说侧的计数器：看短剧时进度写入走 [videoRevisionProvider]，
-/// 不应该触发书架 / 最近阅读重读一遍 SharedPreferences。
-final readingRevisionProvider = NotifierProvider<ReadingRevision, int>(
-  ReadingRevision.new,
+/// 只监听「书架内容」变更（加入 / 移出）：阅读页每 400ms 的进度落盘走
+/// [recentRevisionProvider]，不会让书架 provider 失效、进而重读
+/// shared_preferences 并重建整片书架网格（CODE_REVIEW P1-5）。
+final shelfRevisionProvider = NotifierProvider<ShelfRevision, int>(
+  ShelfRevision.new,
 );
 
-class ReadingRevision extends Notifier<int> {
+class ShelfRevision extends Notifier<int> {
   @override
   int build() {
     final store = ref.watch(readingStoreProvider);
-    void onRevisionChanged() => state = store.novelRevision.value;
-    store.novelRevision.addListener(onRevisionChanged);
-    ref.onDispose(() => store.novelRevision.removeListener(onRevisionChanged));
-    return store.novelRevision.value;
+    void onRevisionChanged() => state = store.shelfRevision.value;
+    store.shelfRevision.addListener(onRevisionChanged);
+    ref.onDispose(() => store.shelfRevision.removeListener(onRevisionChanged));
+    return store.shelfRevision.value;
+  }
+}
+
+/// 把 [ReadingStore.recentRevision] 桥接成 Riverpod 可以 watch 的计数。
+///
+/// 只监听「阅读进度」写入：书架内容的加入/移出不会让最近阅读重读。
+final recentRevisionProvider = NotifierProvider<RecentRevision, int>(
+  RecentRevision.new,
+);
+
+class RecentRevision extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(readingStoreProvider);
+    void onRevisionChanged() => state = store.recentRevision.value;
+    store.recentRevision.addListener(onRevisionChanged);
+    ref.onDispose(() => store.recentRevision.removeListener(onRevisionChanged));
+    return store.recentRevision.value;
   }
 }
 
 /// 把 [ReadingStore.videoRevision] 桥接成 Riverpod 可以 watch 的计数。
 ///
-/// 与 [readingRevisionProvider] 同构，只监听短剧侧的写入：收藏 / 取消收藏、
-/// 换集存进度都只 bump 短剧计数器，避免"看视频导致小说侧也重读"。
+/// 与小说侧细分通道的拆法不同，这里是短剧侧的**聚合**计数：播放页存进度
+/// （换集/退出）后 `videoProgressProvider` 靠它刷新（见
+/// `lib/features/video/video_library_providers.dart`）。「我的」页的收藏 /
+/// 最近观看分别订阅更细的通道（见 `mine_drama_providers.dart`）。
 final videoRevisionProvider = NotifierProvider<VideoRevision, int>(
   VideoRevision.new,
 );
@@ -64,12 +69,19 @@ class VideoRevision extends Notifier<int> {
   }
 }
 
-/// 书架 + 最近阅读。
-final mineDataProvider = FutureProvider<MineData>((ref) async {
-  // 依赖小说侧 revision：书架/进度一有写入就让本 provider 重新读取。
-  ref.watch(readingRevisionProvider);
-  final store = ref.watch(readingStoreProvider);
-  final shelf = await store.shelf();
-  final recent = await store.recent(limit: mineRecentLimit);
-  return MineData(shelf: shelf, recent: recent);
+/// 书架（按加入时间倒序，存储层保证新加入的在前）。
+///
+/// 只依赖 [shelfRevisionProvider]：阅读进度写入不会重新解码这张表。
+final mineShelfProvider = FutureProvider<List<NovelItem>>((ref) async {
+  ref.watch(shelfRevisionProvider);
+  return ref.watch(readingStoreProvider).shelf();
+});
+
+/// 最近阅读（按阅读时间倒序）。
+///
+/// 只依赖 [recentRevisionProvider]：阅读时每次进度落盘只会让这一块刷新，
+/// 书架网格与页头统计不受影响。
+final mineRecentProvider = FutureProvider<List<ReadingProgress>>((ref) async {
+  ref.watch(recentRevisionProvider);
+  return ref.watch(readingStoreProvider).recent(limit: mineRecentLimit);
 });

@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
@@ -9,6 +11,8 @@ import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
+import 'package:novel_playlet/features/mine/widgets/mine_novel_tab.dart';
+import 'package:novel_playlet/features/mine/widgets/mine_shelf_grid.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -179,6 +183,59 @@ void main() {
       find.byType(MinePage),
       matchesGoldenFile('../goldens/mine_shelf.png'),
     );
+  });
+
+  /// 回归（CODE_REVIEW P1-5）：阅读页每 400ms 落一次进度，保活的「我的」页
+  /// 不能因此整页/书架网格重建——只有最近阅读那一块跟着刷新。
+  testWidgets('我的页-保存阅读进度只刷新最近阅读，不重建书架网格', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'shelf_books_v1': jsonEncode([
+        {'id': '1', 'title': '剑来', 'cover': '', 'author': '烽火戏诸侯'},
+      ]),
+      'reading_progress_v1': jsonEncode({
+        '1': {
+          'bookId': '1',
+          'bookTitle': '剑来',
+          'cover': '',
+          'chapterId': 'c1',
+          'chapterIndex': 0,
+          'updatedAt': DateTime.now().millisecondsSinceEpoch,
+        },
+      }),
+    });
+    await pumpPreview(tester, const MinePage());
+
+    final tabBefore = tester.widget<MineNovelTab>(find.byType(MineNovelTab));
+    final gridBefore = tester.widget<MineShelfGrid>(find.byType(MineShelfGrid));
+    expect(find.text('读到第 1 章'), findsOneWidget);
+
+    // 等价于阅读页的一次进度落盘。
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(MinePage)),
+    );
+    await container
+        .read(readingStoreProvider)
+        .saveProgress(
+          bookId: '1',
+          bookTitle: '剑来',
+          cover: '',
+          chapterId: 'c2',
+          chapterIndex: 1,
+        );
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(
+      tester.widget<MineNovelTab>(find.byType(MineNovelTab)),
+      same(tabBefore),
+      reason: '阅读进度落盘不应让 tab（乃至整页）重建',
+    );
+    expect(
+      tester.widget<MineShelfGrid>(find.byType(MineShelfGrid)),
+      same(gridBefore),
+      reason: '书架网格不应因阅读进度落盘重建',
+    );
+    expect(find.text('读到第 2 章'), findsOneWidget, reason: '最近阅读必须跟着更新');
+    expect(find.text('书架 1 本 · 收藏 0 部'), findsOneWidget);
   });
 
   testWidgets('我的页（短剧空态）', (tester) async {

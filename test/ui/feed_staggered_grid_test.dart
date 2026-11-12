@@ -99,6 +99,62 @@ void main() {
     );
   });
 
+  /// 回归（CODE_REVIEW P1-6）：`SliverLayoutBuilder` 的 builder 每次布局都会
+  /// 跑（滚动时每帧一次），不能因此重建已经构建好的卡片。
+  ///
+  /// 用计数断言而不是 golden：布局像素一样，差别只在"重建了几次"。
+  testWidgets('瀑布流-父级重建/滚动不会重复调用 itemBuilder', (tester) async {
+    final counts = <String, int>{};
+    final manyItems = [
+      for (var i = 1; i <= 30; i++)
+        NovelItem(id: '$i', title: '书$i', author: '作者$i'),
+    ];
+    late StateSetter rebuildParent;
+
+    Widget page() => CustomScrollView(
+      slivers: [
+        FeedStaggeredGrid<NovelItem>(
+          items: manyItems,
+          columns: 2,
+          itemBuilder: (context, item, width) {
+            counts[item.id] = (counts[item.id] ?? 0) + 1;
+            return SizedBox(key: ValueKey(item.id), width: width, height: 120);
+          },
+        ),
+      ],
+    );
+
+    await pumpPreview(
+      tester,
+      StatefulBuilder(
+        builder: (context, setState) {
+          rebuildParent = setState;
+          return page();
+        },
+      ),
+    );
+    final firstBuild = Map<String, int>.of(counts);
+    expect(firstBuild, isNotEmpty, reason: '前置：瀑布流已懒构建出首屏卡片');
+
+    // 父级重建（等价于 footer 的 loadingMore 变化导致页面 build）：数据、列数、
+    // 列宽都没变，已构建卡片不应重建。
+    rebuildParent(() {});
+    await tester.pump();
+    expect(counts, firstBuild, reason: '父级重建不应重建网格卡片（P1-6）');
+
+    // 滚动只是布局变化：允许新卡片进入可视区被懒构建，但**已构建过的卡片**
+    // 不能每帧重来一次。
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -80));
+    await tester.pump();
+    for (final entry in firstBuild.entries) {
+      expect(
+        counts[entry.key],
+        entry.value,
+        reason: '滚动后卡片 ${entry.key} 被重复构建了（P1-6 回归）',
+      );
+    }
+  });
+
   testWidgets('瀑布流-三列', (tester) async {
     await pumpPreview(tester, gridPage(3));
 

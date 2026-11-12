@@ -9,7 +9,20 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 ///
 /// 不自己手写 RenderSliver：瀑布流的测量、回收与滚动缓存细节很多，社区
 /// 实现的稳定性更重要（依赖白名单见 CONTRACTS.md）。
-class FeedStaggeredGrid<T> extends StatelessWidget {
+///
+/// 性能（CODE_REVIEW P1-6）：[SliverLayoutBuilder] 的 builder 在**每次布局**
+/// 都会执行（滚动时 `SliverConstraints.scrollOffset` 每帧都变）。如果每次都在
+/// builder 里 new 一个 [SliverMasonryGrid]，新的
+/// `SliverChildBuilderDelegate.shouldRebuild` 恒为 true，会让
+/// `SliverMultiBoxAdaptorElement.performRebuild` 重建所有已构建卡片——等于把
+/// masonry 的懒加载收益抵消掉。这里把"算列宽"和"建 sliver"解耦：列数 / 列宽
+/// / 列表身份都没变时直接复用同一个 sliver 实例，Flutter 的 `updateChild`
+/// 对 identical widget 会短路，卡片不重建。
+///
+/// 复用只发生在"数据与布局都没变"的情况下；缓存的 sliver 在真正懒构建某张
+/// 卡片时才读取 `widget.itemBuilder/items`，所以页面重建传入新的 builder 闭包
+/// （例如 footer 的 loadingMore 变化）不会用到旧闭包。
+class FeedStaggeredGrid<T> extends StatefulWidget {
   const FeedStaggeredGrid({
     super.key,
     required this.items,
@@ -41,9 +54,55 @@ class FeedStaggeredGrid<T> extends StatelessWidget {
   static const double mainAxisSpacing = 8;
 
   @override
+  State<FeedStaggeredGrid<T>> createState() => _FeedStaggeredGridState<T>();
+}
+
+class _FeedStaggeredGridState<T> extends State<FeedStaggeredGrid<T>> {
+  /// 上次构建的 masonry sliver，以及它对应的输入指纹。
+  ///
+  /// 只缓存 sliver 本身（列宽在内层闭包里捕获），不缓存外层
+  /// [SliverLayoutBuilder]：builder 仍要每帧执行一次读 constraints，但命中缓存
+  /// 后就只是一次字段比较，不再触发子节点重建。
+  Widget? _cachedSliver;
+  double? _cachedCellWidth;
+  int? _cachedColumns;
+  List<T>? _cachedItems;
+  int? _cachedItemCount;
+
+  bool _canReuseSliver(double cellWidth) {
+    final cached = _cachedSliver;
+    return cached != null &&
+        _cachedCellWidth == cellWidth &&
+        _cachedColumns == widget.columns &&
+        identical(_cachedItems, widget.items) &&
+        _cachedItemCount == widget.items.length;
+  }
+
+  Widget _buildSliver(double cellWidth) {
+    // itemBuilder 闭包每次被 masonry 真正调用时才读取当前 widget 的 items /
+    // itemBuilder：复用的只是 sliver 结构与布局，不是某一帧的卡片定义。
+    final sliver = SliverMasonryGrid.count(
+      crossAxisCount: widget.columns,
+      mainAxisSpacing: FeedStaggeredGrid.mainAxisSpacing,
+      crossAxisSpacing: FeedStaggeredGrid.crossAxisSpacing,
+      childCount: widget.items.length,
+      itemBuilder: (context, index) =>
+          widget.itemBuilder(context, widget.items[index], cellWidth),
+    );
+    _cachedSliver = sliver;
+    _cachedCellWidth = cellWidth;
+    _cachedColumns = widget.columns;
+    _cachedItems = widget.items;
+    _cachedItemCount = widget.items.length;
+    return sliver;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return SliverPadding(
-      padding: const EdgeInsets.symmetric(horizontal: horizontalPadding),
+      padding: const EdgeInsets.symmetric(
+        horizontal: FeedStaggeredGrid.horizontalPadding,
+      ),
       // 用 sliver 自己拿到的 crossAxisExtent 算列宽，而不是 MediaQuery 屏宽：
       // 外层一旦加留白/安全区或被放进窄容器（iPad 分屏），两者就不相等，
       // 卡片会比列窄、封面比例也跟着失真。SliverLayoutBuilder 的约束与
@@ -51,16 +110,11 @@ class FeedStaggeredGrid<T> extends StatelessWidget {
       sliver: SliverLayoutBuilder(
         builder: (context, constraints) {
           final cellWidth =
-              (constraints.crossAxisExtent - crossAxisSpacing * (columns - 1)) /
-              columns;
-          return SliverMasonryGrid.count(
-            crossAxisCount: columns,
-            mainAxisSpacing: mainAxisSpacing,
-            crossAxisSpacing: crossAxisSpacing,
-            childCount: items.length,
-            itemBuilder: (context, index) =>
-                itemBuilder(context, items[index], cellWidth),
-          );
+              (constraints.crossAxisExtent -
+                  FeedStaggeredGrid.crossAxisSpacing * (widget.columns - 1)) /
+              widget.columns;
+          if (_canReuseSliver(cellWidth)) return _cachedSliver!;
+          return _buildSliver(cellWidth);
         },
       ),
     );

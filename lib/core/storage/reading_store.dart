@@ -101,16 +101,33 @@ class VideoWatchProgress {
 /// 只用 shared_preferences 存"小而重要"的状态；正文不落盘（离线缓存是后续
 /// 功能，届时加一层明文/密文存储实现即可，接口不变）。
 class ReadingStore {
-  /// 小说侧（书架 / 阅读进度）变更计数。跨页面的 UI（如"我的"）监听它来刷新，
-  /// 避免引入全局状态管理依赖。
+  /// 小说侧（书架 / 阅读进度）的**聚合**变更计数。跨页面的 UI（如"我的"）
+  /// 监听它来刷新，避免引入全局状态管理依赖。
   ///
-  /// 刻意按小说 / 短剧拆成两个计数：看短剧时每次存进度只 bump
-  /// [videoRevision]，否则"我的"页的小说书架、搜索页的收藏态等只关心小说的
-  /// UI 会被无关写入带着重读一遍本地数据。
+  /// 早期所有小说写入都只 bump 这一个计数，于是「我的」页的书架和最近阅读
+  /// 被绑在一起：阅读页每 400ms 落一次进度，保活的「我的」页就要把书架
+  /// （shared_preferences 全量解码）与整页重建一次（CODE_REVIEW P1-5）。
+  ///
+  /// 现在写入会同时 bump 更细的 [shelfRevision] / [recentRevision]：只关心
+  /// 其中一块的 UI 订阅细分通道，需要"小说侧任意写入都刷新"的消费者才用这个
+  /// 聚合计数。短剧侧同理见 [videoShelfRevision] / [videoHistoryRevision]。
   final ValueNotifier<int> novelRevision = ValueNotifier<int>(0);
 
-  /// 短剧侧（收藏 / 观看进度）变更计数；拆开的原因见 [novelRevision]。
+  /// 小说侧「书架内容」变更计数：加入 / 移出书架。阅读进度写入不动它。
+  final ValueNotifier<int> shelfRevision = ValueNotifier<int>(0);
+
+  /// 小说侧「最近阅读」变更计数：保存阅读进度（含书架内外的书）。书架内容
+  /// 写入不动它。
+  final ValueNotifier<int> recentRevision = ValueNotifier<int>(0);
+
+  /// 短剧侧（收藏 / 观看进度）的聚合变更计数；拆分原因见 [novelRevision]。
   final ValueNotifier<int> videoRevision = ValueNotifier<int>(0);
+
+  /// 短剧侧「收藏」变更计数：加入 / 移出收藏。
+  final ValueNotifier<int> videoShelfRevision = ValueNotifier<int>(0);
+
+  /// 短剧侧「最近观看」变更计数：保存观看进度。
+  final ValueNotifier<int> videoHistoryRevision = ValueNotifier<int>(0);
 
   static const _shelfKey = 'shelf_books_v1';
   static const _progressKey = 'reading_progress_v1';
@@ -166,6 +183,7 @@ class ReadingStore {
     if (books.any((book) => book.id == item.id)) return;
     books.insert(0, item);
     await _writeShelf(books);
+    shelfRevision.value++;
     novelRevision.value++;
   }
 
@@ -173,6 +191,7 @@ class ReadingStore {
     final books = await shelf();
     books.removeWhere((book) => book.id == bookId);
     await _writeShelf(books);
+    shelfRevision.value++;
     novelRevision.value++;
   }
 
@@ -197,6 +216,7 @@ class ReadingStore {
     if (items.any((entry) => entry.id == item.id)) return;
     items.insert(0, item);
     await _writeVideoShelf(items);
+    videoShelfRevision.value++;
     videoRevision.value++;
   }
 
@@ -204,6 +224,7 @@ class ReadingStore {
     final items = await videoShelf();
     items.removeWhere((item) => item.id == seriesId);
     await _writeVideoShelf(items);
+    videoShelfRevision.value++;
     videoRevision.value++;
   }
 
@@ -234,6 +255,7 @@ class ReadingStore {
       history.removeRange(videoHistoryLimit, history.length);
     }
     await prefs.setString(_videoHistoryKey, jsonEncode(history));
+    videoHistoryRevision.value++;
     videoRevision.value++;
   }
 
@@ -303,6 +325,7 @@ class ReadingStore {
     await prefs.setString(_recentKey, jsonEncode(recent));
 
     await prefs.setString(_lastReadKey, bookId);
+    recentRevision.value++;
     novelRevision.value++;
   }
 
