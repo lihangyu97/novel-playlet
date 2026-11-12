@@ -107,6 +107,8 @@ class _ThemeColorCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final seed = ref.watch(themeSeedProvider);
     final controller = ref.read(themeSeedProvider.notifier);
+    final customSeed = ref.watch(customThemeSeedProvider);
+    final customController = ref.read(customThemeSeedProvider.notifier);
     final customSelected = !isPresetColor(seed);
     return _Card(
       child: Column(
@@ -128,15 +130,17 @@ class _ThemeColorCard extends ConsumerWidget {
                 child: Center(
                   child: _CustomDot(
                     key: themeCustomColorKey,
+                    color: customSeed,
                     selected: customSelected,
-                    tooltip: '自定义 · ${themeColorName(seed)}',
+                    tooltip: '自定义主题色',
                     onTap: () async {
                       final picked = await showThemeColorPicker(
                         context,
-                        initial: seed,
+                        initial: customSeed,
                       );
                       if (picked == null) return;
                       controller.setSeed(picked);
+                      customController.setSeed(picked);
                     },
                   ),
                 ),
@@ -243,7 +247,6 @@ class _ColorDotButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final iconColor =
         ThemeData.estimateBrightnessForColor(color) == Brightness.light
         ? Colors.black54
@@ -255,18 +258,11 @@ class _ColorDotButton extends StatelessWidget {
         label: tooltip,
         child: InkResponse(
           onTap: onTap,
-          radius: 28,
+          radius: 30,
           child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.8),
-                width: 1.5,
-              ),
-            ),
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             child: Icon(Icons.palette_outlined, size: 17, color: iconColor),
           ),
         ),
@@ -329,16 +325,20 @@ class _PresetDot extends StatelessWidget {
 
 /// 第四个色块：自定义取色入口。
 ///
-/// 永远显示彩虹渐变 + 调色板图标（不跟随当前 seed），避免和预设色画出两个
-/// 一模一样的圆点；当前主题色不是预设色时用选中描边表示「自定义正在生效」。
+/// 圆点直接显示用户上次自定义的颜色（不是彩虹盘），和「对话高亮」的颜色块
+/// 一致；只有自定义色正在生效时才描选中边。预设色生效时圆点保持上次自定义
+/// 的颜色，避免和预设圆点撞成两个一模一样的圆。
 class _CustomDot extends StatelessWidget {
   const _CustomDot({
     super.key,
+    required this.color,
     required this.selected,
     required this.tooltip,
     required this.onTap,
   });
 
+  /// 上次自定义选中的颜色；还没自定义过时是中性紫占位色。
+  final Color color;
   final bool selected;
   final String tooltip;
   final VoidCallback onTap;
@@ -346,6 +346,10 @@ class _CustomDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final iconColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.light
+        ? Colors.black54
+        : Colors.white70;
     return Tooltip(
       message: tooltip,
       child: Semantics(
@@ -360,38 +364,14 @@ class _CustomDot extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
+              color: color,
               shape: BoxShape.circle,
-              gradient: const SweepGradient(
-                colors: [
-                  Color(0xFFEF5350),
-                  Color(0xFFFFA726),
-                  Color(0xFF66BB6A),
-                  Color(0xFF4FC3F7),
-                  Color(0xFF5C6BC0),
-                  Color(0xFFAB47BC),
-                  Color(0xFFEF5350),
-                ],
-              ),
               border: Border.all(
                 color: selected ? scheme.onSurface : Colors.transparent,
                 width: 2,
               ),
             ),
-            child: Center(
-              child: Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  color: scheme.surface,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.palette_outlined,
-                  size: 14,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
+            child: Icon(Icons.palette_outlined, size: 17, color: iconColor),
           ),
         ),
       ),

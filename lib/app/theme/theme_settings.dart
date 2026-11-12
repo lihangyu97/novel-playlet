@@ -97,6 +97,61 @@ class ThemeSeedController extends Notifier<Color> {
   }
 }
 
+/// 最近一次通过「自定义」取色盘确认的颜色。
+///
+/// 预设色生效时，主题卡里第 4 个圆点仍显示用户上次自定义的颜色；否则它
+/// 会跟着 seed 变成和预设圆点一模一样的颜色，看起来像两个重复入口。
+final customThemeSeedProvider =
+    NotifierProvider<CustomThemeSeedController, Color>(
+      CustomThemeSeedController.new,
+    );
+
+class CustomThemeSeedController extends Notifier<Color> {
+  static const customSeedKey = 'app_custom_seed_color_v1';
+
+  /// 还没自定义过时的占位色：取一个和三个预设都区分得开的中性紫。
+  static const fallback = Color(0xFF7E57C2);
+
+  bool _userChanged = false;
+
+  @override
+  Color build() {
+    _restore();
+    return fallback;
+  }
+
+  /// 只在取色弹层点「确定」时调用，记录用户挑的颜色。
+  void setSeed(Color color) {
+    if (color == state) return;
+    _userChanged = true;
+    state = color;
+    _persist(color);
+  }
+
+  Future<void> _restore() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted || _userChanged) return;
+      final argb = prefs.getInt(customSeedKey);
+      if (argb == null) return;
+      final restored = Color(argb);
+      if (restored != state) state = restored;
+    } catch (_) {
+      // 读不到偏好就用占位色，不影响主题色本身。
+    }
+  }
+
+  Future<void> _persist(Color color) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted) return;
+      await prefs.setInt(customSeedKey, color.toARGB32());
+    } catch (_) {
+      // 落盘失败只影响下次启动的自定义色圆点，当前这次选色仍然生效。
+    }
+  }
+}
+
 /// 全局深浅色模式。
 ///
 /// 默认 [ThemeMode.system]（跟随系统）；设置页可以显式选浅色/深色。

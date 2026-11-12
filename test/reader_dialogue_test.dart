@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/features/reader/reader_dialogue.dart';
 import 'package:novel_playlet/features/reader/reader_pagination.dart';
+import 'package:novel_playlet/features/reader/reader_settings.dart';
 import 'package:novel_playlet/features/reader/reader_widgets.dart';
 
 /// 正文对话识别与分页测量得到的荧光笔矩形。
@@ -108,14 +109,17 @@ void main() {
       }
     });
 
-    testWidgets('关闭对话高亮开关后不画色带', (tester) async {
+    testWidgets('开关与颜色都作用到对话色带', (tester) async {
       final pagination = ReaderPagination.build(
         chapterId: 'c1',
         paragraphs: const ['“你来了。”他说。'],
         spec: spec(),
       );
       const textStyle = TextStyle(fontSize: 18, height: 1.6);
-      Widget build({required bool enabled}) => MaterialApp(
+      Widget build({
+        required bool enabled,
+        Color color = ReaderSettings.defaultDialogueHighlightColor,
+      }) => MaterialApp(
         home: Scaffold(
           body: ReaderPageContent(
             page: pagination.pages.first,
@@ -124,21 +128,33 @@ void main() {
             contentWidth: 300,
             horizontalPadding: 20,
             showDialogueHighlight: enabled,
+            dialogueHighlightColor: color,
           ),
         ),
       );
 
       await tester.pumpWidget(build(enabled: true));
+      final highlighter = find.byKey(
+        const ValueKey('reader-dialogue-highlight'),
+      );
+      expect(highlighter, findsOneWidget);
+      Color? painterColor() {
+        final painter = tester.widget<CustomPaint>(highlighter).painter;
+        return (painter as dynamic).color as Color?;
+      }
+
       expect(
-        find.byKey(const ValueKey('reader-dialogue-highlight')),
-        findsOneWidget,
+        painterColor(),
+        ReaderSettings.defaultDialogueHighlightColor.withValues(alpha: 0.34),
       );
 
-      await tester.pumpWidget(build(enabled: false));
-      expect(
-        find.byKey(const ValueKey('reader-dialogue-highlight')),
-        findsNothing,
-      );
+      // 设置页改了荧光笔颜色后，色带颜色必须真的跟着变（曾经预览恒为黄）。
+      const picked = Color(0xFF66BB6A);
+      await tester.pumpWidget(build(enabled: true, color: picked));
+      expect(painterColor(), picked.withValues(alpha: 0.34));
+
+      await tester.pumpWidget(build(enabled: false, color: picked));
+      expect(highlighter, findsNothing);
     });
 
     test('跨行对话每一行都有一段矩形', () {

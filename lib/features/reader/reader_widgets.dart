@@ -43,10 +43,11 @@ class ReaderPageContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 对话荧光笔底色：浅色纸用偏亮的黄，夜间纸压暗一档，避免在深色底上过跳。
+    // 对话荧光笔底色：用用户配置的基色，浅色纸/夜间纸叠不同透明度。
     final isDark = Theme.of(context).colorScheme.brightness == Brightness.dark;
-    final markerColor = const Color(0xFFFFD54F)
-        .withValues(alpha: isDark ? 0.22 : 0.34);
+    final markerColor = dialogueHighlightColor.withValues(
+      alpha: isDark ? 0.22 : 0.34,
+    );
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
       child: Stack(

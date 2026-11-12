@@ -65,15 +65,18 @@ void main() {
     expect(find.byKey(themeCustomColorKey), findsOneWidget);
   });
 
-  /// 自定义入口点开后，取色弹层初始值必须是当前主题色。
-  testWidgets('设置页-自定义色块打开取色弹层，初始为当前主题色', (tester) async {
-    SharedPreferences.setMockInitialValues({'app_seed_color_v1': 0xFFEF5350});
+  /// 自定义入口点开后，取色弹层从上次自定义色起步（没有自定义过用占位紫）。
+  testWidgets('设置页-自定义色块打开取色弹层，初始为上次自定义色', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'app_seed_color_v1': 0xFFEF5350,
+      'app_custom_seed_color_v1': 0xFF7E57C2,
+    });
     await pumpPreview(tester, const SettingsPage());
     await tester.tap(find.byKey(themeCustomColorKey));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
 
     expect(find.text('自定义主题色'), findsOneWidget);
-    expect(find.text('#EF5350'), findsOneWidget, reason: '弹层应回显当前主题色');
+    expect(find.text('#7E57C2'), findsOneWidget, reason: '弹层应回显上次自定义色');
 
     // 取消 / 确定必须是同一套小圆角（M3 默认 Outlined 是 StadiumBorder）。
     BorderRadiusGeometry? radiusOf(ButtonStyle? style) {
@@ -131,6 +134,40 @@ void main() {
         .read(readerSettingsProvider)
         .dialogueHighlightColor;
     expect(picked, isNot(initial), reason: '确定后要作用到对话高亮颜色');
+  });
+
+  testWidgets('设置页-自定义色圆点显示上次自定义颜色', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'app_seed_color_v1': 0xFFEF5350,
+      'app_custom_seed_color_v1': 0xFF66BB6A,
+    });
+    await pumpPreview(tester, const SettingsPage());
+
+    final dot = tester.widget<AnimatedContainer>(
+      find.descendant(
+        of: find.byKey(themeCustomColorKey),
+        matching: find.byType(AnimatedContainer),
+      ),
+    );
+    expect(
+      (dot.decoration as BoxDecoration).color,
+      const Color(0xFF66BB6A),
+      reason: '第 4 个圆点要显示自定义色，而不是彩虹盘',
+    );
+  });
+
+  testWidgets('设置页-对话高亮色块无边框且与主题圆点同尺寸', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+    final swatch = find.byKey(dialogueHighlightColorKey);
+    expect(tester.getSize(swatch), const Size(44, 44));
+    final box = tester.widget<Container>(
+      find.descendant(of: swatch, matching: find.byType(Container)),
+    );
+    expect(
+      (box.decoration as BoxDecoration?)?.border,
+      isNull,
+      reason: '对话高亮色块不要边框',
+    );
   });
 
   testWidgets('设置页-存储提示只剩离线缓存一条', (tester) async {
