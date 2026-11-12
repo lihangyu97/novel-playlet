@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
+import 'package:novel_playlet/features/settings/widgets/dialogue_highlight_preview.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/reader/reader_settings.dart';
 import 'package:novel_playlet/features/settings/settings_page.dart';
@@ -278,6 +280,55 @@ void main() {
     );
     expect(find.textContaining('封面更大'), findsNothing, reason: '布局说明提示已去掉');
     // 落盘由 test/recommend_layout_test.dart 覆盖（页面测试只验证交互与联动）。
+  });
+
+  /// 取色器拖动时每帧都会重建预览：换色只能重画色带，不能重新分页。
+  testWidgets('设置页-对话高亮预览换色不重新分页', (tester) async {
+    var color = const Color(0xFFFFD54F);
+    var width = 320.0;
+    late StateSetter rebuild;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: Center(
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                rebuild = setState;
+                return SizedBox(
+                  width: width,
+                  child: DialogueHighlightPreview(color: color),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final initialBuilds = DialogueHighlightPreview.debugPaginationBuilds;
+    expect(initialBuilds, greaterThan(0), reason: '首帧应完成一次分页');
+
+    // 连续换色（模拟拖动）不改变宽度/字型 → 不应重新分页。
+    for (final next in const [
+      Color(0xFF66BB6A),
+      Color(0xFFEF5350),
+      Color(0xFF4FC3F7),
+      Color(0xFF7E57C2),
+    ]) {
+      rebuild(() => color = next);
+      await tester.pump();
+    }
+    expect(
+      DialogueHighlightPreview.debugPaginationBuilds,
+      initialBuilds,
+      reason: '颜色变化只重画荧光笔，不能每帧重跑 ReaderPagination.build',
+    );
+
+    // 可用宽度变了才需要重新分页。
+    rebuild(() => width = 280);
+    await tester.pump();
+    expect(DialogueHighlightPreview.debugPaginationBuilds, initialBuilds + 1);
   });
 
   testWidgets('设置页-深色', (tester) async {

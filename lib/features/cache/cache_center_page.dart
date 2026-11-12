@@ -36,9 +36,14 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
   @override
   void initState() {
     super.initState();
-    // 进页面先自愈一次再刷新列表：按文件存在校正 manifest、清掉崩溃残留的
-    // .part 与无 manifest 的孤立目录。不阻塞首帧（postFrame + 失败静默），
-    // 列表照现有 manifest 展示，最多进度/体积略偏小。
+    // 进页面先自愈一次再刷新列表：按文件存在校正 manifest、清掉无 manifest
+    // 的孤立目录。不阻塞首帧（postFrame + 失败静默），列表照现有 manifest
+    // 展示，最多进度/体积略偏小。
+    //
+    // 但本页正是「缓存中」按钮的落地页：下载器可能正在同一个目录里写
+    // `.part`，扫盘时删掉会让当前集 commitEpisode 抛 part file missing、
+    // 从 0 重下（P1-1）。所以自愈按区跳过有任务/排队项的 kind，另一区照常
+    // 校正；`.part` 清理收窄到启动恢复与删除单条等确定无任务的路径。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(_reconcileAndRefresh());
@@ -57,27 +62,47 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
     _invalidateLists();
   }
 
+  /// 该区是否有正在下载 / 排队中 / 待继续的任务（[busyOfflineKinds]）。
+  ///
+  /// 每一步前都重新读一次：自愈本身是异步的，期间用户可能在列表里点了
+  /// 「继续 / 重试」，paused/failed 任务随时会重新开始写盘。
+  bool _isBusy(OfflineTaskKind kind) =>
+      ref.read(offlineBusyKindsProvider).contains(kind);
+
   Future<void> _reconcileNovelStore() async {
+    const kind = OfflineTaskKind.novel;
+    if (_isBusy(kind)) {
+      debugPrint('[offline] novel self-heal skipped: task active or queued');
+      return;
+    }
     try {
       final store = ref.read(offlineBookStoreProvider);
       for (final summary in await store.summaries()) {
+        if (_isBusy(kind)) return;
         await store.reconcile(summary.bookId);
       }
-      await store.pruneOrphans();
-      await store.cleanupPartFiles();
+      if (_isBusy(kind)) return;
+      // 只删孤立目录，不删 `.part`：本页打开时下载器可能刚被启动（P1-1）。
+      await store.pruneOrphans(cleanupParts: false);
     } catch (error) {
       debugPrint('[offline] novel reconcile failed: $error');
     }
   }
 
   Future<void> _reconcileVideoStore() async {
+    const kind = OfflineTaskKind.video;
+    if (_isBusy(kind)) {
+      debugPrint('[offline] video self-heal skipped: task active or queued');
+      return;
+    }
     try {
       final store = ref.read(offlineSeriesStoreProvider);
       for (final summary in await store.summaries()) {
-        await store.reconcile(summary.seriesId);
+        if (_isBusy(kind)) return;
+        await store.reconcile(summary.seriesId, cleanupParts: false);
       }
-      await store.pruneOrphans();
-      await store.cleanupPartFiles();
+      if (_isBusy(kind)) return;
+      await store.pruneOrphans(cleanupParts: false);
     } catch (error) {
       debugPrint('[offline] video reconcile failed: $error');
     }
@@ -87,7 +112,11 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
   Widget build(BuildContext context) {
     // 任务到达终态时刷新列表：完成/暂停/失败都可能改动 manifest 的
     // completed/bytes，列表不刷新就会停在旧数字上。
-    ref.listen(offlineDownloaderProvider, (previous, next) {
+    //
+    // 监听只读快照 [offlineTaskProvider]（等价于下载器 state）：本页只需要
+    // 任务状态，不主动创建下载器实例，也不该因为它被打开就触发下载器的
+    // 启动恢复扫盘（`_restore()` 会整区清 `.part`，测试/冷启动路径会误伤）。
+    ref.listen(offlineTaskProvider, (previous, next) {
       final status = next?.status;
       if (status == OfflineTaskStatus.done ||
           status == OfflineTaskStatus.paused ||

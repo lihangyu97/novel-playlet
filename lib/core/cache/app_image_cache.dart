@@ -25,6 +25,11 @@ class AppImageCache {
   /// 裁剪目标：留 25 MB 常用封面。
   static const int targetBytes = 25 * 1024 * 1024;
 
+  /// 封面与评论配图共用这一份缓存（评论缩略图由调用方用 `ResizeImage` 限制
+  /// 解码尺寸，不会按原图进 ImageCache）。评论图数量级和封面不同，若以后
+  /// 观察到评论图把封面挤出 120 个对象的上限，再给评论图单独 cacheKey/目录
+  /// ——注意那会牵出 `AppCache` 统计与启动裁剪的第二套目录，不要在 UI 层
+  /// 随手 new 一个 CacheManager。
   static final CacheManager manager = CacheManager(
     Config(
       cacheKey,

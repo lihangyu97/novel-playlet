@@ -3,6 +3,10 @@
 
 mod common;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
 use common::{pool_json, MockReply, MockUpstream, TempDir};
 use fqapi_core::device::{DevicePool, MIN_POOL_SIZE};
 
@@ -258,5 +262,187 @@ async fn concurrent_gets_on_a_degraded_pool_stay_safe() {
             "get() must never return a device that cannot decrypt"
         );
     }
+    upstream.shutdown();
+}
+
+// --- Cold start: one synchronous registration on the caller's path (P1-8) ---
+
+/// Mock upstream that completes the whole registration flow, handing out a
+/// unique device id per `device_register` and the reference registerkey.
+async fn registering_upstream() -> MockUpstream {
+    let next = Arc::new(AtomicUsize::new(0));
+    MockUpstream::start(move |recorded| match recorded.path.as_str() {
+        "/service/2/device_register/" => {
+            let index = next.fetch_add(1, Ordering::SeqCst) as u64;
+            MockReply::json(serde_json::json!({
+                "device_id_str": (7_276_663_560_427_471_412u64 + index).to_string(),
+                "install_id_str": (7_276_663_560_427_471_000u64 + index).to_string(),
+            }))
+        }
+        "/reading/crypt/registerkey" => MockReply::json(serde_json::json!({
+            "data": { "key": REGISTERKEY_INPUT_B64 },
+        })),
+        _ => MockReply::status(200),
+    })
+    .await
+}
+
+/// How many full registrations the mock upstream has served so far.
+fn device_registration_count(upstream: &MockUpstream) -> usize {
+    upstream
+        .requests()
+        .iter()
+        .filter(|recorded| recorded.path == "/service/2/device_register/")
+        .count()
+}
+
+/// Number of devices in the on-disk pool file (0 when it is missing or not
+/// parseable as plaintext JSON; these tests run without a pool key).
+fn persisted_device_count(path: &std::path::Path) -> usize {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| value["android"].as_array().map(Vec::len))
+        .unwrap_or(0)
+}
+
+/// P1-8: first install copies `device_pool.example.json`, which holds one
+/// empty-key placeholder. The first `get()` must register **one** device and
+/// persist it, then return - not queue behind the background top-up (the old
+/// code waited for 4 background registrations and then one of its own).
+///
+/// The single-threaded runtime is part of the assertion: the top-up task
+/// spawned by `get()` cannot be polled before `get()` returns, so the recorded
+/// requests are exactly the synchronous registration's.
+#[tokio::test(flavor = "current_thread")]
+async fn first_get_on_the_shipped_placeholder_registers_one_device() {
+    let upstream = registering_upstream().await;
+    let dir = TempDir::new("pool-placeholder-first-get");
+    let path = dir.write("device_pool.json", &empty_key_pool_json(1));
+    let pool = DevicePool::with_mock_origin(path.clone(), upstream.origin.clone())
+        .await
+        .expect("pool");
+
+    let device = pool.get().await.expect("first get");
+    assert!(!device.secret_key.is_empty(), "the placeholder is unusable");
+    assert_eq!(
+        device_registration_count(&upstream),
+        1,
+        "the first get() must register exactly one device synchronously"
+    );
+
+    // Requirement: the device is committed before the caller is served, so an
+    // aborted request cannot leave it in memory only.
+    let text = std::fs::read_to_string(&path).expect("pool file written");
+    let file: serde_json::Value = serde_json::from_str(&text).expect("valid pool json");
+    let devices = file["android"].as_array().expect("android array");
+    assert_eq!(devices.len(), 1, "the placeholder is replaced, not kept");
+    assert_eq!(
+        devices[0]["device_id"].as_str().unwrap_or(""),
+        device.device_id
+    );
+    assert!(!devices[0]["secret_key"].as_str().unwrap_or("").is_empty());
+
+    upstream.shutdown();
+}
+
+/// A missing/corrupt pool file starts empty; the first `get()` still waits for
+/// exactly one registration.
+#[tokio::test(flavor = "current_thread")]
+async fn first_get_on_an_empty_pool_registers_one_device() {
+    let upstream = registering_upstream().await;
+    let dir = TempDir::new("pool-empty-first-get");
+    let pool = DevicePool::with_mock_origin(dir.join("device_pool.json"), upstream.origin.clone())
+        .await
+        .expect("pool");
+    assert_eq!(pool.count().await, 0);
+
+    let device = pool.get().await.expect("first get");
+    assert!(!device.secret_key.is_empty());
+    assert_eq!(
+        device_registration_count(&upstream),
+        1,
+        "an empty pool must register exactly one device synchronously"
+    );
+    assert!(pool.get_by_id(&device.device_id).await.is_ok());
+    assert_eq!(pool.count().await, 1);
+
+    upstream.shutdown();
+}
+
+/// Concurrent first callers register once in total: the second one waits for
+/// the registration lock and reuses the device the first one just admitted.
+#[tokio::test(flavor = "current_thread")]
+async fn concurrent_first_gets_register_once() {
+    let upstream = registering_upstream().await;
+    let dir = TempDir::new("pool-concurrent-first-get");
+    let path = dir.write("device_pool.json", &empty_key_pool_json(1));
+    let pool = DevicePool::with_mock_origin(path, upstream.origin.clone())
+        .await
+        .expect("pool");
+
+    let (first, second) = tokio::join!(pool.get(), pool.get());
+    let first = first.expect("first concurrent get");
+    let second = second.expect("second concurrent get");
+    assert!(!first.secret_key.is_empty() && !second.secret_key.is_empty());
+    assert_eq!(
+        device_registration_count(&upstream),
+        1,
+        "a registration storm on the first request must be prevented"
+    );
+
+    upstream.shutdown();
+}
+
+/// The rest of the pool is topped up in the background, without blocking the
+/// first caller: the pool ends at MIN_POOL_SIZE and the file matches memory.
+#[tokio::test(flavor = "current_thread")]
+async fn background_top_up_fills_the_pool_from_the_placeholder() {
+    let upstream = registering_upstream().await;
+    let dir = TempDir::new("pool-background-topup");
+    let path = dir.write("device_pool.json", &empty_key_pool_json(1));
+    let pool = DevicePool::with_mock_origin(path.clone(), upstream.origin.clone())
+        .await
+        .expect("pool");
+
+    let first = pool.get().await.expect("first get");
+    assert_eq!(
+        device_registration_count(&upstream),
+        1,
+        "only the synchronous device may be registered on the critical path"
+    );
+
+    // Each background registration pays the deliberate 2s pacing, so poll for
+    // the fill (and for the final commit that lands after the last device).
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while pool.count().await < MIN_POOL_SIZE || persisted_device_count(&path) < MIN_POOL_SIZE {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "background top-up did not reach MIN_POOL_SIZE: memory={}, file={}",
+            pool.count().await,
+            persisted_device_count(&path),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    assert_eq!(pool.count().await, MIN_POOL_SIZE);
+    assert_eq!(
+        device_registration_count(&upstream),
+        MIN_POOL_SIZE,
+        "one synchronous registration plus the background top-up"
+    );
+    assert!(
+        pool.get_by_id(&first.device_id).await.is_ok(),
+        "the device handed to the first caller must stay in the pool"
+    );
+    let text = std::fs::read_to_string(&path).expect("pool file");
+    let file: serde_json::Value = serde_json::from_str(&text).expect("valid pool json");
+    for device in file["android"].as_array().expect("android array") {
+        assert!(
+            !device["secret_key"].as_str().unwrap_or("").is_empty(),
+            "no empty-key placeholder may survive the top-up"
+        );
+    }
+
     upstream.shutdown();
 }

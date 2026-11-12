@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
@@ -25,13 +27,39 @@ import 'preview_harness.dart';
 ///
 /// 活动任务通过 `offlineTaskProvider.overrideWithValue` 注入——页面只读这个
 /// 只读快照，不要在测试里继承 final 的 OfflineDownloader。
+/// 真实文件的离线自愈在 widget test 里要交替 `runAsync`（让 dart:io 完成）与
+/// `pump`（冲掉测试 zone 的 microtask），否则一段 runAsync 只够走完一次 IO
+/// await，自愈链走不到 reconcile 的收尾。
+Future<void> _settleOfflineSelfHeal(WidgetTester tester) async {
+  // 自愈链里每一段 `await` 是一次真实 IO：每轮 runAsync 让一次 IO 完成，
+  // 随后的 pump 冲掉 fake zone 里的 microtask 让链走到下一个 await。
+  for (var i = 0; i < 60; i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+    await tester.pump();
+  }
+  await tester.pumpAndSettle();
+}
+
 void main() {
   setUpAll(() async {
     await loadPreviewFont();
   });
 
-  setUp(() {
+  late Directory tempRoot;
+
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    tempRoot = await Directory.systemTemp.createTemp('cache_center_test_');
+  });
+
+  tearDown(() async {
+    try {
+      await tempRoot.delete(recursive: true);
+    } catch (_) {
+      // 清理失败不影响用例结果。
+    }
   });
 
   OfflineBookSummary book({
@@ -469,15 +497,168 @@ void main() {
       matchesGoldenFile('../goldens/cache_center.png'),
     );
   });
+
+  group('进页扫盘自愈守卫（P1-1：不误删下载中的 .part）', () {
+    OfflineQueuedTask queued(OfflineTaskKind kind) => OfflineQueuedTask(
+      kind: kind,
+      id: 'queued-${kind.wireName}',
+      title: '排队中的任务',
+      cover: '',
+    );
+
+    test('busyOfflineKinds：只有 done 不繁忙，排队项按 kind 计入', () {
+      for (final status in OfflineTaskStatus.values) {
+        final busy = busyOfflineKinds(
+          task(kind: OfflineTaskKind.novel, status: status),
+          const <OfflineQueuedTask>[],
+        );
+        expect(
+          busy.contains(OfflineTaskKind.novel),
+          status != OfflineTaskStatus.done,
+          reason: '$status 状态的区是否算繁忙',
+        );
+        expect(
+          busy.contains(OfflineTaskKind.video),
+          isFalse,
+          reason: '任务只占一个区，不能把另一个区也标成繁忙',
+        );
+      }
+      // 没有活动任务、只有排队项时，该区同样随时可能开始写盘。
+      expect(busyOfflineKinds(null, [queued(OfflineTaskKind.video)]), {
+        OfflineTaskKind.video,
+      });
+      expect(busyOfflineKinds(null, const <OfflineQueuedTask>[]), isEmpty);
+    });
+
+    testWidgets('运行中打开缓存中心：真 store 不删正在下载的 .part', (tester) async {
+      final paths = OfflinePaths(rootDirectory: () async => tempRoot);
+      final seriesStore = OfflineSeriesStore(paths: paths);
+      late File part;
+      await tester.runAsync(() async {
+        await seriesStore.begin(
+          OfflineSeries(
+            seriesId: 's1',
+            title: '下载中的剧',
+            episodes: const [
+              OfflineEpisode(id: 'e0', title: '第一集', index: 0),
+              OfflineEpisode(id: 'e1', title: '第二集', index: 1),
+            ],
+          ),
+        );
+        part = await seriesStore.partFile('s1', 'e0');
+        await part.writeAsBytes(List<int>.filled(2048, 7));
+      });
+
+      await pumpCenter(
+        tester,
+        extra: overrides(
+          series: [drama(id: 's1')],
+          // 缓存中心正是「缓存中」按钮的落地页：任务正在下载这一部剧。
+          active: task(kind: OfflineTaskKind.video, id: 's1'),
+        ),
+        seriesStore: seriesStore,
+      );
+      // 让 postFrame 的自愈真实跑完；守卫失效时这里会删掉 .part，断言就会红。
+      await _settleOfflineSelfHeal(tester);
+
+      final partExists = await tester.runAsync(part.exists);
+      expect(
+        partExists,
+        isTrue,
+        reason: 'reconcile/pruneOrphans 删掉 .part 会让当前集从 0 重下（P1-1）',
+      );
+    });
+
+    testWidgets('暂停待续同样跳过：繁忙区一次扫盘都不发，另一区照常校正', (tester) async {
+      final bookStore = _RecordingBookStore(summariesValue: [book()]);
+      final seriesStore = _RecordingSeriesStore(
+        summariesValue: [drama(id: 's1')],
+      );
+      await pumpCenter(
+        tester,
+        extra: overrides(
+          books: [book()],
+          series: [drama(id: 's1')],
+          // paused/failed 随时会被「继续 / 重试」重新启动，同样算繁忙。
+          active: task(
+            kind: OfflineTaskKind.video,
+            id: 's1',
+            status: OfflineTaskStatus.paused,
+          ),
+        ),
+        bookStore: bookStore,
+        seriesStore: seriesStore,
+      );
+
+      expect(bookStore.reconcileCalls, 1, reason: '空闲的小说区照常校正');
+      expect(bookStore.pruneOrphansCalls, 1);
+      expect(seriesStore.reconcileCalls, 0, reason: '待续的短剧区不扫盘');
+      expect(seriesStore.pruneOrphansCalls, 0);
+      // 整区 cleanupPartFiles 只留给启动恢复（`_restore()`）与删除单条路径，
+      // 缓存中心进页不再调用——两区都应 0 次。
+      expect(
+        seriesStore.cleanupPartFilesCalls,
+        0,
+        reason: '缓存中心不再整区清 .part（只留启动恢复/删除单条路径）',
+      );
+      expect(bookStore.cleanupPartFilesCalls, 0);
+    });
+
+    testWidgets('空闲时打开缓存中心：照常校正 manifest，但不清理 .part', (tester) async {
+      final paths = OfflinePaths(rootDirectory: () async => tempRoot);
+      final seriesStore = OfflineSeriesStore(paths: paths);
+      late File part;
+      await tester.runAsync(() async {
+        await seriesStore.begin(
+          OfflineSeries(
+            seriesId: 's1',
+            title: '空闲的剧',
+            episodes: const [
+              OfflineEpisode(id: 'e0', title: '第一集', index: 0),
+              OfflineEpisode(id: 'e1', title: '第二集', index: 1),
+            ],
+          ),
+        );
+        // e0 已正式落盘、e1 半截（模拟上次崩溃留下的 .part）。
+        final episode = await seriesStore.episodeFilePath('s1', 'e0');
+        await episode.writeAsBytes(List<int>.filled(10, 1));
+        part = await seriesStore.partFile('s1', 'e1');
+        await part.writeAsBytes(List<int>.filled(10, 2));
+      });
+
+      await pumpCenter(
+        tester,
+        extra: overrides(series: [drama(id: 's1', completed: 0, total: 2)]),
+        seriesStore: seriesStore,
+      );
+      // 让 postFrame 的自愈真实跑完；守卫失效时这里会删掉 .part，断言就会红。
+      await _settleOfflineSelfHeal(tester);
+
+      final snapshot = await tester.runAsync(() async {
+        return (await seriesStore.read('s1'), await part.exists());
+      });
+      final loaded = snapshot?.$1;
+      final partExists = snapshot?.$2;
+      expect(loaded!.completed, 1, reason: '空闲区按文件存在校正 manifest');
+      expect(partExists, isTrue, reason: '.part 只由启动恢复与删除单条清理，进页扫盘不碰它');
+    });
+  });
 }
 
-/// 记录型小说离线区：删除/清空只记调用，不碰真实磁盘。
+/// 记录型小说离线区：删除/清空只记调用，不碰真实磁盘；扫盘自愈的调用也
+/// 计数（P1-1 守卫用例要能观察到「该区一次都没被扫」）。
 class _RecordingBookStore extends OfflineBookStore {
-  _RecordingBookStore()
+  _RecordingBookStore({this.summariesValue = const <OfflineBookSummary>[]})
     : super(paths: OfflinePaths(rootDirectory: unsupportedDirectory));
 
+  final List<OfflineBookSummary> summariesValue;
   final List<String> deleted = <String>[];
+  final List<String> reconciled = <String>[];
   int clearAllCalls = 0;
+  int pruneOrphansCalls = 0;
+  int cleanupPartFilesCalls = 0;
+
+  int get reconcileCalls => reconciled.length;
 
   @override
   Future<void> delete(String bookId) async => deleted.add(bookId);
@@ -486,17 +667,19 @@ class _RecordingBookStore extends OfflineBookStore {
   Future<void> clearAll() async => clearAllCalls += 1;
 
   @override
-  Future<List<OfflineBookSummary>> summaries() async =>
-      const <OfflineBookSummary>[];
+  Future<List<OfflineBookSummary>> summaries() async => summariesValue;
 
   @override
-  Future<void> reconcile(String bookId) async {}
+  Future<void> reconcile(String bookId) async => reconciled.add(bookId);
 
   @override
-  Future<int> pruneOrphans() async => 0;
+  Future<int> pruneOrphans({bool cleanupParts = true}) async {
+    pruneOrphansCalls += 1;
+    return 0;
+  }
 
   @override
-  Future<void> cleanupPartFiles() async {}
+  Future<void> cleanupPartFiles() async => cleanupPartFilesCalls += 1;
 
   @override
   Future<OfflineBook?> read(String bookId) async => null;
@@ -515,11 +698,17 @@ class _RecordingBookStore extends OfflineBookStore {
 
 /// 记录型短剧离线区：用途同上。
 class _RecordingSeriesStore extends OfflineSeriesStore {
-  _RecordingSeriesStore()
+  _RecordingSeriesStore({this.summariesValue = const <OfflineSeriesSummary>[]})
     : super(paths: OfflinePaths(rootDirectory: unsupportedDirectory));
 
+  final List<OfflineSeriesSummary> summariesValue;
   final List<String> deleted = <String>[];
+  final List<String> reconciled = <String>[];
   int clearAllCalls = 0;
+  int pruneOrphansCalls = 0;
+  int cleanupPartFilesCalls = 0;
+
+  int get reconcileCalls => reconciled.length;
 
   @override
   Future<void> delete(String seriesId) async => deleted.add(seriesId);
@@ -528,17 +717,20 @@ class _RecordingSeriesStore extends OfflineSeriesStore {
   Future<void> clearAll() async => clearAllCalls += 1;
 
   @override
-  Future<List<OfflineSeriesSummary>> summaries() async =>
-      const <OfflineSeriesSummary>[];
+  Future<List<OfflineSeriesSummary>> summaries() async => summariesValue;
 
   @override
-  Future<void> reconcile(String seriesId) async {}
+  Future<void> reconcile(String seriesId, {bool cleanupParts = true}) async =>
+      reconciled.add(seriesId);
 
   @override
-  Future<int> pruneOrphans() async => 0;
+  Future<int> pruneOrphans({bool cleanupParts = true}) async {
+    pruneOrphansCalls += 1;
+    return 0;
+  }
 
   @override
-  Future<void> cleanupPartFiles() async {}
+  Future<void> cleanupPartFiles() async => cleanupPartFilesCalls += 1;
 
   @override
   Future<OfflineSeries?> read(String seriesId) async => null;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import '../../core/backend/backend_transport.dart';
@@ -267,7 +268,12 @@ class ApiClient {
     return parseDirectory(payload);
   }
 
-  /// 取一章正文，优先图文接口，失败回退纯文字接口。
+  /// 取一章正文，优先图文接口；只有"这条链路本身取不到"的失败才回退纯文本接口。
+  ///
+  /// 回退只针对非瞬时语义失败（解析失败/正文为空/badInput 等）：超时、限流、
+  /// 上游 5xx、设备注册失效与取消（[TimeoutException]）直接原样抛出，不再发
+  /// 第二个请求——那类失败换接口不会变好，只会把用户等待翻倍、把上游错误
+  /// 放大一次（P1-7）。
   Future<ChapterContent> chapter(String itemId, {String title = ''}) async {
     final encoded = Uri.encodeComponent(itemId);
     Object? firstError;
@@ -278,20 +284,38 @@ class ApiClient {
       );
       return parseChapterContent(payload, chapterId: itemId, title: title);
     } catch (error) {
+      if (!_shouldFallbackToPlainChapter(error)) rethrow;
       firstError = error;
     }
     try {
       final payload = await _getJson('/api/v1/chapters/$encoded', const {});
       return parseChapterContent(payload, chapterId: itemId, title: title);
-    } catch (error) {
+    } catch (fallbackError) {
+      // 取消不是错误：保持 TimeoutException 语义，交给上层静默处理。
+      if (fallbackError is TimeoutException) rethrow;
+      // 最终异常取第二次（纯文本接口）的 message + kind：它是最终决定结果的
+      // 那条失败，语义一致，不与第一次的 kind 混用。
+      if (fallbackError is ApiException) rethrow;
       throw ApiException(
-        '无法获取正文：${firstError is ApiException ? firstError.message : error}',
-        // 透传底层语义（超时/限流等），上层需要时能按 kind 分支。
-        kind: firstError is ApiException
-            ? firstError.kind
-            : ApiErrorKind.unknown,
+        firstError is ApiException
+            ? '无法获取正文：${firstError.message}'
+            : '无法获取正文（响应解析失败）',
       );
     }
+  }
+
+  /// 图文接口失败是否值得回退纯文本接口。
+  ///
+  /// 瞬时失败（超时/限流/上游 5xx）由 Rust 侧按策略重试，Dart 不再放大；
+  /// 设备注册失效要重启应用；499 取消是 [TimeoutException]。这些都不能回退。
+  bool _shouldFallbackToPlainChapter(Object error) {
+    if (error is TimeoutException) return false;
+    if (error is BackendTimeoutException) return false;
+    if (error is ApiException) {
+      return !error.kind.isTransient && !error.kind.needsRestart;
+    }
+    // 本地解析/格式异常等意外：另一条接口可能拿到可解析的正文。
+    return true;
   }
 
   /// 批量取正文（内核 `/api/v1/chapters/batch`，约 20 章/批）。

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book_store.dart';
 import 'package:novel_playlet/core/storage/offline/offline_paths.dart';
@@ -22,6 +25,8 @@ import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_controller.dart';
 import 'package:novel_playlet/features/reader/reader_bubble.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
+import 'package:novel_playlet/features/reader/reader_pagination.dart'
+    as reader_pagination;
 import 'package:novel_playlet/features/reader/reader_settings.dart';
 import 'package:novel_playlet/features/reader/reader_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -645,6 +650,197 @@ void main() {
     );
     expect(find.textContaining('条评论'), findsOneWidget);
   });
+
+  /// P1-3 回归：段评异步到达触发的第二遍分页只重测带气泡的段。
+  ///
+  /// fake 后端首章 9 段、段评给了 3 个段的计数；修复前第二遍会把 9 段全部重测，
+  /// 有段落测量缓存后只应重测这 3 段。
+  testWidgets('阅读页-段评到达的第二遍分页只重测带气泡的段', (tester) async {
+    reader_pagination.ReaderPagination.debugResetCounters();
+    addTearDown(reader_pagination.ReaderPagination.debugResetCounters);
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    expect(
+      reader_pagination.ReaderPagination.debugBuildCount,
+      2,
+      reason: '首章分页两次：正文到达一次、段评计数到达一次',
+    );
+    expect(
+      reader_pagination.ReaderPagination.debugLastMeasuredParagraphs,
+      3,
+      reason: '第二遍只重测 3 个带气泡的段（fake 数据共 9 段），其余命中段落缓存',
+    );
+  });
+
+  /// P1-3 回归：段评结果到达但计数全 0 时，值相等不应让已算好的整章分页作废；
+  /// 切章也只新增一次分页（新章的段评结果同样不应触发第二遍）。
+  testWidgets('阅读页-段评计数全 0 时到达后不二次分页，切章只新增一次', (tester) async {
+    reader_pagination.ReaderPagination.debugResetCounters();
+    addTearDown(reader_pagination.ReaderPagination.debugResetCounters);
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: _ZeroCountIdeasTransport(),
+    );
+    expect(
+      reader_pagination.ReaderPagination.debugBuildCount,
+      1,
+      reason: '段评计数全 0（bubbleCounts 值相等）不应让首章分页作废重排',
+    );
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    await container
+        .read(
+          readerSessionProvider(const ReaderArgs(bookId: '1', bookTitle: '剑来'))
+              .notifier,
+        )
+        .nextChapter();
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(
+      reader_pagination.ReaderPagination.debugBuildCount,
+      2,
+      reason: '切章只新增一次分页；新章的段评计数同样不应触发第二遍',
+    );
+  });
+
+  /// P1-4 回归：字号滑块拖动中只更新本地预览，松手才提交 provider（一次重排 +
+  /// 一次落盘）。修复前每个 tick 都会让整章分页作废并把 7 个 key 写一遍。
+  testWidgets('阅读页-字号拖动中只预览，松手才提交一次', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    final before = container.read(readerSettingsProvider).fontSize;
+    var commits = 0;
+    final subscription = container.listen(readerSettingsProvider, (
+      previous,
+      next,
+    ) {
+      if (previous?.fontSize != next.fontSize) commits++;
+    });
+    addTearDown(subscription.close);
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    final fontSlider = find.byType(Slider).first;
+    final gesture = await tester.startGesture(tester.getCenter(fontSlider));
+    await gesture.moveBy(const Offset(60, 0));
+    await tester.pump();
+
+    expect(
+      tester.widget<Slider>(fontSlider).value,
+      isNot(before),
+      reason: '拖动中滑块要跟手（本地预览值）',
+    );
+    expect(
+      container.read(readerSettingsProvider).fontSize,
+      before,
+      reason: '拖动中不能提交 provider，否则每个 tick 都会整章重排',
+    );
+    expect(commits, 0, reason: '拖动中 provider 一次都不该变');
+    expect(prefs.getDouble('reader_font_size_v1'), isNull, reason: '拖动中不落盘');
+
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final committed = container.read(readerSettingsProvider).fontSize;
+    expect(committed, isNot(before), reason: '松手后字号应已提交');
+    expect(commits, 1, reason: '一次拖动只提交一次（一次重排）');
+    expect(
+      prefs.getDouble('reader_font_size_v1'),
+      committed,
+      reason: '松手才落盘一次，且落的是提交值',
+    );
+  });
+
+  /// P2 回归：关掉「对话高亮」后分页跳过对话扫描/矩形测量；开关切换要重排
+  /// 一次（`_PaginationKey` 含该开关），但段落测量缓存命中，重排代价很小。
+  testWidgets('阅读页-切对话高亮开关重排一次且关闭后不测对话矩形', (tester) async {
+    reader_pagination.ReaderPagination.debugResetCounters();
+    addTearDown(reader_pagination.ReaderPagination.debugResetCounters);
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: _DialogueTextTransport(),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    // 首章分页两次：正文到达 + 段评计数到达。
+    final buildsBefore = reader_pagination.ReaderPagination.debugBuildCount;
+    final dialogueBefore =
+        reader_pagination.ReaderPagination.debugDialogueMeasureCount;
+    expect(buildsBefore, 2);
+    expect(dialogueBefore, greaterThan(0), reason: '开着高亮时要测对话矩形');
+    expect(
+      find.byKey(const ValueKey('reader-dialogue-highlight')),
+      findsWidgets,
+    );
+
+    container
+        .read(readerSettingsProvider.notifier)
+        .setShowDialogueHighlight(false);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(
+      reader_pagination.ReaderPagination.debugBuildCount,
+      buildsBefore + 1,
+      reason: '开关进 _PaginationKey：切换要重排一次',
+    );
+    expect(
+      reader_pagination.ReaderPagination.debugDialogueMeasureCount,
+      dialogueBefore,
+      reason: '关闭高亮后不应再做 getBoxesForSelection',
+    );
+    expect(
+      find.byKey(const ValueKey('reader-dialogue-highlight')),
+      findsNothing,
+    );
+    expect(
+      reader_pagination.ReaderPagination.debugLastMeasuredParagraphs,
+      2,
+      reason: 'warm 缓存：只有 2 个原本带对话的段需要重测（ranges 从有到无）',
+    );
+
+    container
+        .read(readerSettingsProvider.notifier)
+        .setShowDialogueHighlight(true);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(
+      reader_pagination.ReaderPagination.debugBuildCount,
+      buildsBefore + 2,
+      reason: '再打开要再重排一次',
+    );
+    expect(
+      reader_pagination.ReaderPagination.debugDialogueMeasureCount,
+      dialogueBefore,
+      reason: '重新打开时段落测量命中缓存，不必再算一遍矩形',
+    );
+    expect(
+      find.byKey(const ValueKey('reader-dialogue-highlight')),
+      findsWidgets,
+    );
+  });
 }
 
 /// 底部常驻信息条里的页码文案（`n/m`）。
@@ -722,4 +918,79 @@ class _GatedOfflineNetwork implements OfflineNetwork {
   @override
   Future<OfflineVideoStream> openVideoStream(String url) async =>
       throw UnimplementedError('小说下载不取视频流');
+}
+
+/// 段评计数全为 0 的假网络：idea list 返回「有桶但 count=0」。
+///
+/// 阅读页按值比较分页 key：这种结果与「无段评」在排版上等价，不能触发第二遍
+/// 整章分页（修复前按对象身份比较，新实例会让分页作废）。
+class _ZeroCountIdeasTransport extends FakePreviewTransport {
+  @override
+  Future<BackendResponse> send(
+    String method,
+    String path, {
+    String? query,
+    Uint8List? body,
+    Duration timeout = BackendTransport.defaultTimeout,
+  }) async {
+    if (path.contains('/chapters/') && path.endsWith('/reviews')) {
+      return BackendResponse(
+        200,
+        Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'code': 0,
+              'data': {
+                'item_version': 'v-zero',
+                'data': {
+                  '0': {'count': 0},
+                  '10000': {'count': 0},
+                },
+              },
+            }),
+          ),
+        ),
+        'application/json',
+      );
+    }
+    return super.send(method, path, query: query, body: body, timeout: timeout);
+  }
+}
+
+/// 正文带对话引号的假网络：验证「对话高亮」开关对分页测量的影响。
+///
+/// 首章 3 段，其中 0/2 段有对话内容；段评计数沿用 FakePreviewTransport。
+class _DialogueTextTransport extends FakePreviewTransport {
+  @override
+  Future<BackendResponse> send(
+    String method,
+    String path, {
+    String? query,
+    Uint8List? body,
+    Duration timeout = BackendTransport.defaultTimeout,
+  }) async {
+    if (path.contains('/chapters/') && !path.endsWith('/reviews')) {
+      return BackendResponse(
+        200,
+        Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'code': 0,
+              'data': {
+                'content_decrypted': true,
+                'title': '第一章',
+                'content': [
+                  '<p idx="0">他说：“走吧，天快黑了。”</p>',
+                  '<p idx="1">这一段没有对话。</p>',
+                  '<p idx="2">“第二段对话”后面还有字。</p>',
+                ].join(),
+              },
+            }),
+          ),
+        ),
+        'application/json',
+      );
+    }
+    return super.send(method, path, query: query, body: body, timeout: timeout);
+  }
 }

@@ -2,6 +2,7 @@ import '../../app/widgets/app_snack_bar.dart';
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -59,6 +60,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   PageController _pageController = PageController(keepPage: false);
   ReaderPagination? _pagination;
   _PaginationKey? _paginationKey;
+
+  /// 跨 build 的段落测量缓存：段评异步到达、换字号等触发整章重排时，只重测
+  /// 真正变化的段落（见 [ReaderBlockMeasureCache]），避免每次整章再测一遍。
+  final ReaderBlockMeasureCache _measureCache = ReaderBlockMeasureCache();
+
   int _pageIndex = 0;
   bool _toolbarVisible = false;
   bool _turning = false;
@@ -736,6 +742,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       fontFamily: fontFamily,
       ideas: ideas,
       showBubbles: showBubbles,
+      showDialogueHighlight: settings.showDialogueHighlight,
     );
     final cached = _pagination;
     if (cached != null && _paginationKey == key) return cached;
@@ -759,6 +766,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         bodyStyle: _readerTextStyle(settings, Colors.black, fontFamily),
         paragraphSpacing: settings.fontSize * 0.55,
       ),
+      showDialogueHighlight: settings.showDialogueHighlight,
+      measureCache: _measureCache,
     );
     _pagination = pagination;
     _paginationKey = key;
@@ -1139,9 +1148,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 }
 
 /// 分页缓存的 key。正文用对象身份比较：换章/重试拿到新正文对象必然重排。
+///
+/// 段评部分用**值比较**（bubbleCounts/bubbleVariants 内容相等即视为同一份）：
+/// 段评是异步到达的，provider 每次加载都会给新实例，但同一个章的空结果 / 计数
+/// 全 0 的结果不应该让已经算好的整章分页作废再排一遍。关气泡时完全忽略 ideas。
 @immutable
 class _PaginationKey {
-  const _PaginationKey({
+  _PaginationKey({
     required this.content,
     required this.width,
     required this.height,
@@ -1149,9 +1162,13 @@ class _PaginationKey {
     required this.lineHeight,
     required this.textScale,
     required this.fontFamily,
-    required this.ideas,
+    required ChapterIdeas ideas,
     required this.showBubbles,
-  });
+    required this.showDialogueHighlight,
+  }) : bubbleCounts = showBubbles ? ideas.bubbleCounts : const <int, int>{},
+       bubbleVariants = showBubbles
+           ? ideas.bubbleVariants
+           : const <int, ParagraphBubbleVariant>{};
 
   final ChapterContent content;
   final double width;
@@ -1165,10 +1182,14 @@ class _PaginationKey {
   /// 主题字体变了字形度量也会变，必须一起重排。
   final String? fontFamily;
 
-  /// 段评气泡会改变段末折行，ideas 变化（或开关切换）必须重排。
-  /// 用对象身份判断：provider 每次加载/刷新都会给新实例。
-  final ChapterIdeas ideas;
+  /// 段评气泡会改变段末折行：只有计数/样式真的变化时才需要重排。
+  final Map<int, int> bubbleCounts;
+  final Map<int, ParagraphBubbleVariant> bubbleVariants;
   final bool showBubbles;
+
+  /// 对话高亮开关：关掉后分页不做对话扫描/矩形测量，但页数和断行不变；
+  /// 开关变化必须重排一次（切换后重排的段落测量几乎全命中缓存）。
+  final bool showDialogueHighlight;
 
   @override
   bool operator ==(Object other) =>
@@ -1180,8 +1201,10 @@ class _PaginationKey {
       other.lineHeight == lineHeight &&
       other.textScale == textScale &&
       other.fontFamily == fontFamily &&
-      identical(other.ideas, ideas) &&
-      other.showBubbles == showBubbles;
+      mapEquals(other.bubbleCounts, bubbleCounts) &&
+      mapEquals(other.bubbleVariants, bubbleVariants) &&
+      other.showBubbles == showBubbles &&
+      other.showDialogueHighlight == showDialogueHighlight;
 
   @override
   int get hashCode => Object.hash(
@@ -1192,7 +1215,17 @@ class _PaginationKey {
     lineHeight,
     textScale,
     fontFamily,
-    identityHashCode(ideas),
+    _unorderedMapHash(bubbleCounts),
+    _unorderedMapHash(bubbleVariants),
     showBubbles,
+    showDialogueHighlight,
+  );
+}
+
+/// Map 的与顺序无关的 hash（兼容 `_PaginationKey` 的值比较）。
+int _unorderedMapHash(Map<int, Object?> map) {
+  if (map.isEmpty) return 0;
+  return Object.hashAllUnordered(
+    map.entries.map((entry) => Object.hash(entry.key, entry.value)),
   );
 }

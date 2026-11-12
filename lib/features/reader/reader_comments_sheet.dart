@@ -476,7 +476,7 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
                     if (comment.imageUrls.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       CommentImageStrip(
-                        imageUrls: comment.imageUrls,
+                        imageRefs: comment.imageRefsOrFallback,
                         // 弹层底色跟随纸色，占位块不能直接吃全局主题的灰。
                         placeholderColor: foreground.withValues(alpha: 0.06),
                       ),
@@ -697,7 +697,7 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
                 if (reply.imageUrls.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   CommentImageStrip(
-                    imageUrls: reply.imageUrls,
+                    imageRefs: reply.imageRefsOrFallback,
                     compact: true,
                     placeholderColor: foreground.withValues(alpha: 0.06),
                   ),

@@ -259,6 +259,88 @@ void main() {
       );
     });
 
+    test('同时保留缩略图与原图；没有 thumb_url 时 thumb 退回原图', () {
+      final refs = parseCommentImageRefs({
+        'image_data': [
+          {
+            'web_url': 'https://img.example.com/1.jpg',
+            'thumb_url': '//img.example.com/1-thumb.jpg',
+          },
+          {'web_url': 'https://img.example.com/2.jpg'},
+        ],
+      });
+      expect(refs, const [
+        CommentImageRef(
+          thumb: 'https://img.example.com/1-thumb.jpg',
+          full: 'https://img.example.com/1.jpg',
+        ),
+        CommentImageRef(
+          thumb: 'https://img.example.com/2.jpg',
+          full: 'https://img.example.com/2.jpg',
+        ),
+      ]);
+      // 旧入口只返回原图，行为不变。
+      expect(
+        parseCommentImages({
+          'image_data': [
+            {'web_url': 'https://img.example.com/1.jpg'},
+          ],
+        }),
+        ['https://img.example.com/1.jpg'],
+      );
+    });
+
+    test('段评 / 回复解析出的 imageRefs 带 thumb 与原图', () {
+      final refs = parseCommentImageRefs({
+        'image_data': [
+          {
+            'web_url': 'https://img.example.com/full.jpg',
+            'thumb_url': 'https://img.example.com/thumb.jpg',
+          },
+        ],
+      });
+      expect(refs.single.thumb, 'https://img.example.com/thumb.jpg');
+      expect(refs.single.full, 'https://img.example.com/full.jpg');
+
+      final page = BookCommentPage.fromCommentListPayload({
+        'code': 0,
+        'data': {
+          'data_list': [
+            {
+              'comment': {
+                'comment_id': 'c1',
+                'common': {
+                  'content': {
+                    'text': '图文段评',
+                    'image_data_list': {
+                      'image_data': [
+                        {
+                          'web_url': 'https://img.example.com/full.jpg',
+                          'thumb_url': 'https://img.example.com/thumb.jpg',
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      });
+      final comment = page.comments.single;
+      expect(comment.imageUrls, ['https://img.example.com/full.jpg']);
+      expect(
+        comment.imageRefsOrFallback.single.thumb,
+        'https://img.example.com/thumb.jpg',
+      );
+      // 手工构造（旧测试写法）只有 imageUrls 时，缩略图位退回原图，不崩。
+      const manual = BookComment(imageUrls: ['https://img.example.com/x.jpg']);
+      expect(
+        manual.imageRefsOrFallback.single.thumb,
+        'https://img.example.com/x.jpg',
+      );
+    });
+
     test('段评、旧书评、回复三条解析链路都带上配图', () {
       final commentPage = BookCommentPage.fromCommentListPayload({
         'code': 0,

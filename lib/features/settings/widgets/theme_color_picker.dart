@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -9,7 +11,8 @@ import '../../../app/theme/app_theme.dart';
 ///
 /// 主题色与阅读页「对话高亮」色共用这个弹层：调用方传 [title] 与
 /// [previewBuilder] 就能把预览区换成自己的示例（主题色默认预览按钮/强调色，
-/// 对话高亮预览一段正文）。预览会跟随当前取色实时更新。
+/// 对话高亮预览一段正文）。预览会跟随当前取色更新：拖动时色块/十六进制
+/// 逐帧变化，预览区（ThemeData / 分页）按 ~90ms 合并，避免每帧重活。
 ///
 /// 注意 `enableDrag: false`：弹层默认的纵向拖动手势会和取色面板打架，而且
 /// sheet 的 VerticalDrag 更早接受（约 18pt，子级 Pan 要 36pt），结果是
@@ -51,9 +54,40 @@ class ThemeColorPickerSheet extends StatefulWidget {
 }
 
 class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
+  /// 预览用的颜色合并间隔。
+  ///
+  /// 预览里主体色卡的 ThemeData 与对话高亮示例的分页都比较贵，而拖动
+  /// SV 面板/色相条时每个 pointer move 都会 setState；这里把**预览**的
+  /// 颜色更新合并到 ~11fps，色块与十六进制仍逐帧即时更新。
+  static const _previewThrottle = Duration(milliseconds: 90);
+
   late HSVColor _hsv = HSVColor.fromColor(widget.initial);
 
+  /// 预览当前显示的颜色（可能滞后 [_previewThrottle]）。
+  late Color _previewColor = _hsv.toColor();
+
+  Timer? _previewTimer;
+
   Color get _color => _hsv.toColor();
+
+  @override
+  void dispose() {
+    _previewTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 拖动取色：色块/hex 立即更新，预览按 [_previewThrottle] 合并。
+  void _updateHsv(HSVColor next) {
+    if (next == _hsv) return;
+    setState(() => _hsv = next);
+    _previewTimer?.cancel();
+    _previewTimer = Timer(_previewThrottle, () {
+      if (!mounted) return;
+      final color = _color;
+      if (color == _previewColor) return;
+      setState(() => _previewColor = color);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -89,18 +123,18 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
               ],
             ),
             const SizedBox(height: 16),
-            _SaturationValuePanel(
-              hsv: _hsv,
-              onChanged: (next) => setState(() => _hsv = next),
-            ),
+            _SaturationValuePanel(hsv: _hsv, onChanged: _updateHsv),
             const SizedBox(height: 16),
             _HueBar(
               hue: _hsv.hue,
-              onChanged: (hue) => setState(() => _hsv = _hsv.withHue(hue)),
+              onChanged: (hue) => _updateHsv(_hsv.withHue(hue)),
             ),
             const SizedBox(height: 20),
-            widget.previewBuilder?.call(_color) ??
-                _ThemePreview(seed: _color, brightness: theme.brightness),
+            widget.previewBuilder?.call(_previewColor) ??
+                _ThemePreview(
+                  seed: _previewColor,
+                  brightness: theme.brightness,
+                ),
             const SizedBox(height: 20),
             Row(
               children: [
@@ -141,11 +175,38 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
 /// 用当前候选中色现场生成一套主题，看一眼按钮/强调色长什么样。
 ///
 /// 直接给页面换色会太跳（而且取消还要回滚），所以只在这里做局部预览。
-class _ThemePreview extends StatelessWidget {
+///
+/// 外层取色弹层每帧都会重建（hex 文本等），而 `AppTheme.themed` 里的
+/// `ColorScheme.fromSeed` 是这条链路里最贵的一步：这里按 (seed, brightness)
+/// memo 住 ThemeData，颜色没变时直接复用，不再重复派生动态配色。
+class _ThemePreview extends StatefulWidget {
   const _ThemePreview({required this.seed, required this.brightness});
 
   final Color seed;
   final Brightness brightness;
+
+  @override
+  State<_ThemePreview> createState() => _ThemePreviewState();
+}
+
+class _ThemePreviewState extends State<_ThemePreview> {
+  ThemeData? _theme;
+  Color? _themeSeed;
+  Brightness? _themeBrightness;
+
+  ThemeData get _previewTheme {
+    final cached = _theme;
+    if (cached != null &&
+        _themeSeed == widget.seed &&
+        _themeBrightness == widget.brightness) {
+      return cached;
+    }
+    final theme = AppTheme.themed(widget.seed, widget.brightness);
+    _theme = theme;
+    _themeSeed = widget.seed;
+    _themeBrightness = widget.brightness;
+    return theme;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -159,7 +220,7 @@ class _ThemePreview extends StatelessWidget {
       // 用完整 ThemeData（而不是 copyWith(colorScheme:)）：copyWith 会把外层
       // 的 AppAccent 扩展原样留下，嵌套主题里的 accentOf 就会读到旧 seed。
       child: Theme(
-        data: AppTheme.themed(seed, brightness),
+        data: _previewTheme,
         child: Builder(
           builder: (context) {
             final previewScheme = Theme.of(context).colorScheme;

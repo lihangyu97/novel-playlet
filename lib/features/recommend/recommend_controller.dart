@@ -39,6 +39,19 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
   /// 重建过，丢弃过期数据，避免旧响应覆盖新列表。
   int _generation = 0;
 
+  /// 列表"世代"：每次 [refresh] 开始 +1。
+  ///
+  /// 翻页请求发出时记下它，回来时对不上就说明列表已经被一次刷新整体换掉，
+  /// 这一页是旧 session 的数据，必须丢弃——否则旧 session 的第二页会被
+  /// append 到刷新后的新列表上（游标/session 不一致，列表错乱）。
+  int _loadEpoch = 0;
+
+  /// 刷新互斥：刷新期间不发翻页请求；也防止连续下拉并发两次刷新。
+  ///
+  /// 反向（翻页进行中刷新）允许：刷新会 bump [_loadEpoch]，把在途翻页的
+  /// 结果作废，见 [loadMore]。
+  bool _refreshing = false;
+
   /// 控制器级重入锁：状态里的 loadingMore 是给 UI 看的，这里再加一道，
   /// 防止同一帧内多次滚动/补屏调用把同一个 offset 并发发出去。
   bool _loadingMore = false;
@@ -55,28 +68,43 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
   ///
   /// 已有数据时刷新失败只把异常抛给页面提示，不替换当前内容；没有数据时
   /// 走和首屏一样的加载/错误路径。
+  ///
+  /// 刷新开始先把 [_loadEpoch] +1：刷新期间已经在途的 loadMore 返回时会被
+  /// 判定为过期页并丢弃，避免旧 session 的第二页拼进刷新后的列表。
   Future<void> refresh() async {
-    final current = state.value;
+    // 连续下拉只跑一次：两个 refresh 响应互相覆盖没有意义。
+    if (_refreshing) return;
+    _refreshing = true;
+    _loadEpoch += 1;
     final generation = _generation;
+    try {
+      final current = state.value;
 
-    if (current == null) {
-      state = const AsyncLoading<RecommendState>();
-      final next = await AsyncValue.guard(_loadFeed);
+      if (current == null) {
+        state = const AsyncLoading<RecommendState>();
+        final next = await AsyncValue.guard(_loadFeed);
+        if (generation != _generation) return;
+        state = next;
+        return;
+      }
+
+      final fresh = await _fetchFeed();
       if (generation != _generation) return;
-      state = next;
-      return;
+      state = AsyncData(fresh);
+    } finally {
+      _refreshing = false;
     }
-
-    final fresh = await _fetchFeed();
-    if (generation != _generation) return;
-    state = AsyncData(fresh);
   }
 
   /// 滚动到底时追加下一页。
   ///
   /// 重复请求在入口处就被状态挡掉：正在加载、已到底、上次失败还没重试，
   /// 都不发新请求。翻页失败只更新底部提示，不清空已加载的列表。
+  ///
+  /// 刷新期间不发翻页（整条列表会被刷新替换，此时翻页只会拿到旧 session 的
+  /// 页）；翻页期间允许刷新，翻页响应回来时用 [_loadEpoch] 判定并丢弃。
   Future<void> loadMore() async {
+    if (_refreshing) return;
     final current = state.value;
     if (_loadingMore ||
         current == null ||
@@ -87,6 +115,7 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
     if (current.loadMoreError != null) return;
 
     final generation = _generation;
+    final epoch = _loadEpoch;
     _loadingMore = true;
     state = AsyncData(current.withLoadingMore(true));
     try {
@@ -96,7 +125,10 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
         offset: offset,
         sessionId: current.sessionId,
       );
-      if (generation != _generation) return;
+      if (_isStale(generation, epoch)) {
+        _dropStaleLoadingMore();
+        return;
+      }
       final latest = state.value;
       if (latest == null) return;
       state = AsyncData(
@@ -108,7 +140,10 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
         ),
       );
     } catch (error) {
-      if (generation != _generation) return;
+      if (_isStale(generation, epoch)) {
+        _dropStaleLoadingMore();
+        return;
+      }
       final latest = state.value;
       if (latest == null) return;
       // 失败时把 loadingMore 收回来：footer 先判 loadingMore 再判 error，
@@ -123,6 +158,19 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
       );
     } finally {
       _loadingMore = false;
+    }
+  }
+
+  /// 翻页请求是否已被刷新/重建取代（代际或列表世代对不上）。
+  bool _isStale(int generation, int epoch) =>
+      generation != _generation || epoch != _loadEpoch;
+
+  /// 被取代的翻页把"翻页中"收回来：刷新失败时 state 可能还停在
+  /// `withLoadingMore(true)` 那一份，不清掉 footer 会一直转圈。
+  void _dropStaleLoadingMore() {
+    final latest = state.value;
+    if (latest != null && latest.loadingMore) {
+      state = AsyncData(latest.withLoadingMore(false));
     }
   }
 

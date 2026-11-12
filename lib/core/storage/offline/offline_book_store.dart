@@ -185,8 +185,13 @@ class OfflineBookStore {
   }
 
   /// 清理没有 manifest（崩溃残留/半截目录）的孤立目录，以及残留 `.part`
-  /// 文件；返回删除的目录数。缓存中心打开时调用（此时不应有进行中的任务）。
-  Future<int> pruneOrphans() async {
+  /// 文件；返回删除的目录数。
+  ///
+  /// [cleanupParts] 为 false 时只删孤立目录、不碰正常目录里的 `.part`：
+  /// 缓存中心进页时下载器可能正在写盘，删 `.part` 会让当前章从 0 重下
+  /// （P1-1）。孤立目录本身不可能有活动任务——下载器一定先写 manifest 再
+  /// 落文件。
+  Future<int> pruneOrphans({bool cleanupParts = true}) async {
     var removed = 0;
     for (final directory in await listChildDirectories(
       await _paths.novelDir(),
@@ -197,7 +202,7 @@ class OfflineBookStore {
         removed += 1;
         continue;
       }
-      await _deletePartFiles(directory);
+      if (cleanupParts) await _deletePartFiles(directory);
     }
     return removed;
   }

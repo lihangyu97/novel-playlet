@@ -158,7 +158,12 @@ class OfflineSeriesStore {
   /// 按文件存在校正 episodes[].cached/bytes 与 completed/bytes。
   ///
   /// 缓存中心/恢复任务时调用；比小说多一步：把每集的实际文件大小写回 manifest。
-  Future<void> reconcile(String seriesId) async {
+  ///
+  /// [cleanupParts] 为 false 时不做收尾的 `.part` 清理：缓存中心进页扫盘时
+  /// 可能刚好有本剧任务被「继续/重试」启动，下载器正在写同一个 `.part`
+  /// （P1-1）。整区 `.part` 清理只留在启动恢复 [_restore] 与删除单条
+  /// （目录整体删除）这类确定无任务的路径。
+  Future<void> reconcile(String seriesId, {bool cleanupParts = true}) async {
     final series = await read(seriesId);
     if (series == null) return;
     final directory = await _paths.seriesDir(seriesId);
@@ -190,7 +195,7 @@ class OfflineSeriesStore {
         updatedAt: DateTime.now(),
       ),
     );
-    await _deletePartFiles(directory);
+    if (cleanupParts) await _deletePartFiles(directory);
   }
 
   /// 删除一部剧的离线内容（调用方负责先取消进行中的任务）。
@@ -220,7 +225,12 @@ class OfflineSeriesStore {
   }
 
   /// 清理没有 manifest 的孤立目录与残留 `.part` 文件；返回删除的目录数。
-  Future<int> pruneOrphans() async {
+  ///
+  /// [cleanupParts] 为 false 时只删孤立目录、不碰正常目录里的 `.part`：
+  /// 缓存中心进页时下载器可能正在写盘，删 `.part` 会让当前集从 0 重下
+  /// （P1-1）。孤立目录本身不可能有活动任务——下载器一定先写 manifest 再
+  /// 落文件。
+  Future<int> pruneOrphans({bool cleanupParts = true}) async {
     var removed = 0;
     for (final directory in await listChildDirectories(
       await _paths.videoDir(),
@@ -231,7 +241,7 @@ class OfflineSeriesStore {
         removed += 1;
         continue;
       }
-      await _deletePartFiles(directory);
+      if (cleanupParts) await _deletePartFiles(directory);
     }
     return removed;
   }

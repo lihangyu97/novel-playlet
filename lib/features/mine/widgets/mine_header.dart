@@ -17,7 +17,10 @@ class MineHeader extends StatelessWidget {
   final IconData icon;
 
   /// 两个 tab 合并后的一行统计，例如「书架 12 本 · 收藏 4 部」。
-  final String stats;
+  ///
+  /// 传 Widget 而不是 String：统计只订阅本数的叶子组件自己 watch provider，
+  /// [MinePage] 根节点不再因为数据变化重建（CODE_REVIEW P1-5）。
+  final Widget stats;
   final VoidCallback onSettings;
 
   @override
@@ -60,12 +63,7 @@ class MineHeader extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            stats,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
+          stats,
         ],
       ),
     );

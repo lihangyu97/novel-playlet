@@ -133,3 +133,14 @@ final offlineEntryStatusProvider = Provider.autoDispose
           ? OfflineEntryStatus.inProgress
           : OfflineEntryStatus.none;
     });
+
+/// 两个离线区里「当前可能正在写盘」的集合；缓存中心扫盘自愈时据此跳过对应区。
+///
+/// 见 [busyOfflineKinds]：下载器可能正在写 `.part`，扫盘自愈里的
+/// `reconcile` / `pruneOrphans` 会把它删掉（P1-1）。
+final offlineBusyKindsProvider = Provider<Set<OfflineTaskKind>>(
+  (ref) => busyOfflineKinds(
+    ref.watch(offlineTaskProvider),
+    ref.watch(offlineQueueProvider),
+  ),
+);

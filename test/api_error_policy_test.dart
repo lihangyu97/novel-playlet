@@ -110,6 +110,49 @@ class _LoadMoreFailureFake extends BackendTransport {
       );
 }
 
+/// 图文/纯文本两条正文接口分别可编程的 transport（`chapter` 回退策略用例）。
+class _ChapterTransport extends BackendTransport {
+  _ChapterTransport(this.handler) : super(port: 0);
+
+  final FutureOr<BackendResponse> Function(String path) handler;
+  final List<String> calls = <String>[];
+
+  @override
+  Future<BackendResponse> send(
+    String method,
+    String path, {
+    String? query,
+    Uint8List? body,
+    Duration timeout = BackendTransport.defaultTimeout,
+  }) async {
+    calls.add(path);
+    return handler(path);
+  }
+}
+
+BackendResponse _jsonResponse(
+  Map<String, dynamic> payload, {
+  int status = 200,
+}) => BackendResponse(
+  status,
+  Uint8List.fromList(utf8.encode(jsonEncode(payload))),
+  'application/json',
+);
+
+/// 一条能解析出段落的正文响应（形状同内核透传的上游响应）。
+Map<String, dynamic> _chapterPayload({
+  String content = '<p idx="1">正文第一段</p>',
+}) => {
+  'code': 0,
+  'data': {'content_decrypted': true, 'title': '第1章', 'content': content},
+};
+
+Map<String, dynamic> _businessError(String message, String kind) => {
+  'success': false,
+  'error': message,
+  'kind': kind,
+};
+
 void main() {
   group('kind 语义表', () {
     test('只有网络/上游瞬时失败算 isTransient', () {
@@ -370,6 +413,115 @@ void main() {
         callsBeforeRetry,
         reason: '非瞬时失败重试同一个请求不会变好，不应再发请求',
       );
+    });
+  });
+
+  group('chapter 回退策略（P1-7）', () {
+    String novelPath(String id) => '/api/v1/chapters/$id/novel';
+    String plainPath(String id) => '/api/v1/chapters/$id';
+
+    test('图文接口超时：只发一次请求，抛 timeout（不回退）', () async {
+      final transport = _ChapterTransport(
+        (_) => throw const BackendTimeoutException(Duration(seconds: 1)),
+      );
+      await expectLater(
+        ApiClient(transport).chapter('c1'),
+        throwsA(
+          isA<ApiException>()
+              .having((error) => error.kind, 'kind', ApiErrorKind.timeout)
+              .having((error) => error.message, 'message', '网络超时，请重试'),
+        ),
+      );
+      expect(transport.calls, [
+        novelPath('c1'),
+      ], reason: '超时再打第二个接口只会把阅读页单章等待翻倍（P1-7）');
+    });
+
+    test('499 取消：只发一次请求，仍是 TimeoutException', () async {
+      final transport = _ChapterTransport(
+        (_) => throw TimeoutException('backend cancelled'),
+      );
+      await expectLater(
+        ApiClient(transport).chapter('c1'),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(transport.calls, [novelPath('c1')], reason: '取消不能触发回退重发');
+    });
+
+    test('限流 / 上游 5xx / 设备失效：都不回退', () async {
+      const cases = [
+        (ApiErrorKind.rateLimited, 429),
+        (ApiErrorKind.upstream5xx, 500),
+        (ApiErrorKind.deviceFailed, 503),
+      ];
+      for (final (kind, status) in cases) {
+        final transport = _ChapterTransport(
+          (_) => _jsonResponse(
+            _businessError('upstream boom', kind.wireName),
+            status: status,
+          ),
+        );
+        await expectLater(
+          ApiClient(transport).chapter('c1'),
+          throwsA(
+            isA<ApiException>().having((error) => error.kind, 'kind', kind),
+          ),
+          reason: '${kind.wireName} 是瞬时/需重启失败，换接口不会变好',
+        );
+        expect(transport.calls, [novelPath('c1')]);
+      }
+    });
+
+    test('图文接口业务失败（badInput）：回退纯文本接口并成功', () async {
+      final transport = _ChapterTransport(
+        (path) => path.endsWith('/novel')
+            ? _jsonResponse(_businessError('本书没有图文版', 'bad_input'))
+            : _jsonResponse(_chapterPayload()),
+      );
+      final content = await ApiClient(transport).chapter('c1');
+      expect(content.paragraphs, isNotEmpty);
+      expect(transport.calls, [novelPath('c1'), plainPath('c1')]);
+    });
+
+    test('图文接口正文为空（解析失败）：回退纯文本接口', () async {
+      final transport = _ChapterTransport(
+        (path) => path.endsWith('/novel')
+            ? _jsonResponse(_chapterPayload(content: ''))
+            : _jsonResponse(_chapterPayload()),
+      );
+      final content = await ApiClient(transport).chapter('c1');
+      expect(content.paragraphs, isNotEmpty);
+      expect(transport.calls.length, 2, reason: '正文为空属于非瞬时失败，值得回退');
+    });
+
+    test('两条接口都失败：最终 message 与 kind 都取第二次（语义一致）', () async {
+      final transport = _ChapterTransport(
+        (path) => path.endsWith('/novel')
+            ? _jsonResponse(_businessError('本书没有图文版', 'bad_input'))
+            : _jsonResponse(_businessError('纯文本也取不到', 'bad_input')),
+      );
+      await expectLater(
+        ApiClient(transport).chapter('c1'),
+        throwsA(
+          isA<ApiException>()
+              .having((error) => error.message, 'message', '纯文本也取不到')
+              .having((error) => error.kind, 'kind', ApiErrorKind.badInput),
+        ),
+      );
+      expect(transport.calls.length, 2);
+    });
+
+    test('回退请求被取消：保持 TimeoutException，不包成 ApiException', () async {
+      final transport = _ChapterTransport(
+        (path) => path.endsWith('/novel')
+            ? _jsonResponse(_businessError('本书没有图文版', 'bad_input'))
+            : throw TimeoutException('backend cancelled'),
+      );
+      await expectLater(
+        ApiClient(transport).chapter('c1'),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(transport.calls.length, 2);
     });
   });
 }

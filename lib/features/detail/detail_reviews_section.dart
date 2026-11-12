@@ -188,7 +188,7 @@ class DetailReviewRow extends StatelessWidget {
                 ],
                 if (comment.imageUrls.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  CommentImageStrip(imageUrls: comment.imageUrls),
+                  CommentImageStrip(imageRefs: comment.imageRefsOrFallback),
                 ],
                 const SizedBox(height: 6),
                 Row(

@@ -1,8 +1,11 @@
 //! Persistent device pool plus the registration flow (`register` submodule).
 //!
 //! Differences from the Go original (recorded in the migration contract):
-//! registration is never performed while the pool lock is held, and saves are
-//! version-guarded so an in-flight registration cannot overwrite newer state.
+//! registration is never performed while the pool lock is held, saves are
+//! version-guarded so an in-flight registration cannot overwrite newer state,
+//! and a caller that finds no usable device waits for exactly one registration
+//! - the rest of the pool is topped up in the background, never on the
+//! request's critical path (P1-8).
 
 pub mod crypto;
 pub mod pool_crypto;
@@ -308,103 +311,52 @@ impl DevicePool {
         }))
     }
 
-    /// Least-recently-used device, refilling the pool when needed.
+    /// Least-recently-used usable device, registering one on the caller's path
+    /// only when the pool has none, then topping the pool up in the background.
     ///
-    /// Only an empty pool waits for a registration. A pool that still has a
-    /// device hands it out immediately and tops itself up in the background:
-    /// one registration is several network round trips plus a deliberate
-    /// pacing delay, so a request must not queue behind it while a usable
-    /// device exists.
+    /// A pool that still has a usable device hands it out immediately. A pool
+    /// with none - empty, reset after a corrupt file, or carrying only the
+    /// shipped example placeholder / devices whose `registerKey` failed -
+    /// registers exactly **one** device synchronously and returns it; the rest
+    /// of the top-up to [MIN_POOL_SIZE] is queued in the background. That
+    /// synchronous registration takes `register_lock` only, never
+    /// `maintenance_lock`: the background top-up holds the latter across
+    /// several registrations, each with a deliberate pacing delay, so the first
+    /// request must not queue behind it (P1-8).
     pub async fn get(self: &Arc<Self>) -> Result<Device, String> {
-        let (empty, below_min) = {
-            let s = self.state.lock().await;
-            (s.devices.is_empty(), s.devices.len() < MIN_POOL_SIZE)
-        };
-        let mut refill_err = None;
-        if empty {
-            // Nothing to hand out: this caller waits for at least one device.
-            refill_err = self.check_and_refill().await.err();
-        } else if below_min {
-            self.schedule_refill();
-        }
-
-        // Least-recently-used selection, with the emptiness check and the pick
-        // inside ONE lock scope. These used to be two separate `state` locks,
-        // and the empty-key branch below can drain the pool in between (it
-        // `retain`s the selected device away and then re-registers it over a
-        // multi-second network round trip), so `devices[0]` could index an
-        // empty vec and panic the whole call.
-        let mut dev = {
+        // Least-recently-used among devices that can actually decrypt. A
+        // device with an empty `secret_key` is never handed out, because every
+        // signed request against it would fail with "bad secret key".
+        let picked = {
             let mut s = self.state.lock().await;
             s.devices.sort_by(|a, b| a.last_used.cmp(&b.last_used));
-            match s.devices.first().cloned() {
-                Some(dev) => dev,
-                None => {
-                    return Err(match refill_err {
-                        Some(e) => e,
-                        None => "device pool empty".to_string(),
-                    });
+            s.devices
+                .iter()
+                .find(|device| !device.secret_key.is_empty())
+                .cloned()
+        };
+        let mut dev = match picked {
+            Some(device) => {
+                // Queue the top-up before the first await below: a pool that is
+                // still filling must not delay this caller. (The task also keeps
+                // its established ordering relative to the caller's own request.)
+                if self.top_up_needed().await {
+                    self.schedule_refill();
                 }
+                device
+            }
+            None => {
+                // Nothing usable: this caller waits for exactly one
+                // registration. The top-up is queued only after that device is
+                // admitted and persisted, so it cannot queue in front of the
+                // caller's registration (P1-8).
+                let device = self.acquire_one_sync().await?;
+                if self.top_up_needed().await {
+                    self.schedule_refill();
+                }
+                device
             }
         };
-
-        if dev.secret_key.is_empty() {
-            let _maintenance = self.maintenance_lock.lock().await;
-            let current = {
-                self.state
-                    .lock()
-                    .await
-                    .devices
-                    .iter()
-                    .find(|d| d.device_id == dev.device_id)
-                    .cloned()
-            };
-            match current {
-                Some(current) if !current.secret_key.is_empty() => dev = current,
-                Some(current) => {
-                    self.state
-                        .lock()
-                        .await
-                        .devices
-                        .retain(|d| d.device_id != current.device_id);
-                    // `register()`-level success is not the same as a usable
-                    // device: when `registerKey` fails it still returns
-                    // `Ok(Device { secret_key: "" })` (register.rs). Handing
-                    // that out makes every decrypting request fail with
-                    // "bad secret key" and persists the bad device, so mirror
-                    // the `replace_failed` guard and fail instead.
-                    let new_dev = match self.register_one().await {
-                        Ok(device) if !device.secret_key.is_empty() => device,
-                        Ok(_) => {
-                            self.state.lock().await.devices.push(current);
-                            return Err(
-                                "re-register empty-key device: replacement has no secret key"
-                                    .to_string(),
-                            );
-                        }
-                        Err(error) => {
-                            self.state.lock().await.devices.push(current);
-                            return Err(format!("re-register empty-key device: {error}"));
-                        }
-                    };
-                    self.state.lock().await.devices.push(new_dev.clone());
-                    self.save()
-                        .await
-                        .map_err(|error| format!("persist re-registered device: {error}"))?;
-                    dev = new_dev;
-                }
-                None => {
-                    let mut s = self.state.lock().await;
-                    s.devices.sort_by(|a, b| a.last_used.cmp(&b.last_used));
-                    dev = s
-                        .devices
-                        .iter()
-                        .find(|device| !device.secret_key.is_empty())
-                        .cloned()
-                        .ok_or_else(|| "device pool has no usable device".to_string())?;
-                }
-            }
-        }
 
         let flush_usage = {
             let mut s = self.state.lock().await;
@@ -428,6 +380,64 @@ impl DevicePool {
             let _ = self.save().await;
         }
         Ok(dev)
+    }
+
+    /// Whether the background top-up has work to do: the pool is below
+    /// `MIN_POOL_SIZE`, or it still holds an empty-key entry that can never be
+    /// handed out and should be pruned/replaced by the top-up.
+    async fn top_up_needed(&self) -> bool {
+        let s = self.state.lock().await;
+        s.devices.len() < MIN_POOL_SIZE
+            || s.devices.iter().any(|device| device.secret_key.is_empty())
+    }
+
+    /// Registers exactly one device on the caller's own path.
+    ///
+    /// `register_lock` is taken first and the pool is re-checked after it is
+    /// held: concurrent first calls therefore register once in total, and a
+    /// device another caller just registered is reused instead of duplicated.
+    /// `maintenance_lock` is deliberately not taken - the background top-up
+    /// holds it across several registrations (P1-8).
+    async fn acquire_one_sync(&self) -> Result<Device, String> {
+        let _guard = self.register_lock.lock().await;
+        {
+            let s = self.state.lock().await;
+            if let Some(device) = s
+                .devices
+                .iter()
+                .find(|device| !device.secret_key.is_empty())
+            {
+                return Ok(device.clone());
+            }
+        }
+        // `register()` reports `Ok` even when `registerKey` failed; such a
+        // device decrypts nothing. Rejecting it here keeps the contract "never
+        // hand out a device without a secret key" and leaves the pool untouched,
+        // exactly like a failed replacement did before.
+        let new_dev = match self.register_one_locked().await {
+            Ok(device) if !device.secret_key.is_empty() => device,
+            Ok(_) => {
+                return Err("device registration has no secret key".to_string());
+            }
+            Err(error) => return Err(format!("device registration failed: {error}")),
+        };
+        {
+            let mut s = self.state.lock().await;
+            // The shipped example pool starts with one empty-key placeholder; a
+            // pool carried over from an older kernel can hold more, and a failed
+            // `registerKey` leaves entries that can never be handed out. The
+            // first successful registration retires all of them instead of
+            // letting them occupy pool slots forever.
+            s.devices.retain(|device| !device.secret_key.is_empty());
+            s.devices.push(new_dev.clone());
+            s.dirty = true;
+        }
+        // Commit before the caller is served: an aborted request (cancelled or
+        // timed out) must not leave the device it just obtained in memory only.
+        self.save()
+            .await
+            .map_err(|error| format!("persist registered device: {error}"))?;
+        Ok(new_dev)
     }
 
     /// Returns the pooled device with the given id without touching rotation
@@ -580,24 +590,11 @@ impl DevicePool {
     }
 
     /// Number of registrations needed to bring the pool back to
-    /// `MIN_POOL_SIZE`.
-    async fn missing_devices(&self) -> usize {
-        let s = self.state.lock().await;
+    /// `MIN_POOL_SIZE`, bounded by the remaining room under `MAX_POOL_SIZE`.
+    fn missing_devices(s: &PoolState) -> usize {
         MIN_POOL_SIZE
             .saturating_sub(s.devices.len())
             .min(MAX_POOL_SIZE.saturating_sub(s.devices.len()))
-    }
-
-    async fn check_and_refill(&self) -> Result<(), String> {
-        // The need check happens before `maintenance_lock` is taken: a healthy
-        // pool must not queue behind a slow registration. The count is checked
-        // again under the lock because another maintenance path may have
-        // topped the pool up in the meantime.
-        if self.missing_devices().await == 0 {
-            return Ok(());
-        }
-        let _maintenance = self.maintenance_lock.lock().await;
-        self.refill_to_min().await
     }
 
     /// Queues a top-up while the caller keeps using the device it has.
@@ -621,8 +618,18 @@ impl DevicePool {
     /// Registers devices until the pool reaches `MIN_POOL_SIZE`. Callers must
     /// hold `maintenance_lock`.
     async fn refill_to_min(&self) -> Result<(), String> {
-        let need = self.missing_devices().await;
-        if need == 0 {
+        let (need, pruned) = {
+            let mut s = self.state.lock().await;
+            let before = s.devices.len();
+            // Empty-key entries can never be handed out. Drop them before
+            // deciding how much to fill so a pool carried over from an older
+            // kernel (or one that more than one `registerKey` failed against)
+            // heals to a full set of *usable* devices instead of stopping at an
+            // unchanged count.
+            s.devices.retain(|device| !device.secret_key.is_empty());
+            (Self::missing_devices(&s), s.devices.len() != before)
+        };
+        if need == 0 && !pruned {
             return Ok(());
         }
         let mut last_err = None;
@@ -645,8 +652,10 @@ impl DevicePool {
             let s = self.state.lock().await;
             !s.devices.is_empty()
         };
-        if has_any {
+        if has_any || pruned {
             self.save().await?;
+        }
+        if has_any {
             return Ok(());
         }
         match last_err {
@@ -657,6 +666,12 @@ impl DevicePool {
 
     async fn register_one(&self) -> Result<Device, String> {
         let _guard = self.register_lock.lock().await;
+        self.register_one_locked().await
+    }
+
+    /// [`DevicePool::register_one`] for callers that already hold
+    /// `register_lock` (the synchronous first-device path).
+    async fn register_one_locked(&self) -> Result<Device, String> {
         self.registrar.register().await
     }
 

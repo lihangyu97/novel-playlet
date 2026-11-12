@@ -29,7 +29,12 @@ enum _MineTab {
 /// 两个 tab 的内容完全隔离：小说侧 = 书架 + 最近阅读；短剧侧 = 收藏 +
 /// 最近观看（点击直接续播对应集）。两边共用 [MineTabBody] 骨架与页头，
 /// 只有数据与内容注入不同。
-class MinePage extends ConsumerStatefulWidget {
+///
+/// 页面根节点**不订阅任何数据 provider**（页头统计由 [_MineStats] 叶子自己
+/// watch）：阅读页每 400ms 落一次进度，如果根节点 watch 数据，保活的整页都会
+/// 跟着重建（CODE_REVIEW P1-5）。tab 内容同理，书架/收藏与最近阅读/观看各自
+/// 订阅自己的通道。
+class MinePage extends StatefulWidget {
   const MinePage({super.key, this.bottomInset = 0});
 
   /// 悬浮底栏遮住的高度（外层 shell 传进来）；列表末尾多留这么多空白。
@@ -40,10 +45,10 @@ class MinePage extends ConsumerStatefulWidget {
   static const dramaTabKey = Key('mine-tab-drama');
 
   @override
-  ConsumerState<MinePage> createState() => _MinePageState();
+  State<MinePage> createState() => _MinePageState();
 }
 
-class _MinePageState extends ConsumerState<MinePage>
+class _MinePageState extends State<MinePage>
     with SingleTickerProviderStateMixin {
   static const _tabs = _MineTab.values;
 
@@ -62,22 +67,6 @@ class _MinePageState extends ConsumerState<MinePage>
 
   void _openSettings() {
     context.pushAppRoute(const SettingsRoute());
-  }
-
-  /// 页头统计行：两侧数据都读到才显示数量，否则给加载 / 失败态。
-  ///
-  /// 页面同时 watch 两个 provider，也顺手把还没进过的 tab 数据预取起来，
-  /// 切过去时不会先闪一下「正在读取…」。
-  String _statsLine() {
-    final novel = ref.watch(mineDataProvider);
-    final drama = ref.watch(mineDramaDataProvider);
-    final novelData = novel.value;
-    final dramaData = drama.value;
-    if (novelData != null && dramaData != null) {
-      return '书架 ${novelData.shelf.length} 本 · 收藏 ${dramaData.collections.length} 部';
-    }
-    if (novel.hasError || drama.hasError) return '本地数据暂时读不出来';
-    return '正在读取本地数据…';
   }
 
   @override
@@ -102,7 +91,7 @@ class _MinePageState extends ConsumerState<MinePage>
                 MineHeader(
                   title: '我的',
                   icon: Icons.person_rounded,
-                  stats: _statsLine(),
+                  stats: const _MineStats(),
                   onSettings: _openSettings,
                 ),
                 CategoryTabBar(
@@ -129,6 +118,38 @@ class _MinePageState extends ConsumerState<MinePage>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 页头统计行：只订阅「书架本数 / 收藏部数」。
+///
+/// 单独做成 ConsumerWidget，[MinePage] 根节点自己不 watch 任何数据 provider：
+/// 阅读进度落盘（最近阅读变化）与这两个计数无关，页面根节点与固定页头不该
+/// 因此整页重建（CODE_REVIEW P1-5）。这里也顺手预取了还没进过的 tab 数据。
+class _MineStats extends ConsumerWidget {
+  const _MineStats();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final shelf = ref.watch(mineShelfProvider);
+    final collections = ref.watch(mineDramaShelfProvider);
+    final shelfCount = shelf.value?.length;
+    final collectionCount = collections.value?.length;
+    final String text;
+    if (shelfCount != null && collectionCount != null) {
+      text = '书架 $shelfCount 本 · 收藏 $collectionCount 部';
+    } else if (shelf.hasError || collections.hasError) {
+      text = '本地数据暂时读不出来';
+    } else {
+      text = '正在读取本地数据…';
+    }
+    final theme = Theme.of(context);
+    return Text(
+      text,
+      style: theme.textTheme.bodyMedium?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
       ),
     );
   }
