@@ -23,7 +23,6 @@ Future<void> showDetailReviewsSheet(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    showDragHandle: true,
     builder: (_) => FractionallySizedBox(
       // 约 0.8 屏高：一屏能看五六条书评，同时留出上方详情页作为上下文。
       heightFactor: 0.8,
@@ -176,7 +175,7 @@ class _DetailReviewsSheetState extends ConsumerState<DetailReviewsSheet> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
+          padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
           child: Row(
             children: [
               Text(

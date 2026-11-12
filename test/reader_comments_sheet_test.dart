@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/app/widgets/comment_image_loader.dart';
+import 'package:novel_playlet/app/widgets/comment_image_strip.dart';
+import 'package:novel_playlet/app/widgets/comment_image_viewer.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/book_comment.dart';
@@ -10,11 +13,14 @@ import 'package:novel_playlet/data/models/comment_reply.dart';
 import 'package:novel_playlet/data/models/json_utils.dart';
 import 'package:novel_playlet/features/reader/reader_comments_sheet.dart';
 
+import 'test_images.dart';
+
 /// 阅读页评论面板的行为回归：首屏渲染、回复懒加载、翻页与失败重试。
 ///
-/// 用 fake ApiClient 替换网络层，不启动 Rust 核，也不加载任何网络图片。
+/// 用 fake ApiClient 替换网络层，不启动 Rust 核；评论配图用 1×1 内存图
+/// 替换 ImageProvider，不加载任何网络图片。
 void main() {
-  testWidgets('首屏渲染评论：作者徽章、图片标记、时间与点赞数', (tester) async {
+  testWidgets('首屏渲染评论：作者徽章、配图、时间与点赞数', (tester) async {
     final api = _FakeApi(
       pagesByCursor: {
         '': _page(
@@ -40,7 +46,8 @@ void main() {
     expect(find.text('作者甲'), findsOneWidget);
     expect(find.text('作者'), findsOneWidget, reason: 'isAuthor 时显示作者徽章');
     expect(find.text('这段写得好'), findsOneWidget);
-    expect(find.text('[图片]'), findsOneWidget, reason: '图片只做文字占位');
+    expect(find.text('[图片]'), findsNothing, reason: '图片不再用文字占位');
+    expect(find.byType(CommentImageStrip), findsOneWidget, reason: '配图渲染成缩略图');
     expect(find.text('5分钟前'), findsOneWidget);
     expect(find.text('7'), findsOneWidget);
     expect(find.text('2 条回复'), findsOneWidget);
@@ -49,11 +56,6 @@ void main() {
       find.byType(CircleAvatar),
       findsNWidgets(2),
       reason: '头像用昵称首字，不加载网络头像',
-    );
-    expect(
-      find.byType(Image),
-      findsNothing,
-      reason: '面板里不加载任何网络图（头像/评论图片都是占位）',
     );
     // 定位参数要原样传到接口，否则会拉到别段/别章的评论。
     expect(api.lastBookId, 'book-1');
@@ -84,6 +86,116 @@ void main() {
     await tester.tap(find.byTooltip('关闭评论'));
     await tester.pumpAndSettle();
     expect(find.text('本章评论 · 2 条评论'), findsNothing);
+  });
+
+  testWidgets('点评论配图打开全屏查看器，可翻页并关闭', (tester) async {
+    final api = _FakeApi(
+      pagesByCursor: {
+        '': _page(
+          comments: [
+            _comment(
+              id: 'c1',
+              name: '读者甲',
+              text: '配图评论',
+              imageUrls: const [
+                'https://example.com/a.jpg',
+                'https://example.com/b.jpg',
+              ],
+            ),
+          ],
+          totalCount: 1,
+        ),
+      },
+    );
+    await _openSheet(tester, api: api);
+
+    await tester.tap(find.byType(Image).first);
+    // 全屏页里的图片加载占位是转圈动画：不能 pumpAndSettle，否则永远转。
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byType(CommentImageViewer), findsOneWidget);
+    expect(find.text('1 / 2'), findsOneWidget, reason: '从第一张进入');
+    expect(find.byTooltip('关闭图片'), findsOneWidget);
+
+    // 多图时右侧箭头切到下一张（1x 左右滑同样可切，见 Listener 逻辑）。
+    await tester.tap(find.byTooltip('下一张'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('2 / 2'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('关闭图片'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CommentImageViewer), findsNothing);
+    expect(find.text('本章评论 · 1 条评论'), findsOneWidget, reason: '关闭后回到评论面板');
+  });
+
+  testWidgets('全屏查看器：点画面任意处立即关闭（不再等双击仲裁）', (tester) async {
+    final api = _FakeApi(
+      pagesByCursor: {
+        '': _page(
+          comments: [
+            _comment(
+              id: 'c1',
+              name: '读者甲',
+              text: '配图评论',
+              imageUrls: const ['https://example.com/a.jpg'],
+            ),
+          ],
+          totalCount: 1,
+        ),
+      },
+    );
+    await _openSheet(tester, api: api);
+    await tester.tap(find.byType(Image).first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byType(CommentImageViewer), findsOneWidget);
+
+    // 单击（非 x / 箭头按钮）：tap 回调应在当前帧就 pop，而不是等约 300ms
+    // 的双击判定超时；用路由动画状态断言「立刻开始退场」。
+    await tester.tapAt(tester.getCenter(find.byType(CommentImageViewer)));
+    await tester.pump();
+    final route = ModalRoute.of(
+      tester.element(find.byType(CommentImageViewer)),
+    );
+    expect(
+      route?.animation?.status,
+      AnimationStatus.reverse,
+      reason: '单击当帧就要开始关闭，不能有双击仲裁延迟',
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(CommentImageViewer), findsNothing);
+    expect(find.text('本章评论 · 1 条评论'), findsOneWidget);
+  });
+
+  testWidgets('回复里的配图也渲染成缩略图', (tester) async {
+    final api = _FakeApi(
+      pagesByCursor: {
+        '': _page(
+          comments: [
+            _comment(id: 'c1', name: '读者甲', text: '回复带图', replyCount: 1),
+          ],
+          totalCount: 1,
+        ),
+      },
+      repliesByCommentId: {
+        'c1': _replyPage([
+          _reply(
+            id: 'r1',
+            name: '回复者乙',
+            text: '图来了',
+            imageUrls: const ['https://example.com/reply.jpg'],
+          ),
+        ]),
+      },
+    );
+    await _openSheet(tester, api: api);
+    expect(find.byType(CommentImageStrip), findsNothing, reason: '回复未展开前不构建');
+
+    await tester.tap(find.text('1 条回复'));
+    await tester.pumpAndSettle();
+    expect(find.text('图来了'), findsOneWidget);
+    expect(find.byType(CommentImageStrip), findsOneWidget);
   });
 
   testWidgets('点击「N 条回复」懒加载并展开，再次点击收起且不重复请求', (tester) async {
@@ -310,7 +422,11 @@ Future<void> _openSheet(
 }) async {
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [apiClientProvider.overrideWithValue(api)],
+      overrides: [
+        apiClientProvider.overrideWithValue(api),
+        // 配图不碰网络/磁盘缓存：统一换成 1×1 内存图。
+        commentImageLoaderProvider.overrideWithValue(fakeCommentImageLoader),
+      ],
       child: MaterialApp(
         theme: AppTheme.light(),
         home: Scaffold(
@@ -379,11 +495,13 @@ CommentReply _reply({
   required String id,
   required String name,
   String text = '',
+  List<String> imageUrls = const <String>[],
 }) {
   return CommentReply(
     id: id,
     userName: name,
     text: text,
+    imageUrls: imageUrls,
     createdAt: DateTime.now().subtract(const Duration(minutes: 3)),
   );
 }

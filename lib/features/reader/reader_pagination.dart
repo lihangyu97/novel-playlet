@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/chapter_ideas.dart';
 import 'reader_bubble.dart';
+import 'reader_dialogue.dart';
 
 /// 正文的行高行为。测量（TextPainter）与渲染（Text）必须显式传同一份，
 /// 否则两组默认值不同时（比如 DefaultTextStyle 带了 leadingDistribution）
@@ -144,14 +145,20 @@ class ReaderBlock {
     this.paraIndex,
     this.bubbleCount = 0,
     this.bubbleVariant = ParagraphBubbleVariant.plain,
+    List<Rect> dialogueRects = const <Rect>[],
   }) : lineTops = List<double>.unmodifiable(lineTops),
-       lineHeights = List<double>.unmodifiable(lineHeights);
+       lineHeights = List<double>.unmodifiable(lineHeights),
+       dialogueRects = List<Rect>.unmodifiable(dialogueRects);
 
   final int index;
   final String text;
   final double height;
   final List<double> lineTops;
   final List<double> lineHeights;
+
+  /// 对话高亮矩形：段内坐标系，测量时用同一份 TextPainter 的
+  /// `getBoxesForSelection` 算好，渲染时只画、不再二次排版。
+  final List<Rect> dialogueRects;
 
   /// 上游段落 id（正文 `<p idx>`），段评气泡与面板按它定位。
   final int? paraIndex;
@@ -230,6 +237,8 @@ class ReaderPagination {
         const <int, ParagraphBubbleVariant>{},
   }) {
     final blocks = <ReaderBlock>[];
+    // 对话引号可能跨段落开/闭，扫描器按整章顺序保留未闭合状态。
+    final dialogueScanner = ReaderDialogueScanner();
     for (var position = 0; position < paragraphs.length; position++) {
       final text = paragraphs[position].trim();
       if (text.isEmpty) continue;
@@ -243,6 +252,7 @@ class ReaderPagination {
         blocks.length,
         text,
         spec,
+        dialogueScanner: dialogueScanner,
         paraIndex: paraIndex,
         bubbleCount: bubbleCount,
         bubbleVariant: paraIndex == null
@@ -317,10 +327,13 @@ class ReaderPagination {
     int index,
     String text,
     ReaderLayoutSpec spec, {
+    required ReaderDialogueScanner dialogueScanner,
     int? paraIndex,
     int bubbleCount = 0,
     ParagraphBubbleVariant bubbleVariant = ParagraphBubbleVariant.plain,
   }) {
+    // 先扫对话：即使这一段后面因为排版异常被丢弃，跨段引号状态也要按正文顺序推进。
+    final dialogueRanges = dialogueScanner.scanParagraph(text);
     // 气泡是行内元素：只有最后一行还有空间时才能和正文同行。若最后一行正好
     // 占满，气泡必然被挤到下一行独占一行——既难看又容易和下一段错位（Flutter
     // 渲染 widget-only 行时按正文行高算，比占位高度高）。这种段落直接不画
@@ -376,6 +389,7 @@ class ReaderPagination {
         paraIndex: paraIndex,
         bubbleCount: effectiveBubbleCount,
         bubbleVariant: bubbleVariant,
+        dialogueRects: _dialogueRects(dialogueRanges, painter),
         // 正常情况两者相等；取较大值保证渲染块的占位高度够裁剪。
         height: math.max(painter.height, top),
         lineTops: tops,
@@ -384,6 +398,58 @@ class ReaderPagination {
     } finally {
       painter.dispose();
     }
+  }
+
+  /// 对话内容在段内的矩形（测量坐标系），供渲染层画荧光笔色带。
+  ///
+  /// 段落 span 的第一个子节点是首行缩进的 [WidgetSpan]，在文本布局里占 1 个
+  /// code unit，所以选区 offset 要整体 +1；气泡是追加在正文之后的 WidgetSpan，
+  /// 不影响前置 offset。
+  static List<Rect> _dialogueRects(
+    List<TextRange> ranges,
+    TextPainter painter,
+  ) {
+    if (ranges.isEmpty) return const <Rect>[];
+    const textOffset = 1;
+    final rects = <Rect>[];
+    for (final range in ranges) {
+      final boxes = painter.getBoxesForSelection(
+        TextSelection(
+          baseOffset: range.start + textOffset,
+          extentOffset: range.end + textOffset,
+        ),
+      );
+      for (final box in boxes) {
+        rects.add(box.toRect());
+      }
+    }
+    return _mergeDialogueRects(rects);
+  }
+
+  /// 同一行里相邻/嵌套的对话矩形合并成一个，避免圆角色带互相叠出补丁感。
+  static List<Rect> _mergeDialogueRects(List<Rect> rects) {
+    if (rects.length <= 1) return rects;
+    rects.sort((a, b) {
+      final byTop = a.top.compareTo(b.top);
+      return byTop != 0 ? byTop : a.left.compareTo(b.left);
+    });
+    final merged = <Rect>[rects.first];
+    for (var i = 1; i < rects.length; i++) {
+      final rect = rects[i];
+      final last = merged.last;
+      final sameLine = (rect.top - last.top).abs() < 1;
+      if (sameLine && rect.left <= last.right + 2) {
+        merged[merged.length - 1] = Rect.fromLTRB(
+          last.left,
+          math.min(last.top, rect.top),
+          math.max(last.right, rect.right),
+          math.max(last.bottom, rect.bottom),
+        );
+      } else {
+        merged.add(rect);
+      }
+    }
+    return merged;
   }
 
   static List<ReaderPage> _paginate(

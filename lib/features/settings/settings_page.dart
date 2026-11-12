@@ -8,8 +8,10 @@ import '../../core/cache/app_cache.dart';
 // 设置页集中放全站偏好，会跨 feature 引用偏好 provider（视频清晰度 / 推荐布局）。
 // 偏好本身归功能域所有，但入口统一在设置页，所以这里的跨域 import 是约定的。
 import '../cache/download_quality.dart';
+import '../reader/reader_settings.dart';
 import '../recommend/recommend_layout.dart';
 import 'settings_providers.dart';
+import 'widgets/dialogue_highlight_preview.dart';
 import 'widgets/theme_color_picker.dart';
 
 /// 设置页：主题（主题色 / 深浅色 / 首页推荐布局）+ 存储 + 视频。
@@ -31,6 +33,8 @@ class SettingsPage extends StatelessWidget {
           children: const [
             _SectionTitle('主题'),
             _ThemeColorCard(),
+            SizedBox(height: 12),
+            _DialogueHighlightColorCard(),
             SizedBox(height: 12),
             _AppearanceCard(),
             SizedBox(height: 12),
@@ -55,7 +59,7 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+      padding: const EdgeInsets.fromLTRB(_contentInset, 20, _contentInset, 10),
       child: Text(
         title,
         style: Theme.of(context).textTheme.titleMedium
@@ -65,6 +69,16 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
+/// 卡片外边距。
+const double _cardMargin = 16;
+
+/// 卡片内容左右内边距。
+const double _cardPadding = 16;
+
+/// 设置页统一的左右内容线：卡片内容、区块标题、存储提示都对齐到这里，
+/// 避免「主题」比下面的 label 往里缩一截。
+const double _contentInset = _cardMargin + _cardPadding;
+
 /// 通用卡片容器：与列表页的 Card 圆角/底色保持一致。
 ///
 /// [padding] 可调：只含一行标题 + 控件的卡片用更紧凑的上下边距，否则
@@ -72,7 +86,12 @@ class _SectionTitle extends StatelessWidget {
 class _Card extends StatelessWidget {
   const _Card({
     required this.child,
-    this.padding = const EdgeInsets.fromLTRB(16, 16, 16, 16),
+    this.padding = const EdgeInsets.fromLTRB(
+      _cardPadding,
+      16,
+      _cardPadding,
+      16,
+    ),
   });
 
   final Widget child;
@@ -81,7 +100,7 @@ class _Card extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: _cardMargin),
       child: Card(
         child: Padding(padding: padding, child: child),
       ),
@@ -103,39 +122,37 @@ class _ThemeColorCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final seed = ref.watch(themeSeedProvider);
     final controller = ref.read(themeSeedProvider.notifier);
+    final customSeed = ref.watch(customThemeSeedProvider);
+    final customController = ref.read(customThemeSeedProvider.notifier);
     final customSelected = !isPresetColor(seed);
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            // 首尾圆点分别贴住内容左右边界，和上下的 label / 开关 / chip 对齐。
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               for (final option in themeColorOptions)
-                Expanded(
-                  child: Center(
-                    child: _PresetDot(
-                      option: option,
-                      selected: option.color == seed,
-                      onTap: () => controller.setSeed(option.color),
-                    ),
-                  ),
+                _PresetDot(
+                  option: option,
+                  selected: option.color == seed,
+                  onTap: () => controller.setSeed(option.color),
                 ),
-              Expanded(
-                child: Center(
-                  child: _CustomDot(
-                    key: themeCustomColorKey,
-                    selected: customSelected,
-                    tooltip: '自定义 · ${themeColorName(seed)}',
-                    onTap: () async {
-                      final picked = await showThemeColorPicker(
-                        context,
-                        initial: seed,
-                      );
-                      if (picked == null) return;
-                      controller.setSeed(picked);
-                    },
-                  ),
-                ),
+              _CustomDot(
+                key: themeCustomColorKey,
+                color: customSeed,
+                selected: customSelected,
+                tooltip: '自定义主题色',
+                onTap: () async {
+                  final picked = await showThemeColorPicker(
+                    context,
+                    initial: customSeed,
+                  );
+                  if (picked == null) return;
+                  controller.setSeed(picked);
+                  customController.setSeed(picked);
+                },
               ),
             ],
           ),
@@ -153,6 +170,111 @@ class _ThemeColorCard extends ConsumerWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 对话高亮颜色
+// ---------------------------------------------------------------------------
+
+/// 「对话高亮」色块的 key：测试用它点开取色弹层。
+const Key dialogueHighlightColorKey = Key('settings-dialogue-highlight-color');
+
+/// 阅读页人物对话荧光笔的颜色。和主题色分开：主题色决定全站配色，对话高亮
+/// 只是阅读页的一层标记色，用户可以单独挑一个顺眼的荧光笔颜色。
+class _DialogueHighlightColorCard extends ConsumerWidget {
+  const _DialogueHighlightColorCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(readerSettingsProvider);
+    final controller = ref.read(readerSettingsProvider.notifier);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return _Card(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '对话高亮',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '阅读页人物对话的荧光笔颜色',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          _ColorDotButton(
+            key: dialogueHighlightColorKey,
+            color: settings.dialogueHighlightColor,
+            tooltip: '自定义对话高亮颜色',
+            onTap: () async {
+              final picked = await showThemeColorPicker(
+                context,
+                initial: settings.dialogueHighlightColor,
+                title: '自定义对话高亮颜色',
+                previewBuilder: (color) =>
+                    DialogueHighlightPreview(color: color),
+              );
+              if (picked == null) return;
+              controller.setDialogueHighlightColor(picked);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 右侧圆形色块：实心显示当前颜色，点开自定义取色。
+class _ColorDotButton extends StatelessWidget {
+  const _ColorDotButton({
+    super.key,
+    required this.color,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final Color color;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final iconColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.light
+        ? Colors.black54
+        : Colors.white70;
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 30,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            child: Icon(Icons.palette_outlined, size: 17, color: iconColor),
+          ),
+        ),
       ),
     );
   }
@@ -212,16 +334,20 @@ class _PresetDot extends StatelessWidget {
 
 /// 第四个色块：自定义取色入口。
 ///
-/// 永远显示彩虹渐变 + 调色板图标（不跟随当前 seed），避免和预设色画出两个
-/// 一模一样的圆点；当前主题色不是预设色时用选中描边表示「自定义正在生效」。
+/// 圆点直接显示用户上次自定义的颜色（不是彩虹盘），和「对话高亮」的颜色块
+/// 一致；只有自定义色正在生效时才描选中边。预设色生效时圆点保持上次自定义
+/// 的颜色，避免和预设圆点撞成两个一模一样的圆。
 class _CustomDot extends StatelessWidget {
   const _CustomDot({
     super.key,
+    required this.color,
     required this.selected,
     required this.tooltip,
     required this.onTap,
   });
 
+  /// 上次自定义选中的颜色；还没自定义过时是中性紫占位色。
+  final Color color;
   final bool selected;
   final String tooltip;
   final VoidCallback onTap;
@@ -229,6 +355,10 @@ class _CustomDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final iconColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.light
+        ? Colors.black54
+        : Colors.white70;
     return Tooltip(
       message: tooltip,
       child: Semantics(
@@ -243,38 +373,14 @@ class _CustomDot extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
+              color: color,
               shape: BoxShape.circle,
-              gradient: const SweepGradient(
-                colors: [
-                  Color(0xFFEF5350),
-                  Color(0xFFFFA726),
-                  Color(0xFF66BB6A),
-                  Color(0xFF4FC3F7),
-                  Color(0xFF5C6BC0),
-                  Color(0xFFAB47BC),
-                  Color(0xFFEF5350),
-                ],
-              ),
               border: Border.all(
                 color: selected ? scheme.onSurface : Colors.transparent,
                 width: 2,
               ),
             ),
-            child: Center(
-              child: Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  color: scheme.surface,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.palette_outlined,
-                  size: 14,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
+            child: Icon(Icons.palette_outlined, size: 17, color: iconColor),
           ),
         ),
       ),
@@ -401,9 +507,8 @@ const Key recommendLayoutThreeKey = ValueKey('recommend-layout-three');
 
 /// 首页推荐布局：双列 / 三列瀑布流。
 ///
-/// 与「离线下载清晰度」同一套控件（小标题 + 一排 ChoiceChip）；这里多留一行
-/// 说明文案，是因为两张卡片宽度/信息密度对普通用户没有直觉，需要一句
-/// "封面更大 vs 一屏更多"的取舍提示（清晰度选项本身含义自明，所以那张卡不加）。
+/// 与「离线下载清晰度」同一套控件（小标题 + ChoiceChip），标题和选项收在
+/// 同一行；不再额外写「封面更大 / 一屏更多」的说明文案。
 /// 默认双列，改完立即生效（推荐页 watch 同一个 provider）。
 class _FeedLayoutCard extends ConsumerWidget {
   const _FeedLayoutCard();
@@ -411,42 +516,35 @@ class _FeedLayoutCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final layout = ref.watch(recommendLayoutProvider);
     final controller = ref.read(recommendLayoutProvider.notifier);
     return _Card(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Row(
         children: [
-          Text(
-            '首页推荐布局',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
+          Expanded(
+            child: Text(
+              '首页推荐布局',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final option in RecommendLayout.values)
-                ChoiceChip(
-                  key: recommendLayoutOptionKey(option),
-                  label: Text(option.label),
-                  selected: option == layout,
-                  onSelected: (_) => controller.setLayout(option),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            layout == RecommendLayout.two
-                ? '双列：封面更大，一屏看到的少一点'
-                : '三列：封面更小，一屏看到的多一点',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-              height: 1.4,
+          const SizedBox(width: 12),
+          Flexible(
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final option in RecommendLayout.values)
+                  ChoiceChip(
+                    key: recommendLayoutOptionKey(option),
+                    label: Text(option.label),
+                    selected: option == layout,
+                    onSelected: (_) => controller.setLayout(option),
+                  ),
+              ],
             ),
           ),
         ],
@@ -717,7 +815,7 @@ class _StorageHint extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      padding: const EdgeInsets.fromLTRB(_contentInset, 12, _contentInset, 0),
       child: Text(
         '离线缓存不在此列，请到「我的 → 缓存」页清理。',
         style: theme.textTheme.bodySmall?.copyWith(

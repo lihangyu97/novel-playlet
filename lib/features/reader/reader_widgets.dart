@@ -19,6 +19,8 @@ class ReaderPageContent extends StatelessWidget {
     required this.textScaler,
     required this.contentWidth,
     required this.horizontalPadding,
+    this.showDialogueHighlight = true,
+    this.dialogueHighlightColor = ReaderSettings.defaultDialogueHighlightColor,
     this.onBubbleTap,
   });
 
@@ -30,22 +32,34 @@ class ReaderPageContent extends StatelessWidget {
   final double contentWidth;
   final double horizontalPadding;
 
+  /// 是否画人物对话荧光笔（阅读设置里的开关）。
+  final bool showDialogueHighlight;
+
+  /// 荧光笔基色（设置页可自定义）；透明度按纸色明暗在渲染时叠。
+  final Color dialogueHighlightColor;
+
   /// 点段评气泡：回调段落 id，由阅读页打开该段的评论面板。
   final void Function(int paraIndex)? onBubbleTap;
 
   @override
   Widget build(BuildContext context) {
+    // 对话荧光笔底色：用用户配置的基色，浅色纸/夜间纸叠不同透明度。
+    final isDark = Theme.of(context).colorScheme.brightness == Brightness.dark;
+    final markerColor = dialogueHighlightColor.withValues(
+      alpha: isDark ? 0.22 : 0.34,
+    );
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
       child: Stack(
         children: [
-          for (final fragment in page.fragments) _buildFragment(fragment),
+          for (final fragment in page.fragments)
+            _buildFragment(fragment, markerColor),
         ],
       ),
     );
   }
 
-  Widget _buildFragment(ReaderFragment fragment) {
+  Widget _buildFragment(ReaderFragment fragment, Color markerColor) {
     // 与分页测量共用同一个 span 构建函数：首行缩进 / 段评气泡的占位度量
     // 在测量与渲染两侧完全一致，不能各自实现一套。
     final block = fragment.block;
@@ -73,15 +87,31 @@ class ReaderPageContent extends StatelessWidget {
           maxHeight: fragment.block.height,
           child: Transform.translate(
             offset: Offset(0, -fragment.sourceTop),
-            child: Text.rich(
-              paragraph.span,
-              style: textStyle,
-              textAlign: TextAlign.justify,
-              textDirection: TextDirection.ltr,
-              textScaler: textScaler,
-              textHeightBehavior: readerTextHeightBehavior,
-              textWidthBasis: TextWidthBasis.parent,
-              locale: const Locale('zh', 'CN'),
+            // StackFit.expand 保证 Text.rich 仍然拿到和测量时一致的紧约束，
+            // 底色只是画在文字后面的另一层，不参与排版。
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (showDialogueHighlight &&
+                    fragment.block.dialogueRects.isNotEmpty)
+                  CustomPaint(
+                    key: const ValueKey('reader-dialogue-highlight'),
+                    painter: _DialogueHighlightPainter(
+                      rects: fragment.block.dialogueRects,
+                      color: markerColor,
+                    ),
+                  ),
+                Text.rich(
+                  paragraph.span,
+                  style: textStyle,
+                  textAlign: TextAlign.justify,
+                  textDirection: TextDirection.ltr,
+                  textScaler: textScaler,
+                  textHeightBehavior: readerTextHeightBehavior,
+                  textWidthBasis: TextWidthBasis.parent,
+                  locale: const Locale('zh', 'CN'),
+                ),
+              ],
             ),
           ),
         ),
@@ -423,7 +453,7 @@ class ReaderSettingsSheet extends ConsumerWidget {
         color: paper.background,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      padding: EdgeInsets.fromLTRB(20, 10, 20, 18 + bottomInset),
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 18 + bottomInset),
       child: SliderTheme(
         data: SliderTheme.of(context).copyWith(
           activeTrackColor: highlight,
@@ -437,17 +467,6 @@ class ReaderSettingsSheet extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: muted.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
             Text(
               '阅读设置',
               style: TextStyle(
@@ -500,37 +519,67 @@ class ReaderSettingsSheet extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '段评气泡',
-                        style: TextStyle(fontSize: 13, color: foreground),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '关闭只隐藏段尾气泡，章末评论仍在',
-                        style: TextStyle(
-                          fontSize: 11,
-                          height: 1.3,
-                          color: muted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Switch(
-                  value: settings.showBubbles,
-                  onChanged: controller.setShowBubbles,
-                ),
-              ],
+            _SettingSwitchRow(
+              title: '对话高亮',
+              subtitle: '给双引号里的人物说话内容加荧光笔',
+              value: settings.showDialogueHighlight,
+              onChanged: controller.setShowDialogueHighlight,
+              foreground: foreground,
+              muted: muted,
+            ),
+            const SizedBox(height: 14),
+            _SettingSwitchRow(
+              title: '段评气泡',
+              subtitle: '关闭只隐藏段尾气泡，章末评论仍在',
+              value: settings.showBubbles,
+              onChanged: controller.setShowBubbles,
+              foreground: foreground,
+              muted: muted,
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 阅读设置里的一行开关：左侧标题 + 说明，右侧 Switch。
+class _SettingSwitchRow extends StatelessWidget {
+  const _SettingSwitchRow({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+    required this.foreground,
+    required this.muted,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final Color foreground;
+  final Color muted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: TextStyle(fontSize: 13, color: foreground)),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(fontSize: 11, height: 1.3, color: muted),
+              ),
+            ],
+          ),
+        ),
+        Switch(value: value, onChanged: onChanged),
+      ],
     );
   }
 }
@@ -687,7 +736,7 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 8, 10),
+              padding: const EdgeInsets.fromLTRB(20, 16, 8, 10),
               child: Row(
                 children: [
                   Text(
@@ -782,4 +831,37 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
       ),
     );
   }
+}
+
+/// 给人物对话画「荧光笔」色带：只覆盖文字框的下半部分，圆角收边。
+///
+/// 矩形来自分页测量时的 `getBoxesForSelection`，和正文共用同一份排版结果，
+/// 所以不需要在渲染阶段再跑一次 TextPainter；色带画在文字下面，只影响观感，
+/// 不改变任何度量。
+class _DialogueHighlightPainter extends CustomPainter {
+  const _DialogueHighlightPainter({required this.rects, required this.color});
+
+  final List<Rect> rects;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (rects.isEmpty) return;
+    final paint = Paint()..color = color;
+    for (final rect in rects) {
+      if (rect.height <= 0 || rect.width <= 0) continue;
+      final top = rect.top + rect.height * 0.52;
+      final bottom = rect.bottom - rect.height * 0.04;
+      if (bottom <= top) continue;
+      final band = Rect.fromLTRB(rect.left - 1, top, rect.right + 1, bottom);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(band, Radius.circular((bottom - top) / 2)),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DialogueHighlightPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.rects != rects;
 }

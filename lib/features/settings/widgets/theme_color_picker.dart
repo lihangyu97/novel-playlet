@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
 
-/// 底部的「自定义颜色」弹层：HSV 取色（色相条 + 饱和度/明度面板）。
+/// 底部的自定义颜色弹层：HSV 取色（色相条 + 饱和度/明度面板）。
 ///
 /// 为什么自己画：项目不允许新增依赖，也没有系统取色器可用；HSV 比 RGB
 /// 滑块更符合「挑一个主色」的直觉——先定色相，再调深浅。
+///
+/// 主题色与阅读页「对话高亮」色共用这个弹层：调用方传 [title] 与
+/// [previewBuilder] 就能把预览区换成自己的示例（主题色默认预览按钮/强调色，
+/// 对话高亮预览一段正文）。预览会跟随当前取色实时更新。
 ///
 /// 注意 `enableDrag: false`：弹层默认的纵向拖动手势会和取色面板打架，而且
 /// sheet 的 VerticalDrag 更早接受（约 18pt，子级 Pan 要 36pt），结果是
@@ -13,19 +17,34 @@ import '../../../app/theme/app_theme.dart';
 Future<Color?> showThemeColorPicker(
   BuildContext context, {
   required Color initial,
+  String title = '自定义主题色',
+  Widget Function(Color color)? previewBuilder,
 }) {
   return showModalBottomSheet<Color>(
     context: context,
     isScrollControlled: true,
     enableDrag: false,
-    builder: (_) => ThemeColorPickerSheet(initial: initial),
+    builder: (_) => ThemeColorPickerSheet(
+      initial: initial,
+      title: title,
+      previewBuilder: previewBuilder,
+    ),
   );
 }
 
 class ThemeColorPickerSheet extends StatefulWidget {
-  const ThemeColorPickerSheet({super.key, required this.initial});
+  const ThemeColorPickerSheet({
+    super.key,
+    required this.initial,
+    this.title = '自定义主题色',
+    this.previewBuilder,
+  });
 
   final Color initial;
+  final String title;
+
+  /// 自定义预览区；null = 主题色默认预览（按钮 + 强调色）。
+  final Widget Function(Color color)? previewBuilder;
 
   @override
   State<ThemeColorPickerSheet> createState() => _ThemeColorPickerSheetState();
@@ -44,7 +63,7 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
       top: false,
       // 小屏/大字号时内容可能超出可用高度：包一层滚动，别把按钮挤出屏幕。
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -52,7 +71,7 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
             Row(
               children: [
                 Text(
-                  '自定义主题色',
+                  widget.title,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
@@ -80,7 +99,8 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
               onChanged: (hue) => setState(() => _hsv = _hsv.withHue(hue)),
             ),
             const SizedBox(height: 20),
-            _ThemePreview(seed: _color, brightness: theme.brightness),
+            widget.previewBuilder?.call(_color) ??
+                _ThemePreview(seed: _color, brightness: theme.brightness),
             const SizedBox(height: 20),
             Row(
               children: [

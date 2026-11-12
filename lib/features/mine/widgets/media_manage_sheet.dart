@@ -19,7 +19,6 @@ Future<void> showMediaManageSheet({
 }) async {
   final action = await showModalBottomSheet<_ManageAction>(
     context: context,
-    showDragHandle: true,
     builder: (sheetContext) {
       final theme = Theme.of(sheetContext);
       final scheme = theme.colorScheme;
@@ -30,7 +29,7 @@ Future<void> showMediaManageSheet({
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
               child: Text(
                 title,
                 maxLines: 1,
