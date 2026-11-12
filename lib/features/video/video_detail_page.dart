@@ -5,6 +5,7 @@ import '../../app/router.dart';
 import '../../app/widgets/detail/detail_common.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
+import '../../data/models/book_comment.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/video_detail.dart';
@@ -12,9 +13,12 @@ import '../../data/models/video_series.dart';
 import '../cache/offline_task.dart';
 import '../cache/widgets/offline_download_button.dart';
 import '../detail/detail_action_bar.dart';
+import '../detail/detail_reviews_section.dart';
+import 'video_comments_providers.dart';
 import 'video_detail_providers.dart';
 import 'video_library_providers.dart';
 import 'widgets/episode_picker.dart';
+import 'widgets/video_comments_sheet.dart';
 
 /// 短剧详情：与小说详情共用同一套版式（沉浸渐变 + 封面/标题/元信息 +
 /// 简介/标签卡片），差异只在「选集」这个特殊模块。
@@ -45,6 +49,8 @@ class VideoDetailPage extends ConsumerWidget {
     final bundleAsync = ref.watch(videoDetailBundleProvider(seriesId));
     final shelfAsync = ref.watch(videoShelfStatusProvider(seriesId));
     final progressAsync = ref.watch(videoProgressProvider(seriesId));
+    // 剧评是详情页的次要信息：失败时 provider 给 null，页面整块不插入。
+    final commentsAsync = ref.watch(videoSeriesCommentsProvider(seriesId));
 
     // 用 .value 而非 when：刷新时保留上一份数据，页面不闪加载态。
     final bundle = bundleAsync.value;
@@ -69,6 +75,7 @@ class VideoDetailPage extends ConsumerWidget {
           context,
           detail,
           episodes,
+          reviews: commentsAsync.value,
           error: bundleAsync.error,
           onRetry: () => ref.invalidate(videoDetailBundleProvider(seriesId)),
         ),
@@ -133,6 +140,7 @@ class VideoDetailPage extends ConsumerWidget {
     BuildContext context,
     VideoDetail? detail,
     List<Chapter>? episodes, {
+    BookCommentPage? reviews,
     Object? error,
     required VoidCallback onRetry,
   }) {
@@ -179,6 +187,26 @@ class VideoDetailPage extends ConsumerWidget {
               child: DetailIntroCard(intro: intro, tags: detail.categories),
             ),
           ),
+          // 剧评：简介之后、选集之前（与小说详情的书评卡片同款位置）。
+          // 请求失败或没有评论时 reviews 为 null/空，整块不占位——次要数据
+          // 不制造错误态，也不留空白卡片。
+          if (reviews != null && reviews.comments.isNotEmpty)
+            SliverToBoxAdapter(
+              child: DetailFadeIn(
+                delay: const Duration(milliseconds: 90),
+                child: DetailReviewsSection(
+                  page: reviews,
+                  title: '剧评',
+                  // 短剧评论没有评分，不画空星。
+                  showStars: false,
+                  onOpenAll: () => showVideoCommentsSheet(
+                    context,
+                    seriesId: seriesId,
+                    initialPage: reviews,
+                  ),
+                ),
+              ),
+            ),
           if (episodes.isEmpty)
             const SliverToBoxAdapter(
               child: SizedBox(

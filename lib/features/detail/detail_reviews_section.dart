@@ -13,9 +13,17 @@ class DetailReviewsSection extends StatelessWidget {
     super.key,
     required this.page,
     required this.onOpenAll,
+    this.title = '书评',
+    this.showStars = true,
   });
 
   final BookCommentPage page;
+
+  /// 区块标题。小说详情是「书评」，短剧详情传「剧评」。
+  final String title;
+
+  /// 是否画 5 星评分。短剧评论没有评分字段，传 false 避免一排空星。
+  final bool showStars;
 
   /// 整卡点击：打开全部书评弹层。
   final VoidCallback onOpenAll;
@@ -42,7 +50,7 @@ class DetailReviewsSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               DetailSectionHeader(
-                title: '书评',
+                title: title,
                 // 卡片自己已经有 gutter 内边距，标题行不再重复留白。
                 padding: EdgeInsets.zero,
                 trailing: page.context.isEmpty
@@ -57,7 +65,10 @@ class DetailReviewsSection extends StatelessWidget {
                       ),
               ),
               const SizedBox(height: 10),
-              DetailReviewRow(comment: page.comments.first),
+              DetailReviewRow(
+                comment: page.comments.first,
+                showStars: showStars,
+              ),
               const SizedBox(height: 8),
               // 右下角只做视觉提示：整张卡都可点，所以这里不再套第二层按钮，
               // 避免出现两个互相竞争的点击热区。
@@ -97,9 +108,13 @@ class DetailReviewRow extends StatelessWidget {
     required this.comment,
     this.maxLines,
     this.padding = EdgeInsets.zero,
+    this.showStars = true,
   });
 
   final BookComment comment;
+
+  /// 是否画 5 星评分；短剧评论没有评分，传 false。
+  final bool showStars;
 
   /// 正文行数上限；null = 不限制（弹层里完整展示）。
   final int? maxLines;
@@ -153,8 +168,10 @@ class DetailReviewRow extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    DetailReviewStars(stars: comment.stars),
+                    if (showStars) ...[
+                      const SizedBox(width: 8),
+                      DetailReviewStars(stars: comment.stars),
+                    ],
                   ],
                 ),
                 if (text.isNotEmpty) ...[

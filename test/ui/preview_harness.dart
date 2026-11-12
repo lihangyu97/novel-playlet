@@ -30,6 +30,18 @@ import 'package:novel_playlet/features/settings/settings_providers.dart';
 /// 布局。更新基线：`flutter test --update-goldens test/ui/<页面>_test.dart`。
 ///
 /// 顺带说明：封面 URL 故意留空，避免 widget 测试里真的发网络请求。
+const _emptyCommentPayload = <String, dynamic>{
+  'code': 0,
+  'data': <String, dynamic>{
+    'data_list': <dynamic>[],
+    'common_list_info': <String, dynamic>{
+      'total': 0,
+      'cursor': '',
+      'has_more': false,
+    },
+  },
+};
+
 class FakePreviewTransport extends BackendTransport {
   FakePreviewTransport() : super(port: 0);
 
@@ -50,6 +62,12 @@ class FakePreviewTransport extends BackendTransport {
 
   /// 短剧详情接口返回的封面。
   String detailSeriesCoverUrl = '';
+
+  /// 短剧剧评接口（`/series/{id}/comments`）的回包；null = 空列表。
+  Map<String, dynamic>? seriesCommentsPayload;
+
+  /// 某一集评论接口（`/series/{id}/hot-comments`）的回包；null = 空列表。
+  Map<String, dynamic>? episodeCommentsPayload;
 
   /// 目录接口返回的章节/集数（短剧选集分组测试用）。
   int directoryChapterCount = 24;
@@ -120,6 +138,14 @@ class FakePreviewTransport extends BackendTransport {
 
   Map<String, dynamic> _payloadFor(String path, String? query) {
     final params = Uri.splitQueryString(query ?? '');
+    // 短剧评论：剧评（/series/{id}/comments）与某一集评论（/series/{id}/hot-comments）。
+    // 默认回空列表，详情页不显示评论区块；需要验证 UI 的用例注入 payload。
+    if (path.contains('/series/') && path.endsWith('/comments')) {
+      return seriesCommentsPayload ?? _emptyCommentPayload;
+    }
+    if (path.endsWith('/hot-comments')) {
+      return episodeCommentsPayload ?? _emptyCommentPayload;
+    }
     if (path.startsWith('/api/v1/recommend/homepage')) {
       // 同一路由按 `tab_type` 分流：2 = 小说、8 = 短剧、24 = 漫剧
       // （对齐 api_client 的 tab 映射）。与真实响应同形：游标/session 挂在
