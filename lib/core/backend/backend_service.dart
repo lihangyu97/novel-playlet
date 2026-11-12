@@ -122,12 +122,21 @@ class BackendService {
     }
     _configFile = File('${configDir.path}/config.json');
 
+    // 端口：正式版读部署后的 config.json（唯一来源）；beta 版用
+    // `--dart-define=BACKEND_PORT=18932` 覆盖。两个 App 会同时装在一台 iPhone
+    // 上，而 iOS 的 127.0.0.1 是设备级共享的——监听同一端口时后启动的实例
+    // bind 失败、启动闸门会卡住，所以双版本必须错开端口。
+    final port = _portOverride > 0 ? _portOverride : await configuredPort();
     return _transport.start(
       configPath: _configFile!.path,
       poolPath: poolFile.path,
       runtimeDir: dir.path,
+      listenPort: port,
     );
   }
+
+  /// `--dart-define=BACKEND_PORT=<port>` 时的端口覆盖；0 = 不覆盖。
+  static const int _portOverride = int.fromEnvironment('BACKEND_PORT');
 
   Future<void> _deployAsset(
     String assetPath,
@@ -156,7 +165,9 @@ class BackendService {
     return true;
   }
 
-  /// 从部署后的 config.json 读端口，让"端口"只有一个来源。
+  /// 从部署后的 config.json 读端口，让正式版的"端口"只有一个来源。
+  ///
+  /// beta 版不走这里：它用 `--dart-define=BACKEND_PORT` 覆盖（见 [_start]）。
   Future<int> configuredPort() async {
     final file = _configFile;
     if (file != null && await file.exists()) {

@@ -32,6 +32,9 @@ class _FakeTransport extends BackendTransport {
   int startCalls = 0;
   int stopCalls = 0;
 
+  /// 最近一次 start 传下来的端口（锁「config.json 的端口真的传给内核」）。
+  int? lastListenPort;
+
   @override
   bool get isRunning => running;
 
@@ -43,6 +46,7 @@ class _FakeTransport extends BackendTransport {
     int? listenPort,
   }) async {
     startCalls += 1;
+    lastListenPort = listenPort;
     if (startCalls <= failStarts) {
       throw StateError('kernel start failed (test)');
     }
@@ -134,6 +138,18 @@ void main() {
     expect(await service.ensureLoopback(), isTrue);
     expect(transport.startCalls, 1);
     expect(transport.stopCalls, 0);
+  });
+
+  test('start: 把 config.json 里的端口显式传给内核', () async {
+    final transport = _FakeTransport(running: false);
+    final service = serviceFor(transport);
+
+    expect(await service.start(), 'running');
+    expect(
+      transport.lastListenPort,
+      18931,
+      reason: 'BackendService 必须把部署后的 config.json 端口传给内核，而不是依赖构造默认值',
+    );
   });
 
   test('start: 失败的启动不永久缓存，重试会重新拉起内核', () async {

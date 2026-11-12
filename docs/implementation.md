@@ -573,6 +573,41 @@ xcrun devicectl device copy from --device <UDID> \
 # rust.log（内核日志）、config/device_pool.json（密文）
 ```
 
+#### release / beta 双版本（同时安装，数据独立）
+
+同一台 iPhone 上装两个 App：正式版从 `main` 构建，β 版从开发分支构建。两者
+App ID 不同，iOS 会分配独立的沙盒容器与 keychain，互不影响；日常开发只覆盖
+β 版，正式版的书籍 / 离线 / 阅读进度不会被卸载或签名事故带走。
+
+| 版本 | Bundle ID | 显示名 | 回环端口 |
+|---|---|---|---|
+| release | `com.lihangyu.novelPlaylet` | 摆烂盒子 | `config.json`（18931） |
+| beta | `com.lihangyu.novelPlaylet.beta` | 摆烂盒子 Beta | `BACKEND_PORT`（18932） |
+
+- **端口必须错开**：`127.0.0.1` 是设备级共享的，两个 App 同时运行时，后启动的
+  那个监听同一端口会 bind 失败、启动闸门卡住。β 版由
+  `--dart-define=BACKEND_PORT=18932` 覆盖（`BackendService` 显式传给内核），
+  release 仍读 `assets/config/config.json`。
+- **构建**（两个 flavor 共用 Rust 静态库，`--skip-rust` 可跳过内核重编）：
+
+```bash
+./scripts/build_ios_app.sh --flavor release   # 建议在 main 上跑
+./scripts/build_ios_app.sh --flavor beta      # 开发分支的包
+# 产物 build/ios/ipa/novel_playlet_<flavor>_<sha>_unsigned.ipa
+```
+
+  脚本会改未签名包的 `CFBundleIdentifier` / `CFBundleDisplayName`（beta 加 Beta
+  后缀），签名仍由 ios-sideload 按目标 App ID 完成。
+- **签名**：两个 App ID 各有自己的描述文件。切换版本签名前先确认
+  `~/workspace/ios-sideload/build/signer.mobileprovision` 的 App ID 与之匹配，
+  不匹配就 `BUNDLE_ID=<app id> ./profile.sh --mint` 重新签发（免费账号 7 天一轮，
+  两个版本各续一次）。建议把两份 profile 备份成
+  `signer.release.mobileprovision` / `signer.beta.mobileprovision`，用哪个就拷回
+  `signer.mobileprovision`。
+- **安装**：`./install.sh -f <signed.ipa> -d <iPhone 名称/UDID>`。同一个 App ID
+  覆盖安装是升级（保留数据），**不要卸载**。
+- 抓日志 / 拷数据时用对应 bundle id（beta 是 `com.lihangyu.novelPlaylet.beta`）。
+
 ### 7.3 Android
 
 ```bash

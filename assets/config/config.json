@@ -1,5 +1,5 @@
 {
-  "_comment": "端口唯一来源是这份 config.json（部署后 Flutter 从它读 port）；缺省值在 config.json / rust/src/config.rs / backend_transport.dart 三处对齐，改端口只改这里。",
+  "_comment": "正式版端口唯一来源是这份 config.json（部署后 Flutter 从它读 port）；beta 版不改这里，用 --dart-define=BACKEND_PORT 覆盖，避免两个 App 同时安装时抢同一个 127.0.0.1 端口。",
   "port": 18931,
   "anti_crawler": {
     "enabled": false,
