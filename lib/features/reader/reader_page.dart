@@ -1,3 +1,5 @@
+import '../../app/widgets/app_snack_bar.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -971,8 +973,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    showAppSnackBar(context, message);
   }
 
   Widget _buildBottomBar(ReaderSettings settings) {
@@ -1042,8 +1043,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (!mounted) return;
     final paraIndex = ideas.chapterEndParaIndex;
     if (paraIndex == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('本章还没有评论')));
+      showAppSnackBar(context, '本章还没有评论');
       return;
     }
     _openCommentsAt(paraIndex, session, ideas);

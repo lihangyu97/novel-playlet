@@ -27,7 +27,6 @@ Future<void> showVideoCommentsSheet(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    showDragHandle: true,
     builder: (_) => FractionallySizedBox(
       // 约 0.8 屏高：一屏能看五六条评论，同时留出上方页面作为上下文。
       heightFactor: 0.8,

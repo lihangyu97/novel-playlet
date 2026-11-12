@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/widgets/app_snack_bar.dart';
 import '../../app/router.dart';
 import '../../app/widgets/detail/detail_common.dart';
 import '../../app/widgets/states.dart';
@@ -322,19 +323,16 @@ class VideoDetailPage extends ConsumerWidget {
     WidgetRef ref,
     VideoDetail detail,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final nowOnShelf = await ref
           .read(videoShelfStatusProvider(seriesId).notifier)
           .toggle(_shelfItemOf(detail));
       if (!context.mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text(nowOnShelf ? '已收藏' : '已取消收藏')),
-      );
+      showAppSnackBar(context, nowOnShelf ? '已收藏' : '已取消收藏');
     } catch (_) {
       // controller 已把按钮态回滚到操作前，这里只负责提示。
       if (!context.mounted) return;
-      messenger.showSnackBar(const SnackBar(content: Text('收藏操作失败，请重试')));
+      showAppSnackBar(context, '收藏操作失败，请重试');
     }
   }
 }

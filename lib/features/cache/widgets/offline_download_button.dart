@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/widgets/app_snack_bar.dart';
 import '../../../app/router.dart';
 import '../../../app/widgets/detail_icon_label_button.dart';
 import '../../../data/models/chapter.dart';
@@ -134,7 +135,7 @@ Future<void> startOfflineDownload(
 }
 
 void _showMessage(BuildContext context, String message) {
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  showAppSnackBar(context, message);
 }
 
 String _formatBytes(int bytes) {

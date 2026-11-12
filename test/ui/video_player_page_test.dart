@@ -74,7 +74,7 @@ void main() {
     await _disposePlayer(tester);
   });
 
-  testWidgets('底栏新增收藏/缓存/本集评论入口，收藏可切换并回执', (tester) async {
+  testWidgets('底栏新增收藏/缓存/本集评论入口，收藏只加不移、不弹提示条', (tester) async {
     final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
     final factory = _FakeFactory();
     final container = await _pumpPlayer(tester, store: store, factory: factory);
@@ -94,20 +94,20 @@ void main() {
     await tester.tap(find.byTooltip('收藏'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('已收藏'), findsOneWidget, reason: '收藏成功要有回执');
     expect(container.read(shelfProvider).value, isTrue);
+    expect(find.byTooltip('已收藏'), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing, reason: '收藏成功不弹提示条，图标自己变实心就够了');
 
-    // SnackBar 会压住底栏按钮，先收掉再点第二次。
-    ScaffoldMessenger.of(tester.element(find.byType(VideoPlayerPage)))
-        .hideCurrentSnackBar();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-
+    // 只加不移：已收藏后按钮只读，再点不会取消。
     await tester.tap(find.byTooltip('已收藏'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('已取消收藏'), findsOneWidget);
-    expect(container.read(shelfProvider).value, isFalse);
+    expect(container.read(shelfProvider).value, isTrue);
+    expect(
+      find.byIcon(Icons.favorite_rounded),
+      findsOneWidget,
+      reason: '已收藏后仍是实心收藏图标',
+    );
 
     await _disposePlayer(tester);
   });

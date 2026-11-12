@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../app/providers.dart';
 import '../../app/router.dart';
+import '../../app/widgets/app_snack_bar.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/video_series.dart';
@@ -867,8 +868,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       ClipboardData(text: '${error.title}\n${error.reason}\n${error.detail}'),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('错误信息已复制')));
+    showAppSnackBar(context, '错误信息已复制');
   }
 
   void _togglePlay() {
@@ -1316,27 +1316,23 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     episodeCount: _episodes.length,
   );
 
-  void _showToast(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  /// 收藏 / 取消收藏：与详情页共用 [videoShelfStatusProvider] 和同一套文案。
+  /// 收藏：只加不移（与阅读页顶部「加入书架」一致）。
   ///
   /// 历史「最近观看」是直进播放页的，这里没有入口的话看过就收藏不了；
-  /// 因此做成可切换（与详情页一致），而不是阅读页「加入书架」的单向。
-  Future<void> _toggleShelf() async {
+  /// 已收藏后按钮变只读态，不再提供取消（取消入口在「我的 → 收藏」里）。
+  /// 成功不弹提示条：图标自己会变成实心，底部操作行不该被 SnackBar 压住。
+  Future<void> _addToShelf() async {
     final seriesId = widget.args.seriesId;
     if (seriesId.isEmpty || !_shelfItem.isValid) return;
     final provider = videoShelfStatusProvider(seriesId);
-    if (ref.read(provider).isLoading) return;
+    if ((ref.read(provider).value ?? false) || ref.read(provider).isLoading) {
+      return;
+    }
     try {
-      final onShelf = await ref.read(provider.notifier).toggle(_shelfItem);
-      _showToast(onShelf ? '已收藏' : '已取消收藏');
+      await ref.read(provider.notifier).add(_shelfItem);
     } catch (_) {
-      _showToast('收藏失败，请重试');
+      if (!mounted) return;
+      showAppSnackBar(context, '收藏失败，请重试');
     }
   }
 
@@ -1963,7 +1959,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       icon: onShelf ? Icons.favorite_rounded : Icons.favorite_border_rounded,
       tooltip: onShelf ? '已收藏' : '收藏',
       active: onShelf,
-      onTap: busy ? null : () => unawaited(_toggleShelf()),
+      // 只加不移：已收藏后按钮只读（与阅读页「已在书架」一致）。
+      onTap: onShelf || busy ? null : () => unawaited(_addToShelf()),
     );
   }
 

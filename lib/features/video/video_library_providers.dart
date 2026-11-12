@@ -29,6 +29,21 @@ class VideoShelfController extends AsyncNotifier<bool> {
     return store.isVideoOnShelf(seriesId);
   }
 
+  /// 只加不移（播放页「收藏」用）：已收藏直接返回，不写盘也不报错。
+  ///
+  /// 与阅读页「加入书架」同一语义；取消收藏走「我的 → 收藏」长按管理，
+  /// 播放页不做取消，避免看剧时误触把收藏删掉。
+  Future<void> add(VideoSeries item) async {
+    if (state.value ?? false) return;
+    state = const AsyncData(true);
+    try {
+      await ref.read(readingStoreProvider).addVideoToShelf(item);
+    } catch (_) {
+      if (ref.mounted) state = const AsyncData(false);
+      rethrow;
+    }
+  }
+
   /// 切换收藏，返回切换后的状态。落盘失败会回滚并重新抛出，由页面提示。
   Future<bool> toggle(VideoSeries item) async {
     final store = ref.read(readingStoreProvider);

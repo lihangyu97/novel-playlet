@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/widgets/app_snack_bar.dart';
 import '../../app/router.dart';
 import '../../app/widgets/detail/detail_common.dart';
 import '../../app/widgets/states.dart';
@@ -350,31 +351,23 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     WidgetRef ref,
     NovelItem item,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final nowOnShelf = await ref
           .read(detailShelfProvider(widget.bookId).notifier)
           .toggle(item);
       if (!context.mounted) return;
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(nowOnShelf ? '已加入书架' : '已移出书架'),
-            duration: const Duration(milliseconds: 1200),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+      showAppSnackBar(
+        context,
+        nowOnShelf ? '已加入书架' : '已移出书架',
+        behavior: SnackBarBehavior.floating,
+      );
     } catch (_) {
       if (!context.mounted) return;
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('书架操作失败，请重试'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+      showAppSnackBar(
+        context,
+        '书架操作失败，请重试',
+        behavior: SnackBarBehavior.floating,
+      );
     }
   }
 }

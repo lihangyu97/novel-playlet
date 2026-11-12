@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/widgets/app_snack_bar.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/theme_settings.dart';
 import '../../core/cache/app_cache.dart';
@@ -555,20 +556,16 @@ class _StorageCardState extends ConsumerState<_StorageCard> {
       final freed = await ref.read(appCacheProvider).clear();
       if (!mounted) return;
       ref.invalidate(cacheUsageProvider);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            freed > 0 ? '已清理 ${formatBytes(freed)} 缓存' : '没有可清理的缓存',
-          ),
-        ),
+      showAppSnackBar(
+        context,
+        freed > 0 ? '已清理 ${formatBytes(freed)} 缓存' : '没有可清理的缓存',
       );
     } catch (error) {
       // 缓存统计/删除碰到文件系统或 path_provider 异常时不能让按钮永远停在
       // 「清理中…」：兜底复位并提示，用户还能再试一次。
       debugPrint('[settings] clear cache failed: $error');
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('清理失败，请重试')));
+      showAppSnackBar(context, '清理失败，请重试');
     } finally {
       if (mounted) setState(() => _clearing = false);
     }
