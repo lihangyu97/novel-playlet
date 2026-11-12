@@ -237,6 +237,8 @@ class ReaderPagination {
         const <int, ParagraphBubbleVariant>{},
   }) {
     final blocks = <ReaderBlock>[];
+    // 对话引号可能跨段落开/闭，扫描器按整章顺序保留未闭合状态。
+    final dialogueScanner = ReaderDialogueScanner();
     for (var position = 0; position < paragraphs.length; position++) {
       final text = paragraphs[position].trim();
       if (text.isEmpty) continue;
@@ -250,6 +252,7 @@ class ReaderPagination {
         blocks.length,
         text,
         spec,
+        dialogueScanner: dialogueScanner,
         paraIndex: paraIndex,
         bubbleCount: bubbleCount,
         bubbleVariant: paraIndex == null
@@ -324,10 +327,13 @@ class ReaderPagination {
     int index,
     String text,
     ReaderLayoutSpec spec, {
+    required ReaderDialogueScanner dialogueScanner,
     int? paraIndex,
     int bubbleCount = 0,
     ParagraphBubbleVariant bubbleVariant = ParagraphBubbleVariant.plain,
   }) {
+    // 先扫对话：即使这一段后面因为排版异常被丢弃，跨段引号状态也要按正文顺序推进。
+    final dialogueRanges = dialogueScanner.scanParagraph(text);
     // 气泡是行内元素：只有最后一行还有空间时才能和正文同行。若最后一行正好
     // 占满，气泡必然被挤到下一行独占一行——既难看又容易和下一段错位（Flutter
     // 渲染 widget-only 行时按正文行高算，比占位高度高）。这种段落直接不画
@@ -383,7 +389,7 @@ class ReaderPagination {
         paraIndex: paraIndex,
         bubbleCount: effectiveBubbleCount,
         bubbleVariant: bubbleVariant,
-        dialogueRects: _dialogueRects(text, painter),
+        dialogueRects: _dialogueRects(dialogueRanges, painter),
         // 正常情况两者相等；取较大值保证渲染块的占位高度够裁剪。
         height: math.max(painter.height, top),
         lineTops: tops,
@@ -399,8 +405,10 @@ class ReaderPagination {
   /// 段落 span 的第一个子节点是首行缩进的 [WidgetSpan]，在文本布局里占 1 个
   /// code unit，所以选区 offset 要整体 +1；气泡是追加在正文之后的 WidgetSpan，
   /// 不影响前置 offset。
-  static List<Rect> _dialogueRects(String text, TextPainter painter) {
-    final ranges = findReaderDialogueRanges(text);
+  static List<Rect> _dialogueRects(
+    List<TextRange> ranges,
+    TextPainter painter,
+  ) {
     if (ranges.isEmpty) return const <Rect>[];
     const textOffset = 1;
     final rects = <Rect>[];

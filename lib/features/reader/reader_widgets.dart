@@ -19,6 +19,7 @@ class ReaderPageContent extends StatelessWidget {
     required this.textScaler,
     required this.contentWidth,
     required this.horizontalPadding,
+    this.showDialogueHighlight = true,
     this.onBubbleTap,
   });
 
@@ -29,6 +30,9 @@ class ReaderPageContent extends StatelessWidget {
   /// 可读区宽度（不含左右内边距），首行缩进按它计算。
   final double contentWidth;
   final double horizontalPadding;
+
+  /// 是否画人物对话荧光笔（阅读设置里的开关）。
+  final bool showDialogueHighlight;
 
   /// 点段评气泡：回调段落 id，由阅读页打开该段的评论面板。
   final void Function(int paraIndex)? onBubbleTap;
@@ -83,8 +87,10 @@ class ReaderPageContent extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                if (fragment.block.dialogueRects.isNotEmpty)
+                if (showDialogueHighlight &&
+                    fragment.block.dialogueRects.isNotEmpty)
                   CustomPaint(
+                    key: const ValueKey('reader-dialogue-highlight'),
                     painter: _DialogueHighlightPainter(
                       rects: fragment.block.dialogueRects,
                       color: markerColor,
@@ -508,37 +514,67 @@ class ReaderSettingsSheet extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '段评气泡',
-                        style: TextStyle(fontSize: 13, color: foreground),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '关闭只隐藏段尾气泡，章末评论仍在',
-                        style: TextStyle(
-                          fontSize: 11,
-                          height: 1.3,
-                          color: muted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Switch(
-                  value: settings.showBubbles,
-                  onChanged: controller.setShowBubbles,
-                ),
-              ],
+            _SettingSwitchRow(
+              title: '对话高亮',
+              subtitle: '给双引号里的人物说话内容加荧光笔',
+              value: settings.showDialogueHighlight,
+              onChanged: controller.setShowDialogueHighlight,
+              foreground: foreground,
+              muted: muted,
+            ),
+            const SizedBox(height: 14),
+            _SettingSwitchRow(
+              title: '段评气泡',
+              subtitle: '关闭只隐藏段尾气泡，章末评论仍在',
+              value: settings.showBubbles,
+              onChanged: controller.setShowBubbles,
+              foreground: foreground,
+              muted: muted,
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 阅读设置里的一行开关：左侧标题 + 说明，右侧 Switch。
+class _SettingSwitchRow extends StatelessWidget {
+  const _SettingSwitchRow({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+    required this.foreground,
+    required this.muted,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final Color foreground;
+  final Color muted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: TextStyle(fontSize: 13, color: foreground)),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(fontSize: 11, height: 1.3, color: muted),
+              ),
+            ],
+          ),
+        ),
+        Switch(value: value, onChanged: onChanged),
+      ],
     );
   }
 }

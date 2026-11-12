@@ -545,6 +545,7 @@ void main() {
       Brightness.light,
       reason: '默认纸色是浅色，弹层应该用纸色的浅色 scheme，而不是全局暗色',
     );
+    expect(find.text('对话高亮'), findsOneWidget, reason: '设置弹层要有对话高亮开关');
     await expectLater(
       find.byType(ReaderSettingsSheet),
       matchesGoldenFile('../goldens/reader_settings_sheet.png'),

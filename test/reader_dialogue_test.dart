@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/features/reader/reader_dialogue.dart';
 import 'package:novel_playlet/features/reader/reader_pagination.dart';
+import 'package:novel_playlet/features/reader/reader_widgets.dart';
 
 /// 正文对话识别与分页测量得到的荧光笔矩形。
 void main() {
@@ -22,24 +23,60 @@ void main() {
       ]);
     });
 
-    test('嵌套引号按栈配对，内外区间都会产出', () {
+    test('嵌套引号合并成一段说话内容', () {
       const text = '“他说：「我不知道。」就走了”';
       final ranges = findReaderDialogueRanges(text);
-      expect(ranges, hasLength(2));
-      expect(ranges.first.start, 5);
-      expect(text.substring(ranges.first.start, ranges.first.end), '我不知道。');
+      expect(ranges, hasLength(1), reason: '内层引号属于外层说话内容，合并成一段');
       expect(
-        text.substring(ranges.last.start, ranges.last.end),
+        text.substring(ranges.single.start, ranges.single.end),
         '他说：「我不知道。」就走了',
       );
     });
 
-    test('未闭合引号与空引号忽略，普通正文返回空', () {
-      expect(findReaderDialogueRanges('“没有结尾'), isEmpty);
+    test('孤立右引号/空引号忽略，未闭合左引号延续到段尾', () {
+      // 未闭合左引号不再丢弃：真实源里它会在后面的段落闭合，单段调用按
+      // 「从引号后到段尾都算说话内容」返回。
+      expect(findReaderDialogueRanges('“没有结尾'), const [
+        TextRange(start: 1, end: 5),
+      ]);
       expect(findReaderDialogueRanges('没有开头”'), isEmpty);
       expect(findReaderDialogueRanges('“”'), isEmpty);
       expect(findReaderDialogueRanges('这一段没有对话。'), isEmpty);
       expect(findReaderDialogueRanges(''), isEmpty);
+    });
+  });
+
+  group('ReaderDialogueScanner 跨段', () {
+    test('左引号在本段、右引号在下一段：两段都识别为对话', () {
+      final scanner = ReaderDialogueScanner();
+      expect(scanner.scanParagraph('他说：“你先'), const [
+        TextRange(start: 4, end: 6),
+      ]);
+      expect(scanner.scanParagraph('别急着走。”他转身离开。'), const [
+        TextRange(start: 0, end: 5),
+      ]);
+      expect(scanner.scanParagraph('这一句是旁白。'), isEmpty);
+    });
+
+    test('多段引语每段重复左引号、最后一段才闭合', () {
+      final scanner = ReaderDialogueScanner();
+      expect(scanner.scanParagraph('“第一段'), const [
+        TextRange(start: 1, end: 4),
+      ]);
+      expect(scanner.scanParagraph('“第二段'), const [
+        TextRange(start: 1, end: 4),
+      ]);
+      expect(scanner.scanParagraph('“第三段”'), const [
+        TextRange(start: 1, end: 4),
+      ]);
+      expect(scanner.scanParagraph('旁白。'), isEmpty);
+    });
+
+    test('空段不打断跨段状态', () {
+      final scanner = ReaderDialogueScanner();
+      expect(scanner.scanParagraph('“前半'), hasLength(1));
+      expect(scanner.scanParagraph(''), isEmpty);
+      expect(scanner.scanParagraph('后半”'), const [TextRange(start: 0, end: 2)]);
     });
   });
 
@@ -69,6 +106,39 @@ void main() {
         expect(rect.top, greaterThanOrEqualTo(0));
         expect(rect.bottom, lessThanOrEqualTo(withDialogue.height));
       }
+    });
+
+    testWidgets('关闭对话高亮开关后不画色带', (tester) async {
+      final pagination = ReaderPagination.build(
+        chapterId: 'c1',
+        paragraphs: const ['“你来了。”他说。'],
+        spec: spec(),
+      );
+      const textStyle = TextStyle(fontSize: 18, height: 1.6);
+      Widget build({required bool enabled}) => MaterialApp(
+        home: Scaffold(
+          body: ReaderPageContent(
+            page: pagination.pages.first,
+            textStyle: textStyle,
+            textScaler: TextScaler.noScaling,
+            contentWidth: 300,
+            horizontalPadding: 20,
+            showDialogueHighlight: enabled,
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(build(enabled: true));
+      expect(
+        find.byKey(const ValueKey('reader-dialogue-highlight')),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(build(enabled: false));
+      expect(
+        find.byKey(const ValueKey('reader-dialogue-highlight')),
+        findsNothing,
+      );
     });
 
     test('跨行对话每一行都有一段矩形', () {

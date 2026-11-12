@@ -425,6 +425,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                               textScaler: textScaler,
                               contentWidth: contentWidth,
                               horizontalPadding: _horizontalPadding,
+                              showDialogueHighlight:
+                                  settings.showDialogueHighlight,
                               onBubbleTap: _openParagraphComments,
                             ),
                           ),

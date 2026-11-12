@@ -16,6 +16,7 @@ class ReaderSettings {
     this.paper = ReaderPaper.parchment,
     this.dayPaper = ReaderPaper.parchment,
     this.showBubbles = true,
+    this.showDialogueHighlight = true,
   }) : assert(dayPaper != ReaderPaper.night, '日间底色必须是浅色纸');
 
   /// 15–30，单位与 Flutter 逻辑像素一致。
@@ -35,18 +36,23 @@ class ReaderSettings {
   /// 是否在段尾画段评气泡。关掉只影响气泡渲染，章末/工具栏评论入口仍在。
   final bool showBubbles;
 
+  /// 是否给双引号里的人物对话画荧光笔。只影响渲染，不参与分页测量。
+  final bool showDialogueHighlight;
+
   ReaderSettings copyWith({
     double? fontSize,
     double? lineHeight,
     ReaderPaper? paper,
     ReaderPaper? dayPaper,
     bool? showBubbles,
+    bool? showDialogueHighlight,
   }) => ReaderSettings(
     fontSize: fontSize ?? this.fontSize,
     lineHeight: lineHeight ?? this.lineHeight,
     paper: paper ?? this.paper,
     dayPaper: dayPaper ?? this.dayPaper,
     showBubbles: showBubbles ?? this.showBubbles,
+    showDialogueHighlight: showDialogueHighlight ?? this.showDialogueHighlight,
   );
 
   @override
@@ -56,11 +62,18 @@ class ReaderSettings {
       other.lineHeight == lineHeight &&
       other.paper == paper &&
       other.dayPaper == dayPaper &&
-      other.showBubbles == showBubbles;
+      other.showBubbles == showBubbles &&
+      other.showDialogueHighlight == showDialogueHighlight;
 
   @override
-  int get hashCode =>
-      Object.hash(fontSize, lineHeight, paper, dayPaper, showBubbles);
+  int get hashCode => Object.hash(
+    fontSize,
+    lineHeight,
+    paper,
+    dayPaper,
+    showBubbles,
+    showDialogueHighlight,
+  );
 }
 
 final readerSettingsProvider =
@@ -75,6 +88,7 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
   static const _paperKey = 'reader_paper_v1';
   static const _dayPaperKey = 'reader_day_paper_v1';
   static const _bubblesKey = 'reader_show_bubbles_v1';
+  static const _dialogueHighlightKey = 'reader_show_dialogue_highlight_v1';
 
   static const double minFontSize = 15;
   static const double maxFontSize = 30;
@@ -146,6 +160,13 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
     _persist();
   }
 
+  void setShowDialogueHighlight(bool value) {
+    if (value == state.showDialogueHighlight) return;
+    _userChanged = true;
+    state = state.copyWith(showDialogueHighlight: value);
+    _persist();
+  }
+
   Future<void> _restore() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -174,6 +195,9 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
         paper: paper,
         dayPaper: dayPaper,
         showBubbles: prefs.getBool(_bubblesKey) ?? fallback.showBubbles,
+        showDialogueHighlight:
+            prefs.getBool(_dialogueHighlightKey) ??
+            fallback.showDialogueHighlight,
       );
       if (restored != state) state = restored;
     } catch (_) {
@@ -193,6 +217,10 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
       await prefs.setString(_paperKey, snapshot.paper.name);
       await prefs.setString(_dayPaperKey, snapshot.dayPaper.name);
       await prefs.setBool(_bubblesKey, snapshot.showBubbles);
+      await prefs.setBool(
+        _dialogueHighlightKey,
+        snapshot.showDialogueHighlight,
+      );
     } catch (_) {
       // 偏好落盘失败只影响下次启动的默认值，不打扰当前阅读。
       return;

@@ -239,10 +239,12 @@ ChapterContent{id,title,paragraphs}
 
 - 分页进度存「本页真正开头的段落下标」，不是跨页段落号；恢复时找包含该段的第一页。
 - 字号/行距/系统缩放变化 → 进 key，重新分页并按旧页锚点回位；换底色只改颜色，不重排。
-- 对话荧光笔：`“…”` / `「…」` / `『…』` 成对引号内的说话内容（不含引号）在测量阶段
+- 对话荧光笔：`“…”` / `「…」` / `『…』` 引号内的说话内容（不含引号）在测量阶段
   用 `getBoxesForSelection` 算出段内矩形，渲染时在文字下方画「下半段」圆角色带
   （浅色纸 34% 黄、夜间纸 22% 黄）；矩形来自这次 TextPainter 测量，渲染期不额外排版，
-  也不影响分页、选中和复制。
+  也不影响分页、选中和复制。真实源常把一句话拆成多个 `<p>`，扫描器
+  （`ReaderDialogueScanner`）按整章顺序保留未闭合引号，跨段对话/每段重复左引号
+  的排版都能连起来；状态不跨章。可在阅读设置里关闭（只影响渲染、不触发重排）。
 - 空章显示「本章暂无正文」+ 上/下一章（空章没有可翻页的正文，保留这条兜底入口）。
 - 工具栏：点中间 1/3 区域呼出；打开时横向翻页锁定（PageView `NeverScrollableScrollPhysics`），
   压暗遮罩保留但不接收点击（点击穿透到正文，用于收起工具栏）。
@@ -259,8 +261,9 @@ ChapterContent{id,title,paragraphs}
 - 进度：`{chapterId, chapterIndex, blockIndex, updatedAt}`，`blockIndex` 是页首段落下标。
 - 写入：翻页 400ms 防抖、切章立即 flush、页面 dispose 再兜一次。
 - 表：`reading_progress_v1`（最近 200 本 LRU）+ `recent_reading_v1`（3 条）+ `last_read_book_v1`。
-- 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、4 种底色、段评气泡开关
-  （默认开），落 `reader_font_size_v1 / reader_line_height_v1 / reader_paper_v1 / reader_day_paper_v1 / reader_show_bubbles_v1`；
+- 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、4 种底色、对话高亮开关
+  （默认开）、段评气泡开关（默认开），落
+  `reader_font_size_v1 / reader_line_height_v1 / reader_paper_v1 / reader_day_paper_v1 / reader_show_dialogue_highlight_v1 / reader_show_bubbles_v1`；
   `reader_day_paper_v1` 记住最近一次浅色纸，供工具栏日/夜切换切回；已落盘偏好优先，
   默认值只影响无历史偏好的用户。
 
