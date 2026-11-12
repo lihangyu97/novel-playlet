@@ -170,6 +170,35 @@ void main() {
     );
   });
 
+  testWidgets('设置页-区块标题/标签/控件左右边界对齐', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+    const inset = 32.0; // 卡片 16 外边距 + 16 内边距
+
+    for (final text in ['主题', '对话高亮', '跟随系统', '首页推荐布局', '存储']) {
+      expect(
+        tester.getTopLeft(find.text(text).first).dx,
+        inset,
+        reason: '$text 的左边线应对齐卡片内容线',
+      );
+    }
+
+    // 主题色第一颗圆点的左沿、最后一颗（自定义）圆点的右沿贴住内容边界。
+    final firstDot = find.byTooltip('天蓝');
+    expect(tester.getRect(firstDot).left, inset);
+    expect(
+      tester.getRect(find.byKey(themeCustomColorKey)).right,
+      390 - inset,
+      reason: '自定义圆点右沿应对齐内容右边界',
+    );
+
+    // 存储行：图标贴内容左边界、数值贴内容右边界（label 在图标后面）。
+    expect(
+      tester.getTopLeft(find.byIcon(Icons.smart_display_outlined)).dx,
+      inset,
+    );
+    expect(tester.getRect(find.text('339 MB')).right, 390 - inset);
+  });
+
   testWidgets('设置页-存储提示只剩离线缓存一条', (tester) async {
     await pumpPreview(tester, const SettingsPage());
 

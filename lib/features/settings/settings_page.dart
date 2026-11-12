@@ -59,7 +59,7 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+      padding: const EdgeInsets.fromLTRB(_contentInset, 20, _contentInset, 10),
       child: Text(
         title,
         style: Theme.of(context).textTheme.titleMedium
@@ -69,6 +69,16 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
+/// 卡片外边距。
+const double _cardMargin = 16;
+
+/// 卡片内容左右内边距。
+const double _cardPadding = 16;
+
+/// 设置页统一的左右内容线：卡片内容、区块标题、存储提示都对齐到这里，
+/// 避免「主题」比下面的 label 往里缩一截。
+const double _contentInset = _cardMargin + _cardPadding;
+
 /// 通用卡片容器：与列表页的 Card 圆角/底色保持一致。
 ///
 /// [padding] 可调：只含一行标题 + 控件的卡片用更紧凑的上下边距，否则
@@ -76,7 +86,12 @@ class _SectionTitle extends StatelessWidget {
 class _Card extends StatelessWidget {
   const _Card({
     required this.child,
-    this.padding = const EdgeInsets.fromLTRB(16, 16, 16, 16),
+    this.padding = const EdgeInsets.fromLTRB(
+      _cardPadding,
+      16,
+      _cardPadding,
+      16,
+    ),
   });
 
   final Widget child;
@@ -85,7 +100,7 @@ class _Card extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: _cardMargin),
       child: Card(
         child: Padding(padding: padding, child: child),
       ),
@@ -115,35 +130,29 @@ class _ThemeColorCard extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            // 首尾圆点分别贴住内容左右边界，和上下的 label / 开关 / chip 对齐。
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               for (final option in themeColorOptions)
-                Expanded(
-                  child: Center(
-                    child: _PresetDot(
-                      option: option,
-                      selected: option.color == seed,
-                      onTap: () => controller.setSeed(option.color),
-                    ),
-                  ),
+                _PresetDot(
+                  option: option,
+                  selected: option.color == seed,
+                  onTap: () => controller.setSeed(option.color),
                 ),
-              Expanded(
-                child: Center(
-                  child: _CustomDot(
-                    key: themeCustomColorKey,
-                    color: customSeed,
-                    selected: customSelected,
-                    tooltip: '自定义主题色',
-                    onTap: () async {
-                      final picked = await showThemeColorPicker(
-                        context,
-                        initial: customSeed,
-                      );
-                      if (picked == null) return;
-                      controller.setSeed(picked);
-                      customController.setSeed(picked);
-                    },
-                  ),
-                ),
+              _CustomDot(
+                key: themeCustomColorKey,
+                color: customSeed,
+                selected: customSelected,
+                tooltip: '自定义主题色',
+                onTap: () async {
+                  final picked = await showThemeColorPicker(
+                    context,
+                    initial: customSeed,
+                  );
+                  if (picked == null) return;
+                  controller.setSeed(picked);
+                  customController.setSeed(picked);
+                },
               ),
             ],
           ),
@@ -806,7 +815,7 @@ class _StorageHint extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      padding: const EdgeInsets.fromLTRB(_contentInset, 12, _contentInset, 0),
       child: Text(
         '离线缓存不在此列，请到「我的 → 缓存」页清理。',
         style: theme.textTheme.bodySmall?.copyWith(
