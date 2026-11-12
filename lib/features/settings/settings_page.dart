@@ -8,8 +8,10 @@ import '../../core/cache/app_cache.dart';
 // 设置页集中放全站偏好，会跨 feature 引用偏好 provider（视频清晰度 / 推荐布局）。
 // 偏好本身归功能域所有，但入口统一在设置页，所以这里的跨域 import 是约定的。
 import '../cache/download_quality.dart';
+import '../reader/reader_settings.dart';
 import '../recommend/recommend_layout.dart';
 import 'settings_providers.dart';
+import 'widgets/dialogue_highlight_preview.dart';
 import 'widgets/theme_color_picker.dart';
 
 /// 设置页：主题（主题色 / 深浅色 / 首页推荐布局）+ 存储 + 视频。
@@ -31,6 +33,8 @@ class SettingsPage extends StatelessWidget {
           children: const [
             _SectionTitle('主题'),
             _ThemeColorCard(),
+            SizedBox(height: 12),
+            _DialogueHighlightColorCard(),
             SizedBox(height: 12),
             _AppearanceCard(),
             SizedBox(height: 12),
@@ -153,6 +157,119 @@ class _ThemeColorCard extends ConsumerWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 对话高亮颜色
+// ---------------------------------------------------------------------------
+
+/// 「对话高亮」色块的 key：测试用它点开取色弹层。
+const Key dialogueHighlightColorKey = Key('settings-dialogue-highlight-color');
+
+/// 阅读页人物对话荧光笔的颜色。和主题色分开：主题色决定全站配色，对话高亮
+/// 只是阅读页的一层标记色，用户可以单独挑一个顺眼的荧光笔颜色。
+class _DialogueHighlightColorCard extends ConsumerWidget {
+  const _DialogueHighlightColorCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(readerSettingsProvider);
+    final controller = ref.read(readerSettingsProvider.notifier);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return _Card(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '对话高亮',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '阅读页人物对话的荧光笔颜色',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          _ColorDotButton(
+            key: dialogueHighlightColorKey,
+            color: settings.dialogueHighlightColor,
+            tooltip: '自定义对话高亮颜色',
+            onTap: () async {
+              final picked = await showThemeColorPicker(
+                context,
+                initial: settings.dialogueHighlightColor,
+                title: '自定义对话高亮颜色',
+                previewBuilder: (color) =>
+                    DialogueHighlightPreview(color: color),
+              );
+              if (picked == null) return;
+              controller.setDialogueHighlightColor(picked);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 右侧圆形色块：实心显示当前颜色，点开自定义取色。
+class _ColorDotButton extends StatelessWidget {
+  const _ColorDotButton({
+    super.key,
+    required this.color,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final Color color;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final iconColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.light
+        ? Colors.black54
+        : Colors.white70;
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 28,
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: 0.8),
+                width: 1.5,
+              ),
+            ),
+            child: Icon(Icons.palette_outlined, size: 17, color: iconColor),
+          ),
+        ),
       ),
     );
   }
@@ -401,9 +518,8 @@ const Key recommendLayoutThreeKey = ValueKey('recommend-layout-three');
 
 /// 首页推荐布局：双列 / 三列瀑布流。
 ///
-/// 与「离线下载清晰度」同一套控件（小标题 + 一排 ChoiceChip）；这里多留一行
-/// 说明文案，是因为两张卡片宽度/信息密度对普通用户没有直觉，需要一句
-/// "封面更大 vs 一屏更多"的取舍提示（清晰度选项本身含义自明，所以那张卡不加）。
+/// 与「离线下载清晰度」同一套控件（小标题 + ChoiceChip），标题和选项收在
+/// 同一行；不再额外写「封面更大 / 一屏更多」的说明文案。
 /// 默认双列，改完立即生效（推荐页 watch 同一个 provider）。
 class _FeedLayoutCard extends ConsumerWidget {
   const _FeedLayoutCard();
@@ -411,42 +527,35 @@ class _FeedLayoutCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final layout = ref.watch(recommendLayoutProvider);
     final controller = ref.read(recommendLayoutProvider.notifier);
     return _Card(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Row(
         children: [
-          Text(
-            '首页推荐布局',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
+          Expanded(
+            child: Text(
+              '首页推荐布局',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final option in RecommendLayout.values)
-                ChoiceChip(
-                  key: recommendLayoutOptionKey(option),
-                  label: Text(option.label),
-                  selected: option == layout,
-                  onSelected: (_) => controller.setLayout(option),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            layout == RecommendLayout.two
-                ? '双列：封面更大，一屏看到的少一点'
-                : '三列：封面更小，一屏看到的多一点',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-              height: 1.4,
+          const SizedBox(width: 12),
+          Flexible(
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final option in RecommendLayout.values)
+                  ChoiceChip(
+                    key: recommendLayoutOptionKey(option),
+                    label: Text(option.label),
+                    selected: option == layout,
+                    onSelected: (_) => controller.setLayout(option),
+                  ),
+              ],
             ),
           ),
         ],

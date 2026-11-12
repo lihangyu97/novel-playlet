@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/features/reader/reader_settings.dart';
@@ -29,6 +30,36 @@ void main() {
       restored.read(readerSettingsProvider).showDialogueHighlight,
       isFalse,
       reason: '下次启动要沿用关闭状态',
+    );
+  });
+
+  test('对话高亮颜色可改、落盘并在新容器恢复', () async {
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    expect(
+      container.read(readerSettingsProvider).dialogueHighlightColor,
+      ReaderSettings.defaultDialogueHighlightColor,
+    );
+
+    const picked = Color(0xFF66BB6A);
+    container
+        .read(readerSettingsProvider.notifier)
+        .setDialogueHighlightColor(picked);
+    await pumpEventQueue();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getInt('reader_dialogue_highlight_color_v1'),
+      picked.toARGB32(),
+    );
+
+    final restored = ProviderContainer();
+    addTearDown(restored.dispose);
+    await restored.read(readerSettingsProvider.notifier).restoreFuture;
+    expect(
+      restored.read(readerSettingsProvider).dialogueHighlightColor,
+      picked,
     );
   });
 

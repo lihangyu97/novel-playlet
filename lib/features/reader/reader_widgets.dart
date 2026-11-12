@@ -20,6 +20,7 @@ class ReaderPageContent extends StatelessWidget {
     required this.contentWidth,
     required this.horizontalPadding,
     this.showDialogueHighlight = true,
+    this.dialogueHighlightColor = ReaderSettings.defaultDialogueHighlightColor,
     this.onBubbleTap,
   });
 
@@ -33,6 +34,9 @@ class ReaderPageContent extends StatelessWidget {
 
   /// 是否画人物对话荧光笔（阅读设置里的开关）。
   final bool showDialogueHighlight;
+
+  /// 荧光笔基色（设置页可自定义）；透明度按纸色明暗在渲染时叠。
+  final Color dialogueHighlightColor;
 
   /// 点段评气泡：回调段落 id，由阅读页打开该段的评论面板。
   final void Function(int paraIndex)? onBubbleTap;

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
+import 'package:novel_playlet/features/reader/reader_settings.dart';
 import 'package:novel_playlet/features/settings/settings_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -41,6 +42,8 @@ void main() {
       reason: '离线下载默认 720P',
     );
 
+    await tester.ensureVisible(find.text('1080P'));
+    await tester.pump();
     await tester.tap(find.text('1080P'));
     await tester.pump();
     expect(
@@ -92,6 +95,42 @@ void main() {
       find.byType(MaterialApp),
       matchesGoldenFile('../goldens/settings_color_picker.png'),
     );
+  });
+
+  testWidgets('设置页-对话高亮颜色可自定义，示例文本跟随取色', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await pumpPreview(tester, const SettingsPage());
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(SettingsPage)),
+    );
+    final initial = container
+        .read(readerSettingsProvider)
+        .dialogueHighlightColor;
+    expect(initial, ReaderSettings.defaultDialogueHighlightColor);
+
+    await tester.ensureVisible(find.byKey(dialogueHighlightColorKey));
+    await tester.tap(find.byKey(dialogueHighlightColorKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.text('自定义对话高亮颜色'), findsOneWidget);
+    expect(
+      find.byKey(const Key('dialogue-highlight-preview')),
+      findsOneWidget,
+      reason: '取色弹层里要有阅读页示例文本',
+    );
+    expect(find.textContaining('你先别急着走', findRichText: true), findsOneWidget);
+
+    // 在饱和度/明度面板左上角点一下换色，示例会实时跟着变，确定后写回设置。
+    final panel = find.byKey(const Key('theme-color-sv-panel'));
+    await tester.tapAt(tester.getTopLeft(panel) + const Offset(12, 12));
+    await tester.pump();
+    await tester.tap(find.text('确定'));
+    await tester.pumpAndSettle();
+
+    final picked = container
+        .read(readerSettingsProvider)
+        .dialogueHighlightColor;
+    expect(picked, isNot(initial), reason: '确定后要作用到对话高亮颜色');
   });
 
   testWidgets('设置页-存储提示只剩离线缓存一条', (tester) async {
@@ -161,7 +200,6 @@ void main() {
       tester.widget<ChoiceChip>(find.byKey(recommendLayoutTwoKey)).selected,
       isTrue,
     );
-    expect(find.text('双列：封面更大，一屏看到的少一点'), findsOneWidget);
 
     // ListView 懒加载：先滚到选项再点，避免以后上面再加一张卡就点不到。
     await tester.ensureVisible(find.byKey(recommendLayoutThreeKey));
@@ -172,7 +210,7 @@ void main() {
       tester.widget<ChoiceChip>(find.byKey(recommendLayoutThreeKey)).selected,
       isTrue,
     );
-    expect(find.text('三列：封面更小，一屏看到的多一点'), findsOneWidget);
+    expect(find.textContaining('封面更大'), findsNothing, reason: '布局说明提示已去掉');
     // 落盘由 test/recommend_layout_test.dart 覆盖（页面测试只验证交互与联动）。
   });
 

@@ -23,7 +23,7 @@
 - **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下滑切集（竖向翻页）/播完自动下一集、选集弹层、横屏全屏、在线 MP4 边下边播、失败分类与「重新下载这一集」；底排左侧「选集 + 本集评论」、中间播放/暂停、右侧「收藏 + 缓存（三态）+ 倍速」，顶栏右侧「剧集详情」（历史「最近观看」直进播放页，收藏/缓存与回详情都靠这里）。收藏**只加不移**（与阅读页加入书架一致，已收藏后只读，成功不弹提示条）；缓存三态与详情页同一份 `offlineEntryStatusProvider`。
 - **我的**：统一页头（图标 + 「我的」 + 合并统计 + 右上角设置入口，固定贴顶、不随内容滚动，带一套蓝粉氛围渐变）+ 小说 / 短剧两个 tab（无下划线，当前 tab 主题色高亮且字号稍大，可点击或左右滑动切换，内容各自保活）；小说 tab = 书架 + 最近阅读，短剧 tab = 收藏 + 最近观看；书架/收藏与首页同款白底不定高卡片（瀑布流，小说只展示书名+作者、短剧只展示剧名+集数）；缓存入口在推荐页搜索框右侧。
 - **缓存中心**：离线整本 / 整剧下载的进度、网速、排队、暂停/继续/删除/清空；入口在推荐页搜索框右侧的下载图标按钮（原「我的」页右下角悬浮入口已删除）。
-- **设置**：主题色（天蓝 / 草绿 / 绯红 + 自定义取色）、深浅色模式（跟随系统 / 手动）、首页推荐布局（双列 / 三列，默认双列）、存储占用与清理、离线下载清晰度。
+- **设置**：主题色（天蓝 / 草绿 / 绯红 + 自定义取色）、对话高亮颜色（圆形色块打开 HSV 取色，弹层内用阅读页真实正文预览当前颜色）、深浅色模式（跟随系统 / 手动）、首页推荐布局（双列 / 三列，默认双列）、存储占用与清理、离线下载清晰度。
 
 两个内容链路：
 
@@ -241,8 +241,9 @@ ChapterContent{id,title,paragraphs}
 - 字号/行距/系统缩放变化 → 进 key，重新分页并按旧页锚点回位；换底色只改颜色，不重排。
 - 对话荧光笔：`“…”` / `「…」` / `『…』` 引号内的说话内容（不含引号）在测量阶段
   用 `getBoxesForSelection` 算出段内矩形，渲染时在文字下方画「下半段」圆角色带
-  （浅色纸 34% 黄、夜间纸 22% 黄）；矩形来自这次 TextPainter 测量，渲染期不额外排版，
-  也不影响分页、选中和复制。真实源常把一句话拆成多个 `<p>`，扫描器
+  （默认琥珀黄，透明度浅色纸 34% / 夜间纸 22%；颜色可在设置页「主题 → 对话高亮」自定义）；
+  矩形来自这次 TextPainter 测量，渲染期不额外排版，也不影响分页、选中和复制。
+  真实源常把一句话拆成多个 `<p>`，扫描器
   （`ReaderDialogueScanner`）按整章顺序保留未闭合引号，跨段对话/每段重复左引号
   的排版都能连起来；状态不跨章。可在阅读设置里关闭（只影响渲染、不触发重排）。
 - 空章显示「本章暂无正文」+ 上/下一章（空章没有可翻页的正文，保留这条兜底入口）。
@@ -262,8 +263,8 @@ ChapterContent{id,title,paragraphs}
 - 写入：翻页 400ms 防抖、切章立即 flush、页面 dispose 再兜一次。
 - 表：`reading_progress_v1`（最近 200 本 LRU）+ `recent_reading_v1`（3 条）+ `last_read_book_v1`。
 - 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、4 种底色、对话高亮开关
-  （默认开）、段评气泡开关（默认开），落
-  `reader_font_size_v1 / reader_line_height_v1 / reader_paper_v1 / reader_day_paper_v1 / reader_show_dialogue_highlight_v1 / reader_show_bubbles_v1`；
+  （默认开）与颜色（默认 `#FFD54F`，设置页主题模块自定义）、段评气泡开关（默认开），落
+  `reader_font_size_v1 / reader_line_height_v1 / reader_paper_v1 / reader_day_paper_v1 / reader_show_dialogue_highlight_v1 / reader_dialogue_highlight_color_v1 / reader_show_bubbles_v1`；
   `reader_day_paper_v1` 记住最近一次浅色纸，供工具栏日/夜切换切回；已落盘偏好优先，
   默认值只影响无历史偏好的用户。
 
@@ -698,6 +699,7 @@ flutter drive --profile -d <iPhone UDID> \
 | `lib/data/models/{chapter_ideas,book_comment,comment_reply}.dart` | 段评/书评/回复模型与解析 |
 | `lib/data/models/comment_image.dart` | 评论配图 URL 解析与归一（协议相对地址 / `&amp;` / 去重） |
 | `lib/app/widgets/comment_image_{loader,strip,viewer}.dart` | 评论配图加载（AppImageCache）/ 缩略图 / 全屏查看器 |
+| `lib/features/settings/widgets/dialogue_highlight_preview.dart` | 对话高亮取色弹层里的阅读页示例预览 |
 | `lib/features/reader/{reader_comments,reader_comments_sheet,reader_bubble}.dart` | 段评 provider / 评论面板 / 段尾气泡 |
 | `lib/features/detail/{detail_reviews_section,detail_reviews_sheet}.dart` | 详情页书评卡片与弹窗 |
 | `lib/features/video/network_health.dart` | 会话级「疑似离线」标记：断网后切集快速失败、手动重试强制联网 |
