@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/app_version.dart';
 import '../../app/widgets/app_snack_bar.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/theme_settings.dart';
@@ -44,6 +45,7 @@ class SettingsPage extends StatelessWidget {
             _StorageHint(),
             _SectionTitle('视频'),
             _VideoDownloadQualityCard(),
+            _AppVersionFooter(),
           ],
         ),
       ),
@@ -787,6 +789,34 @@ class _StorageHint extends StatelessWidget {
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
           height: 1.5,
+        ),
+      ),
+    );
+  }
+}
+
+/// 版本脚注：设置页最底部，灰色、居中，显示当前安装包的版本号与构建号。
+///
+/// 版本来自原生包元数据（见 [appVersionProvider]）；测试/桌面环境没有原生
+/// 通道时返回 null，这里不占位，避免 golden 里多出一行"假版本"。
+class _AppVersionFooter extends ConsumerWidget {
+  const _AppVersionFooter();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final version = ref.watch(appVersionProvider).value;
+    if (version == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Padding(
+      // 上间距把版本脚注和「视频」区块分开；下间距交给 ListView 的 bottom padding。
+      padding: const EdgeInsets.fromLTRB(_contentInset, 24, _contentInset, 0),
+      child: Center(
+        child: Text(
+          '版本 ${version.label}',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ),
     );

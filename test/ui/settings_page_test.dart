@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/app_version.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
 import 'package:novel_playlet/features/settings/widgets/dialogue_highlight_preview.dart';
@@ -345,6 +346,36 @@ void main() {
     await expectLater(
       find.byType(SettingsPage),
       matchesGoldenFile('../goldens/settings_dark.png'),
+    );
+  });
+
+  /// 版本脚注：显示原生包元数据里的版本号 + 构建号，灰色、居中。
+  testWidgets('设置页-底部显示版本号与构建号（灰色、居中）', (tester) async {
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      extraOverrides: [
+        appVersionProvider.overrideWith(
+          (ref) async => const AppVersion(name: '1.0.0', build: '15'),
+        ),
+      ],
+    );
+
+    final finder = find.text('版本 1.0.0 (15)');
+    await tester.scrollUntilVisible(finder, 300);
+    expect(finder, findsOneWidget);
+
+    final text = tester.widget<Text>(finder);
+    expect(text.textAlign, TextAlign.center);
+    final theme = Theme.of(tester.element(finder));
+    expect(text.style?.color, theme.colorScheme.onSurfaceVariant);
+    expect(
+      find.ancestor(of: finder, matching: find.byType(Center)),
+      findsWidgets,
+    );
+    expect(
+      find.ancestor(of: finder, matching: find.byType(SettingsPage)),
+      findsOneWidget,
     );
   });
 }
