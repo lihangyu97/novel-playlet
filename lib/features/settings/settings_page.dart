@@ -139,11 +139,12 @@ class _ThemeColorCard extends ConsumerWidget {
                   selected: option.color == seed,
                   onTap: () => controller.setSeed(option.color),
                 ),
-              _CustomDot(
+              _ColorDot(
                 key: themeCustomColorKey,
                 color: customSeed,
                 selected: customSelected,
                 tooltip: '自定义主题色',
+                semanticsLabel: '自定义',
                 onTap: () async {
                   final picked = await showThemeColorPicker(
                     context,
@@ -219,7 +220,7 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
             ),
           ),
           const SizedBox(width: 12),
-          _ColorDotButton(
+          _ColorDot(
             key: dialogueHighlightColorKey,
             color: settings.dialogueHighlightColor,
             tooltip: '自定义对话高亮颜色',
@@ -241,21 +242,34 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
   }
 }
 
-/// 右侧圆形色块：实心显示当前颜色，点开自定义取色。
-class _ColorDotButton extends StatelessWidget {
-  const _ColorDotButton({
+/// 圆形色块：实心显示当前颜色，点开取色；[selected] 时描一圈 onSurface 边。
+///
+/// 主题卡第 4 个「自定义」圆点与「对话高亮」色块共用（两者只差选中态和
+/// 语义文案，视觉必须一致，不要再各写一份）。
+class _ColorDot extends StatelessWidget {
+  const _ColorDot({
     super.key,
     required this.color,
     required this.tooltip,
     required this.onTap,
+    this.selected = false,
+    this.semanticsLabel,
   });
 
   final Color color;
   final String tooltip;
   final VoidCallback onTap;
 
+  /// 当前颜色是否正在生效（描选中边）。
+  final bool selected;
+
+  /// 读屏文案；null = 用 [tooltip]。主题卡的自定义圆点用「自定义」而不是
+  /// 完整 tooltip，避免读屏把「自定义主题色」和预设色混在一起播报。
+  final String? semanticsLabel;
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final iconColor =
         ThemeData.estimateBrightnessForColor(color) == Brightness.light
         ? Colors.black54
@@ -264,14 +278,22 @@ class _ColorDotButton extends StatelessWidget {
       message: tooltip,
       child: Semantics(
         button: true,
-        label: tooltip,
+        selected: selected,
+        label: semanticsLabel ?? tooltip,
         child: InkResponse(
           onTap: onTap,
           radius: 30,
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
             width: 44,
             height: 44,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: selected
+                  ? Border.all(color: scheme.onSurface, width: 2)
+                  : null,
+            ),
             child: Icon(Icons.palette_outlined, size: 17, color: iconColor),
           ),
         ),
@@ -325,62 +347,6 @@ class _PresetDot extends StatelessWidget {
             child: selected
                 ? Icon(Icons.check_rounded, size: 20, color: checkColor)
                 : null,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 第四个色块：自定义取色入口。
-///
-/// 圆点直接显示用户上次自定义的颜色（不是彩虹盘），和「对话高亮」的颜色块
-/// 一致；只有自定义色正在生效时才描选中边。预设色生效时圆点保持上次自定义
-/// 的颜色，避免和预设圆点撞成两个一模一样的圆。
-class _CustomDot extends StatelessWidget {
-  const _CustomDot({
-    super.key,
-    required this.color,
-    required this.selected,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  /// 上次自定义选中的颜色；还没自定义过时是中性紫占位色。
-  final Color color;
-  final bool selected;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final iconColor =
-        ThemeData.estimateBrightnessForColor(color) == Brightness.light
-        ? Colors.black54
-        : Colors.white70;
-    return Tooltip(
-      message: tooltip,
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: '自定义',
-        child: InkResponse(
-          onTap: onTap,
-          radius: 30,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: selected ? scheme.onSurface : Colors.transparent,
-                width: 2,
-              ),
-            ),
-            child: Icon(Icons.palette_outlined, size: 17, color: iconColor),
           ),
         ),
       ),

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
+import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/core/storage/offline/offline_series_store.dart';
@@ -656,6 +657,43 @@ void main() {
     await _disposePlayer(tester);
   });
 
+  testWidgets('相邻集封面走统一封面组件 NovelCover，不直接用 Image.network', (tester) async {
+    // 预热 initialize 先挂起：相邻页稳定停在占位（封面暗化底）上。
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _GatedFactory();
+    await _pumpPlayer(
+      tester,
+      store: store,
+      factory: factory,
+      cover: 'https://example.com/drama-cover.jpg',
+    );
+
+    final gesture = await tester.startGesture(const Offset(400, 300));
+    await gesture.moveBy(const Offset(0, -180));
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, -180));
+    await tester.pump();
+
+    expect(
+      find.byType(NovelCover),
+      findsWidgets,
+      reason: '相邻页封面要走 AppImageCache，滑动/离线时能复用列表页已缓存的图',
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is Image && widget.image is NetworkImage,
+      ),
+      findsNothing,
+      reason: '不允许再用 Image.network：它各建 provider、无磁盘缓存',
+    );
+
+    factory.gated.single.gate.complete();
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await _disposePlayer(tester);
+  });
+
   testWidgets('拖动过半、预热完成后，下一集首帧不等落定就上屏', (tester) async {
     final store = _FakeSeriesStore();
     final factory = _GatedFactory();
@@ -857,6 +895,7 @@ Future<ProviderContainer> _pumpPlayer(
   ApiClient? api,
   Future<bool> Function()? ensureLoopback,
   List<Override> overrides = const [],
+  String cover = '',
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -870,11 +909,12 @@ Future<ProviderContainer> _pumpPlayer(
       ],
       child: MaterialApp(
         home: VideoPlayerPage(
-          args: const VideoPlayArgs(
+          args: VideoPlayArgs(
             seriesTitle: '测试短剧',
             episodes: _episodes,
             index: 0,
             seriesId: 's1',
+            cover: cover,
           ),
         ),
       ),

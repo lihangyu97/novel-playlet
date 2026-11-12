@@ -6,6 +6,7 @@ import 'package:novel_playlet/app/widgets/comment_image_loader.dart';
 import 'package:novel_playlet/app/widgets/comment_image_strip.dart';
 import 'package:novel_playlet/app/widgets/comment_image_viewer.dart';
 import 'package:novel_playlet/data/models/book_comment.dart';
+import 'package:novel_playlet/data/models/comment_image.dart';
 import 'package:novel_playlet/features/detail/detail_reviews_section.dart';
 
 import 'test_images.dart';
@@ -64,8 +65,12 @@ void main() {
               child: SizedBox(
                 width: 320,
                 child: CommentImageStrip(
-                  imageUrls: [
-                    for (var i = 0; i < 12; i++) 'https://example.com/$i.jpg',
+                  imageRefs: [
+                    for (var i = 0; i < 12; i++)
+                      CommentImageRef(
+                        thumb: 'https://example.com/$i-thumb.jpg',
+                        full: 'https://example.com/$i.jpg',
+                      ),
                   ],
                 ),
               ),

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/models/comment_image.dart';
 import 'comment_image_loader.dart';
 import 'comment_image_viewer.dart';
 
@@ -12,17 +13,19 @@ import 'comment_image_viewer.dart';
 /// （最多 [maxImages] 张，超出在最后一张上盖 `+N`）。点任意一张进全屏
 /// 查看器（[_CommentThumbnail] → [showCommentImageViewer]）。
 ///
-/// 缩略图按格位物理像素解码（`memCacheWidth`），避免拿原图进 ImageCache；
-/// 加载中/失败都退化成占位块，不会把整条评论撑坏。
+/// 缩略图取 [CommentImageRef.thumb]（上游有 `thumb_url` 时就是小图），并按
+/// 格位物理像素解码（`memCacheWidth`，loader 用 ResizeImage）；全屏查看器才
+/// 拿 [CommentImageRef.full] 原图。加载中/失败都退化成占位块，不会把整条
+/// 评论撑坏。
 class CommentImageStrip extends ConsumerWidget {
   const CommentImageStrip({
     super.key,
-    required this.imageUrls,
+    required this.imageRefs,
     this.compact = false,
     this.placeholderColor,
   });
 
-  final List<String> imageUrls;
+  final List<CommentImageRef> imageRefs;
 
   /// 回复区用紧凑尺寸（更小的格子、圆角）。
   final bool compact;
@@ -37,35 +40,42 @@ class CommentImageStrip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final urls = [
-      for (final url in imageUrls)
-        if (url.isNotEmpty) url,
+    final refs = [
+      for (final ref in imageRefs)
+        if (ref.thumb.isNotEmpty || ref.full.isNotEmpty) ref,
     ];
-    if (urls.isEmpty) return const SizedBox.shrink();
+    if (refs.isEmpty) return const SizedBox.shrink();
+    // 缩略图格位用 thumb（缺失时退回原图），查看器永远拿原图。
+    final thumbs = [
+      for (final ref in refs) ref.thumb.isEmpty ? ref.full : ref.thumb,
+    ];
+    final fullUrls = [
+      for (final ref in refs) ref.full.isEmpty ? ref.thumb : ref.full,
+    ];
     final loader = ref.watch(commentImageLoaderProvider);
-    final visible = math.min(urls.length, maxImages);
-    final extra = urls.length - visible;
+    final visible = math.min(refs.length, maxImages);
+    final extra = refs.length - visible;
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final size = _tileSize(constraints.maxWidth, urls.length);
+        final size = _tileSize(constraints.maxWidth, refs.length);
         return Wrap(
           spacing: _spacing,
           runSpacing: _spacing,
           children: [
             for (var index = 0; index < visible; index++)
               _CommentThumbnail(
-                url: urls[index],
+                url: thumbs[index],
                 size: size,
                 loader: loader,
                 compact: compact,
                 placeholderColor: placeholderColor,
                 overlayCount: index == visible - 1 && extra > 0 ? extra : null,
                 index: index,
-                total: urls.length,
+                total: refs.length,
                 onTap: () => showCommentImageViewer(
                   context,
-                  imageUrls: urls,
+                  imageUrls: fullUrls,
                   initialIndex: index,
                 ),
               ),

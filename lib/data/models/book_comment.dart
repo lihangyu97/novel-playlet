@@ -11,6 +11,7 @@ class BookComment {
     this.id = '',
     this.text = '',
     this.imageUrls = const <String>[],
+    this.imageRefs = const <CommentImageRef>[],
     this.score = 0,
     this.diggCount = 0,
     this.replyCount = 0,
@@ -24,7 +25,15 @@ class BookComment {
 
   final String id;
   final String text;
+
+  /// 配图的原图 URL 列表（查看器/旧调用方用）。
+  ///
+  /// 解析器同时填 [imageRefs]；手工构造（测试/旧代码）只给这个字段也兼容，
+  /// UI 通过 [imageRefsOrFallback] 取缩略图/原图。
   final List<String> imageUrls;
+
+  /// 配图的缩略图 + 原图（优先用它渲染，避免缩略图位下原图）。
+  final List<CommentImageRef> imageRefs;
 
   /// 书评才有：上游 0–10 分；段评恒为 0。
   final int score;
@@ -43,7 +52,15 @@ class BookComment {
   /// `data_type`：段评/书评 0，短剧评论另有一套取值（本模型不区分）。
   final int dataType;
 
-  bool get isEmpty => text.trim().isEmpty && imageUrls.isEmpty;
+  /// 渲染用配图：优先新字段（含 thumb/full），只有旧字段时 thumb=full。
+  List<CommentImageRef> get imageRefsOrFallback => imageRefs.isNotEmpty
+      ? imageRefs
+      : <CommentImageRef>[
+          for (final url in imageUrls) CommentImageRef(thumb: url, full: url),
+        ];
+
+  bool get isEmpty =>
+      text.trim().isEmpty && imageUrls.isEmpty && imageRefs.isEmpty;
 
   /// 书评的 5 星展示（0–10 分折半）。
   double get stars => (score.clamp(0, 10)) / 2;
@@ -78,14 +95,15 @@ class BookComment {
         asMap(userInfo['base_info']) ?? asMap(userInfo['baseInfo']) ?? const {};
     final userTag = asMap(userInfo['user_tag']) ?? const <String, dynamic>{};
     final text = firstString(content, ['text', 'content']);
-    final images = parseCommentImages(
+    final images = parseCommentImageRefs(
       content['image_data_list'] ?? content['image_data'],
     );
     if (text.isEmpty && images.isEmpty) return null;
     return BookComment(
       id: firstString(comment, ['comment_id', 'commentId', 'id']),
       text: text,
-      imageUrls: images,
+      imageUrls: <String>[for (final ref in images) ref.full],
+      imageRefs: images,
       diggCount: asInt(stat['digg_count'] ?? stat['diggCount']),
       replyCount: asInt(stat['reply_count'] ?? stat['replyCount']),
       createdAt: _parseTime(
@@ -103,7 +121,9 @@ class BookComment {
     final map = asMap(raw);
     if (map == null) return null;
     final text = firstString(map, ['text', 'content']);
-    final images = parseCommentImages(map['image_data_list'] ?? map['images']);
+    final images = parseCommentImageRefs(
+      map['image_data_list'] ?? map['images'],
+    );
     if (text.isEmpty && images.isEmpty) return null;
     final userInfo = asMap(map['user_info']) ?? const <String, dynamic>{};
     final baseInfo =
@@ -111,7 +131,8 @@ class BookComment {
     return BookComment(
       id: firstString(map, ['comment_id', 'commentId', 'id']),
       text: text,
-      imageUrls: images,
+      imageUrls: <String>[for (final ref in images) ref.full],
+      imageRefs: images,
       score: asInt(map['score']),
       diggCount: asInt(map['digg_count'] ?? map['diggCount']),
       replyCount: asInt(map['reply_count'] ?? map['replyCount']),

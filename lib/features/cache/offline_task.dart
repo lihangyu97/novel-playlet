@@ -227,3 +227,24 @@ class OfflineQueuedTask {
   final String title;
   final String cover;
 }
+
+/// 当前「可能正在写离线区」的 kind 集合。
+///
+/// 缓存中心进页会扫盘自愈（`reconcile` / `pruneOrphans` / 整区 `cleanupPartFiles`），
+/// 其中后两步会删该区所有 `*.part`；而下载器可能正在同一个 `.part` 上
+/// `openWrite()`——删掉后 `commitEpisode` 抛 `part file missing`，整集从 0
+/// 重下（P1-1）。扫盘前用这个集合跳过繁忙区：
+///
+/// - 只有 [OfflineTaskStatus.done] 是「确定不会再写」的终态；
+/// - `running` 正在写；`paused` / `failed` 随时可能被「继续 / 重试」重新
+///   启动；队列里的下一个任务也会在当前任务收尾后立刻开始；
+/// - `idle` 理论上不会发布（默认值），保守按繁忙处理。
+Set<OfflineTaskKind> busyOfflineKinds(
+  OfflineTask? task,
+  Iterable<OfflineQueuedTask> queue,
+) {
+  return <OfflineTaskKind>{
+    for (final item in queue) item.kind,
+    if (task != null && task.status != OfflineTaskStatus.done) task.kind,
+  };
+}

@@ -10,6 +10,7 @@ class CommentReply {
     this.id = '',
     this.text = '',
     this.imageUrls = const <String>[],
+    this.imageRefs = const <CommentImageRef>[],
     this.diggCount = 0,
     this.createdAt,
     this.userName = '',
@@ -18,13 +19,27 @@ class CommentReply {
 
   final String id;
   final String text;
+
+  /// 配图原图 URL（查看器/旧调用方用）；解析器同时填 [imageRefs]。
   final List<String> imageUrls;
+
+  /// 配图缩略图 + 原图（UI 渲染优先用它）。
+  final List<CommentImageRef> imageRefs;
+
   final int diggCount;
   final DateTime? createdAt;
   final String userName;
   final String userAvatar;
 
-  bool get isEmpty => text.trim().isEmpty && imageUrls.isEmpty;
+  /// 渲染用配图：优先新字段（含 thumb/full），只有旧字段时 thumb=full。
+  List<CommentImageRef> get imageRefsOrFallback => imageRefs.isNotEmpty
+      ? imageRefs
+      : <CommentImageRef>[
+          for (final url in imageUrls) CommentImageRef(thumb: url, full: url),
+        ];
+
+  bool get isEmpty =>
+      text.trim().isEmpty && imageUrls.isEmpty && imageRefs.isEmpty;
 
   static CommentReply? fromPayload(Object? raw) {
     final map = asMap(raw);
@@ -36,14 +51,15 @@ class CommentReply {
     final baseInfo =
         asMap(userInfo['base_info']) ?? asMap(userInfo['baseInfo']) ?? userInfo;
     final text = firstString(content, ['text', 'content']);
-    final images = parseCommentImages(
+    final images = parseCommentImageRefs(
       content['image_data_list'] ?? content['image_data'],
     );
     if (text.isEmpty && images.isEmpty) return null;
     return CommentReply(
       id: firstString(map, ['reply_id', 'replyId', 'id']),
       text: text,
-      imageUrls: images,
+      imageUrls: <String>[for (final ref in images) ref.full],
+      imageRefs: images,
       diggCount: asInt(stat['digg_count'] ?? stat['diggCount']),
       createdAt: _parseTime(
         common['create_timestamp'] ?? common['createTimestamp'],

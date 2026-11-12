@@ -19,14 +19,6 @@ const themeColorOptions = <ThemeColorOption>[
   ThemeColorOption('绯红', Color(0xFFEF5350)),
 ];
 
-/// 主题色的展示名：命中预设用预设名，否则叫「自定义」。
-String themeColorName(Color color) {
-  for (final option in themeColorOptions) {
-    if (option.color == color) return option.name;
-  }
-  return '自定义';
-}
-
 /// 当前主题色是不是预设色之一（否则算自定义）。
 bool isPresetColor(Color color) =>
     themeColorOptions.any((option) => option.color == color);

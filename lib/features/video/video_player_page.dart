@@ -9,15 +9,17 @@ import 'package:video_player/video_player.dart';
 import '../../app/providers.dart';
 import '../../app/router.dart';
 import '../../app/widgets/app_snack_bar.dart';
+import '../../app/widgets/novel_cover.dart';
 import '../../data/models/chapter.dart';
-import '../../data/models/json_utils.dart';
 import '../../data/models/video_series.dart';
 import '../../data/models/video_source.dart';
 import '../cache/cache_providers.dart';
 import '../cache/offline_task.dart';
 import '../cache/widgets/offline_download_button.dart';
+import 'episode_source_resolver.dart';
 import 'network_health.dart';
 import 'offline_playback.dart';
+import 'playback_failure.dart';
 import 'playback_speed.dart';
 import 'video_library_providers.dart';
 import 'widgets/episode_picker_sheet.dart';
@@ -80,17 +82,6 @@ class VideoPlayerPage extends ConsumerStatefulWidget {
   ConsumerState<VideoPlayerPage> createState() => _VideoPlayerPageState();
 }
 
-/// 近期发生过网络类失败后，主动跳过取流（见 [NetworkHealth]）。
-///
-/// 单独一个类型是为了让 `_open` 的 catch 能区分「真的取流失败」和「按策略
-/// 主动跳过」：后者不应再记一次失败，但同样落到「未离线缓存」的文案。
-class _OfflineSuspected implements Exception {
-  const _OfflineSuspected();
-
-  @override
-  String toString() => 'network recently failed; skipped source resolution';
-}
-
 class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     with WidgetsBindingObserver {
   late int _index;
@@ -100,7 +91,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
 
   /// 播放失败的原因 + 可复制的技术详情。播放页的失败原因不止"网络"，也可能是
   /// 缓存文件半截、编码不支持、ATS 拦截，所以不能只给一句"请重试"。
-  _PlaybackFailure? _error;
+  PlaybackFailure? _error;
 
   /// 异步换集的结果校验：用户连续点下一集时，旧请求回来必须丢弃。
   int _generation = 0;
@@ -305,114 +296,45 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     }
 
     try {
-      // 离线副本优先：命中就直接开本地明文 mp4，不请求内核、不等待
-      // 「准备播放」。未命中才走原来的在线流程（见 docs/implementation.md）。
-      final offlineFile = await _offlineFile(episode.id, refresh: refresh);
-      if (!mounted || generation != _generation) return;
-      // 「确认离线」只能在取流失败后推断，所以这里先按在线尝试。
-      final plan = resolveOfflineEpisode(
-        cachedFile: offlineFile,
-        offline: false,
+      // 取流级联（离线 → 预取 → 内核缓存 → stream → 整集下载）统一由
+      // [EpisodeSourceResolver] 决定；正式起播传入 playNetworkUrl，让它在
+      // 每个候选地址上真的起播、失败再回退下一级。
+      final resolved =
+          await _episodeSourceResolver(
+            isCancelled: () => !mounted || generation != _generation,
+          ).resolve(
+            episodeId: episode.id,
+            refresh: refresh,
+            playNetworkUrl: (url) async {
+              sourceUrl = url;
+              await _startController(
+                ref.read(playbackControllerFactoryProvider)(
+                  networkUrl: Uri.parse(url),
+                ),
+                index: index,
+                generation: generation,
+                autoAdvance: autoAdvance,
+              );
+            },
+          );
+      // null = 已被更新的切集请求取代（generation 变了），直接丢弃。
+      if (resolved == null) return;
+      // 网络源在上面 playNetworkUrl 里已经起播；只有离线文件需要这里建
+      // controller（本地明文 mp4 不碰内核）。
+      if (!resolved.isLocal) return;
+      localPath = resolved.file!.path;
+      await _startController(
+        ref.read(playbackControllerFactoryProvider)(file: resolved.file!),
+        index: index,
+        generation: generation,
+        autoAdvance: autoAdvance,
       );
-      if (plan.isLocal) {
-        localPath = plan.file!.path;
-        final controller = ref.read(playbackControllerFactoryProvider)(
-          file: plan.file!,
-        );
-        await _startController(
-          controller,
-          index: index,
-          generation: generation,
-          autoAdvance: autoAdvance,
-        );
-        return;
-      }
-
-      final api = ref.read(apiClientProvider);
-      final factory = ref.read(playbackControllerFactoryProvider);
-
-      Future<void> playUrl(String url) async {
-        sourceUrl = url;
-        await _startController(
-          factory(networkUrl: Uri.parse(url)),
-          index: index,
-          generation: generation,
-          autoAdvance: autoAdvance,
-        );
-      }
-
-      // 当前集播放期间预取的下一集：命中就省掉一次取流（缓存未命中时那次
-      // 会整集下载，是切集等待的大头）。
-      final cachedSource = _prefetched.remove(episode.id);
-      final prefetched = refresh ? null : cachedSource;
-      if (prefetched != null) {
-        try {
-          await playUrl(prefetched.url);
-          return;
-        } catch (error) {
-          // 预取的 `/src` 可能已被内核 128MB 预算淘汰：回退正常取流。
-          // 但「回环监听被回收」不是地址问题，回退只会再失败一次；抛给外层
-          // 走一次有界自愈（见下面 catch）。
-          if (_isLoopbackConnectRefused(error)) rethrow;
-        }
-      }
-
-      // 先探内核本地缓存（mode=cached）：命中就不打上游，断网也能播自动缓存集。
-      if (!refresh) {
-        String? cachedUrl;
-        try {
-          cachedUrl = await api.cachedVideoUrl(episode.id);
-        } catch (_) {
-          // 探测失败当 miss，错误交给正常取流路径展示。
-        }
-        if (!mounted || generation != _generation) return;
-        if (cachedUrl != null) {
-          try {
-            await playUrl(cachedUrl);
-            return;
-          } catch (error) {
-            // 缓存条目可能刚被淘汰/半截：继续走正常取流。回环监听被回收时
-            // 同理不能回退（下一次取流也播不了），交给外层自愈。
-            if (_isLoopbackConnectRefused(error)) rethrow;
-          }
-        }
-      }
-
-      // 刚发生过网络类失败：这一集又没有离线副本 / 本地缓存，别再付一次
-      // 完整取流等待（黑洞网络下内核重试会耗几十秒），直接给可操作文案。
-      // 用户点「重试」会清掉标记并强制走一次完整网络请求。
-      if (!refresh && ref.read(networkHealthProvider).isSuspectedOffline) {
-        throw const _OfflineSuspected();
-      }
-
-      // 在线优先走 mode=stream：内核立即返回 `/src` 地址并在后台继续下载，
-      // 起播不用等整集落盘。refresh（用户要求重新下载这一集）跳过它，直接
-      // 走整集重取。stream 取流/起播失败时回退下面的默认整集下载兜底，不能
-      // 因为新模式把原本能播的集变成错误页；-1004 是回环监听被回收，回退也
-      // 播不了，仍交给外层做一次有界自愈。
-      if (!refresh) {
-        try {
-          final streamed = await api.videoSource(episode.id, stream: true);
-          if (!mounted || generation != _generation) return;
-          ref.read(networkHealthProvider).recordSuccess();
-          await playUrl(streamed.url);
-          return;
-        } catch (error) {
-          if (!mounted || generation != _generation) return;
-          if (_isLoopbackConnectRefused(error)) rethrow;
-        }
-      }
-
-      final source = await api.videoSource(episode.id, refresh: refresh);
-      if (!mounted || generation != _generation) return;
-      ref.read(networkHealthProvider).recordSuccess();
-      await playUrl(source.url);
     } catch (error, stack) {
       if (!mounted || generation != _generation) return;
       // iOS 长时间挂起后会回收回环监听（Apple TN2277）：内核 FFI 还活着，
       // 但 AVPlayer 连 127.0.0.1 被拒（-1004）。先探活/必要时整核重启，
       // 服务回来后把这一集重新打开一次；[recovered] 保证最多恢复一次。
-      if (!recovered && _isLoopbackConnectRefused(error)) {
+      if (!recovered && isLoopbackConnectRefused(error)) {
         final restored = await ref.read(backendEnsureLoopbackProvider)();
         if (!mounted || generation != _generation) return;
         if (restored) {
@@ -430,8 +352,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       // 没有离线副本、失败又像「网络不可达」：换成明确文案；网络在线时保留
       // 原来的失败原因（上游/鉴权/解码各有各的说明 + 重试入口）。
       final offlineLike =
-          error is _OfflineSuspected || isOfflineNetworkFailure(error);
-      if (error is! _OfflineSuspected && isOfflineNetworkFailure(error)) {
+          error is SuspectedOfflineException || isOfflineNetworkFailure(error);
+      if (error is! SuspectedOfflineException &&
+          isOfflineNetworkFailure(error)) {
         // 记住这次失败，后续切集不再重复等一次完整取流（见 NetworkHealth）。
         ref.read(networkHealthProvider).recordFailure();
       }
@@ -439,33 +362,61 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
         cachedFile: null,
         offline: offlineLike,
       );
+      final failureContext = _failureContext(
+        episode,
+        sourceUrl: sourceUrl,
+        localPath: localPath,
+        refreshed: refresh,
+      );
       setState(() {
         _loading = false;
         _showSpinner = false;
         _error = missedOffline.source == EpisodePlaybackSource.offlineMiss
-            ? _PlaybackFailure(
-                title: EpisodePlaybackPlan.offlineMissTitle,
-                reason: EpisodePlaybackPlan.offlineMissReason,
-                detail: _playbackDetail(
-                  episode,
-                  sourceUrl: sourceUrl,
-                  localPath: localPath,
-                  refreshed: refresh,
-                  error: error,
-                  stack: stack,
-                ),
-              )
-            : _describePlaybackError(
-                error,
-                stack: stack,
-                episode: episode,
-                sourceUrl: sourceUrl,
-                localPath: localPath,
-                refreshed: refresh,
-              );
+            ? offlineMissPlaybackFailure(error, stack, context: failureContext)
+            : describePlaybackFailure(error, stack, context: failureContext);
       });
     }
   }
+
+  /// 组装一集的取流级联：把页面的 IO（离线副本 / 预取 / 内核缓存 / 取流）
+  /// 与 [NetworkHealth] 接到 [EpisodeSourceResolver] 上。
+  ///
+  /// resolver 不持有 State：取消判定通过 [isCancelled] 注入，网络源是否真的
+  /// 起播由调用方决定（正式起播传 `playNetworkUrl`；预热/预取只解析地址）。
+  EpisodeSourceResolver _episodeSourceResolver({
+    required bool Function() isCancelled,
+  }) {
+    final api = ref.read(apiClientProvider);
+    final health = ref.read(networkHealthProvider);
+    return EpisodeSourceResolver(
+      loadOfflineFile: (episodeId, {required refresh}) =>
+          _offlineFile(episodeId, refresh: refresh),
+      takePrefetchedUrl: (episodeId) => _prefetched.remove(episodeId)?.url,
+      probeCachedUrl: api.cachedVideoUrl,
+      fetchSource: (episodeId, {required stream, required refresh}) => stream
+          ? api.videoSource(episodeId, stream: true)
+          : api.videoSource(episodeId, refresh: refresh),
+      isSuspectedOffline: () => health.isSuspectedOffline,
+      recordSuccess: health.recordSuccess,
+      isCancelled: isCancelled,
+    );
+  }
+
+  /// 失败文案的纯数据上下文（集信息 + 本次取源尝试）。
+  PlaybackFailureContext _failureContext(
+    Chapter episode, {
+    required String sourceUrl,
+    required String localPath,
+    required bool refreshed,
+  }) => PlaybackFailureContext(
+    seriesTitle: widget.args.seriesTitle,
+    episodeTitle: episode.title,
+    episodeId: episode.id,
+    episodeNumber: _index + 1,
+    sourceUrl: sourceUrl,
+    localPath: localPath,
+    refreshed: refreshed,
+  );
 
   /// 用户主动重试 / 重新下载：清掉「疑似离线」再走一次完整取流。
   ///
@@ -571,7 +522,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       // 用户点「重新下载这一集」：本地副本可能已损坏，删掉后走网络重新取流。
       // 顺带按文件存在校正 manifest，否则详情页/缓存中心会继续显示这一集「已缓存」。
       await cached.delete();
-      await store.reconcile(seriesId);
+      // 重新下载这一集时只校正 manifest；`.part` 清理关掉——同一部剧可能正
+      // 在后台离线下载，别把下载器的在写文件删掉（P1-1 的同一类竞态）。
+      await store.reconcile(seriesId, cleanupParts: false);
     } catch (_) {
       // 离线区读/删/校正失败（权限、插件缺失等）不能拖垮在线播放。
     }
@@ -581,25 +534,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       ref.invalidate(offlineSeriesProvider(seriesId));
     }
     return null;
-  }
-
-  /// 在线取流（预热用）：优先 `mode=stream`，失败回退默认整集下载。
-  ///
-  /// stream 只让内核「开始下载并立即返回 `/src` 地址」，起播不再等整集落盘；
-  /// 内核不支持 stream / 本次取流异常时回退到原来的整集下载路径，避免预热
-  /// 因为新模式整体失效。正式取流（[_open]）的起播失败回退更细，单独实现。
-  Future<VideoSource> _onlineSource(String episodeId) async {
-    final api = ref.read(apiClientProvider);
-    try {
-      final source = await api.videoSource(episodeId, stream: true);
-      ref.read(networkHealthProvider).recordSuccess();
-      return source;
-    } catch (_) {
-      // 回退整集下载；失败原因由提交后的 _open 统一展示。
-    }
-    final source = await api.videoSource(episodeId);
-    ref.read(networkHealthProvider).recordSuccess();
-    return source;
   }
 
   void _onTick() {
@@ -680,32 +614,14 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     if (!mounted || _prefetching.contains(episode.id)) return;
     _prefetching.add(episode.id);
     try {
-      final api = ref.read(apiClientProvider);
-      // 先探本地缓存：命中就不用为预取再触发一次取流。
-      String? cachedUrl;
-      try {
-        cachedUrl = await api.cachedVideoUrl(episode.id);
-      } catch (_) {
-        // 探测失败当 miss。
-      }
-      if (!mounted) return;
-      if (cachedUrl != null) {
-        // 缓存命中：地址已经是完整文件，不需要再让内核启动下载。
-        _rememberPrefetched(episode.id, VideoSource(url: cachedUrl));
-        return;
-      }
-      // 预取优先用 stream 源：内核立即返回 `/src` 地址并在后台下载下一集，
-      // 切集时直接拿现成地址起播；内核不支持时回退旧的整集下载预取。
-      VideoSource source;
-      try {
-        source = await api.videoSource(episode.id, stream: true);
-      } catch (_) {
-        source = await api.videoSource(episode.id);
-      }
-      if (!mounted) return;
-      // 预取真的走了网络且成功：说明网络可用，清掉「疑似离线」。
-      ref.read(networkHealthProvider).recordSuccess();
-      _rememberPrefetched(episode.id, source);
+      // 预取只解析地址、不起播：交给同一个取流级联（内核缓存命中 → stream
+      // → 整集下载兜底），拿到地址后存进页内 LRU。
+      final resolved = await _episodeSourceResolver(isCancelled: () => !mounted)
+          .resolve(episodeId: episode.id);
+      if (resolved == null || resolved.isLocal) return;
+      // 预取真的走了网络且成功时 resolver 已 recordSuccess；这里只记地址
+      // （切集只用得到 url）。
+      _rememberPrefetched(episode.id, VideoSource(url: resolved.url!));
     } catch (_) {
       // 预取失败静默：切集时走正常取流，失败原因由播放页统一展示。
     } finally {
@@ -719,146 +635,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       _prefetched.remove(_prefetched.keys.first);
     }
     _prefetched[episodeId] = source;
-  }
-
-  /// 这次失败是不是「回环监听已死」——connect refused。
-  ///
-  /// iOS 长时间挂起后会回收 listening socket（Apple TN2277），内核 FFI 照常
-  /// 可用，但 127.0.0.1 上已经没人 accept；AVPlayer 把它报成
-  /// NSURLErrorCannotConnectToHost(-1004, "Could not connect to the server")。
-  /// vendored video_player_avfoundation 只把 localizedDescription 传上来
-  /// （没有数字 code），所以以英文文案为主、数字 code 只作兜底。
-  bool _isLoopbackConnectRefused(Object error) {
-    if (error is SocketException) {
-      final code = error.osError?.errorCode;
-      return code == 61 || // Darwin ECONNREFUSED
-          code == 111 || // Linux ECONNREFUSED
-          error.message.toLowerCase().contains('connection refused');
-    }
-    if (error is! PlatformException) return false;
-    final text = [
-      error.code,
-      error.message ?? '',
-      error.details?.toString() ?? '',
-    ].join(' ').toLowerCase();
-    return text.contains('could not connect to the server') ||
-        text.contains('cannot connect to host') ||
-        text.contains('connection refused') ||
-        text.contains('-1004');
-  }
-
-  /// 把播放异常翻译成"人话原因 + 可复制的技术详情"。
-  ///
-  /// 失败发生在两段：`videoSource`（内核取流/整集下载，抛 ApiException；
-  /// B2 之后 504 超时已被 ApiClient 归一成 `ApiException(kind: timeout)`，
-  /// 只有 499 取消还走 TimeoutException）和 `controller.initialize()`
-  /// （AVPlayer，抛 PlatformException，msg 里带 AVFoundation 的 `Code=-xxxxx`）。
-  _PlaybackFailure _describePlaybackError(
-    Object error, {
-    required StackTrace stack,
-    required Chapter episode,
-    required String sourceUrl,
-    required String localPath,
-    required bool refreshed,
-  }) {
-    final raw = error.toString();
-    final rawLower = raw.toLowerCase();
-    String title;
-    String reason;
-
-    // 504 超时（ApiException.kind == timeout）与 499 取消的 TimeoutException
-    // 都按"取流超时"展示：B2 之后超时不再落进通用"取流失败"。
-    final timedOut =
-        error is TimeoutException ||
-        (error is ApiException && error.kind == ApiErrorKind.timeout);
-    if (timedOut) {
-      title = '取流超时';
-      reason = '等内核下载/解密这一集超过 120 秒。常见于网络慢、上游限速，或这一集体积过大。';
-    } else if (error is ApiException) {
-      title = '取流失败';
-      // 具体原因优先；技术兜底换 kind 短句（deviceFailed 会提示重启应用）。
-      reason = apiErrorCopy(error, fallback: '取流失败，请重试');
-    } else if (error is PlatformException) {
-      final text = [
-        error.code,
-        error.message ?? '',
-        error.details?.toString() ?? '',
-      ].join(' | ');
-      if (RegExp(r'-1022|App Transport Security').hasMatch(text)) {
-        title = '本地视频流被 ATS 拦截';
-        reason = 'iOS 拒绝了 http://127.0.0.1 的回环请求（Info.plist 的 ATS 例外没生效）。';
-      } else if (RegExp(r'-1001|-1005|-1009|-1011|-1012|-1200|-1202')
-          .hasMatch(text)) {
-        title = '本地视频流连接中断';
-        reason =
-            'AVPlayer 读本地回环流时断开了：常见于内核下载被中断（App 切后台）、'
-            '或回环服务被系统回收。点「重新下载这一集」重试。';
-      } else if (RegExp(
-        r'-1102|-11800|-11828|-11829|avfoundationerrordomain|decode|format',
-        caseSensitive: false,
-      ).hasMatch(text)) {
-        title = '视频解码失败';
-        reason = localPath.isNotEmpty
-            ? '离线缓存文件可能损坏（下载不完整或被外部清理）。'
-                  '点「重新下载这一集」会删掉本地文件后重新联网取流。'
-            : '这一集的文件可能损坏（半截缓存）或编码不受支持。'
-                  '可以点「重新下载这一集」清掉缓存重取。';
-      } else if (RegExp(r'403|404|410').hasMatch(text)) {
-        title = '本地视频地址失效';
-        reason = '回环服务对 /src 返回了 4xx，多半是缓存被清理或内核重启过。重新下载这一集即可。';
-      } else if (_isLoopbackConnectRefused(error)) {
-        title = '本地视频服务未响应';
-        reason =
-            '播放器连不上 App 内的本地视频服务（127.0.0.1）：App 长时间在后台后，'
-            '系统回收了本机回环监听（iOS TN2277）。已尝试自动重启播放服务；'
-            '如果仍然失败，请重启 App。';
-      } else {
-        title = 'AVPlayer 播放失败';
-        reason = '播放器内部错误，具体信息见下方。';
-      }
-      // 兜底：有些插件版本把网络类错误包在 message 的英文描述里。
-      if (title == 'AVPlayer 播放失败' && rawLower.contains('network')) {
-        title = '本地视频流连接中断';
-        reason = '播放器报告网络类错误，详情见下方。';
-      }
-    } else {
-      title = '视频播放失败';
-      reason = '未归类的错误，详情见下方。';
-    }
-
-    return _PlaybackFailure(
-      title: title,
-      reason: reason,
-      detail: _playbackDetail(
-        episode,
-        sourceUrl: sourceUrl,
-        localPath: localPath,
-        refreshed: refreshed,
-        error: error,
-        stack: stack,
-      ),
-    );
-  }
-
-  /// 可复制的技术详情：集 id、地址、原始异常、堆栈前几行。
-  String _playbackDetail(
-    Chapter episode, {
-    required String sourceUrl,
-    required String localPath,
-    required bool refreshed,
-    required Object error,
-    required StackTrace stack,
-  }) {
-    final frames = stack.toString().split('\n').take(4).join('\n');
-    return [
-      '《${widget.args.seriesTitle}》第 ${_index + 1} 集 ${episode.title}（id=${episode.id}）',
-      if (sourceUrl.isNotEmpty) '播放地址: $sourceUrl',
-      if (localPath.isNotEmpty) '离线文件: $localPath',
-      if (refreshed) '本次为「重新下载这一集」后的结果',
-      '错误类型: ${error.runtimeType}',
-      '原始错误: $error',
-      if (frames.isNotEmpty) '堆栈(前 4 行):\n$frames',
-    ].join('\n');
   }
 
   Future<void> _copyError() async {
@@ -1098,35 +874,18 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     final episode = _episodes[index];
     VideoPlayerController? controller;
     try {
-      final offlineFile = await _offlineFile(episode.id, refresh: false);
-      if (!mounted || token != _prepareToken) return;
-      if (offlineFile != null) {
-        controller = ref.read(playbackControllerFactoryProvider)(
-          file: offlineFile,
-        );
-      } else {
-        final api = ref.read(apiClientProvider);
-        String? url = _prefetched.remove(episode.id)?.url;
-        if (url == null) {
-          try {
-            url = await api.cachedVideoUrl(episode.id);
-          } catch (_) {
-            // 探测失败当 miss，交给正常取流。
-          }
-          if (!mounted || token != _prepareToken) return;
-          if (url == null) {
-            // 疑似离线：不在预热里白等内核重试，落定后由 _open 给明确文案。
-            if (ref.read(networkHealthProvider).isSuspectedOffline) return;
-            // 和正式取流同一优先级：先 stream（立即拿 /src + 后台下载），
-            // 失败再回退整集下载。
-            url = (await _onlineSource(episode.id)).url;
-            if (!mounted || token != _prepareToken) return;
-          }
-        }
-        controller = ref.read(playbackControllerFactoryProvider)(
-          networkUrl: Uri.parse(url),
-        );
-      }
+      // 和正式起播同一条取流级联（离线 → 预取 → 内核缓存 → stream → 整集
+      // 下载），但不传 playNetworkUrl：预热只解析地址，controller 由这里
+      // 建好后停在第一帧。
+      final resolved = await _episodeSourceResolver(
+        isCancelled: () => !mounted || token != _prepareToken,
+      ).resolve(episodeId: episode.id);
+      if (resolved == null) return;
+      controller = resolved.isLocal
+          ? ref.read(playbackControllerFactoryProvider)(file: resolved.file!)
+          : ref.read(playbackControllerFactoryProvider)(
+              networkUrl: Uri.parse(resolved.url!),
+            );
       await controller.initialize();
       if (!mounted || token != _prepareToken) {
         unawaited(controller.dispose());
@@ -1604,12 +1363,19 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     return Stack(
       fit: StackFit.expand,
       children: [
-        Image.network(
-          cover,
-          fit: BoxFit.cover,
-          // 封面加载失败退回纯黑，不阻塞占位文案/预热。
-          errorBuilder: (context, error, stackTrace) =>
-              const ColoredBox(color: Colors.black),
+        // 与全站共用封面组件：接 AppImageCache 磁盘缓存（列表页/详情页已下过
+        // 的封面直接命中）、占位色与失败兜底。不再用 Image.network——它会
+        // 各建一个图片 provider，滑动相邻页时白下一遍封面，断网则全黑。
+        // 圆角置 0、铺满整页；加载中给黑底占位，保持原「封面暗化」观感。
+        LayoutBuilder(
+          builder: (context, constraints) => NovelCover(
+            url: cover,
+            width: constraints.maxWidth,
+            height: constraints.maxHeight,
+            radius: 0,
+            placeholderColor: Colors.black,
+            fadeInDuration: Duration.zero,
+          ),
         ),
         const ColoredBox(color: Color(0x99000000)),
         Center(child: child),
@@ -2143,22 +1909,4 @@ String _formatDuration(Duration value) {
   final minutes = (seconds ~/ 60).toString().padLeft(2, '0');
   final rest = (seconds % 60).toString().padLeft(2, '0');
   return '$minutes:$rest';
-}
-
-/// 一次播放失败的可展示信息。
-class _PlaybackFailure {
-  const _PlaybackFailure({
-    required this.title,
-    required this.reason,
-    required this.detail,
-  });
-
-  /// 一句话标题（如「视频解码失败」）。
-  final String title;
-
-  /// 可能原因与建议动作。
-  final String reason;
-
-  /// 可复制的技术详情（集 id、地址、原始异常、堆栈前几行）。
-  final String detail;
 }
