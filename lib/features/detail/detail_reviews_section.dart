@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/widgets/comment_image_strip.dart';
 import '../../app/widgets/detail/detail_common.dart';
 import '../../data/models/book_comment.dart';
 
@@ -184,6 +185,10 @@ class DetailReviewRow extends StatelessWidget {
                         : TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
                   ),
+                ],
+                if (comment.imageUrls.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  CommentImageStrip(imageUrls: comment.imageUrls),
                 ],
                 const SizedBox(height: 6),
                 Row(

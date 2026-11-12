@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme/app_theme.dart';
+import '../../app/widgets/comment_image_strip.dart';
 import '../../data/api/api_client.dart';
 import '../../data/models/book_comment.dart';
 import '../../data/models/comment_reply.dart';
@@ -315,7 +316,7 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 8, 10),
+            padding: const EdgeInsets.fromLTRB(20, 16, 8, 10),
             child: Row(
               children: [
                 Expanded(
@@ -474,9 +475,11 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
                     ],
                     if (comment.imageUrls.isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      // 评论图片同样不加载网络图，只给一个占位标记；
-                      // 表情图也不做特殊渲染，按正文原样展示。
-                      _buildImageBadge(foreground),
+                      CommentImageStrip(
+                        imageUrls: comment.imageUrls,
+                        // 弹层底色跟随纸色，占位块不能直接吃全局主题的灰。
+                        placeholderColor: foreground.withValues(alpha: 0.06),
+                      ),
                     ],
                     const SizedBox(height: 6),
                     _buildMetaRow(comment, scheme, foreground),
@@ -693,7 +696,11 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
                 ],
                 if (reply.imageUrls.isNotEmpty) ...[
                   const SizedBox(height: 4),
-                  _buildImageBadge(foreground),
+                  CommentImageStrip(
+                    imageUrls: reply.imageUrls,
+                    compact: true,
+                    placeholderColor: foreground.withValues(alpha: 0.06),
+                  ),
                 ],
                 if (reply.diggCount > 0) ...[
                   const SizedBox(height: 3),
@@ -735,23 +742,6 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
           fontSize: radius * 0.8,
           fontWeight: FontWeight.w600,
           color: scheme.primary,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildImageBadge(Color foreground) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: foreground.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        '[图片]',
-        style: TextStyle(
-          fontSize: 11,
-          color: foreground.withValues(alpha: 0.55),
         ),
       ),
     );

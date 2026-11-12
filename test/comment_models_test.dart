@@ -3,6 +3,7 @@ import 'package:novel_playlet/data/models/book_comment.dart';
 import 'package:novel_playlet/data/models/chapter.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/data/models/chapter_ideas.dart';
+import 'package:novel_playlet/data/models/comment_image.dart';
 import 'package:novel_playlet/data/models/comment_reply.dart';
 
 /// 评论/段评响应形状：与 fqapp 实机验证过的 payload 对齐。
@@ -228,6 +229,104 @@ void main() {
 
     test('缺 version 时为空', () {
       expect(Chapter.fromRaw({'item_id': 'c1', 'title': 'x'}).version, '');
+    });
+  });
+
+  group('评论配图', () {
+    test('解析 web_url / url / thumb_url，补齐协议并去重', () {
+      final urls = parseCommentImages({
+        'image_data': [
+          {'web_url': '//p3.example.com/a.jpg?x=1&amp;y=2'},
+          {'url': 'https://p3.example.com/b.jpg'},
+          {'thumb_url': 'https://p3.example.com/b.jpg'},
+          {'web_url': 'ftp://example.com/c.jpg'},
+          {'web_url': ''},
+        ],
+      });
+      expect(urls, [
+        'https://p3.example.com/a.jpg?x=1&y=2',
+        'https://p3.example.com/b.jpg',
+      ]);
+    });
+
+    test('非 http(s) / 无 host / 空地址直接丢弃', () {
+      expect(normalizeCommentImageUrl('  '), '');
+      expect(normalizeCommentImageUrl('data:image/png;base64,xx'), '');
+      expect(normalizeCommentImageUrl('https:///a.jpg'), '');
+      expect(
+        normalizeCommentImageUrl('http://a.example.com/x.jpg'),
+        isNotEmpty,
+      );
+    });
+
+    test('段评、旧书评、回复三条解析链路都带上配图', () {
+      final commentPage = BookCommentPage.fromCommentListPayload({
+        'code': 0,
+        'data': {
+          'data_list': [
+            {
+              'comment': {
+                'comment_id': 'c1',
+                'common': {
+                  'content': {
+                    'text': '配图段评',
+                    'image_data_list': {
+                      'image_data': [
+                        {'web_url': 'https://img.example.com/1.jpg'},
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      });
+      expect(commentPage.comments.single.imageUrls, [
+        'https://img.example.com/1.jpg',
+      ]);
+
+      final legacyPage = BookCommentPage.fromLegacyPayload({
+        'code': 0,
+        'data': {
+          'comment': [
+            {
+              'comment_id': 'r1',
+              'text': '配图书评',
+              'image_data_list': [
+                {'web_url': 'https://img.example.com/2.jpg'},
+              ],
+            },
+          ],
+        },
+      });
+      expect(legacyPage.comments.single.imageUrls, [
+        'https://img.example.com/2.jpg',
+      ]);
+
+      final replyPage = CommentReplyPage.fromPayload({
+        'code': 0,
+        'data': {
+          'reply_list': [
+            {
+              'reply_id': 'p1',
+              'Common': {
+                'content': {
+                  'text': '配图回复',
+                  'image_data_list': {
+                    'image_data': [
+                      {'web_url': 'https://img.example.com/3.jpg'},
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      });
+      expect(replyPage.replies.single.imageUrls, [
+        'https://img.example.com/3.jpg',
+      ]);
     });
   });
 }

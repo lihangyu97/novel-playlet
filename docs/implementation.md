@@ -283,6 +283,10 @@ loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（
 约定：
 
 - **只读**：没有发评论/点赞/回复入口（内核只有短剧写接口，小说段评写接口不存在）。
+- **配图只读展示**：评论正文的 `content.image_data_list.image_data[].web_url` 由
+  `parseCommentImages` 归一成 http(s) 绝对 URL（兼容协议相对地址 / `&amp;` / 去重），
+  评论与回复都渲染缩略图；点开全屏查看器可左右切图、双指缩放，单击画面任意处（或右上角 x）立即关闭。图片走
+  `AppImageCache`（与封面共用磁盘缓存），只做展示，不参与任何写操作。
 - **装饰失败静默**：`chapterIdeasProvider` 失败一律 `ChapterIdeas.empty`，阅读页不进入错误态。
 - **锚点缺失不瞎猜**：没有 `paraIndices` 的段不画气泡；升级前写入的老缓存/老离线正文
   会在后台补取一次带锚点的正文（见 §4.3），纯文本回退源补取后仍无锚点、不替换正文。
@@ -683,6 +687,8 @@ flutter drive --profile -d <iPhone UDID> \
 | `lib/app/widgets/surface_card.dart` | 通用白底卡容器（推荐流先接入，后续列表逐步复用） |
 | `lib/features/cache/offline_downloader.dart` | 离线下载引擎（单任务状态机 + 队列） |
 | `lib/data/models/{chapter_ideas,book_comment,comment_reply}.dart` | 段评/书评/回复模型与解析 |
+| `lib/data/models/comment_image.dart` | 评论配图 URL 解析与归一（协议相对地址 / `&amp;` / 去重） |
+| `lib/app/widgets/comment_image_{loader,strip,viewer}.dart` | 评论配图加载（AppImageCache）/ 缩略图 / 全屏查看器 |
 | `lib/features/reader/{reader_comments,reader_comments_sheet,reader_bubble}.dart` | 段评 provider / 评论面板 / 段尾气泡 |
 | `lib/features/detail/{detail_reviews_section,detail_reviews_sheet}.dart` | 详情页书评卡片与弹窗 |
 | `lib/features/video/network_health.dart` | 会话级「疑似离线」标记：断网后切集快速失败、手动重试强制联网 |
