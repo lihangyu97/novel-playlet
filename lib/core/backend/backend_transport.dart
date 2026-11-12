@@ -48,9 +48,10 @@ class BackendTimeoutException implements Exception {
 class BackendTransport {
   BackendTransport({this.port = defaultPort});
 
-  /// 端口唯一来源是 `assets/config/config.json`（部署后由 BackendService 读它）；
-  /// 这里的缺省值与 config.json、`rust/src/config.rs` 三处对齐，改端口只改
-  /// config.json。
+  /// 正式版的端口唯一来源是 `assets/config/config.json`（部署后由
+  /// `BackendService.configuredPort` 读它并显式传给 [start]）；这里只是
+  /// 读不到配置时的兜底。beta 版用 `--dart-define=BACKEND_PORT` 覆盖
+  /// （见 `BackendService`），两个版本同机安装时端口必须不同。
   static const defaultPort = 18931;
 
   /// 单次请求默认超时：后端在本机进程内，正常远小于此值；挂死不能永久转圈。
