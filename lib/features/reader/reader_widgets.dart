@@ -428,14 +428,48 @@ class ReaderLoadingPill extends StatelessWidget {
   }
 }
 
-/// 阅读设置弹层：字号、行距、底色。
-class ReaderSettingsSheet extends ConsumerWidget {
+/// 阅读设置弹层：字号、行距、底色、对话高亮、段评气泡。
+///
+/// 字号/行距是分页输入。拖动过程中只更新**本地预览值**（滑块与文案立即跟手，
+/// 不碰 provider），松手（`onChangeEnd`）才提交一次：一次整章重排 + 一次落盘。
+/// 否则滑块每个 tick 都会让 `_PaginationKey` 失效、整章 TextPainter 重排一次，
+/// 并写 7 个 SharedPreferences key。
+class ReaderSettingsSheet extends ConsumerStatefulWidget {
   const ReaderSettingsSheet({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ReaderSettingsSheet> createState() =>
+      _ReaderSettingsSheetState();
+}
+
+class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
+  /// 拖动中的预览值；null = 没在拖，显示 provider 里已提交的值。
+  double? _previewFontSize;
+  double? _previewLineHeight;
+
+  void _onFontSizePreview(double value) =>
+      setState(() => _previewFontSize = value);
+
+  void _onFontSizeCommit(double value) {
+    ref.read(readerSettingsProvider.notifier).setFontSize(value);
+    setState(() => _previewFontSize = null);
+  }
+
+  void _onLineHeightPreview(double value) =>
+      setState(() => _previewLineHeight = value);
+
+  void _onLineHeightCommit(double value) {
+    ref.read(readerSettingsProvider.notifier).setLineHeight(value);
+    setState(() => _previewLineHeight = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final settings = ref.watch(readerSettingsProvider);
     final controller = ref.read(readerSettingsProvider.notifier);
+    // 滑块显示预览值（拖动中跟手），文案同步预览，不读 provider 的旧值。
+    final fontSize = _previewFontSize ?? settings.fontSize;
+    final lineHeight = _previewLineHeight ?? settings.lineHeight;
     final paper = settings.paper;
     final foreground = paper.foreground;
     final muted = foreground.withValues(alpha: 0.55);
@@ -478,28 +512,30 @@ class ReaderSettingsSheet extends ConsumerWidget {
             const SizedBox(height: 4),
             _SettingRow(
               label: '字号',
-              value: '${settings.fontSize.round()}',
+              value: '${fontSize.round()}',
               color: muted,
               child: Slider(
                 min: ReaderSettingsController.minFontSize,
                 max: ReaderSettingsController.maxFontSize,
                 divisions: 15,
-                value: settings.fontSize,
-                label: '${settings.fontSize.round()}',
-                onChanged: controller.setFontSize,
+                value: fontSize,
+                label: '${fontSize.round()}',
+                onChanged: _onFontSizePreview,
+                onChangeEnd: _onFontSizeCommit,
               ),
             ),
             _SettingRow(
               label: '行距',
-              value: settings.lineHeight.toStringAsFixed(2),
+              value: lineHeight.toStringAsFixed(2),
               color: muted,
               child: Slider(
                 min: ReaderSettingsController.minLineHeight,
                 max: ReaderSettingsController.maxLineHeight,
                 divisions: 14,
-                value: settings.lineHeight,
-                label: settings.lineHeight.toStringAsFixed(2),
-                onChanged: controller.setLineHeight,
+                value: lineHeight,
+                label: lineHeight.toStringAsFixed(2),
+                onChanged: _onLineHeightPreview,
+                onChangeEnd: _onLineHeightCommit,
               ),
             ),
             const SizedBox(height: 6),
