@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../app/widgets/app_bottom_sheet.dart';
 import '../../app/widgets/states.dart';
 import '../../data/models/book_comment.dart';
 import '../../data/models/json_utils.dart';
@@ -19,15 +20,10 @@ Future<void> showDetailReviewsSheet(
   required String bookId,
   BookCommentPage? initialPage,
 }) {
-  return showModalBottomSheet<void>(
+  return showAppBottomSheet<void>(
     context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (_) => FractionallySizedBox(
-      // 约 0.8 屏高：一屏能看五六条书评，同时留出上方详情页作为上下文。
-      heightFactor: 0.8,
-      child: DetailReviewsSheet(bookId: bookId, initialPage: initialPage),
-    ),
+    builder: (_) =>
+        DetailReviewsSheet(bookId: bookId, initialPage: initialPage),
   );
 }
 
@@ -170,42 +166,13 @@ class _DetailReviewsSheetState extends ConsumerState<DetailReviewsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
-          child: Row(
-            children: [
-              Text(
-                '书评',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  _totalCount > 0 ? '共 $_totalCount 条' : '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: '关闭书评',
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close_rounded),
-              ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-        Expanded(child: _buildBody(context)),
-      ],
+    return AppBottomSheet(
+      title: '书评',
+      subtitle: _totalCount > 0 ? '共 $_totalCount 条' : null,
+      // 约 0.8 屏高：一屏能看五六条书评，同时留出上方详情页作为上下文。
+      heightFactor: 0.8,
+      closeTooltip: '关闭书评',
+      child: _buildBody(context),
     );
   }
 
@@ -220,9 +187,7 @@ class _DetailReviewsSheetState extends ConsumerState<DetailReviewsSheet> {
     final hasFooter = _loadingMore || _loadMoreError != null;
     return ListView.builder(
       controller: _scrollController,
-      padding: EdgeInsets.only(
-        bottom: 24 + MediaQuery.paddingOf(context).bottom,
-      ),
+      padding: const EdgeInsets.only(bottom: 24),
       itemCount: _comments.length + (hasFooter ? 1 : 0),
       itemBuilder: (context, index) {
         if (index >= _comments.length) return _buildFooter();

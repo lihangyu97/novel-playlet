@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/widgets/app_bottom_sheet.dart';
 import '../../../app/widgets/app_snack_bar.dart';
 
 enum _ManageAction { openDetail, remove }
@@ -17,35 +18,27 @@ Future<void> showMediaManageSheet({
   required Future<void> Function() remove,
   required String removedMessage,
 }) async {
-  final action = await showModalBottomSheet<_ManageAction>(
+  final action = await showAppBottomSheet<_ManageAction>(
     context: context,
     builder: (sheetContext) {
-      final theme = Theme.of(sheetContext);
-      final scheme = theme.colorScheme;
-      return SafeArea(
-        top: false,
+      final scheme = Theme.of(sheetContext).colorScheme;
+      return AppBottomSheet(
+        title: title,
+        closeTooltip: '关闭菜单',
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
+            // 列表项左右 20 与标题区对齐。
             ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20),
               leading: const Icon(Icons.info_outline_rounded),
               title: const Text('查看详情'),
               onTap: () =>
                   Navigator.of(sheetContext).pop(_ManageAction.openDetail),
             ),
             ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20),
               leading: Icon(
                 Icons.bookmark_remove_outlined,
                 color: scheme.error,

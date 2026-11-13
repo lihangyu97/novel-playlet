@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
+import '../../../app/widgets/app_bottom_sheet.dart';
 
 /// 底部的自定义颜色弹层：HSV 取色（色相条 + 饱和度/明度面板）。
 ///
@@ -23,9 +24,8 @@ Future<Color?> showThemeColorPicker(
   String title = '自定义主题色',
   Widget Function(Color color)? previewBuilder,
 }) {
-  return showModalBottomSheet<Color>(
+  return showAppBottomSheet<Color>(
     context: context,
-    isScrollControlled: true,
     enableDrag: false,
     builder: (_) => ThemeColorPickerSheet(
       initial: initial,
@@ -93,24 +93,20 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return SafeArea(
-      top: false,
+    return AppBottomSheet(
+      title: widget.title,
+      closeTooltip: '关闭取色',
       // 小屏/大字号时内容可能超出可用高度：包一层滚动，别把按钮挤出屏幕。
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 当前候选中色：色块 + 十六进制，靠右排在标题下面一行。
             Row(
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                Text(
-                  widget.title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const Spacer(),
                 _ColorChip(color: _color, size: 22),
                 const SizedBox(width: 8),
                 Text(
@@ -122,7 +118,7 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             _SaturationValuePanel(hsv: _hsv, onChanged: _updateHsv),
             const SizedBox(height: 16),
             _HueBar(

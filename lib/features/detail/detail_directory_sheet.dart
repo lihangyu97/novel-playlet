@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/widgets/app_bottom_sheet.dart';
 import '../../data/models/chapter.dart';
 
 /// 打开全部目录的底部弹层；返回被点中的章节（取消返回 null）。
@@ -8,16 +9,11 @@ Future<Chapter?> showDetailDirectorySheet(
   required List<Chapter> chapters,
   int? currentIndex,
 }) {
-  return showModalBottomSheet<Chapter>(
+  return showAppBottomSheet<Chapter>(
     context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (_) => FractionallySizedBox(
-      heightFactor: 0.85,
-      child: _DirectorySheetBody(
-        chapters: chapters,
-        currentIndex: currentIndex,
-      ),
+    builder: (_) => _DirectorySheetBody(
+      chapters: chapters,
+      currentIndex: currentIndex,
     ),
   );
 }
@@ -32,85 +28,52 @@ class _DirectorySheetBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
-          child: Row(
-            children: [
-              Text(
-                '目录',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
+    return AppBottomSheet(
+      title: '目录',
+      subtitle: '共 ${chapters.length} 章',
+      heightFactor: 0.85,
+      closeTooltip: '关闭目录',
+      child: chapters.isEmpty
+          ? Center(
+              child: Text(
+                '暂无目录',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  '共 ${chapters.length} 章',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: '关闭目录',
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close_rounded),
-              ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-        Expanded(
-          child: chapters.isEmpty
-              ? Center(
-                  child: Text(
-                    '暂无目录',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                )
-              : ListView.builder(
-                  padding: EdgeInsets.only(
-                    bottom: 24 + MediaQuery.paddingOf(context).bottom,
-                  ),
-                  itemCount: chapters.length,
-                  itemBuilder: (context, index) {
-                    final chapter = chapters[index];
-                    // 目录已摊平，卷名挂在每条上；只在卷首插一次卷标题。
-                    final showVolume =
-                        chapter.volumeName.isNotEmpty &&
-                        (index == 0 ||
-                            chapters[index - 1].volumeName !=
-                                chapter.volumeName);
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (showVolume)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                            child: Text(
-                              chapter.volumeName,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.primary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.only(bottom: 24),
+              itemCount: chapters.length,
+              itemBuilder: (context, index) {
+                final chapter = chapters[index];
+                // 目录已摊平，卷名挂在每条上；只在卷首插一次卷标题。
+                final showVolume =
+                    chapter.volumeName.isNotEmpty &&
+                    (index == 0 ||
+                        chapters[index - 1].volumeName != chapter.volumeName);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (showVolume)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                        child: Text(
+                          chapter.volumeName,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w600,
                           ),
-                        _SheetChapterTile(
-                          chapter: chapter,
-                          current: chapter.index == currentIndex,
                         ),
-                      ],
-                    );
-                  },
-                ),
-        ),
-      ],
+                      ),
+                    _SheetChapterTile(
+                      chapter: chapter,
+                      current: chapter.index == currentIndex,
+                    ),
+                  ],
+                );
+              },
+            ),
     );
   }
 }
