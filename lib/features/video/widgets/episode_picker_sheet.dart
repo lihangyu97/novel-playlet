@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../app/widgets/app_bottom_sheet.dart';
 import '../../../data/models/chapter.dart';
 
 /// 选集弹层每个 tab 的集数：78 集 = 13 行 × 6 列，正好比一屏多一点。
@@ -21,17 +22,12 @@ Future<int?> showEpisodePickerSheet(
   required int currentIndex,
   required String seriesTitle,
 }) {
-  return showModalBottomSheet<int>(
+  return showAppBottomSheet<int>(
     context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (_) => FractionallySizedBox(
-      heightFactor: 0.7,
-      child: _EpisodePickerBody(
-        episodes: episodes,
-        currentIndex: currentIndex,
-        seriesTitle: seriesTitle,
-      ),
+    builder: (_) => _EpisodePickerBody(
+      episodes: episodes,
+      currentIndex: currentIndex,
+      seriesTitle: seriesTitle,
     ),
   );
 }
@@ -85,77 +81,52 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
     if (_tabCount == 0) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Column(
-      children: [
-        // 标题行沿用原弹层样式：选集 / 共 N 集 · 剧名 / 关闭。
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
-          child: Row(
-            children: [
-              Text(
-                '选集',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  '共 ${widget.episodes.length} 集 · ${widget.seriesTitle}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: '关闭选集',
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close_rounded),
-              ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-        // tab 样式与详情页选集一致：可横向滑动，内容可左右滑。
-        TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          labelPadding: const EdgeInsets.symmetric(horizontal: 10),
-          labelColor: scheme.primary,
-          unselectedLabelColor: scheme.onSurfaceVariant,
-          labelStyle: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-          unselectedLabelStyle: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w400,
-          ),
-          indicatorSize: TabBarIndicatorSize.label,
-          indicator: UnderlineTabIndicator(
-            borderSide: BorderSide(width: 2, color: scheme.primary),
-            insets: const EdgeInsets.symmetric(horizontal: 2),
-          ),
-          dividerColor: Colors.transparent,
-          tabs: [
-            for (var tab = 0; tab < _tabCount; tab++)
-              Tab(height: 40, text: _tabLabel(tab)),
-          ],
-        ),
-        // 78 集（13 行）放不进 0.7 屏高的弹层，每个 tab 内单独滚动。
-        Expanded(
-          child: TabBarView(
+    return AppBottomSheet(
+      title: '选集',
+      subtitle: '共 ${widget.episodes.length} 集 · ${widget.seriesTitle}',
+      heightFactor: 0.7,
+      closeTooltip: '关闭选集',
+      // tab 样式与详情页选集一致：可横向滑动，内容可左右滑。
+      child: Column(
+        children: [
+          TabBar(
             controller: _tabController,
-            children: [
-              for (var tab = 0; tab < _tabCount; tab++) _buildGrid(tab),
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            labelPadding: const EdgeInsets.symmetric(horizontal: 10),
+            labelColor: scheme.primary,
+            unselectedLabelColor: scheme.onSurfaceVariant,
+            labelStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+            unselectedLabelStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w400,
+            ),
+            indicatorSize: TabBarIndicatorSize.label,
+            indicator: UnderlineTabIndicator(
+              borderSide: BorderSide(width: 2, color: scheme.primary),
+              insets: const EdgeInsets.symmetric(horizontal: 2),
+            ),
+            dividerColor: Colors.transparent,
+            tabs: [
+              for (var tab = 0; tab < _tabCount; tab++)
+                Tab(height: 40, text: _tabLabel(tab)),
             ],
           ),
-        ),
-      ],
+          // 78 集（13 行）放不进 0.7 屏高的弹层，每个 tab 内单独滚动。
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                for (var tab = 0; tab < _tabCount; tab++) _buildGrid(tab),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -172,12 +143,7 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return GridView.builder(
-      padding: EdgeInsets.fromLTRB(
-        16,
-        16,
-        16,
-        24 + MediaQuery.paddingOf(context).bottom,
-      ),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 6,
         crossAxisSpacing: 10,

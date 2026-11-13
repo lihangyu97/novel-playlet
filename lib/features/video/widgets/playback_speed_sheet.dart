@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/widgets/app_bottom_sheet.dart';
 import '../playback_speed.dart';
 
 /// 打开「播放速度」底部弹层，返回选中的倍速（取消返回 null）。
@@ -10,9 +11,8 @@ Future<double?> showPlaybackSpeedSheet(
   BuildContext context, {
   required double current,
 }) {
-  return showModalBottomSheet<double>(
+  return showAppBottomSheet<double>(
     context: context,
-    useSafeArea: true,
     builder: (_) => _PlaybackSpeedSheet(current: current),
   );
 }
@@ -26,42 +26,37 @@ class _PlaybackSpeedSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        20,
-        16,
-        20,
-        20 + MediaQuery.paddingOf(context).bottom,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '播放速度',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
+    return AppBottomSheet(
+      title: '播放速度',
+      closeTooltip: '关闭播放速度',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '倍速会跨集保持；3x 更耗电，个别片源可能略有卡顿',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '倍速会跨集保持；3x 更耗电，个别片源可能略有卡顿',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              for (final speed in playbackSpeeds) ...[
-                if (speed != playbackSpeeds.first) const SizedBox(width: 8),
-                Expanded(
-                  child: _SpeedButton(speed: speed, selected: speed == current),
-                ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                for (final speed in playbackSpeeds) ...[
+                  if (speed != playbackSpeeds.first) const SizedBox(width: 8),
+                  Expanded(
+                    child: _SpeedButton(
+                      speed: speed,
+                      selected: speed == current,
+                    ),
+                  ),
+                ],
               ],
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }

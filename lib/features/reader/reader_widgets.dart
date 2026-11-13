@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../../app/widgets/app_bottom_sheet.dart';
 import '../../data/models/chapter.dart';
 import 'reader_pagination.dart';
 import 'reader_settings.dart';
@@ -478,101 +479,90 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
     // 不能直接用 AppTheme.accentOf（raw seed）——用户选近白/近黑主题色时
     // 滑块和描边会彻底看不见。
     final highlight = Theme.of(context).colorScheme.primary;
-    // 弹层要一直铺到屏幕底：把 Home 指示条高度做成容器内部的 padding，
-    // 而不是 SafeArea 在外层留白。否则最底部会露出弹层外的灰色横条。
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: paper.background,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      padding: EdgeInsets.fromLTRB(20, 16, 20, 18 + bottomInset),
-      child: SliderTheme(
-        data: SliderTheme.of(context).copyWith(
-          activeTrackColor: highlight,
-          inactiveTrackColor: foreground.withValues(alpha: 0.14),
-          thumbColor: highlight,
-          overlayColor: highlight.withValues(alpha: 0.12),
-          trackHeight: 2.5,
-          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '阅读设置',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: foreground,
+    return AppBottomSheet(
+      title: '阅读设置',
+      backgroundColor: paper.background,
+      foregroundColor: foreground,
+      closeTooltip: '关闭阅读设置',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
+        child: SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            activeTrackColor: highlight,
+            inactiveTrackColor: foreground.withValues(alpha: 0.14),
+            thumbColor: highlight,
+            overlayColor: highlight.withValues(alpha: 0.12),
+            trackHeight: 2.5,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SettingRow(
+                label: '字号',
+                value: '${fontSize.round()}',
+                color: muted,
+                child: Slider(
+                  min: ReaderSettingsController.minFontSize,
+                  max: ReaderSettingsController.maxFontSize,
+                  divisions: 15,
+                  value: fontSize,
+                  label: '${fontSize.round()}',
+                  onChanged: _onFontSizePreview,
+                  onChangeEnd: _onFontSizeCommit,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            _SettingRow(
-              label: '字号',
-              value: '${fontSize.round()}',
-              color: muted,
-              child: Slider(
-                min: ReaderSettingsController.minFontSize,
-                max: ReaderSettingsController.maxFontSize,
-                divisions: 15,
-                value: fontSize,
-                label: '${fontSize.round()}',
-                onChanged: _onFontSizePreview,
-                onChangeEnd: _onFontSizeCommit,
+              _SettingRow(
+                label: '行距',
+                value: lineHeight.toStringAsFixed(2),
+                color: muted,
+                child: Slider(
+                  min: ReaderSettingsController.minLineHeight,
+                  max: ReaderSettingsController.maxLineHeight,
+                  divisions: 14,
+                  value: lineHeight,
+                  label: lineHeight.toStringAsFixed(2),
+                  onChanged: _onLineHeightPreview,
+                  onChangeEnd: _onLineHeightCommit,
+                ),
               ),
-            ),
-            _SettingRow(
-              label: '行距',
-              value: lineHeight.toStringAsFixed(2),
-              color: muted,
-              child: Slider(
-                min: ReaderSettingsController.minLineHeight,
-                max: ReaderSettingsController.maxLineHeight,
-                divisions: 14,
-                value: lineHeight,
-                label: lineHeight.toStringAsFixed(2),
-                onChanged: _onLineHeightPreview,
-                onChangeEnd: _onLineHeightCommit,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text('底色', style: TextStyle(fontSize: 13, color: muted)),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                for (final option in ReaderPaper.values)
-                  Expanded(
-                    child: _PaperOption(
-                      option: option,
-                      selected: option == paper,
-                      foreground: foreground,
-                      onTap: () => controller.setPaper(option),
+              const SizedBox(height: 6),
+              Text('底色', style: TextStyle(fontSize: 13, color: muted)),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  for (final option in ReaderPaper.values)
+                    Expanded(
+                      child: _PaperOption(
+                        option: option,
+                        selected: option == paper,
+                        foreground: foreground,
+                        onTap: () => controller.setPaper(option),
+                      ),
                     ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _SettingSwitchRow(
-              title: '对话高亮',
-              subtitle: '给双引号里的人物说话内容加荧光笔',
-              value: settings.showDialogueHighlight,
-              onChanged: controller.setShowDialogueHighlight,
-              foreground: foreground,
-              muted: muted,
-            ),
-            const SizedBox(height: 14),
-            _SettingSwitchRow(
-              title: '段评气泡',
-              subtitle: '关闭只隐藏段尾气泡，章末评论仍在',
-              value: settings.showBubbles,
-              onChanged: controller.setShowBubbles,
-              foreground: foreground,
-              muted: muted,
-            ),
-          ],
+                ],
+              ),
+              const SizedBox(height: 14),
+              _SettingSwitchRow(
+                title: '对话高亮',
+                subtitle: '给双引号里的人物说话内容加荧光笔',
+                value: settings.showDialogueHighlight,
+                onChanged: controller.setShowDialogueHighlight,
+                foreground: foreground,
+                muted: muted,
+              ),
+              const SizedBox(height: 14),
+              _SettingSwitchRow(
+                title: '段评气泡',
+                subtitle: '关闭只隐藏段尾气泡，章末评论仍在',
+                value: settings.showBubbles,
+                onChanged: controller.setShowBubbles,
+                foreground: foreground,
+                muted: muted,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -757,62 +747,19 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
 
   @override
   Widget build(BuildContext context) {
-    final muted = widget.foreground.withValues(alpha: 0.55);
-    // 背景铺到屏幕底，内容让出 Home 指示条；这样列表最后一项不会被挡住，
-    // 也不会出现"容器底边没铺满"的灰色空条。
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
-    return SizedBox(
-      height: MediaQuery.sizeOf(context).height * 0.72,
-      child: Container(
-        decoration: BoxDecoration(
-          color: widget.background,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: EdgeInsets.only(bottom: bottomInset),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 8, 10),
-              child: Row(
-                children: [
-                  Text(
-                    '目录',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: widget.foreground,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '共 ${widget.chapters.length} 章',
-                    style: TextStyle(fontSize: 12, color: muted),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    tooltip: '关闭',
-                    color: widget.foreground,
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                  ),
-                ],
-              ),
-            ),
-            Divider(
-              height: 0.5,
-              thickness: 0.5,
-              color: widget.foreground.withValues(alpha: 0.08),
-            ),
-            Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                itemExtent: _itemExtent,
-                itemCount: widget.chapters.length,
-                itemBuilder: (context, index) => _buildItem(context, index),
-              ),
-            ),
-          ],
-        ),
+    return AppBottomSheet(
+      title: '目录',
+      subtitle: '共 ${widget.chapters.length} 章',
+      // 0.72 屏高：比设置弹层高，目录能多露几行。
+      heightFactor: 0.72,
+      backgroundColor: widget.background,
+      foregroundColor: widget.foreground,
+      closeTooltip: '关闭目录',
+      child: ListView.builder(
+        controller: _scrollController,
+        itemExtent: _itemExtent,
+        itemCount: widget.chapters.length,
+        itemBuilder: (context, index) => _buildItem(context, index),
       ),
     );
   }
