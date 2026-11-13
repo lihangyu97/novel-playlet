@@ -149,9 +149,11 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             child: Column(
               children: [
                 Padding(
+                  // 顶部不留内边距：搜索框上沿贴住安全区，与推荐页入口同位置，
+                  // 从推荐页点进来时搜索框不会往下跳 8pt。
                   padding: const EdgeInsets.fromLTRB(
                     SearchPage.rowPadding,
-                    8,
+                    0,
                     SearchPage.rowPadding,
                     4,
                   ),
