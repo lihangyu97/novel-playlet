@@ -13,7 +13,8 @@ import '../offline_task.dart';
 
 /// 通用的「离线缓存」入口（小说详情「缓存整本」/ 短剧详情「缓存整剧」共用）。
 ///
-/// 与左侧收藏按钮同一套线条风格（[DetailIconLabelButton]），三态：
+/// 与收藏、播放/阅读两颗按钮同一套圆形悬浮样式（[DetailIconLabelButton]），
+/// 在底栏中间，三态：
 /// - `缓存`（download_outlined）：没有离线内容，或上次任务失败；点击开始/重试。
 /// - `缓存中`（downloading_outlined）：任务进行中/暂停、manifest 只完成一部分，
 ///   或已经在下载队列里排队；点击进缓存中心看进度（暂停/继续/取消排队都由
