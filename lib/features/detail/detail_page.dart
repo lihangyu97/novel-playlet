@@ -84,7 +84,6 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     final shelfItem = _resolveShelfItem(bundle, preview);
     final onShelf = shelfAsync.value ?? false;
     final shelfBusy = shelfAsync.isLoading && !shelfAsync.hasValue;
-    final reviews = reviewsAsync.value;
 
     // 「继续阅读」优先用进度里保存的章（目录顺序变了也还找得到），
     // 没有进度才从第一章开始。
@@ -129,22 +128,21 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             ),
           ),
         ),
-        // 书评：简介/标签之后、目录之前。接口失败或没有书评时 reviews 为
-        // null/空，整块不占位——次要数据不制造错误态，也不留空白卡片。
-        if (reviews != null && reviews.comments.isNotEmpty)
-          SliverToBoxAdapter(
-            child: DetailFadeIn(
-              delay: const Duration(milliseconds: 90),
-              child: DetailReviewsSection(
-                page: reviews,
-                onOpenAll: () => showDetailReviewsSheet(
-                  context,
-                  bookId: bookId,
-                  initialPage: reviews,
-                ),
+        // 书评：简介/标签之后、目录之前。卡片常驻：请求中显示 loading，
+        // 没有书评/请求失败显示「暂无评论」，有数据再换成首条书评。
+        SliverToBoxAdapter(
+          child: DetailFadeIn(
+            delay: const Duration(milliseconds: 90),
+            child: DetailReviewsSection(
+              reviews: reviewsAsync,
+              onOpenAll: (page) => showDetailReviewsSheet(
+                context,
+                bookId: bookId,
+                initialPage: page,
               ),
             ),
           ),
+        ),
         SliverToBoxAdapter(
           child: DetailFadeIn(
             delay: const Duration(milliseconds: 120),

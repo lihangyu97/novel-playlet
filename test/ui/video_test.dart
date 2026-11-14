@@ -8,6 +8,7 @@ import 'package:novel_playlet/app/widgets/detail_circle_button.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/detail/detail_action_bar.dart';
+import 'package:novel_playlet/features/detail/detail_reviews_section.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/features/video/video_detail_page.dart';
 import 'package:novel_playlet/features/video/widgets/episode_picker.dart';
@@ -273,6 +274,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('共 2 条'), findsOneWidget);
     expect(find.text('第二集开始上头'), findsOneWidget, reason: '弹层里应能看到全部评论');
+  });
+
+  testWidgets('短剧详情-没有剧评：卡片保留并显示暂无评论', (tester) async {
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
+    await pumpPreview(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: FakePreviewTransport(),
+    );
+
+    expect(find.text('剧评'), findsOneWidget);
+    expect(find.text('暂无评论'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(DetailReviewsSection),
+        matching: find.textContaining('查看全部'),
+      ),
+      findsNothing,
+    );
   });
 
   testWidgets('短剧详情-底部收藏与播放栏', (tester) async {
