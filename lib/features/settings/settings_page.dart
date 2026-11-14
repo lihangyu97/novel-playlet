@@ -812,7 +812,7 @@ class _AppVersionFooter extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(_contentInset, 24, _contentInset, 0),
       child: Center(
         child: Text(
-          '版本 ${version.label}',
+          '$appFlavorLabel ${version.label}',
           textAlign: TextAlign.center,
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,

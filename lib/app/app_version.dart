@@ -28,6 +28,20 @@ class AppVersion {
   int get hashCode => Object.hash(name, build);
 }
 
+/// 构建渠道：beta 包由 `scripts/build_ios_app.sh --flavor beta` 通过
+/// `--dart-define=APP_FLAVOR=beta` 标记，其余（含 release / debug）按 Release。
+const String appFlavor = String.fromEnvironment(
+  'APP_FLAVOR',
+  defaultValue: 'release',
+);
+
+/// 构建渠道 → 版本脚注前缀（`Beta` / `Release`）。
+String appFlavorLabelFor(String flavor) =>
+    flavor.trim().toLowerCase() == 'beta' ? 'Beta' : 'Release';
+
+/// 设置页版本脚注的前缀：`Beta` / `Release`。
+String get appFlavorLabel => appFlavorLabelFor(appFlavor);
+
 /// 版本方法通道；改通道名/方法名要同步改
 /// `ios/Runner/AppDelegate.swift` 与 `android/.../MainActivity.kt`。
 const MethodChannel appVersionChannel = MethodChannel(

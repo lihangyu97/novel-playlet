@@ -53,6 +53,42 @@ void main() {
     );
   });
 
+  testWidgets('搜索页-搜索历史：提交后清空显示关键词，点击可直接重搜', (tester) async {
+    await pumpPreview(tester, const SearchPage());
+    await _submit(tester, '剑来');
+    expect(find.byType(NovelGridCard), findsWidgets);
+
+    // 清空输入回到搜索历史。
+    await tester.tap(find.byTooltip('清空'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('搜索历史'), findsOneWidget);
+    expect(find.text('剑来'), findsOneWidget);
+    expect(find.byType(EmptyView), findsNothing, reason: '有历史时不再显示引导空态');
+
+    // 点历史关键词直接重新搜索。
+    await tester.tap(find.text('剑来'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.byType(NovelGridCard), findsWidgets);
+    expect(find.text('搜索历史'), findsNothing);
+  });
+
+  testWidgets('搜索页-启动时恢复落盘的搜索历史，可一键清空', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'search_history_v1': <String>['剑来', '斗破'],
+    });
+    await pumpPreview(tester, const SearchPage());
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(find.text('搜索历史'), findsOneWidget);
+    expect(find.text('剑来'), findsOneWidget);
+    expect(find.text('斗破'), findsOneWidget);
+
+    await tester.tap(find.text('清空'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('搜索历史'), findsNothing);
+    expect(find.byType(EmptyView), findsOneWidget);
+  });
+
   testWidgets('搜索页-小说 / 短剧两行从上到下各一行横向卡片', (tester) async {
     await pumpPreview(tester, const SearchPage());
     await _submit(tester, '剑来');
@@ -261,14 +297,15 @@ void main() {
     expect(find.text('没有找到相关漫剧'), findsNothing, reason: '漫剧行已去掉');
   });
 
-  testWidgets('搜索页-清空输入回到引导空态', (tester) async {
+  testWidgets('搜索页-清空输入回到搜索历史', (tester) async {
     await pumpPreview(tester, const SearchPage());
     await _submit(tester, '剑来');
     expect(find.byType(NovelGridCard), findsWidgets);
 
     await tester.tap(find.byIcon(Icons.cancel_rounded));
     await tester.pumpAndSettle();
-    expect(find.byType(EmptyView), findsOneWidget);
+    expect(find.text('搜索历史'), findsOneWidget);
+    expect(find.text('剑来'), findsOneWidget);
     expect(find.byType(NovelGridCard), findsNothing);
   });
 

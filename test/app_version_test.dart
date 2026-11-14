@@ -19,6 +19,12 @@ void main() {
     return container;
   }
 
+  test('构建渠道：beta 显示 Beta，其余显示 Release', () {
+    expect(appFlavorLabelFor('beta'), 'Beta');
+    expect(appFlavorLabelFor('release'), 'Release');
+    expect(appFlavorLabelFor(''), 'Release');
+  });
+
   test('从原生读出版本名与构建号，label 拼接为「版本 (构建号)」', () async {
     messenger.setMockMethodCallHandler(appVersionChannel, (call) async {
       expect(call.method, 'get');

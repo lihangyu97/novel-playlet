@@ -15,6 +15,7 @@ import '../recommend/recommend_category.dart';
 import '../recommend/recommend_item.dart';
 import '../video/widgets/video_card.dart';
 import 'search_cue_hint.dart';
+import 'search_history.dart';
 import 'search_providers.dart';
 
 /// 独立搜索页：一次提交同时搜小说 / 短剧，从上到下各一行横向卡片。
@@ -103,6 +104,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       _controller.text = cue;
       _controller.selection = TextSelection.collapsed(offset: cue.length);
     }
+    // 不管是不是重复提交，都把关键词记进历史（重复项会被提到最前）。
+    ref.read(searchHistoryProvider.notifier).add(query);
     final active = ref.read(searchQueryProvider);
     if (active == query) {
       // 同一关键词再次提交 = 重试：只重拉失败的那几行，正在加载/已有结果的行
@@ -123,6 +126,17 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     _controller.clear();
     ref.read(searchQueryProvider.notifier).clear();
     _focus.requestFocus();
+  }
+
+  /// 点历史关键词：填回输入框并立即发起搜索。
+  void _searchKeyword(String keyword) {
+    final query = keyword.trim();
+    if (query.isEmpty) return;
+    _controller.text = query;
+    _controller.selection = TextSelection.collapsed(offset: query.length);
+    _focus.unfocus();
+    ref.read(searchHistoryProvider.notifier).add(query);
+    ref.read(searchQueryProvider.notifier).submit(query);
   }
 
   /// 取消 / 返回：搜索词随页面 autoDispose 自动清掉，这里只退页——提前清会让
@@ -175,16 +189,117 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 ),
                 Expanded(
                   child: query == null
-                      ? const EmptyView(
-                          message: '输入关键词，一次搜小说 / 短剧',
-                          icon: Icons.search_rounded,
-                        )
+                      ? _SearchHistoryView(onSearch: _searchKeyword)
                       : _SearchResults(query: query),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 搜索历史：首次进入 / 清空输入后展示最近搜过的关键词。
+///
+/// 没有历史时退回原来的引导空态；点关键词直接重新搜索。
+class _SearchHistoryView extends ConsumerWidget {
+  const _SearchHistoryView({required this.onSearch});
+
+  final ValueChanged<String> onSearch;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final history = ref.watch(searchHistoryProvider);
+    if (history.isEmpty) {
+      return const EmptyView(
+        message: '输入关键词，一次搜小说 / 短剧',
+        icon: Icons.search_rounded,
+      );
+    }
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    return ListView(
+      padding: EdgeInsets.fromLTRB(8, 12, 8, 24 + bottomInset),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: [
+              Text(
+                '搜索历史',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () =>
+                    ref.read(searchHistoryProvider.notifier).clear(),
+                style: TextButton.styleFrom(
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: scheme.onSurfaceVariant,
+                  textStyle: theme.textTheme.bodySmall,
+                ),
+                child: const Text('清空'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final keyword in history)
+                _SearchHistoryChip(
+                  keyword: keyword,
+                  onTap: () => onSearch(keyword),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 单个历史关键词：可点的小圆角 pill（与详情页标签同一套观感）。
+class _SearchHistoryChip extends StatelessWidget {
+  const _SearchHistoryChip({required this.keyword, required this.onTap});
+
+  final String keyword;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(99),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Text(
+            keyword,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurface),
+          ),
+        ),
       ),
     );
   }

@@ -78,7 +78,7 @@ echo "==> flutter build ios --release --no-codesign（flavor=${FLAVOR}）"
 # macOS 自带 bash 3.2 在 `set -u` 下展开空数组会报 unbound variable，
 # 所以按 flavor 分两条命令，而不是拼 DART_ARGS 数组。
 if [[ -n "$PORT" ]]; then
-  ( cd "$APP_DIR" && flutter build ios --release --no-codesign --dart-define="BACKEND_PORT=$PORT" )
+  ( cd "$APP_DIR" && flutter build ios --release --no-codesign --dart-define="BACKEND_PORT=$PORT" --dart-define=APP_FLAVOR=beta )
 else
   ( cd "$APP_DIR" && flutter build ios --release --no-codesign )
 fi
