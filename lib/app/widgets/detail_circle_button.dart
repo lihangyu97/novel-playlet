@@ -49,7 +49,12 @@ class DetailCircleButton extends StatelessWidget {
       background = scheme.primary;
       iconColor = scheme.onPrimary;
     } else if (active) {
-      background = scheme.primary.withValues(alpha: 0.14);
+      // 有状态时用实色底：直接把 14% 主色压到按钮的常态底色上。外观与原来的
+      // 半透明一致，但不再透出下面的封面/正文，避免看起来「发灰、变透明」。
+      background = Color.alphaBlend(
+        scheme.primary.withValues(alpha: 0.14),
+        scheme.surfaceContainerHigh,
+      );
       iconColor = scheme.primary;
     } else {
       background = scheme.surfaceContainerHigh;
