@@ -448,8 +448,11 @@ void main() {
       const VideoDetailPage(seriesId: 'v1', preview: preview),
       transport: FakePreviewTransport(),
     );
-    // 滚到内容最下方：ID 行位于选集之后、底部操作栏之上。
-    final footerText = find.text('短剧 ID：v1');
+    // 滚到内容最下方：ID 卡片位于选集之后、底部操作栏之上。
+    final footerText = find.descendant(
+      of: find.byType(DetailIdFooter),
+      matching: find.text('v1'),
+    );
     await tester.scrollUntilVisible(
       footerText,
       240,
@@ -458,7 +461,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(footerText, findsOneWidget);
 
-    await tester.tap(find.byTooltip('复制 ID'));
+    await tester.tap(find.byTooltip('复制短剧 ID'));
     await tester.pumpAndSettle();
     expect(copied, 'v1', reason: '复制的是完整 ID');
     expect(find.text('ID 已复制'), findsOneWidget, reason: '复制后弹浮动 SnackBar');

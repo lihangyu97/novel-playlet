@@ -227,8 +227,11 @@ void main() {
       );
 
       await pumpPreview(tester, const DetailPage(bookId: '1'));
-      // 滚到内容最下方：ID 行位于目录之后、底部操作栏之上。
-      final footerText = find.text('书籍 ID：1');
+      // 滚到内容最下方：ID 卡片位于目录之后、底部操作栏之上。
+      final footerText = find.descendant(
+        of: find.byType(DetailIdFooter),
+        matching: find.text('1'),
+      );
       await tester.scrollUntilVisible(
         footerText,
         240,
@@ -237,7 +240,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(footerText, findsOneWidget);
 
-      await tester.tap(find.byTooltip('复制 ID'));
+      await tester.tap(find.byTooltip('复制书籍 ID'));
       await tester.pumpAndSettle();
       expect(copied, '1', reason: '复制的是完整 ID');
       expect(find.text('ID 已复制'), findsOneWidget, reason: '复制后弹浮动 SnackBar');

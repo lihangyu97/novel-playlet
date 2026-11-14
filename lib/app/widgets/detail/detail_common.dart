@@ -538,11 +538,11 @@ class DetailTagWrap extends StatelessWidget {
   }
 }
 
-/// 详情页最下方的资源 ID + 一键复制。
+/// 详情页最下方的资源 ID 卡片 + 一键复制。
 ///
-/// 小说详情展示 `书籍 ID`、短剧详情展示 `短剧 ID`；放在内容最后、底部操作栏
-/// 之上，反馈问题时能直接报出资源 ID。整行置灰小字，只有右侧复制按钮响应，
-/// 避免误触。ID 可能很长：单行 + 省略号，复制拿到的始终是完整值。
+/// 卡风格、不再带标题：左侧一个小的 `ID` 前缀 + 资源 ID（超长省略），右侧
+/// 复制图标；放在内容最后、底部操作栏之上，反馈问题时能直接报出资源 ID。
+/// [label] 只用于复制按钮的 tooltip / 读屏文案（「复制书籍 ID」）。
 class DetailIdFooter extends StatelessWidget {
   const DetailIdFooter({
     super.key,
@@ -554,7 +554,7 @@ class DetailIdFooter extends StatelessWidget {
   /// 完整资源 ID（复制用）。
   final String id;
 
-  /// 展示用前缀：`书籍 ID` / `短剧 ID`。
+  /// 资源类型：`书籍 ID` / `短剧 ID`，只给 tooltip 与读屏用。
   final String label;
 
   /// 与下方底部操作栏之间的留白。
@@ -572,36 +572,47 @@ class DetailIdFooter extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Padding(
-      // 右侧少留 8：IconButton 自带内边距，图标视觉上仍与正文对齐。
-      padding: EdgeInsets.fromLTRB(
-        detailGutter,
-        6,
-        detailGutter - 8,
-        bottomPadding,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              '$label：$id',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
+      padding: EdgeInsets.only(bottom: bottomPadding),
+      child: Card(
+        margin: const EdgeInsets.fromLTRB(detailGutter, 6, detailGutter, 0),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          // 右侧少留：IconButton 自带内边距，图标视觉上仍贴着卡片右边。
+          padding: const EdgeInsets.fromLTRB(16, 4, 6, 4),
+          child: Row(
+            children: [
+              Text(
+                'ID',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.6,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                ),
               ),
-            ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  id,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: '复制$label',
+                onPressed: () => _copy(context),
+                icon: const Icon(Icons.copy_rounded, size: 16),
+                color: scheme.onSurfaceVariant,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
           ),
-          const SizedBox(width: 4),
-          IconButton(
-            tooltip: '复制 ID',
-            onPressed: () => _copy(context),
-            icon: const Icon(Icons.copy_rounded, size: 16),
-            color: scheme.onSurfaceVariant,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            visualDensity: VisualDensity.compact,
-          ),
-        ],
+        ),
       ),
     );
   }

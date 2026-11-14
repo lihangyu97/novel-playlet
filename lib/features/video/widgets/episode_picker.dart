@@ -79,54 +79,54 @@ class _EpisodePickerState extends State<EpisodePicker>
     final scheme = theme.colorScheme;
     final total = widget.episodes.length;
 
-    return Column(
-      children: [
-        InkWell(
-          onTap: _toggle,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              detailGutter,
-              detailGutter,
-              detailGutter,
-              4,
-            ),
-            child: Row(
-              children: [
-                Text(
-                  '选集',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '共 $total 集',
-                    textAlign: TextAlign.right,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
+    // 与简介 / 剧评同一套卡风格：标题、tab、集数网格都收在卡片里。
+    return Card(
+      margin: const EdgeInsets.fromLTRB(detailGutter, 6, detailGutter, 0),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          InkWell(
+            onTap: _toggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 10, 10),
+              child: Row(
+                children: [
+                  Text(
+                    '选集',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  _expanded ? Icons.expand_less : Icons.expand_more,
-                  size: 20,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '共 $total 集',
+                      textAlign: TextAlign.right,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 20,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeInOutCubicEmphasized,
-          alignment: Alignment.topCenter,
-          child: _expanded
-              ? _buildExpanded(context)
-              : const SizedBox(width: double.infinity),
-        ),
-      ],
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeInOutCubicEmphasized,
+            alignment: Alignment.topCenter,
+            child: _expanded
+                ? _buildExpanded(context)
+                : const SizedBox(width: double.infinity),
+          ),
+        ],
+      ),
     );
   }
 
@@ -180,7 +180,7 @@ class _EpisodePickerState extends State<EpisodePicker>
             ],
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
       ],
     );
   }
@@ -199,7 +199,7 @@ class _EpisodePickerState extends State<EpisodePicker>
     final end = math.min(start + widget.episodesPerTab, widget.episodes.length);
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(detailGutter, 4, detailGutter, 4),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final itemWidth =
