@@ -82,7 +82,7 @@ class _EpisodePickerState extends State<EpisodePicker>
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Row(
               children: [
                 Text(
@@ -126,7 +126,7 @@ class _EpisodePickerState extends State<EpisodePicker>
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           padding: const EdgeInsets.symmetric(horizontal: 8),
-          labelPadding: const EdgeInsets.symmetric(horizontal: 10),
+          labelPadding: const EdgeInsets.symmetric(horizontal: 8),
           labelColor: Theme.of(context).colorScheme.primary,
           unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
           labelStyle: const TextStyle(
@@ -137,18 +137,13 @@ class _EpisodePickerState extends State<EpisodePicker>
             fontSize: 13,
             fontWeight: FontWeight.w400,
           ),
+          // 不要下划线：当前 tab 只靠主色 + 加粗区分（与顶部分类 tabs 一致）。
+          indicator: const BoxDecoration(),
           indicatorSize: TabBarIndicatorSize.label,
-          indicator: UnderlineTabIndicator(
-            borderSide: BorderSide(
-              width: 2,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            insets: const EdgeInsets.symmetric(horizontal: 2),
-          ),
           dividerColor: Colors.transparent,
           tabs: [
             for (var tab = 0; tab < tabCount; tab++)
-              Tab(height: 40, text: _tabLabel(tab)),
+              Tab(height: 36, text: _tabLabel(tab)),
           ],
         ),
         SizedBox(
@@ -179,7 +174,7 @@ class _EpisodePickerState extends State<EpisodePicker>
     final end = math.min(start + widget.episodesPerTab, widget.episodes.length);
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final itemWidth =
