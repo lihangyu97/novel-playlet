@@ -349,7 +349,7 @@ void main() {
     );
   });
 
-  /// 版本脚注：显示原生包元数据里的版本号 + 构建号，灰色、居中。
+  /// 版本脚注：显示构建渠道（Release/Beta）+ 版本号 + 构建号，灰色、居中。
   testWidgets('设置页-底部显示版本号与构建号（灰色、居中）', (tester) async {
     await pumpPreview(
       tester,
@@ -361,7 +361,7 @@ void main() {
       ],
     );
 
-    final finder = find.text('版本 1.0.0 (15)');
+    final finder = find.text('Release 1.0.0 (15)');
     await tester.scrollUntilVisible(finder, 300);
     expect(finder, findsOneWidget);
 

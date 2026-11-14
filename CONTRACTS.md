@@ -12,6 +12,7 @@
 - 离线缓存：`lib/core/storage/offline/`（小说/短剧两个 pinned 区的 manifest 与原子读写）+ `lib/features/cache/`（单任务下载器、等待队列、任务持久化、providers、详情底栏三态按钮、缓存中心）。缓存中心同时负责浏览、暂停/继续/重试、删除/清空；设置页不再有离线入口。与自动缓存物理隔离、只手动清理，见下文「离线缓存」
 - 主题：`lib/app/theme/app_theme.dart`（Material 3 seed 主题 + `AppAccent` 扩展 + `ReaderPaper` 阅读底色 + 媒体卡圆角/底色 `mediaCardRadius` / `mediaCardColor`）；主题色偏好：`lib/app/theme/theme_settings.dart`（`themeSeedProvider`、`themeModeProvider`，持久化在 `shared_preferences`）。页面颜色一律走 `Theme.of(context).colorScheme`（M3 保证对比度），不要引用 `AppTheme.accent` 常量；只有「需要原始 seed 再自己派生 scheme」的场景（如阅读页按纸色明暗重建主题）才用 `AppTheme.accentOf(context)` + `AppTheme.schemeFor(seed, brightness)`
 - 共享组件：`lib/app/widgets/`（`NovelCover`、`AppSurfaceCard`（通用白底卡容器：纯白底 / 暗色 surfaceContainerHigh + 小圆角 + 点击反馈；水波纹在封面图下层、实际只在文字区可见，后续列表逐步卡片化时复用它）、`MediaCard`（列表卡共用骨架：封面 + 标题 + 元信息；`surface` 开白底卡、`naturalTitleHeight` 开标题自然高度、`coverAspect` 换封面比例）、`NovelGridCard` / `VideoCard`（把模型映射成卡片文案的薄适配）、`CategoryTabBar`（一级分类 tabs 通用样式：高度固定 34、无下划线、首个 tab 文字左边缘与内容留白 8pt 对齐（按选中字号预留宽度，字号变化不挪左边缘）、文字贴同一条底线（选中 17 / 未选 15，变大只向上长）、字号/颜色/字重都在过半时直接切换——不做逐帧插值，避免文字每帧重排重栅格化导致抖动）、`LoadingView`、`ErrorView`、`EmptyView`）。我的页通用块在 `lib/features/mine/widgets/`（`ShelfGrid<T>`、`RecentList<T>`、`MineTabBody<TData>`）。小说/短剧两侧只注入数据与文案，不要各写一套
+- 底部弹层：一律走 `lib/app/widgets/app_bottom_sheet.dart` 的 `AppBottomSheet` + `showAppBottomSheet()`，不要再直接调 `showModalBottomSheet`（圆角/遮罩/底部安全区/标题区只在一处维护）。标题区把主标题与副标题当行内元素排：默认同一行，主标题过长自己折行，副标题不折行、一行放不下就落到下一行左对齐（等价 CSS `flex-wrap: wrap`）；右上角统一关闭按钮；内容走 `child` 插槽（插槽不自带左右内边距，标题区是 20，需要齐平由调用方自己加）。`title: null` 时不画标题区/分割线，只在右上角浮一个圆形关闭按钮（可用 `showClose: false` 去掉），必须同时传 `heightFactor`（详情类弹层用 0.72 并不显示关闭按钮）
 - 列表页通用骨架：`lib/features/feed/`（`FeedState<T>` 分页状态、`FeedView<T>` 滚动/补屏/下拉刷新/底部状态、`FeedStaggeredGrid<T>` 瀑布流网格（列数 2/3，卡片不定高）、`FeedSearchField`（可输入 + 只读入口两形态：推荐页点只读框进搜索页）、`FeedSectionTitle`、`FeedFooter`）。新列表页优先复用它，不要各写一套。搜索页的**行内**加载/失败/空态用行内紧凑提示（`SearchPage` 私有 `_SectionStatus`），不复用整页 `LoadingView`/`ErrorView`/`EmptyView`——两行里的一行不能撑满整屏
 - 详情页通用组件：`lib/app/widgets/detail/detail_common.dart`（`DetailCoverHeader` 封面头、`DetailIntroCard` 简介+标签、`ExpandableIntro`、`DetailSectionHeader`、`DetailTagChip`）。小说/短剧详情共用，特殊模块（目录/选集）各自在 feature 内实现
 - 详情状态：小说走 `lib/features/detail/detail_providers.dart`（`detailBundleProvider` / `detailShelfProvider`，autoDispose + 乐观更新）；短剧走 `lib/features/video/video_detail_providers.dart`（`videoDetailBundleProvider`；收藏态在 `lib/features/video/video_library_providers.dart` 的 `VideoShelfController`，同样乐观更新），两侧对称
@@ -30,7 +31,7 @@
 4. UI 文案用中文；注释写"为什么"，不要写"做了什么"。
 5. 只用 Material 3 + `Theme.of(context).colorScheme`，不要硬编码颜色（阅读页底色用 `ReaderPaper`；推荐流卡片的纯白底 / 暗色底统一走 `AppTheme.mediaCardColor`）。
 6. 列表图片一律走 `NovelCover`（处理空 URL/失败），不要裸 `Image.network`。
-7. 封面一律取缩略图：解析时用 `lib/data/models/json_utils.dart` 的 `coverKeys`（`thumb_url` 优先），不要回退到 `detail_page_thumb_url` / `cover` 之外的大图。封面位宽度：推荐流/搜索结果/我的页统一左右留白 8，双列约 183pt、三列约 119pt（书架/收藏网格同为 3 列约 119pt）；详情页封面铺成整屏宽模糊背景（`DetailCoverBackdrop`），大图也用不上。`NovelCover` 按 `width * dpr` 解图，卡片变宽会自动跟着涨，不要手动写死解码宽度。书架与阅读进度会把 `cover` 落盘，存大图 URL 等于永久多付带宽。
+7. 封面一律取缩略图：解析时用 `lib/data/models/json_utils.dart` 的 `coverKeys`（`thumb_url` 优先），不要回退到 `detail_page_thumb_url` / `cover` 之外的大图。封面位宽度：推荐流/搜索结果/我的页统一左右留白 8，双列约 183pt、三列约 119pt（书架/收藏网格同为 3 列约 119pt）；详情页封面铺成整屏宽渐变背景（`DetailCoverBackdrop`，不模糊），大图也用不上。`NovelCover` 按 `width * dpr` 解图，卡片变宽会自动跟着涨，不要手动写死解码宽度。书架与阅读进度会把 `cover` 落盘，存大图 URL 等于永久多付带宽。
 8. 封面像素比例按内容类型取**上游原生比例**：小说 `kNovelCoverAspect`（320/240 = 4:3）、短剧/漫剧 `kVideoCoverAspect`（571/400 ≈ 10:7），定义在 `lib/app/widgets/novel_cover.dart`，由卡片类型/面板显式传入。推荐流瀑布流、搜索结果、书架、最近阅读、缓存中心都用原生比例，封面不被裁切；小说与短剧封面高度因此不同（7:10 比 3:4 高约 7%），切分类 tab 时卡片会变高，属预期。`kCoverAspect`（11:8）只作为 `MediaCard` / `NovelGridCard` / `VideoCard` 的默认值保留，页面入口不要依赖默认值。接口不返回封面尺寸，不要按单张图解码量尺寸（会在瀑布流里二次重排）。
 
 ## 数据层 API（已完成，直接用）
@@ -150,7 +151,7 @@ await downloader.clearFor(OfflineTaskKind.novel, bookId);   // 删除前取消�
 final queued = ref.watch(offlineQueueProvider);             // List<OfflineQueuedTask>
 ref.read(offlineQueueProvider.notifier).remove(kind, id);   // 取消排队
 
-// UI：详情页底栏按钮（小说/短剧共用）；三态「缓存/缓存中/已缓存」，
+// UI：详情页底部悬浮圆按钮（小说/短剧共用，从左到右 收藏 / 缓存 / 播放·阅读，只有图标、靠右排列）；三态「缓存/缓存中/已缓存」，
 // 缓存 → start*；缓存中/已缓存 → push CacheCenterRoute()（暂停/继续/重试在缓存中心）
 DetailActionBar(offlineButton: OfflineDownloadButton(
   kind: OfflineTaskKind.novel, id: bookId, title: title, cover: cover, items: chapters))
@@ -259,13 +260,13 @@ context.pushAppRoute(const SearchRoute());         // 推荐页搜索框 → 独
 
 1. 推荐页：顶部**常驻**搜索框（40pt、圆角 10，是**只读入口**：点一下进入独立搜索页，不弹键盘、不随列表滚动收起；占位轮播 cue 热词（`/api/v1/search/cue`，按 `rotate_interval_ms` 淡入淡出，无词/失败回退「搜索小说 / 短剧」），点进搜索页时把当前这条带过去；右侧固定下载图标按钮（`download_outlined`，Tooltip/无障碍文案为「已缓存」） → 缓存中心）；顶部固定模块（搜索框 + tabs）带很淡的蓝粉氛围渐变（左→右、向下淡出，`TopGlow`）+ 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧，与我的页共用 `CategoryTabBar`）+ 各分类推荐流（白底卡片 + 不定高瀑布流，默认双列、设置里可切三列；左右留白与行/列间距都 8；封面按内容域原生比例出图；底部导航只剩「推荐 / 我的」）
 2. 详情页：封面/书名/作者/分类/状态/字数/简介/标签 + 书评卡片（首条 + 弹窗查看全部）+ 目录 + 底部「开始阅读」；短剧详情是同一套版式，只是把书评/目录换成剧评卡片（首条 + 弹窗查看全部）与选集
-3. 阅读页：分页正文 + 段评气泡 + 工具栏「评论」/评论面板（分页/回复只读）+ 点击呼出工具栏 + 顶部左侧书名（与右侧动作同字号，占剩余宽度、超宽省略）+ 书架状态（加入书架→已在书架，只读，只加不移）/整本缓存状态（缓存小说/缓存中/已缓存，缓存中与已缓存点击进缓存中心）文本动作 + 底部日间/夜间切换（夜间黑色纸，日间回上次选的浅色纸）+ 字号/行距/底色/段评气泡开关 + 进度保存；上一章/下一章不占工具栏按钮（空章兜底仍保留），点正文左右分区/章边界滑动/目录跳章都能切章
-4. 短剧播放页：控制条底排左侧「选集 + 本集评论」、中间播放/暂停、右侧「收藏 + 缓存 + 倍速」（历史「最近观看」直进播放页，这里就是收藏/缓存的唯一入口）；顶栏右侧「剧集详情」回详情；上下滑切集、播完自动续播、横屏全屏
+3. 阅读页：分页正文 + 段评气泡 + 工具栏「评论」/评论面板（分页/回复只读）+ 点击呼出工具栏 + 顶部左侧书名（与右侧动作同字号，占剩余宽度、超宽省略）+ 书架状态（加入书架→已在书架，只读，只加不移）/整本缓存状态（缓存小说/缓存中/已缓存，缓存中与已缓存点击进缓存中心）文本动作 + 底部日间/夜间切换（夜间黑色纸，日间回上次选的浅色纸）+ 三章预取窗口（当前 ±1 章：正文/章评/分页；窗口外淘汰，边界 sentinel 页复用 PageView 动画）+ 详情弹层（目录右边入口，无标题、无关闭按钮、不重复目录，只有收藏/缓存）+ 字号/行距/字重（300–800）/底色（色块与标题同行）/段评气泡开关 + 进度保存；上一章/下一章不占工具栏按钮（空章兜底仍保留），点正文左右分区/章边界滑动/目录跳章都能切章
+4. 短剧播放页：控制条底排左侧「选集 + 详情 + 本集评论」、中间播放/暂停、右侧「清晰度（仅展示）+ 倍速」；收藏/缓存收进「详情」底部弹层（历史「最近观看」直进播放页时也从这里操作；弹层不重复选集、无关闭按钮）；进度条两侧显示当前时间/总时长；上下滑切集、播完自动续播、横屏全屏
    - **收藏只加不移**（与阅读页顶部「加入书架」一致）：已收藏后按钮只读，取消走「我的 → 收藏」；成功不弹提示条，图标变实心即可。
    - 缓存三态与详情页共用 `offlineEntryStatusProvider`：未缓存开下载，缓存中/已缓存进缓存中心。
 5. 我的页：**统一页头**（图标 + 「我的」 + 合并统计「书架 N 本 · 收藏 M 部」 + 右上角唯一设置入口，固定贴顶、不随内容滚动；缓存入口在推荐页搜索框右侧）+ 小说 / 短剧两个 tab（与推荐页共用 `CategoryTabBar`：左对齐、**无下划线**、整行高度固定 34，首个 tab 文字与内容留白左对齐（按最大字号预留宽度），当前 tab 主题色高亮、字号 17 / 未选中 15；文字贴同一条底线（变大只向上长），字号/颜色/字重都在过半时直接切换（不做逐帧插值，拖动时一过中线新 tab 就亮）；点击或左右滑动切换，tab 内容各自独立滚动并保活）；整页共用一套蓝粉氛围渐变（方向与推荐页略有差异），不随 tab 变化。小说 tab = 最近阅读 + 我的书架；短剧 tab = 最近观看 + 我的收藏（点击直接续播对应集）；两个 tab 共用 `MineTabBody` 骨架与页头，数据/空态/长按管理各自独立
 6. 设置页：主题色（3 个预设 + HSV 自定义取色，全站生效并持久化）+ 深浅色模式（跟随系统 / 手动深色，持久化）+ 首页推荐布局（双列 / 三列二选一，默认双列，持久化）+ 存储占用与清理（离线缓存提示去「我的 → 缓存」页处理）
 7. 缓存中心：推荐页搜索框右侧的下载图标按钮进入（不再是「我的」页悬浮按钮）；小说/短剧分区列出下载中/排队中/已下载，进度条 + 实时网速，暂停/继续/重试/取消排队，M3 删除与按区清空（确认框），点条目 Hero 进详情
-8. 搜索页（独立页，推荐页搜索框点进来）：顶部搜索框（自动聚焦，右侧「取消」返回；占位从推荐页带过来的热词接着轮播，**空输入提交时直接搜当前占位热词**并把它填回输入框）+ 一次提交**搜小说 / 短剧**，从上到下依次是 小说 / 短剧 两行；每行横向可滑、一屏露出约 3.5 张卡；卡片复用首页推荐流同款（白底卡 + 原生封面比例），卡宽按屏宽算（`SearchPage.cardWidthFor`）、字号整体缩一档（`SearchPage.cardFontScale` = 0.88）；每行独立 加载骨架（与真卡同宽同高的色块占位）/ 失败重试 / 空态；**不单列漫剧行**——漫剧没有独立搜索 tab，是借短剧搜索 tab 再按 `genre=205` 过滤的，和短剧行本质是同一份响应；单列会把同一份数据请求两遍并在两行重复出现，所以短剧行直接展示上游混排结果（漫剧卡片混在其中）；视频卡不展示推荐理由（`recommend_reason_list` 第一条：或为分类名「漫剧」、或为「上新」角标，都隐藏），只留「全 N 集 + 热度」；点卡片按内容域进详情（Hero tag 带 `search-<分类>` 来源）。v1 每个分类只取首屏一页（暂不接 `next_offset`，没有「查看更多」）
+8. 搜索页（独立页，推荐页搜索框点进来）：顶部搜索框（自动聚焦，右侧「取消」返回；占位从推荐页带过来的热词接着轮播，**空输入提交时直接搜当前占位热词**并把它填回输入框）+ 一次提交**搜小说 / 短剧**，从上到下依次是 小说 / 短剧 两行；每行横向可滑、一屏露出约 3.5 张卡；卡片复用首页推荐流同款（白底卡 + 原生封面比例），卡宽按屏宽算（`SearchPage.cardWidthFor`）、字号整体缩一档（`SearchPage.cardFontScale` = 0.88）；每行独立 加载骨架（与真卡同宽同高的色块占位）/ 失败重试 / 空态；**不单列漫剧行**——漫剧没有独立搜索 tab，是借短剧搜索 tab 再按 `genre=205` 过滤的，和短剧行本质是同一份响应；单列会把同一份数据请求两遍并在两行重复出现，所以短剧行直接展示上游混排结果（漫剧卡片混在其中）；视频卡不展示推荐理由（`recommend_reason_list` 第一条：或为分类名「漫剧」、或为「上新」角标，都隐藏），只留「全 N 集 + 热度」；点卡片按内容域进详情（Hero tag 带 `search-<分类>` 来源）。v1 每个分类只取首屏一页（暂不接 `next_offset`，没有「查看更多」）；输入为空时展示搜索历史（最多 10 条、去重置顶、点击直接重搜）
 
 不在本期范围：听书、漫画、登录；评论/段评只做**只读**（不发评论、不点赞、不回复）。

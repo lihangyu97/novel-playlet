@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
+import '../../../app/widgets/app_bottom_sheet.dart';
 import '../../../app/widgets/states.dart';
 import '../../../data/models/book_comment.dart';
 import '../../../data/models/json_utils.dart';
@@ -23,18 +24,12 @@ Future<void> showVideoCommentsSheet(
   String vid = '',
   BookCommentPage? initialPage,
 }) {
-  return showModalBottomSheet<void>(
+  return showAppBottomSheet<void>(
     context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (_) => FractionallySizedBox(
-      // 约 0.8 屏高：一屏能看五六条评论，同时留出上方页面作为上下文。
-      heightFactor: 0.8,
-      child: VideoCommentsSheet(
-        seriesId: seriesId,
-        vid: vid,
-        initialPage: initialPage,
-      ),
+    builder: (_) => VideoCommentsSheet(
+      seriesId: seriesId,
+      vid: vid,
+      initialPage: initialPage,
     ),
   );
 }
@@ -200,43 +195,12 @@ class _VideoCommentsSheetState extends ConsumerState<VideoCommentsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final title = _isEpisode ? '本集评论' : '剧评';
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
-          child: Row(
-            children: [
-              Text(
-                title,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  _totalCount > 0 ? '共 $_totalCount 条' : '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: '关闭评论',
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close_rounded),
-              ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-        Expanded(child: _buildBody(context)),
-      ],
+    return AppBottomSheet(
+      title: _isEpisode ? '本集评论' : '剧评',
+      subtitle: _totalCount > 0 ? '共 $_totalCount 条' : null,
+      heightFactor: 0.8,
+      closeTooltip: '关闭评论',
+      child: _buildBody(context),
     );
   }
 
@@ -254,9 +218,7 @@ class _VideoCommentsSheetState extends ConsumerState<VideoCommentsSheet> {
     final showFooter = !_isEpisode && (_loadingMore || _loadMoreError != null);
     return ListView.builder(
       controller: _scrollController,
-      padding: EdgeInsets.only(
-        bottom: 24 + MediaQuery.paddingOf(context).bottom,
-      ),
+      padding: const EdgeInsets.only(bottom: 24),
       itemCount: _comments.length + (showFooter ? 1 : 0),
       itemBuilder: (context, index) {
         if (index >= _comments.length) return _buildFooter();

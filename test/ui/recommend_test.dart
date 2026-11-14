@@ -260,10 +260,12 @@ void main() {
     expect(find.byType(SearchPage), findsNothing);
     expect(feedCalls(), before, reason: '搜索/返回不应重拉推荐流');
 
-    // 再进搜索页：上一次的关键词已被 autoDispose 清掉，应回到引导空态。
+    // 再进搜索页：上一次的搜索词已清掉（不显示结果），但关键词进了搜索历史。
     await tester.tap(find.byIcon(Icons.search_rounded));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.textContaining('输入关键词'), findsOneWidget);
+    expect(find.text('搜索历史'), findsOneWidget);
+    expect(find.text('剑来'), findsOneWidget);
+    expect(find.byType(NovelGridCard), findsNothing, reason: '搜索词应已清空');
   });
 
   /// 搜索框轮播热词：热词只做 placeholder，不写进输入框；点进搜索页时把

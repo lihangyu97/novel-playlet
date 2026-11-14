@@ -428,6 +428,8 @@ class ReaderPagination {
   @visibleForTesting
   static int debugDialogueMeasureCount = 0;
 
+  /// 仅测试用：预排版（相邻章）不计入上面三个计数，避免把后台准备算成
+  /// 当前章的额外重排。由阅读页在构建预排版时临时打开。
   @visibleForTesting
   static void debugResetCounters() {
     debugBuildCount = 0;

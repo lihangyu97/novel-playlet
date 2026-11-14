@@ -60,6 +60,9 @@ class AppTheme {
 
   static const double cardRadius = 14;
 
+  /// 底部弹层顶部圆角。全应用统一（见 `AppBottomSheet`），不要各处自己写。
+  static const double sheetRadius = 20;
+
   /// 媒体卡片（推荐流封面卡）圆角。
   ///
   /// 比通用 [cardRadius] 小一档：卡片是纯白底、封面满宽出血，14 在双列宽卡上
@@ -194,11 +197,12 @@ class AppTheme {
     required double fontSize,
     required double lineHeight,
     required Color color,
+    FontWeight fontWeight = FontWeight.w400,
   }) => TextStyle(
     fontSize: fontSize,
     height: lineHeight,
     color: color,
     letterSpacing: 0.2,
-    fontWeight: FontWeight.w400,
+    fontWeight: fontWeight,
   );
 }

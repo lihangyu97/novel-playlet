@@ -145,6 +145,9 @@ class ReaderController extends Notifier<ReaderSessionState> {
   final List<Chapter> _prefetchQueue = <Chapter>[];
   final Set<String> _prefetchQueued = <String>{};
   final Set<String> _prefetching = <String>{};
+  final Map<String, Future<ChapterContent?>> _prepareFutures =
+      <String, Future<ChapterContent?>>{};
+  final Map<String, Future<void>> _prefetchFutures = <String, Future<void>>{};
   final Set<String> _prefetched = <String>{};
   bool _prefetchWorkerRunning = false;
   static const int _maxPrefetchQueue = 4;
@@ -487,6 +490,61 @@ class ReaderController extends Notifier<ReaderSessionState> {
     }
   }
 
+  /// 为相邻章准备正文：离线 → 自动缓存 → 网络，结果写回缓存但不改当前
+  /// 会话状态。阅读页用它给上一章/下一章预排版；同一章并发调用只发一次。
+  Future<ChapterContent?> prepareChapterContent(int position) async {
+    if (_disposed || state.chapters.isEmpty) return null;
+    final clamped = position.clamp(0, state.chapters.length - 1).toInt();
+    final chapter = state.chapters[clamped];
+    final existing = _prepareFutures[chapter.id];
+    if (existing != null) return existing;
+    // 正文预取已经在路上时等它落进缓存，别再发一次同样的请求。
+    final prefetch = _prefetchFutures[chapter.id];
+    if (prefetch != null) {
+      await prefetch;
+      if (_disposed) return null;
+    }
+    final future = _prepareChapterContent(chapter);
+    _prepareFutures[chapter.id] = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_prepareFutures[chapter.id], future)) {
+        _prepareFutures.remove(chapter.id);
+      }
+    }
+  }
+
+  Future<ChapterContent?> _prepareChapterContent(Chapter chapter) async {
+    if (_disposed) return null;
+    final offline = await _readOfflineChapter(chapter.id);
+    if (_disposed) return null;
+    if (offline != null) return _anchoredChapters[chapter.id] ?? offline;
+
+    final cached = await _cache.get(chapter.id);
+    if (_disposed) return null;
+    if (cached != null) {
+      if (cached.anchorsOutdated &&
+          ref.read(readerSettingsProvider).showBubbles) {
+        unawaited(_upgradeAnchors(chapter));
+      } else if (cached.isStale) {
+        _enqueuePrefetch(chapter);
+      }
+      return cached.content;
+    }
+
+    try {
+      final content = await ref
+          .read(apiClientProvider)
+          .chapter(chapter.id, title: chapter.title);
+      if (_disposed) return null;
+      unawaited(_cache.put(content));
+      return content;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 当前章展示后，把相邻章悄悄拉进本地缓存。只写缓存，不动 UI 状态，
   /// 避免预取结果串到正在显示的章节上。
   void _prefetchNeighbors() {
@@ -531,7 +589,20 @@ class ReaderController extends Notifier<ReaderSessionState> {
     }
   }
 
-  Future<void> _fetchIntoCache(Chapter chapter) async {
+  Future<void> _fetchIntoCache(Chapter chapter) {
+    final id = chapter.id;
+    final existing = _prefetchFutures[id];
+    if (existing != null) return existing;
+    final future = _fetchIntoCacheImpl(chapter);
+    _prefetchFutures[id] = future;
+    return future.whenComplete(() {
+      if (identical(_prefetchFutures[id], future)) {
+        _prefetchFutures.remove(id);
+      }
+    });
+  }
+
+  Future<void> _fetchIntoCacheImpl(Chapter chapter) async {
     final id = chapter.id;
     if (_disposed || id.isEmpty) return;
     if (_prefetched.contains(id) || _prefetching.contains(id)) return;

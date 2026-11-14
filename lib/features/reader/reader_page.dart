@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_theme.dart';
+import '../../app/widgets/app_bottom_sheet.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/chapter.dart';
@@ -19,11 +20,13 @@ import '../../data/models/novel_item.dart';
 import '../cache/cache_providers.dart';
 import '../cache/offline_task.dart';
 import '../cache/widgets/offline_download_button.dart';
+import '../detail/detail_page.dart';
 import 'reader_actions.dart';
 import 'reader_comments.dart';
 import 'reader_comments_sheet.dart';
 import 'reader_controller.dart';
 import 'reader_pagination.dart';
+import 'reader_pagination.dart' as reader_pagination;
 import 'reader_settings.dart';
 import 'reader_widgets.dart';
 
@@ -35,6 +38,11 @@ class ReaderPage extends ConsumerStatefulWidget {
   const ReaderPage({super.key, required this.args});
 
   final ReaderArgs args;
+
+  /// 仅测试用：关掉邻章预排版，让“分页次数/重测段数”这类回归计数只统计
+  /// 当前章的显示路径（生产默认开启）。
+  @visibleForTesting
+  static bool debugDisablePreparation = false;
 
   @override
   ConsumerState<ReaderPage> createState() => _ReaderPageState();
@@ -64,6 +72,35 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   /// 跨 build 的段落测量缓存：段评异步到达、换字号等触发整章重排时，只重测
   /// 真正变化的段落（见 [ReaderBlockMeasureCache]），避免每次整章再测一遍。
   final ReaderBlockMeasureCache _measureCache = ReaderBlockMeasureCache();
+
+  /// 当前章 + 前后各一章的准备结果（正文 / 章评 / 分页）。只保留这三章，
+  /// 切到新章后由 [_prunePrepared] 淘汰窗口外的条目。
+  final Map<String, _PreparedChapter> _prepared = <String, _PreparedChapter>{};
+
+  /// 章评本地缓存：provider 是 autoDispose，切回同一章会重新请求；这里先
+  /// 用缓存渲染，请求回来再替换，避免气泡/章末计数先消失再出现。
+  final Map<String, ChapterIdeas> _ideasCache = <String, ChapterIdeas>{};
+  final Set<String> _ideasLoading = <String>{};
+  final Set<String> _preparing = <String>{};
+
+  /// 当前排版参数（宽高/字号/行距/字重/缩放/气泡开关）。预排版和 sentinel
+  /// 只在这个签名一致时复用，否则视为过期。
+  _PrepLayout? _activeLayout;
+
+  /// PageView 里“上一章最后一页”sentinel 占掉的一页；没有时为 0。
+  int _displayOffset = 0;
+  bool _hasPrevSentinel = false;
+  bool _hasNextSentinel = false;
+  bool _prepScheduled = false;
+  int _pageControllerGeneration = 0;
+
+  /// sentinel 落定切章后，新 PageView 第一帧可能还停在夹取后的页；用目标页
+  /// 的内容盖住这一帧，等控制器校正完再撤掉，避免“先看到前一页再跳”。
+  reader_pagination.ReaderPage? _settlePage;
+  String _settlePageChapterId = '';
+
+  /// 从 sentinel 落定切章时不要再播旧的淡入过渡（页面本身已经滑到了目标页）。
+  bool _suppressChapterTransition = false;
 
   int _pageIndex = 0;
   bool _toolbarVisible = false;
@@ -128,8 +165,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           ),
         )
         .value;
-    if (value != null) _stickyIdeas = value;
-    return value ?? _stickyIdeas ?? ChapterIdeas.empty;
+    if (value != null) {
+      _stickyIdeas = value;
+      _ideasCache[chapter.id] = value;
+    }
+    return value ??
+        _ideasCache[chapter.id] ??
+        _stickyIdeas ??
+        ChapterIdeas.empty;
   }
 
   @override
@@ -190,6 +233,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     ref.listen<ReaderSessionState>(provider, (previous, next) {
       if (previous == null || next.contentIndex < 0) return;
       if (previous.contentIndex == next.contentIndex) return;
+      // 从 sentinel 页落定切章：页面已经滑到目标页，不能再叠加淡入。
+      if (_suppressChapterTransition) {
+        _suppressChapterTransition = false;
+        return;
+      }
       _chapterSlide = next.contentIndex >= previous.contentIndex ? 1 : -1;
       _chapterTransition.forward(from: 0);
     });
@@ -300,7 +348,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   /// 阅读纸色对应的一套主题：配色方案按纸色的明暗重新派生。
   ///
-  /// 弹层（设置/目录）也要用它包一层——showModalBottomSheet 挂在 root
+  /// 弹层（设置/目录）也要用它包一层——底部弹层挂在 root
   /// Navigator 上，不包就会拿到全局主题的 primary，在纸色/夜间底色上对比度
   /// 不够（暗色 App + 纸色底时曾经低到 1.5:1）。
   ThemeData _readerTheme(ReaderPaper paper) {
@@ -376,17 +424,38 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         // 常驻信息条占固定高度，先扣掉再分页；布局与分页用同一个常量，
         // 不会出现“信息条一刷新正文就重排”的抖动。
         final pageHeight = constraints.maxHeight - _infoBarHeight;
+        final layout = _PrepLayout(
+          width: contentWidth,
+          height: pageHeight,
+          fontSize: settings.fontSize,
+          lineHeight: settings.lineHeight,
+          fontWeight: settings.fontWeight,
+          fontFamily: fontFamily,
+          textScaler: textScaler,
+          showBubbles: settings.showBubbles,
+          showDialogueHighlight: settings.showDialogueHighlight,
+        );
+        _activeLayout = layout;
+        final prevPrepared = _preparedFor(
+          session,
+          session.contentIndex - 1,
+          layout,
+        );
+        final nextPrepared = _preparedFor(
+          session,
+          session.contentIndex + 1,
+          layout,
+        );
+        final displayOffset = prevPrepared == null ? 0 : 1;
+        final offsetBefore = _displayOffset;
+        final controllerBefore = _pageController;
         final pagination = contentWidth <= 0 || pageHeight <= 0
             ? null
             : _obtainPagination(
                 content: content,
-                settings: settings,
-                textScaler: textScaler,
-                fontFamily: fontFamily,
-                width: contentWidth,
-                height: pageHeight,
+                layout: layout,
                 ideas: ideas,
-                showBubbles: settings.showBubbles,
+                displayOffset: displayOffset,
               );
         if (pagination == null || pagination.pages.isEmpty) {
           return _buildStatus(
@@ -395,9 +464,29 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           );
         }
         final pages = pagination.pages;
+        // 当前章也记进准备缓存：切到下一章后它要当“上一章 last page” sentinel。
+        _prepared[content.id] = _PreparedChapter(
+          chapterId: content.id,
+          content: content,
+          ideas: ideas,
+          pagination: pagination,
+          layout: layout,
+        );
+        _hasPrevSentinel = prevPrepared != null;
+        _hasNextSentinel = nextPrepared != null;
+        // prev sentinel 是在当前页前面插了一页，PageView 的索引整体 +1；
+        // 预排版刚完成时用新 PageController 直接以正确页码重建，避免先显示
+        // 错位一页再 jump 过去。
+        if (offsetBefore != displayOffset &&
+            identical(controllerBefore, _pageController)) {
+          _restartPageController(displayOffset + _pageIndex);
+        }
+        _schedulePreparation(session, layout);
         // 续读入口：首次分页完成后按 blockIndex 落到对应页（只做一次）。
         _applyResumeIfNeeded(session, pagination);
         final pageIndex = _pageIndex.clamp(0, pages.length - 1).toInt();
+        final displayPageCount =
+            displayOffset + pages.length + (_hasNextSentinel ? 1 : 0);
         return AnimatedBuilder(
           animation: _chapterTransition,
           child: Column(
@@ -410,8 +499,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       child: NotificationListener<ScrollNotification>(
                         onNotification: _onScrollNotification,
                         child: PageView.builder(
+                          // 换 PageController 时必须同时换 PageView 的 key：
+                          // 同一个 element 里换 controller 会沿用旧 ScrollPosition，
+                          // initialPage 不生效，导致回到上一章时页码/内容错位或
+                          // 先画错页再校正。generation 保证每次 restart 都是新元素。
                           key: ValueKey<String>(
-                            'reader-pager-${pagination.chapterId}',
+                            'reader-pager-${pagination.chapterId}-'
+                            '$_pageControllerGeneration',
                           ),
                           controller: _pageController,
                           // 不用 iOS 回弹物理：回弹不产生 OverscrollNotification，
@@ -422,11 +516,56 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                           physics: _toolbarVisible
                               ? const NeverScrollableScrollPhysics()
                               : const ClampingScrollPhysics(),
-                          itemCount: pages.length,
+                          itemCount: displayPageCount,
                           onPageChanged: _onPageChanged,
-                          itemBuilder: (context, index) => RepaintBoundary(
+                          itemBuilder: (context, index) {
+                            final bool isPrevSentinel =
+                                _hasPrevSentinel && index == 0;
+                            final bool isNextSentinel =
+                                _hasNextSentinel &&
+                                index == displayOffset + pages.length;
+                            final bool inCurrent =
+                                !isPrevSentinel && !isNextSentinel;
+                            final reader_pagination.ReaderPage page;
+                            if (isPrevSentinel) {
+                              page = prevPrepared!.pagination.pages.last;
+                            } else if (isNextSentinel) {
+                              page = nextPrepared!.pagination.pages.first;
+                            } else {
+                              page = pages[index - displayOffset];
+                            }
+                            return RepaintBoundary(
+                              child: ReaderPageContent(
+                                page: page,
+                                textStyle: textStyle,
+                                textScaler: textScaler,
+                                contentWidth: contentWidth,
+                                horizontalPadding: _horizontalPadding,
+                                showDialogueHighlight:
+                                    settings.showDialogueHighlight,
+                                dialogueHighlightColor:
+                                    settings.dialogueHighlightColor,
+                                // sentinel 页不属于当前章，气泡不接点击。
+                                onBubbleTap: inCurrent
+                                    ? _openParagraphComments
+                                    : null,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    if (_settlePage != null)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: ColoredBox(
+                            color: paper.background,
                             child: ReaderPageContent(
-                              page: pages[index],
+                              // 新正文已经到达就用新分页的目标页；还在加载旧章
+                              // 时用 sentinel 的目标页（两者内容一致）。
+                              page: content.id == _settlePageChapterId
+                                  ? pages[_pageIndex.clamp(0, pages.length - 1)]
+                                  : _settlePage!,
                               textStyle: textStyle,
                               textScaler: textScaler,
                               contentWidth: contentWidth,
@@ -435,13 +574,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                   settings.showDialogueHighlight,
                               dialogueHighlightColor:
                                   settings.dialogueHighlightColor,
-                              onBubbleTap: _openParagraphComments,
+                              onBubbleTap: null,
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    if (session.loading)
+                    if (session.loading && _settlePage == null)
                       Positioned(
                         top: 10,
                         left: 0,
@@ -518,7 +656,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       if (target != _pageIndex) {
         _pageIndex = target;
         // 首次分页时直接用目标页做 PageController 初始页，避免先画第 0 页。
-        _restartPageController(target);
+        _restartPageController(target + _displayOffset);
       }
     }
     final provider = readerSessionProvider(widget.args);
@@ -652,6 +790,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
     if (notification is ScrollEndNotification) {
       _dragStartPage = null;
+      final pagination = _pagination;
+      if (pagination != null && _pageController.hasClients) {
+        final display = _pageController.page?.round();
+        if (display != null) {
+          final local = display - _displayOffset;
+          if (local < 0) {
+            unawaited(_commitSentinel(-1));
+          } else if (local >= pagination.pages.length) {
+            unawaited(_commitSentinel(1));
+          }
+        }
+      }
       return false;
     }
     if (notification is! OverscrollNotification ||
@@ -667,6 +817,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
     // 向右越界（负 overscroll）= 想回上一章；向左越界 = 想进下一章。
     final direction = notification.overscroll < 0 ? -1 : 1;
+    // 该方向已经有 sentinel 页：边界由 PageView 的原生滑动负责，这里不能再
+    // 触发旧的“越界直接切章”，否则会在 sentinel 上再切一次。
+    if (direction < 0 && _hasPrevSentinel) return false;
+    if (direction > 0 && _hasNextSentinel) return false;
     final expectedStart = direction < 0 ? 0 : pagination.pages.length - 1;
     if (startPage != expectedStart) return false;
     _overscroll += notification.overscroll;
@@ -675,6 +829,65 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       unawaited(_crossChapter(direction));
     }
     return false;
+  }
+
+  /// 滑到 sentinel 页并落定后，原子切到目标章。
+  ///
+  /// 此时 PageView 已经像普通翻页一样滑到了目标页；切章后新 PageView 的
+  /// 初始页指向同一页内容，所以不需要淡入过渡（[_suppressChapterTransition]）。
+  /// 如果正文没取到（断网且无缓存），把 PageView 退回当前章原来的页，避免
+  /// 停在一个假的 sentinel 上。
+  Future<void> _commitSentinel(int direction) async {
+    if (_boundaryPending) return;
+    final session = ref.read(readerSessionProvider(widget.args));
+    if (session.loading || session.index != session.contentIndex) return;
+    if (direction < 0 && !session.hasPrevious) return;
+    if (direction > 0 && !session.hasNext) return;
+    _boundaryPending = true;
+    _suppressChapterTransition = true;
+    _rememberPosition();
+    _pendingEntry = direction < 0
+        ? _ChapterEntry.lastPage
+        : _ChapterEntry.firstPage;
+    // 目标页的内容先盖住新 PageView 的第一帧：从 sentinel 返回时，控制器
+    // 可能被旧 itemCount 夹到前一页，校正发生在 post-frame；这一层让用户
+    // 看不到中间的错页。
+    final targetPosition = session.contentIndex + direction;
+    if (targetPosition >= 0 && targetPosition < session.chapters.length) {
+      final targetChapter = session.chapters[targetPosition];
+      final prepared = _prepared[targetChapter.id];
+      if (prepared != null && prepared.pagination.pages.isNotEmpty) {
+        final targetPage = direction < 0
+            ? prepared.pagination.pages.last
+            : prepared.pagination.pages.first;
+        setState(() {
+          _settlePage = targetPage;
+          _settlePageChapterId = targetChapter.id;
+        });
+      }
+    }
+    final controller = ref.read(readerSessionProvider(widget.args).notifier);
+    try {
+      if (direction < 0) {
+        await controller.previousChapter();
+      } else {
+        await controller.nextChapter();
+      }
+    } finally {
+      _boundaryPending = false;
+      _suppressChapterTransition = false;
+      if (mounted) {
+        final now = ref.read(readerSessionProvider(widget.args));
+        if (now.contentIndex == session.contentIndex) {
+          // 切章失败：正文仍停在原章，退回原页。
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || !_pageController.hasClients) return;
+            _pageController.jumpToPage(_displayOffset + _pageIndex);
+          });
+          if (_settlePage != null) setState(() => _settlePage = null);
+        }
+      }
+    }
   }
 
   /// 章边界继续滑动的切章入口。落点与点击分区一致：回上一章落最后一页，
@@ -718,62 +931,48 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
       color: color,
+      fontWeight: settings.fontWeight,
     ).copyWith(inherit: false, fontFamily: fontFamily);
   }
 
   /// 拿分页结果；输入没变就直接返回缓存，绝不每帧重排。
+  ///
+  /// [displayOffset] 是 PageView 前面多出来的「上一章最后一页」sentinel 数
+  /// （0/1）。
   ReaderPagination _obtainPagination({
     required ChapterContent content,
-    required ReaderSettings settings,
-    required TextScaler textScaler,
-    required String? fontFamily,
-    required double width,
-    required double height,
+    required _PrepLayout layout,
     required ChapterIdeas ideas,
-    required bool showBubbles,
+    required int displayOffset,
   }) {
-    final key = _PaginationKey(
-      content: content,
-      width: width,
-      height: height,
-      fontSize: settings.fontSize,
-      lineHeight: settings.lineHeight,
-      textScale: textScaler.scale(16),
-      fontFamily: fontFamily,
-      ideas: ideas,
-      showBubbles: showBubbles,
-      showDialogueHighlight: settings.showDialogueHighlight,
-    );
+    final key = _paginationKeyFor(content, layout, ideas);
     final cached = _pagination;
-    if (cached != null && _paginationKey == key) return cached;
+    if (cached != null && _paginationKey == key) {
+      _displayOffset = displayOffset;
+      return cached;
+    }
 
     final sameChapter = cached != null && cached.chapterId == content.id;
     // 重排前记下当前页首段，重排后回到包含它的那一页。
     final anchorBlock = sameChapter && cached.pages.isNotEmpty
         ? cached.blockAtPage(_pageIndex)
         : null;
-    final pagination = ReaderPagination.build(
-      chapterId: content.id,
-      paragraphs: content.paragraphs,
-      paraIndices: content.paraIndices,
-      showBubbles: showBubbles,
-      bubbleCounts: ideas.bubbleCounts,
-      bubbleVariants: ideas.bubbleVariants,
-      spec: ReaderLayoutSpec(
-        width: width,
-        height: height,
-        textScaler: textScaler,
-        bodyStyle: _readerTextStyle(settings, Colors.black, fontFamily),
-        paragraphSpacing: settings.fontSize * 0.55,
-      ),
-      showDialogueHighlight: settings.showDialogueHighlight,
-      measureCache: _measureCache,
-    );
+    // 相邻章可能已经预排版过；key/正文完全一致时直接复用，省掉一次整章测量。
+    final prepared = _prepared[content.id];
+    final pagination =
+        prepared != null &&
+            prepared.layout == layout &&
+            identical(prepared.content, content) &&
+            identical(prepared.ideas, ideas)
+        ? prepared.pagination
+        : _buildPaginationFor(content, ideas, layout);
     _pagination = pagination;
     _paginationKey = key;
 
     if (cached == null) {
       _pageIndex = 0;
+      _displayOffset = displayOffset;
+      if (displayOffset != 0) _restartPageController(displayOffset);
     } else if (!sameChapter) {
       // 换章：新章从指定页开始，同时换掉 PageController，避免旧滚动位置
       // 让新的 PageView 先停在中途再跳回来（那会闪一下）。
@@ -784,7 +983,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           ? pagination.pages.length - 1
           : 0;
       _pageIndex = target;
-      _restartPageController(target);
+      _displayOffset = displayOffset;
+      _restartPageController(target + displayOffset);
       // 上一章落最后一页时 PageView 直接以该页为初始页，不会触发
       // onPageChanged，这里补记一次，退出/切章时进度才是这一页。
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -799,12 +999,226 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return pagination;
   }
 
+  /// 取排版签名一致的邻章准备结果；正文/页为空或排版过期都当没有。
+  _PreparedChapter? _preparedFor(
+    ReaderSessionState session,
+    int position,
+    _PrepLayout layout,
+  ) {
+    if (position < 0 || position >= session.chapters.length) return null;
+    final chapter = session.chapters[position];
+    final prepared = _prepared[chapter.id];
+    if (prepared == null ||
+        prepared.layout != layout ||
+        prepared.pagination.pages.isEmpty) {
+      return null;
+    }
+    return prepared;
+  }
+
+  /// 当前章稳定后，在后台把前后章（正文 + 章评 + 分页）准备好。
+  ///
+  /// 每帧 build 都会调用；如果窗口内都已就绪就直接 return，不产生额外
+  /// 异步任务。预排版放在 post-frame，避免抢当前章首帧。
+  void _schedulePreparation(ReaderSessionState session, _PrepLayout layout) {
+    if (ReaderPage.debugDisablePreparation) return;
+    if (_prepScheduled || !_needsPreparation(session, layout)) return;
+    _prepScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _prepScheduled = false;
+      if (!mounted) return;
+      final current = ref.read(readerSessionProvider(widget.args));
+      if (!mounted || _activeLayout != layout || current.content == null) {
+        return;
+      }
+      var changed = await _prepareNeighbor(
+        current,
+        current.contentIndex + 1,
+        layout,
+      );
+      if (!mounted || _activeLayout != layout) return;
+      changed =
+          await _prepareNeighbor(current, current.contentIndex - 1, layout) ||
+          changed;
+      if (!mounted) return;
+      changed = _prunePrepared(current) || changed;
+      if (changed && mounted) setState(() {});
+    });
+  }
+
+  bool _needsPreparation(ReaderSessionState session, _PrepLayout layout) {
+    for (final position in [
+      session.contentIndex - 1,
+      session.contentIndex + 1,
+    ]) {
+      if (position < 0 || position >= session.chapters.length) continue;
+      final chapter = session.chapters[position];
+      if (_prepared[chapter.id]?.layout != layout) return true;
+    }
+    return false;
+  }
+
+  Future<bool> _prepareNeighbor(
+    ReaderSessionState session,
+    int position,
+    _PrepLayout layout,
+  ) async {
+    if (position < 0 || position >= session.chapters.length) return false;
+    final chapter = session.chapters[position];
+    if (_preparing.contains(chapter.id) ||
+        _prepared[chapter.id]?.layout == layout) {
+      return false;
+    }
+    _preparing.add(chapter.id);
+    try {
+      final content = await ref
+          .read(readerSessionProvider(widget.args).notifier)
+          .prepareChapterContent(position);
+      if (!mounted || content == null || _activeLayout != layout) return false;
+      final ideas = await _loadIdeasFor(chapter, layout.showBubbles);
+      if (!mounted || _activeLayout != layout) return false;
+      final pagination = _buildPaginationFor(content, ideas, layout);
+      if (!mounted || _activeLayout != layout) return false;
+      _prepared[chapter.id] = _PreparedChapter(
+        chapterId: chapter.id,
+        content: content,
+        ideas: ideas,
+        pagination: pagination,
+        layout: layout,
+      );
+      return true;
+    } finally {
+      _preparing.remove(chapter.id);
+    }
+  }
+
+  /// 章评也提前拉：provider 是 autoDispose，切回旧章会重新请求；本地缓存
+  /// 先保证首屏渲染，请求回来再按 provider 的新值刷新。
+  Future<ChapterIdeas> _loadIdeasFor(Chapter chapter, bool showBubbles) async {
+    if (!showBubbles) return ChapterIdeas.empty;
+    final cached = _ideasCache[chapter.id];
+    if (cached != null) return cached;
+    if (!_ideasLoading.add(chapter.id)) return ChapterIdeas.empty;
+    try {
+      final ideas = await ref.read(
+        chapterIdeasProvider(
+          ChapterCommentsArgs(
+            bookId: widget.args.bookId,
+            chapterId: chapter.id,
+            itemVersion: chapter.version,
+          ),
+        ).future,
+      );
+      if (!mounted) return ideas;
+      _ideasCache[chapter.id] = ideas;
+      return ideas;
+    } catch (_) {
+      return ChapterIdeas.empty;
+    } finally {
+      _ideasLoading.remove(chapter.id);
+    }
+  }
+
+  /// 只保留当前章和前后各一章；其余（更早读过的）准备结果及时释放。
+  bool _prunePrepared(ReaderSessionState session) {
+    final keep = <String>{};
+    for (final position in [
+      session.contentIndex - 1,
+      session.contentIndex,
+      session.contentIndex + 1,
+    ]) {
+      if (position < 0 || position >= session.chapters.length) continue;
+      keep.add(session.chapters[position].id);
+    }
+    final before = _prepared.length + _ideasCache.length;
+    _prepared.removeWhere((id, _) => !keep.contains(id));
+    _ideasCache.removeWhere((id, _) => !keep.contains(id));
+    return _prepared.length + _ideasCache.length != before;
+  }
+
+  _PaginationKey _paginationKeyFor(
+    ChapterContent content,
+    _PrepLayout layout,
+    ChapterIdeas ideas,
+  ) => _PaginationKey(
+    content: content,
+    width: layout.width,
+    height: layout.height,
+    fontSize: layout.fontSize,
+    lineHeight: layout.lineHeight,
+    fontWeight: layout.fontWeight,
+    textScale: layout.textScaler.scale(16),
+    fontFamily: layout.fontFamily,
+    ideas: ideas,
+    showBubbles: layout.showBubbles,
+    showDialogueHighlight: layout.showDialogueHighlight,
+  );
+
+  ReaderPagination _buildPaginationFor(
+    ChapterContent content,
+    ChapterIdeas ideas,
+    _PrepLayout layout,
+  ) {
+    return ReaderPagination.build(
+      chapterId: content.id,
+      paragraphs: content.paragraphs,
+      paraIndices: content.paraIndices,
+      showBubbles: layout.showBubbles,
+      bubbleCounts: ideas.bubbleCounts,
+      bubbleVariants: ideas.bubbleVariants,
+      spec: ReaderLayoutSpec(
+        width: layout.width,
+        height: layout.height,
+        textScaler: layout.textScaler,
+        bodyStyle: AppTheme.readerText(
+          fontSize: layout.fontSize,
+          lineHeight: layout.lineHeight,
+          color: Colors.black,
+          fontWeight: layout.fontWeight,
+        ).copyWith(inherit: false, fontFamily: layout.fontFamily),
+        paragraphSpacing: layout.fontSize * 0.55,
+      ),
+      showDialogueHighlight: layout.showDialogueHighlight,
+      measureCache: _measureCache,
+    );
+  }
+
   /// 换掉 PageController 后旧的滚动位置就作废了；等这一帧把旧 PageView
   /// 卸载（detach 掉 position）之后再释放旧控制器。
   void _restartPageController(int initialPage) {
     final retired = _pageController;
+    final generation = ++_pageControllerGeneration;
     _pageController = PageController(initialPage: initialPage, keepPage: false);
-    WidgetsBinding.instance.addPostFrameCallback((_) => retired.dispose());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      retired.dispose();
+      _stabilizeController(initialPage, generation);
+    });
+  }
+
+  /// PageView 重建前如果旧页数更少，initialPage 可能被旧的 itemCount 夹取
+  /// （从第 2 章回第 1 章时表现为「信息条 10/10、内容却是第 9 页」）。
+  /// 新页数布局完成后校正，并连续确认几帧再撤 sentinel 覆盖层：不同设备上
+  /// ScrollPosition 的 clamp 可能晚一帧发生，只校正一次仍会闪。
+  void _stabilizeController(int expected, int generation) {
+    var attempts = 0;
+    void check() {
+      if (!mounted || generation != _pageControllerGeneration) return;
+      if (_pageController.hasClients) {
+        if (_pageController.page?.round() != expected) {
+          _pageController.jumpToPage(expected);
+        }
+      }
+      attempts++;
+      if (attempts >= 3) {
+        if (_settlePage != null && mounted) {
+          setState(() => _settlePage = null);
+        }
+        return;
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) => check());
+    }
+
+    check();
   }
 
   void _scheduleJump(int page) {
@@ -812,15 +1226,22 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       if (!mounted || !_pageController.hasClients) return;
       // 排队的跳页可能已经过时（用户自己滑走了），以最新页码为准。
       if (_pageIndex != page) return;
-      if (_pageController.page?.round() == page) return;
-      _pageController.jumpToPage(page);
+      final displayPage = page + _displayOffset;
+      if (_pageController.page?.round() == displayPage) return;
+      _pageController.jumpToPage(displayPage);
     });
   }
 
   void _onPageChanged(int index) {
     if (!mounted) return;
-    if (index != _pageIndex) {
-      setState(() => _pageIndex = index);
+    final pagination = _pagination;
+    if (pagination == null) return;
+    final local = index - _displayOffset;
+    // sentinel（上一章最后一页 / 下一章第一页）不算当前章的页码；
+    // 等滚动落定后由 _commitSentinel 原子切章。
+    if (local < 0 || local >= pagination.pages.length) return;
+    if (local != _pageIndex) {
+      setState(() => _pageIndex = local);
     }
     _rememberPosition();
   }
@@ -852,6 +1273,21 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     if (target < 0) {
       if (!session.hasPrevious) return;
+      if (_hasPrevSentinel) {
+        // 上一章最后一页已经在 PageView 里：用和普通翻页一样的动画滑过去，
+        // 落定后由 _onScrollNotification 原子切章。
+        _turning = true;
+        try {
+          await _pageController.animateToPage(
+            0,
+            duration: _pageTurnDuration,
+            curve: Curves.easeOutCubic,
+          );
+        } finally {
+          _turning = false;
+        }
+        return;
+      }
       _rememberPosition();
       _pendingEntry = _ChapterEntry.lastPage;
       await controller.previousChapter();
@@ -859,6 +1295,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
     if (target >= pagination.pages.length) {
       if (!session.hasNext) return;
+      if (_hasNextSentinel) {
+        // 下一章第一页已在 PageView 末尾，和章内翻页同一条动画。
+        _turning = true;
+        try {
+          await _pageController.animateToPage(
+            _displayOffset + pagination.pages.length,
+            duration: _pageTurnDuration,
+            curve: Curves.easeOutCubic,
+          );
+        } finally {
+          _turning = false;
+        }
+        return;
+      }
       _rememberPosition();
       _pendingEntry = _ChapterEntry.firstPage;
       await controller.nextChapter();
@@ -867,7 +1317,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _turning = true;
     try {
       await _pageController.animateToPage(
-        target,
+        target + _displayOffset,
         duration: _pageTurnDuration,
         curve: Curves.easeOutCubic,
       );
@@ -1008,6 +1458,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             settings,
             ref.read(readerSessionProvider(widget.args).notifier),
           ),
+          onDetail: () =>
+              _openDetail(ref.read(readerSessionProvider(widget.args))),
           onToggleDayNight: () =>
               ref.read(readerSettingsProvider.notifier).toggleDayNight(),
           onSettings: _openSettings,
@@ -1092,13 +1544,37 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   void _openSettings() {
     _hideToolbar();
     final paper = ref.read(readerSettingsProvider).paper;
-    showModalBottomSheet<void>(
+    showAppBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.3),
       builder: (_) =>
           Theme(data: _readerTheme(paper), child: const ReaderSettingsSheet()),
+    );
+  }
+
+  /// 工具栏「详情」：以底部弹层打开小说详情。
+  ///
+  /// 弹层里没有主按钮，只留收藏 / 缓存；点目录章节直接跳当前阅读会话，
+  /// 不再往栈上叠一个新的阅读页。
+  void _openDetail(ReaderSessionState session) {
+    final bookId = widget.args.bookId;
+    if (bookId.isEmpty) return;
+    _hideToolbar();
+    final preview = NovelItem(
+      id: bookId,
+      title: session.bookTitle.isNotEmpty
+          ? session.bookTitle
+          : widget.args.bookTitle,
+      cover: session.cover.isNotEmpty ? session.cover : widget.args.cover,
+    );
+    unawaited(
+      showAppBottomSheet<void>(
+        context: context,
+        builder: (sheetContext) => AppBottomSheet(
+          heightFactor: 0.72,
+          showClose: false,
+          child: DetailPage(bookId: bookId, preview: preview, embed: true),
+        ),
+      ),
     );
   }
 
@@ -1110,11 +1586,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (session.chapters.isEmpty) return;
     _hideToolbar();
     final paper = settings.paper;
-    showModalBottomSheet<void>(
+    showAppBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.3),
       builder: (sheetContext) => Theme(
         data: _readerTheme(paper),
         child: ReaderDirectorySheet(
@@ -1160,6 +1633,7 @@ class _PaginationKey {
     required this.height,
     required this.fontSize,
     required this.lineHeight,
+    required this.fontWeight,
     required this.textScale,
     required this.fontFamily,
     required ChapterIdeas ideas,
@@ -1175,6 +1649,7 @@ class _PaginationKey {
   final double height;
   final double fontSize;
   final double lineHeight;
+  final FontWeight fontWeight;
 
   /// 用实际缩放后的字号代替 TextScaler 对象，避免不同实例但等价时漏复用。
   final double textScale;
@@ -1199,6 +1674,7 @@ class _PaginationKey {
       other.height == height &&
       other.fontSize == fontSize &&
       other.lineHeight == lineHeight &&
+      other.fontWeight == fontWeight &&
       other.textScale == textScale &&
       other.fontFamily == fontFamily &&
       mapEquals(other.bubbleCounts, bubbleCounts) &&
@@ -1213,6 +1689,7 @@ class _PaginationKey {
     height,
     fontSize,
     lineHeight,
+    fontWeight,
     textScale,
     fontFamily,
     _unorderedMapHash(bubbleCounts),
@@ -1220,6 +1697,77 @@ class _PaginationKey {
     showBubbles,
     showDialogueHighlight,
   );
+}
+
+/// 只由排版输入组成的签名；内容/章评变化不改变它，但字号/宽高/气泡开关
+/// 等一变，预排版就必须重算。
+@immutable
+class _PrepLayout {
+  const _PrepLayout({
+    required this.width,
+    required this.height,
+    required this.fontSize,
+    required this.lineHeight,
+    required this.fontWeight,
+    required this.fontFamily,
+    required this.textScaler,
+    required this.showBubbles,
+    required this.showDialogueHighlight,
+  });
+
+  final double width;
+  final double height;
+  final double fontSize;
+  final double lineHeight;
+  final FontWeight fontWeight;
+  final String? fontFamily;
+  final TextScaler textScaler;
+  final bool showBubbles;
+  final bool showDialogueHighlight;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _PrepLayout &&
+      other.width == width &&
+      other.height == height &&
+      other.fontSize == fontSize &&
+      other.lineHeight == lineHeight &&
+      other.fontWeight == fontWeight &&
+      other.fontFamily == fontFamily &&
+      other.textScaler.scale(16) == textScaler.scale(16) &&
+      other.showBubbles == showBubbles &&
+      other.showDialogueHighlight == showDialogueHighlight;
+
+  @override
+  int get hashCode => Object.hash(
+    width,
+    height,
+    fontSize,
+    lineHeight,
+    fontWeight,
+    fontFamily,
+    textScaler.scale(16),
+    showBubbles,
+    showDialogueHighlight,
+  );
+}
+
+/// 一章的预排版结果：正文、章评汇总、分页，以及生成它的排版签名。
+@immutable
+class _PreparedChapter {
+  const _PreparedChapter({
+    required this.chapterId,
+    required this.content,
+    required this.ideas,
+    required this.pagination,
+    required this.layout,
+  });
+
+  final String chapterId;
+  final ChapterContent content;
+  final ChapterIdeas ideas;
+  final ReaderPagination pagination;
+  final _PrepLayout layout;
 }
 
 /// Map 的与顺序无关的 hash（兼容 `_PaginationKey` 的值比较）。

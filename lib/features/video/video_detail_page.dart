@@ -37,6 +37,7 @@ class VideoDetailPage extends ConsumerWidget {
     required this.seriesId,
     this.preview,
     this.heroTag,
+    this.embed = false,
   });
 
   final String seriesId;
@@ -45,12 +46,16 @@ class VideoDetailPage extends ConsumerWidget {
   /// 封面 Hero tag（列表点进来时由 [VideoDetailRoute] 带下来）；null = 不飞入。
   final String? heroTag;
 
+  /// 弹层模式：在播放页里以底部弹层打开。底部只保留收藏 / 缓存，
+  /// 不显示「播放 / 继续观看」主按钮。
+  final bool embed;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final bundleAsync = ref.watch(videoDetailBundleProvider(seriesId));
     final shelfAsync = ref.watch(videoShelfStatusProvider(seriesId));
     final progressAsync = ref.watch(videoProgressProvider(seriesId));
-    // 剧评是详情页的次要信息：失败时 provider 给 null，页面整块不插入。
+    // 剧评是详情页的次要信息：失败时 provider 给 null，卡片内按「暂无评论」展示。
     final commentsAsync = ref.watch(videoSeriesCommentsProvider(seriesId));
 
     // 用 .value 而非 when：刷新时保留上一份数据，页面不闪加载态。
@@ -60,6 +65,9 @@ class VideoDetailPage extends ConsumerWidget {
 
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
+      // 三颗悬浮圆直接盖在正文上（与小说详情、首页悬浮底栏同一套做法），
+      // 正文末尾自己留白见 `_buildContent`。
+      extendBody: true,
       body: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -76,7 +84,7 @@ class VideoDetailPage extends ConsumerWidget {
           context,
           detail,
           episodes,
-          reviews: commentsAsync.value,
+          reviews: commentsAsync,
           error: bundleAsync.error,
           onRetry: () => ref.invalidate(videoDetailBundleProvider(seriesId)),
         ),
@@ -93,7 +101,8 @@ class VideoDetailPage extends ConsumerWidget {
     );
   }
 
-  /// 底部操作栏：收藏 + 播放/继续观看（与小说详情的书架 + 阅读同款）。
+  /// 底部悬浮操作栏：从左到右「收藏 / 缓存 / 播放」三颗圆（与小说详情的
+  /// 收藏 / 缓存 / 阅读同一套布局）。
   Widget? _buildActionBar(
     BuildContext context,
     WidgetRef ref, {
@@ -109,18 +118,20 @@ class VideoDetailPage extends ConsumerWidget {
     final resumeIndex = progress == null
         ? 0
         : (progress.episodeIndex < count ? progress.episodeIndex : 0);
-    final primaryLabel = !canPlay
+    final primarySemanticLabel = !canPlay
         ? '加载中…'
         : progress == null
         ? '播放'
         : '继续观看 · 第 ${resumeIndex + 1} 集';
     return DetailActionBar(
-      primaryLabel: primaryLabel,
+      primarySemanticLabel: primarySemanticLabel,
+      primaryIcon: Icons.play_arrow_rounded,
       onPrimary: canPlay
           ? () => _openEpisode(context, detail, episodes!, resumeIndex)
           : null,
-      shelfLabel: onShelf ? '已收藏' : '收藏',
+      shelfSemanticLabel: onShelf ? '已收藏' : '收藏',
       shelfActive: onShelf,
+      showPrimary: !embed,
       onShelf: detail == null || shelfBusy
           ? null
           : () => _toggleShelf(context, ref, detail),
@@ -141,7 +152,7 @@ class VideoDetailPage extends ConsumerWidget {
     BuildContext context,
     VideoDetail? detail,
     List<Chapter>? episodes, {
-    BookCommentPage? reviews,
+    required AsyncValue<BookCommentPage?> reviews,
     Object? error,
     required VoidCallback onRetry,
   }) {
@@ -189,48 +200,49 @@ class VideoDetailPage extends ConsumerWidget {
             ),
           ),
           // 剧评：简介之后、选集之前（与小说详情的书评卡片同款位置）。
-          // 请求失败或没有评论时 reviews 为 null/空，整块不占位——次要数据
-          // 不制造错误态，也不留空白卡片。
-          if (reviews != null && reviews.comments.isNotEmpty)
-            SliverToBoxAdapter(
-              child: DetailFadeIn(
-                delay: const Duration(milliseconds: 90),
-                child: DetailReviewsSection(
-                  page: reviews,
-                  title: '剧评',
-                  // 短剧评论没有评分，不画空星。
-                  showStars: false,
-                  onOpenAll: () => showVideoCommentsSheet(
-                    context,
-                    seriesId: seriesId,
-                    initialPage: reviews,
+          // 卡片常驻：请求中显示 loading，没有剧评/请求失败显示「暂无评论」，
+          // 有数据再换成首条剧评；区块出现/消失不会把下面的选集顶上顶下。
+          SliverToBoxAdapter(
+            child: DetailFadeIn(
+              delay: const Duration(milliseconds: 90),
+              child: DetailReviewsSection(
+                reviews: reviews,
+                title: '剧评',
+                // 短剧评论没有评分，不画空星。
+                showStars: false,
+                onOpenAll: (page) => showVideoCommentsSheet(
+                  context,
+                  seriesId: seriesId,
+                  initialPage: page,
+                ),
+              ),
+            ),
+          ),
+          // 详情弹层里不再重复选集（播放页已有选集入口）。
+          if (!embed) ...[
+            if (episodes.isEmpty)
+              const SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 168,
+                  child: EmptyView(
+                    message: '这部剧暂时没有可播放的集数',
+                    icon: Icons.movie_outlined,
+                  ),
+                ),
+              )
+            else
+              SliverToBoxAdapter(
+                // 1000+ 集的剧不能整页平铺：36 集一个 tab，默认展开。
+                child: DetailFadeIn(
+                  delay: const Duration(milliseconds: 120),
+                  child: EpisodePicker(
+                    episodes: episodes,
+                    onOpen: (index) =>
+                        _openEpisode(context, detail, episodes, index),
                   ),
                 ),
               ),
-            ),
-          if (episodes.isEmpty)
-            const SliverToBoxAdapter(
-              child: SizedBox(
-                height: 168,
-                child: EmptyView(
-                  message: '这部剧暂时没有可播放的集数',
-                  icon: Icons.movie_outlined,
-                ),
-              ),
-            )
-          else
-            SliverToBoxAdapter(
-              // 1000+ 集的剧不能整页平铺：36 集一个 tab，默认展开。
-              child: DetailFadeIn(
-                delay: const Duration(milliseconds: 120),
-                child: EpisodePicker(
-                  episodes: episodes,
-                  initiallyExpanded: true,
-                  onOpen: (index) =>
-                      _openEpisode(context, detail, episodes, index),
-                ),
-              ),
-            ),
+          ],
         ] else if (error != null)
           SliverFillRemaining(
             hasScrollBody: false,
@@ -250,6 +262,12 @@ class VideoDetailPage extends ConsumerWidget {
               delay: const Duration(milliseconds: 180),
               child: DetailIdFooter(id: seriesId, label: '短剧 ID'),
             ),
+          ),
+        // 悬浮操作栏盖在正文上方（extendBody）：末尾留出它的高度，最后一行
+        // 滚到底时才停在按钮上面，而不是永远被三颗圆挡住。
+        if (detail != null || preview != null)
+          SliverToBoxAdapter(
+            child: SizedBox(height: DetailActionBar.totalHeight(context) + 8),
           ),
       ],
     );

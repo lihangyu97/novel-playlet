@@ -124,8 +124,10 @@ class RecommendPageState extends ConsumerState<RecommendPage>
           child: Column(
             children: [
               // 搜索框常驻顶部，不随列表滚动收起；右侧固定下载图标入口。
+              // 顶部不留内边距：搜索框上沿直接贴住安全区（状态栏 / 刘海底边），
+              // 与独立搜索页保持一致，点进搜索页时搜索框不会上下跳。
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
                 child: Row(
                   children: [
                     Expanded(
@@ -240,22 +242,36 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
     };
   }
 
-  void _openDetail(RecommendItem item) {
+  /// 点卡片进详情。
+  ///
+  /// [cardContext] 是这张卡片自己的 BuildContext（`FeedStaggeredGrid` 的
+  /// itemBuilder 给的是整条 sliver 的，算不出卡片在视口里的位置）。
+  ///
+  /// 把卡片移进可视区的动作放在详情页转场**完全结束之后**：飞行与转场期间
+  /// 列表还在详情页下面，用户看不到这次跳动；等详情页完全进来再移，返回时
+  /// 落点已经落在视口内。代价是去程 Hero 仍从原位起飞（可能经过底栏），
+  /// 这是「转场后再移」这个时序本身的取舍。
+  void _openDetail(RecommendItem item, BuildContext cardContext) {
     final heroTag = _coverHeroTag(item);
-    switch (item) {
-      case NovelRecommendItem(:final novel):
-        context.pushAppRoute(
-          DetailRoute(bookId: novel.id, preview: novel, heroTag: heroTag),
-        );
-      case VideoRecommendItem(:final video):
-        context.pushAppRoute(
-          VideoDetailRoute(
-            seriesId: video.id,
-            preview: video,
-            heroTag: heroTag,
-          ),
-        );
-    }
+    final route = switch (item) {
+      NovelRecommendItem(:final novel) => DetailRoute(
+        bookId: novel.id,
+        preview: novel,
+        heroTag: heroTag,
+      ),
+      VideoRecommendItem(:final video) => VideoDetailRoute(
+        seriesId: video.id,
+        preview: video,
+        heroTag: heroTag,
+      ),
+    }.toRoute();
+
+    pushRouteRevealingHeroSource(
+      context,
+      route,
+      cardContext: cardContext,
+      bottomInset: widget.bottomInset,
+    );
   }
 
   @override
@@ -294,39 +310,46 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
           items: state.items,
           columns: layout.columns,
           itemBuilder: (context, item, width) {
-            void onTap() => _openDetail(item);
-            final heroTag = _coverHeroTag(item);
-            // 小说与短剧/漫剧的卡片元信息不同（作者 vs 集数），复用各自
-            // 现有卡片；推荐流统一是白底不定高卡片，封面按内容域原生比例。
-            return switch (item) {
-              NovelRecommendItem(:final novel) => NovelGridCard(
-                key: ValueKey(item.id),
-                item: novel,
-                width: width,
-                onTap: onTap,
-                heroTag: heroTag,
-                // 推荐流：作者固定一行；双列时理由上封面角标、热度右对齐，
-                // 三列放不下就退回理由/热度各自一行。
-                showRecommendMeta: true,
-                reasonOnCover: layout.columns == 2,
-                surface: true,
-                naturalTitleHeight: true,
-                coverAspect: kNovelCoverAspect,
-              ),
-              VideoRecommendItem(:final video) => VideoCard(
-                key: ValueKey(item.id),
-                item: video,
-                width: width,
-                onTap: onTap,
-                heroTag: heroTag,
-                // 短剧/漫剧同规则：集数固定一行；双列理由上封面、热度右对齐。
-                showRecommendMeta: true,
-                reasonOnCover: layout.columns == 2,
-                surface: true,
-                naturalTitleHeight: true,
-                coverAspect: kVideoCoverAspect,
-              ),
-            };
+            // 用 [Builder] 拿到「这张卡片自己」的 BuildContext：sliver 的
+            // itemBuilder 传进来的是整条 sliver 的 context，算不出卡片在
+            // 视口里的位置（见 [revealHeroSource]）。
+            return Builder(
+              builder: (cardContext) {
+                void onTap() => _openDetail(item, cardContext);
+                final heroTag = _coverHeroTag(item);
+                // 小说与短剧/漫剧的卡片元信息不同（作者 vs 集数），复用各自
+                // 现有卡片；推荐流统一是白底不定高卡片，封面按内容域原生比例。
+                return switch (item) {
+                  NovelRecommendItem(:final novel) => NovelGridCard(
+                    key: ValueKey(item.id),
+                    item: novel,
+                    width: width,
+                    onTap: onTap,
+                    heroTag: heroTag,
+                    // 推荐流：作者固定一行；双列时理由上封面角标、热度右对齐，
+                    // 三列放不下就退回理由/热度各自一行。
+                    showRecommendMeta: true,
+                    reasonOnCover: layout.columns == 2,
+                    surface: true,
+                    naturalTitleHeight: true,
+                    coverAspect: kNovelCoverAspect,
+                  ),
+                  VideoRecommendItem(:final video) => VideoCard(
+                    key: ValueKey(item.id),
+                    item: video,
+                    width: width,
+                    onTap: onTap,
+                    heroTag: heroTag,
+                    // 短剧/漫剧同规则：集数固定一行；双列理由上封面、热度右对齐。
+                    showRecommendMeta: true,
+                    reasonOnCover: layout.columns == 2,
+                    surface: true,
+                    naturalTitleHeight: true,
+                    coverAspect: kVideoCoverAspect,
+                  ),
+                };
+              },
+            );
           },
         );
       },

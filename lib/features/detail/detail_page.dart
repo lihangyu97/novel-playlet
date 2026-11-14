@@ -20,7 +20,7 @@ import 'detail_providers.dart';
 import 'detail_reviews_section.dart';
 import 'detail_reviews_sheet.dart';
 
-/// 小说详情页：Hero 信息 + 简介/标签 + 目录 + 底部「开始阅读 / 加入书架」。
+/// 小说详情页：Hero 信息 + 简介/标签 + 目录 + 底部悬浮「收藏 / 缓存 / 阅读」。
 ///
 /// 页面只负责布局与导航；数据、进度、书架状态都在 detail_providers.dart。
 /// 构造函数与 router.dart 里的 [DetailRoute] 对应，[preview] 用来在接口返回
@@ -31,6 +31,7 @@ class DetailPage extends ConsumerStatefulWidget {
     required this.bookId,
     this.preview,
     this.heroTag,
+    this.embed = false,
   });
 
   final String bookId;
@@ -38,6 +39,10 @@ class DetailPage extends ConsumerStatefulWidget {
 
   /// 封面 Hero tag（列表点进来时由 [DetailRoute] 带下来）；null = 不飞入。
   final String? heroTag;
+
+  /// 弹层模式：由阅读页「详情」打开时使用。去掉系统栏适配与滚动顶栏渐变，
+  /// 底部操作栏只保留收藏 / 缓存（阅读按钮在弹层里没有意义）。
+  final bool embed;
 
   @override
   ConsumerState<DetailPage> createState() => _DetailPageState();
@@ -84,7 +89,6 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     final shelfItem = _resolveShelfItem(bundle, preview);
     final onShelf = shelfAsync.value ?? false;
     final shelfBusy = shelfAsync.isLoading && !shelfAsync.hasValue;
-    final reviews = reviewsAsync.value;
 
     // 「继续阅读」优先用进度里保存的章（目录顺序变了也还找得到），
     // 没有进度才从第一章开始。
@@ -98,7 +102,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         : (chapters.isEmpty
               ? progress.chapterIndex + 1
               : (progress.chapterIndex + 1).clamp(1, chapters.length));
-    final primaryLabel = resumeNumber == null
+    final primarySemanticLabel = resumeNumber == null
         ? '开始阅读'
         : '继续阅读 · 第$resumeNumber章';
     final canOpenReader =
@@ -129,44 +133,43 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             ),
           ),
         ),
-        // 书评：简介/标签之后、目录之前。接口失败或没有书评时 reviews 为
-        // null/空，整块不占位——次要数据不制造错误态，也不留空白卡片。
-        if (reviews != null && reviews.comments.isNotEmpty)
-          SliverToBoxAdapter(
-            child: DetailFadeIn(
-              delay: const Duration(milliseconds: 90),
-              child: DetailReviewsSection(
-                page: reviews,
-                onOpenAll: () => showDetailReviewsSheet(
-                  context,
-                  bookId: bookId,
-                  initialPage: reviews,
-                ),
-              ),
-            ),
-          ),
+        // 书评：简介/标签之后、目录之前。卡片常驻：请求中显示 loading，
+        // 没有书评/请求失败显示「暂无评论」，有数据再换成首条书评。
         SliverToBoxAdapter(
           child: DetailFadeIn(
-            delay: const Duration(milliseconds: 120),
-            child: DetailDirectorySection(
-              chapters: chapters,
-              currentIndex: progress?.chapterIndex,
-              onOpenChapter: (chapter) => _openReader(
+            delay: const Duration(milliseconds: 90),
+            child: DetailReviewsSection(
+              reviews: reviewsAsync,
+              onOpenAll: (page) => showDetailReviewsSheet(
                 context,
-                ref,
-                chapterId: chapter.id,
-                chapterIndex: chapter.index,
-              ),
-              onOpenAll: () => _openDirectory(
-                context,
-                ref,
-                chapters: chapters,
-                currentIndex: progress?.chapterIndex,
+                bookId: bookId,
+                initialPage: page,
               ),
             ),
           ),
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: 20)),
+        if (!widget.embed)
+          SliverToBoxAdapter(
+            child: DetailFadeIn(
+              delay: const Duration(milliseconds: 120),
+              child: DetailDirectorySection(
+                chapters: chapters,
+                currentIndex: progress?.chapterIndex,
+                onOpenChapter: (chapter) => _openReader(
+                  context,
+                  ref,
+                  chapterId: chapter.id,
+                  chapterIndex: chapter.index,
+                ),
+                onOpenAll: () => _openDirectory(
+                  context,
+                  ref,
+                  chapters: chapters,
+                  currentIndex: progress?.chapterIndex,
+                ),
+              ),
+            ),
+          ),
       ] else if (bundleAsync.hasError)
         SliverFillRemaining(
           hasScrollBody: false,
@@ -186,6 +189,12 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             child: DetailIdFooter(id: bookId, label: '书籍 ID'),
           ),
         ),
+      // 悬浮操作栏盖在正文上方（extendBody）：末尾留出它的高度，最后一行
+      // 滚到底时才停在按钮上面，而不是永远被三颗圆挡住。
+      if (bundle != null || preview != null)
+        SliverToBoxAdapter(
+          child: SizedBox(height: DetailActionBar.totalHeight(context) + 8),
+        ),
     ];
 
     final scheme = Theme.of(context).colorScheme;
@@ -198,9 +207,12 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
     return Scaffold(
-      body: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: overlayStyle,
-        child: Stack(
+      // 三颗悬浮圆直接盖在正文上（与首页悬浮底栏同一套做法），不再用整条
+      // 底栏把内容截断；正文末尾自己留白见上面的 slivers。
+      extendBody: true,
+      body: _wrapBody(
+        overlayStyle,
+        Stack(
           children: [
             Positioned.fill(
               child: DecoratedBox(
@@ -221,38 +233,42 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                 ),
               ),
             ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: IgnorePointer(
-                child: AnimatedOpacity(
-                  opacity: _scrolled ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  child: Container(
-                    height: topInset + 14,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          theme.scaffoldBackgroundColor,
-                          theme.scaffoldBackgroundColor.withValues(alpha: 0.92),
-                          theme.scaffoldBackgroundColor.withValues(alpha: 0),
-                        ],
-                        stops: const [0, 0.62, 1],
+            if (!widget.embed)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: _scrolled ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: Container(
+                      height: topInset + 14,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            theme.scaffoldBackgroundColor,
+                            theme.scaffoldBackgroundColor.withValues(
+                              alpha: 0.92,
+                            ),
+                            theme.scaffoldBackgroundColor.withValues(alpha: 0),
+                          ],
+                          stops: const [0, 0.62, 1],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),
       bottomNavigationBar: (bundle != null || preview != null)
           ? DetailActionBar(
-              primaryLabel: primaryLabel,
+              primarySemanticLabel: primarySemanticLabel,
+              primaryIcon: Icons.menu_book_rounded,
               onPrimary: canOpenReader
                   ? () => _openReader(
                       context,
@@ -267,8 +283,9 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                           : 0,
                     )
                   : null,
-              shelfLabel: onShelf ? '已收藏' : '收藏',
+              shelfSemanticLabel: onShelf ? '已收藏' : '收藏',
               shelfActive: onShelf,
+              showPrimary: !widget.embed,
               onShelf: shelfItem == null || shelfBusy
                   ? null
                   : () => _toggleShelf(context, ref, shelfItem),
@@ -284,6 +301,12 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             )
           : null,
     );
+  }
+
+  /// 全页模式包一层 [AnnotatedRegion] 适配系统栏；弹层模式不碰系统栏。
+  Widget _wrapBody(SystemUiOverlayStyle style, Widget body) {
+    if (widget.embed) return body;
+    return AnnotatedRegion<SystemUiOverlayStyle>(value: style, child: body);
   }
 
   /// 详情里的字段比卡片全，但 bookId 缺失时退回列表卡片。

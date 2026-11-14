@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
+import 'package:novel_playlet/app/widgets/detail_circle_button.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/detail/detail_action_bar.dart';
+import 'package:novel_playlet/features/detail/detail_reviews_section.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/features/video/video_detail_page.dart';
 import 'package:novel_playlet/features/video/widgets/episode_picker.dart';
@@ -176,15 +178,20 @@ void main() {
       expect(bundleCalls(), 2, reason: '进入详情时详情与选集各拉一次');
 
       // 收藏走 provider 乐观更新（按钮立即回显），页面因此重建一次。
-      // 底栏收藏按钮是「图标 + 文字」，按文字定位；SnackBar 里也有「已收藏」，
-      // 所以 finder 收敛到底栏内。
+      // 底栏按钮只有图标，收藏态用 书签空/书签实 区分。
       final actionBar = find.byType(DetailActionBar);
       await tester.tap(
-        find.descendant(of: actionBar, matching: find.text('收藏')),
+        find.descendant(
+          of: actionBar,
+          matching: find.byIcon(Icons.bookmark_add_outlined),
+        ),
       );
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
       expect(
-        find.descendant(of: actionBar, matching: find.text('已收藏')),
+        find.descendant(
+          of: actionBar,
+          matching: find.byIcon(Icons.bookmark_added_outlined),
+        ),
         findsOneWidget,
         reason: '收藏应乐观回显，不等落盘',
       );
@@ -196,7 +203,15 @@ void main() {
         episodeIndex: 3,
       );
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
-      expect(find.text('继续观看 · 第 4 集'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is DetailCircleButton &&
+              widget.semanticLabel == '继续观看 · 第 4 集',
+        ),
+        findsOneWidget,
+        reason: '主按钮的读屏文案要跟上观看进度',
+      );
 
       expect(bundleCalls(), 2, reason: '页面重建由 provider 驱动，不应重新请求上游');
     });
@@ -261,6 +276,25 @@ void main() {
     expect(find.text('第二集开始上头'), findsOneWidget, reason: '弹层里应能看到全部评论');
   });
 
+  testWidgets('短剧详情-没有剧评：卡片保留并显示暂无评论', (tester) async {
+    const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
+    await pumpPreview(
+      tester,
+      const VideoDetailPage(seriesId: 'v1', preview: preview),
+      transport: FakePreviewTransport(),
+    );
+
+    expect(find.text('剧评'), findsOneWidget);
+    expect(find.text('暂无评论'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(DetailReviewsSection),
+        matching: find.textContaining('查看全部'),
+      ),
+      findsNothing,
+    );
+  });
+
   testWidgets('短剧详情-底部收藏与播放栏', (tester) async {
     const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
     await pumpPreview(
@@ -271,18 +305,24 @@ void main() {
     final actionBar = find.byType(DetailActionBar);
     final favoriteButton = find.descendant(
       of: actionBar,
-      matching: find.text('收藏'),
+      matching: find.byIcon(Icons.bookmark_add_outlined),
     );
     expect(favoriteButton, findsOneWidget);
-    expect(find.text('播放'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.play_arrow_rounded),
+      ),
+      findsOneWidget,
+    );
 
     await tester.tap(favoriteButton);
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     final favoriteActive = find.descendant(
       of: actionBar,
-      matching: find.text('已收藏'),
+      matching: find.byIcon(Icons.bookmark_added_outlined),
     );
-    expect(favoriteActive, findsOneWidget, reason: '底部收藏按钮应变成「已收藏」');
+    expect(favoriteActive, findsOneWidget, reason: '底部收藏按钮应变成已收藏图标');
     final store = ReadingStore();
     expect(await store.isVideoOnShelf('v1'), isTrue);
 
@@ -291,7 +331,10 @@ void main() {
     await tester.tap(favoriteActive);
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(
-      find.descendant(of: actionBar, matching: find.text('收藏')),
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.bookmark_add_outlined),
+      ),
       findsOneWidget,
     );
     expect(await store.isVideoOnShelf('v1'), isFalse);
@@ -314,11 +357,18 @@ void main() {
       const VideoDetailPage(seriesId: 'v1', preview: preview),
       transport: FakePreviewTransport(),
     );
-    expect(find.text('继续观看 · 第 3 集'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is DetailCircleButton &&
+            widget.semanticLabel == '继续观看 · 第 3 集',
+      ),
+      findsOneWidget,
+    );
   });
 
   group('短剧选集', () {
-    testWidgets('默认折叠，展开后 36 集一个 tab、每行 6 个、只显示集数', (tester) async {
+    testWidgets('默认展开，36 集一个 tab、每行 6 个、只显示集数', (tester) async {
       final fake = FakePreviewTransport()..directoryChapterCount = 80;
       const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 80);
       await pumpPreview(
@@ -363,10 +413,7 @@ void main() {
       expect(find.text('37'), findsOneWidget);
       expect(find.text('36'), findsNothing);
 
-      // 点标题可以收起，再点可以重新展开。
-      await tester.tap(find.text('选集'));
-      await tester.pumpAndSettle(const Duration(milliseconds: 300));
-      expect(episodeButtons, findsNothing);
+      // 选集常驻展开，点标题不会收起。
       await tester.tap(find.text('选集'));
       await tester.pumpAndSettle(const Duration(milliseconds: 300));
       expect(episodeButtons, findsWidgets);
@@ -398,8 +445,11 @@ void main() {
       const VideoDetailPage(seriesId: 'v1', preview: preview),
       transport: FakePreviewTransport(),
     );
-    // 滚到内容最下方：ID 行位于选集之后、底部操作栏之上。
-    final footerText = find.text('短剧 ID：v1');
+    // 滚到内容最下方：ID 卡片位于选集之后、底部操作栏之上。
+    final footerText = find.descendant(
+      of: find.byType(DetailIdFooter),
+      matching: find.text('v1'),
+    );
     await tester.scrollUntilVisible(
       footerText,
       240,
@@ -408,7 +458,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(footerText, findsOneWidget);
 
-    await tester.tap(find.byTooltip('复制 ID'));
+    await tester.tap(find.byTooltip('复制短剧 ID'));
     await tester.pumpAndSettle();
     expect(copied, 'v1', reason: '复制的是完整 ID');
     expect(find.text('ID 已复制'), findsOneWidget, reason: '复制后弹浮动 SnackBar');

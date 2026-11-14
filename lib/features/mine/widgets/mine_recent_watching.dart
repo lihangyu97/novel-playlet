@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../app/widgets/novel_cover.dart';
 import '../../../core/storage/reading_store.dart';
 import 'mine_recent_tile.dart';
 import 'recent_list.dart';
@@ -25,7 +24,6 @@ class MineRecentWatching extends StatelessWidget {
       items: items,
       tileOf: (item) => MineRecentTile(
         cover: item.cover,
-        coverAspect: kVideoCoverAspect,
         title: item.title.isEmpty ? '未命名短剧' : item.title,
         subtitle: '看到第 ${item.episodeIndex + 1} 集',
         updatedAt: item.updatedAt,

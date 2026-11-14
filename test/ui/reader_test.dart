@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/app/widgets/app_bottom_sheet.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book_store.dart';
@@ -16,6 +17,9 @@ import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/chapter.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
+import 'package:novel_playlet/features/detail/detail_action_bar.dart';
+import 'package:novel_playlet/features/detail/detail_directory_section.dart';
+import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
 import 'package:novel_playlet/features/cache/offline_downloader.dart';
@@ -43,6 +47,12 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    // 分页计数/重测段数等回归用例只统计当前章显示路径；邻章预排版默认关闭。
+    ReaderPage.debugDisablePreparation = true;
+  });
+
+  tearDown(() {
+    ReaderPage.debugDisablePreparation = false;
   });
 
   testWidgets('阅读页', (tester) async {
@@ -78,11 +88,202 @@ void main() {
     expect(find.text('下一章'), findsNothing);
     expect(find.text('夜间'), findsOneWidget);
     expect(find.text('目录'), findsOneWidget);
+    expect(find.text('详情'), findsOneWidget, reason: '目录右边应有详情入口');
     expect(find.text('设置'), findsOneWidget);
     await expectLater(
       find.byType(ReaderPage),
       matchesGoldenFile('../goldens/reader_toolbar.png'),
     );
+  });
+
+  testWidgets('阅读页-详情弹层：无标题、保留关闭、只有收藏和缓存', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('详情'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.byType(DetailPage), findsOneWidget);
+    expect(find.byTooltip('关闭详情'), findsNothing, reason: '详情弹层不再有关闭叉号');
+    expect(
+      find.byType(DetailDirectorySection),
+      findsNothing,
+      reason: '详情弹层里不再重复目录',
+    );
+    // 高度与目录弹层一致：0.72 屏高。
+    expect(
+      tester.getSize(find.byType(AppBottomSheet)).height,
+      closeTo(844 * 0.72, 1),
+    );
+
+    final actionBar = find.byType(DetailActionBar);
+    expect(actionBar, findsOneWidget);
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.bookmark_add_outlined),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.download_outlined),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.menu_book_rounded),
+      ),
+      findsNothing,
+      reason: '弹层里不需要阅读主按钮',
+    );
+
+    // 点弹层外的遮罩关闭。
+    await tester.tapAt(const Offset(195, 80));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(DetailPage), findsNothing);
+  });
+
+  testWidgets('阅读页-目录弹层带常驻可拖动滚动条', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('目录'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar));
+    expect(scrollbar.thumbVisibility, isTrue);
+    expect(scrollbar.interactive, isTrue);
+    expect(scrollbar.controller, isNotNull);
+  });
+
+  testWidgets('阅读页-上一章 sentinel：首页回翻无感切回上一章', (tester) async {
+    ReaderPage.debugDisablePreparation = false;
+    // 第 1 章长（约 10 页）、第 2 章短：回到第 1 章时旧 PageView 页数更少，
+    // 用来回归「信息条 10/10、内容却是第 9 页」的 initialPage 夹取问题。
+    final fake = FakePreviewTransport()
+      ..chapterParagraphCounts = <String, int>{'c1': 40, 'c2': 2};
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: fake,
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    final provider = readerSessionProvider(
+      const ReaderArgs(bookId: '1', bookTitle: '剑来'),
+    );
+    // 直接走控制器进第 2 章，等上一章 sentinel 也准备好。
+    await container.read(provider.notifier).nextChapter();
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(container.read(provider).contentIndex, 1);
+
+    final pageView = tester.widget<PageView>(find.byType(PageView));
+    final delegate = pageView.childrenDelegate as SliverChildBuilderDelegate;
+    expect(
+      delegate.childCount,
+      greaterThan(1),
+      reason: '第 2 章 PageView 前面应有上一章最后一页 sentinel',
+    );
+    expect(
+      pageView.controller!.page,
+      closeTo(1, 0.01),
+      reason: '当前显示页 = 偏移 1 + 第 2 章第 0 页',
+    );
+
+    // 点左侧 1/3：滑到上一章 sentinel，落定后切回第 1 章。
+    await tester.tapAt(const Offset(40, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(container.read(provider).contentIndex, 0);
+
+    final returned = tester.widget<PageView>(find.byType(PageView));
+    final info = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((text) => text.data ?? '')
+        .firstWhere((data) => RegExp(r'^\d+/\d+$').hasMatch(data));
+    expect(info, endsWith('/${info.split('/').last}'));
+    expect(
+      returned.controller!.page,
+      closeTo(int.parse(info.split('/').last) - 1, 0.01),
+      reason: '回到上一章应停在最后一页，PageController 与信息条一致',
+    );
+  });
+
+  testWidgets('阅读页-邻章预排版：末页继续翻用 PageView sentinel 无感切章', (tester) async {
+    ReaderPage.debugDisablePreparation = false;
+    final fake = FakePreviewTransport();
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: fake,
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    // 下一章正文和章评都在当前章停留时提前请求/排好。
+    expect(
+      fake.calls.any((call) => call.contains('/chapters/c2')),
+      isTrue,
+      reason: '下一章正文应已预取',
+    );
+    expect(
+      fake.calls.any((call) => call.contains('/chapters/c2/reviews')),
+      isTrue,
+      reason: '下一章章评应已预取',
+    );
+
+    final pageView = tester.widget<PageView>(find.byType(PageView));
+    final delegate = pageView.childrenDelegate as SliverChildBuilderDelegate;
+    final pageCount = delegate.childCount ?? 0;
+    // 下一章第一页已经就绪，PageView 末尾多一个 sentinel。
+    expect(pageCount, greaterThan(1), reason: '至少当前章多页 + next sentinel');
+
+    final info = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((text) => text.data ?? '')
+        .firstWhere((data) => RegExp(r'^\d+/\d+$').hasMatch(data));
+    final currentPages = int.parse(info.split('/').last);
+    expect(
+      pageCount,
+      currentPages + 1,
+      reason: '首章没有上一章 sentinel，末尾应正好多出下一章第一页',
+    );
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    final provider = readerSessionProvider(
+      const ReaderArgs(bookId: '1', bookTitle: '剑来'),
+    );
+    expect(container.read(provider).contentIndex, 0);
+
+    // 跳到当前章最后一页，再点右侧 1/3：走和普通翻页同一条 PageView 动画，
+    // 落定后提交下一章。
+    pageView.controller!.jumpToPage(currentPages - 1);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await tester.tapAt(const Offset(350, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+
+    expect(container.read(provider).contentIndex, 1);
   });
 
   testWidgets('阅读页-书名超宽时省略且不挤压右侧按钮', (tester) async {
@@ -530,6 +731,56 @@ void main() {
 
   /// 阅读弹层的主题作用域回归：弹层挂在 root Navigator 上，必须显式包一层
   /// 「纸色对应的 Theme」。否则暗色 App + 浅色纸底时，弹层里会用全局的亮色
+  testWidgets('阅读页-设置：字重滑块与底色色块同行', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.text('字重'), findsOneWidget);
+    final sliders = find.byType(Slider);
+    expect(sliders, findsNWidgets(3));
+    final weightSlider = tester.widget<Slider>(sliders.at(2));
+    expect(weightSlider.min, 300);
+    expect(weightSlider.max, 800);
+    expect(weightSlider.divisions, 5);
+
+    // 底色文案去掉，四个色块和「底色」标题在同一行。
+    final sheet = find.byType(ReaderSettingsSheet);
+    for (final label in ['白', '纸', '护眼', '夜间']) {
+      expect(
+        find.descendant(of: sheet, matching: find.text(label)),
+        findsNothing,
+      );
+    }
+    final baseY = tester.getCenter(find.text('底色')).dy;
+    for (final label in ['白', '纸', '护眼', '夜间']) {
+      expect(
+        tester.getCenter(find.byTooltip(label)).dy,
+        closeTo(baseY, 1),
+        reason: '$label 色块应与底色标题同一行',
+      );
+    }
+
+    // 拖（点）到滑块右侧：提交一次字重。
+    final rect = tester.getRect(sliders.at(2));
+    await tester.tapAt(Offset(rect.left + rect.width * 0.9, rect.center.dy));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    expect(
+      container.read(readerSettingsProvider).fontWeight.value,
+      greaterThan(400),
+    );
+  });
+
   /// primary 画文字，在纸色上对比度只有 1.5:1（曾出现目录当前章看不清）。
   testWidgets('阅读页-设置弹层（暗色 App + 纸色底）', (tester) async {
     await pumpPreview(

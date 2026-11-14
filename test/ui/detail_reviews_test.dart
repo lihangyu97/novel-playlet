@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/data/models/book_comment.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/detail/detail_providers.dart';
 import 'package:novel_playlet/features/detail/detail_reviews_section.dart';
@@ -106,7 +109,7 @@ void main() {
     expect(find.byType(DetailReviewsSheet), findsNothing);
   });
 
-  testWidgets('没有书评 / 请求失败：书评区块整块不渲染', (tester) async {
+  testWidgets('没有书评 / 请求失败：卡片保留并显示暂无评论', (tester) async {
     await pumpPreview(
       tester,
       const DetailPage(bookId: '1'),
@@ -116,9 +119,50 @@ void main() {
       ],
     );
 
-    expect(find.byType(DetailReviewsSection), findsNothing);
-    expect(find.text('书评'), findsNothing);
+    expect(find.byType(DetailReviewsSection), findsOneWidget);
+    expect(find.text('书评'), findsOneWidget);
+    expect(find.text('暂无评论'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(DetailReviewsSection),
+        matching: find.textContaining('查看全部'),
+      ),
+      findsNothing,
+      reason: '没有书评时不应出现「查看全部」',
+    );
     // 详情主内容不受影响。
     expect(find.text('剑来'), findsWidgets);
+  });
+
+  testWidgets('书评请求中：卡片先渲染，书评区显示 loading', (tester) async {
+    final completer = Completer<BookCommentPage?>();
+    await pumpPreview(
+      tester,
+      const DetailPage(bookId: '1'),
+      extraOverrides: [
+        bookReviewsProvider.overrideWith((ref, bookId) => completer.future),
+      ],
+      settle: false,
+    );
+    // 详情包本身也是异步的：多推几帧让内容淡入；不要 pumpAndSettle，
+    // loading 圈会一直动。
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.byType(DetailReviewsSection), findsOneWidget);
+    expect(find.text('书评'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(DetailReviewsSection),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('暂无评论'), findsNothing);
+
+    completer.complete(null);
+    await tester.pumpAndSettle();
+    expect(find.text('暂无评论'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 }

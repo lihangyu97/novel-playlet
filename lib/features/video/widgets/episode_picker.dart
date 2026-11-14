@@ -5,17 +5,16 @@ import 'package:flutter/material.dart';
 import '../../../app/widgets/detail/detail_common.dart';
 import '../../../data/models/chapter.dart';
 
-/// 短剧详情里的选集：默认折叠，展开后按固定集数自动分 tab。
+/// 短剧详情里的选集：常驻展开，按固定集数自动分 tab。
 ///
 /// 上游有些剧 1000+ 集，如果像以前那样平铺一整个 grid，详情页会被撑成灾难。
 /// 这里每 36 集一组、组内每行 6 个，tab 样式与推荐页的分类 tabs 一致（可横向
-/// 滑动、内容可左右滑）；折叠态只保留一行「选集 / 共 N 集 / 展开」。
+/// 滑动、内容可左右滑）；卡片标题行只展示「选集 / 共 N 集」，不再折叠。
 class EpisodePicker extends StatefulWidget {
   const EpisodePicker({
     super.key,
     required this.episodes,
     required this.onOpen,
-    this.initiallyExpanded = false,
     this.episodesPerTab = 36,
     this.columns = 6,
   });
@@ -25,7 +24,6 @@ class EpisodePicker extends StatefulWidget {
   /// 回传整部剧里的绝对下标。
   final ValueChanged<int> onOpen;
 
-  final bool initiallyExpanded;
   final int episodesPerTab;
   final int columns;
 
@@ -38,7 +36,6 @@ class EpisodePicker extends StatefulWidget {
 
 class _EpisodePickerState extends State<EpisodePicker>
     with TickerProviderStateMixin {
-  late bool _expanded = widget.initiallyExpanded;
   TabController? _tabController;
 
   int get _tabCount => (widget.episodes.length / widget.episodesPerTab).ceil();
@@ -71,25 +68,21 @@ class _EpisodePickerState extends State<EpisodePicker>
     super.dispose();
   }
 
-  void _toggle() => setState(() => _expanded = !_expanded);
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final total = widget.episodes.length;
 
-    return Column(
-      children: [
-        InkWell(
-          onTap: _toggle,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              detailGutter,
-              detailGutter,
-              detailGutter,
-              4,
-            ),
+    // 与简介 / 剧评同一套卡风格：标题、tab、集数网格都收在卡片里；
+    // 选集常驻展开，没有折叠交互。
+    return Card(
+      margin: const EdgeInsets.fromLTRB(detailGutter, 6, detailGutter, 0),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Row(
               children: [
                 Text(
@@ -108,25 +101,12 @@ class _EpisodePickerState extends State<EpisodePicker>
                     ),
                   ),
                 ),
-                const SizedBox(width: 4),
-                Icon(
-                  _expanded ? Icons.expand_less : Icons.expand_more,
-                  size: 20,
-                  color: scheme.onSurfaceVariant,
-                ),
               ],
             ),
           ),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeInOutCubicEmphasized,
-          alignment: Alignment.topCenter,
-          child: _expanded
-              ? _buildExpanded(context)
-              : const SizedBox(width: double.infinity),
-        ),
-      ],
+          _buildExpanded(context),
+        ],
+      ),
     );
   }
 
@@ -146,7 +126,7 @@ class _EpisodePickerState extends State<EpisodePicker>
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           padding: const EdgeInsets.symmetric(horizontal: 8),
-          labelPadding: const EdgeInsets.symmetric(horizontal: 10),
+          labelPadding: const EdgeInsets.symmetric(horizontal: 8),
           labelColor: Theme.of(context).colorScheme.primary,
           unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
           labelStyle: const TextStyle(
@@ -157,18 +137,13 @@ class _EpisodePickerState extends State<EpisodePicker>
             fontSize: 13,
             fontWeight: FontWeight.w400,
           ),
+          // 不要下划线：当前 tab 只靠主色 + 加粗区分（与顶部分类 tabs 一致）。
+          indicator: const BoxDecoration(),
           indicatorSize: TabBarIndicatorSize.label,
-          indicator: UnderlineTabIndicator(
-            borderSide: BorderSide(
-              width: 2,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            insets: const EdgeInsets.symmetric(horizontal: 2),
-          ),
           dividerColor: Colors.transparent,
           tabs: [
             for (var tab = 0; tab < tabCount; tab++)
-              Tab(height: 40, text: _tabLabel(tab)),
+              Tab(height: 36, text: _tabLabel(tab)),
           ],
         ),
         SizedBox(
@@ -180,7 +155,7 @@ class _EpisodePickerState extends State<EpisodePicker>
             ],
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
       ],
     );
   }
@@ -199,7 +174,7 @@ class _EpisodePickerState extends State<EpisodePicker>
     final end = math.min(start + widget.episodesPerTab, widget.episodes.length);
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(detailGutter, 4, detailGutter, 4),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final itemWidth =

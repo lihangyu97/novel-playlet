@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../../app/widgets/app_bottom_sheet.dart';
 import '../../data/models/chapter.dart';
 import 'reader_pagination.dart';
 import 'reader_settings.dart';
@@ -265,7 +266,7 @@ class _ReaderTextAction extends StatelessWidget {
   }
 }
 
-/// 工具栏底部：目录 / 评论 / 日间·夜间 / 设置。
+/// 工具栏底部：目录 / 详情 / 评论 / 日间·夜间 / 设置。
 ///
 /// 上一章/下一章不再占按钮位：点击正文左右分区、章边界继续滑动、目录跳章都
 /// 能切章；空出来的位置给日间/夜间切换。
@@ -277,6 +278,7 @@ class ReaderBottomBar extends StatelessWidget {
     required this.foreground,
     required this.isNight,
     required this.onDirectory,
+    required this.onDetail,
     required this.onToggleDayNight,
     required this.onSettings,
     this.onComments,
@@ -292,6 +294,7 @@ class ReaderBottomBar extends StatelessWidget {
   final bool isNight;
 
   final VoidCallback onDirectory;
+  final VoidCallback onDetail;
   final VoidCallback onToggleDayNight;
   final VoidCallback onSettings;
   final VoidCallback? onComments;
@@ -317,6 +320,12 @@ class ReaderBottomBar extends StatelessWidget {
               label: '目录',
               color: foreground,
               onTap: onDirectory,
+            ),
+            _ReaderToolButton(
+              icon: Icons.info_outline_rounded,
+              label: '详情',
+              color: foreground,
+              onTap: onDetail,
             ),
             _ReaderToolButton(
               icon: Icons.forum_outlined,
@@ -446,6 +455,7 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
   /// 拖动中的预览值；null = 没在拖，显示 provider 里已提交的值。
   double? _previewFontSize;
   double? _previewLineHeight;
+  double? _previewFontWeight;
 
   void _onFontSizePreview(double value) =>
       setState(() => _previewFontSize = value);
@@ -463,6 +473,14 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
     setState(() => _previewLineHeight = null);
   }
 
+  void _onFontWeightPreview(double value) =>
+      setState(() => _previewFontWeight = value);
+
+  void _onFontWeightCommit(double value) {
+    ref.read(readerSettingsProvider.notifier).setFontWeight(value.round());
+    setState(() => _previewFontWeight = null);
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(readerSettingsProvider);
@@ -470,6 +488,8 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
     // 滑块显示预览值（拖动中跟手），文案同步预览，不读 provider 的旧值。
     final fontSize = _previewFontSize ?? settings.fontSize;
     final lineHeight = _previewLineHeight ?? settings.lineHeight;
+    final fontWeight =
+        _previewFontWeight ?? settings.fontWeight.value.toDouble();
     final paper = settings.paper;
     final foreground = paper.foreground;
     final muted = foreground.withValues(alpha: 0.55);
@@ -478,101 +498,115 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
     // 不能直接用 AppTheme.accentOf（raw seed）——用户选近白/近黑主题色时
     // 滑块和描边会彻底看不见。
     final highlight = Theme.of(context).colorScheme.primary;
-    // 弹层要一直铺到屏幕底：把 Home 指示条高度做成容器内部的 padding，
-    // 而不是 SafeArea 在外层留白。否则最底部会露出弹层外的灰色横条。
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: paper.background,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      padding: EdgeInsets.fromLTRB(20, 16, 20, 18 + bottomInset),
-      child: SliderTheme(
-        data: SliderTheme.of(context).copyWith(
-          activeTrackColor: highlight,
-          inactiveTrackColor: foreground.withValues(alpha: 0.14),
-          thumbColor: highlight,
-          overlayColor: highlight.withValues(alpha: 0.12),
-          trackHeight: 2.5,
-          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '阅读设置',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: foreground,
+    return AppBottomSheet(
+      title: '阅读设置',
+      backgroundColor: paper.background,
+      foregroundColor: foreground,
+      closeTooltip: '关闭阅读设置',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
+        child: SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            activeTrackColor: highlight,
+            inactiveTrackColor: foreground.withValues(alpha: 0.14),
+            thumbColor: highlight,
+            overlayColor: highlight.withValues(alpha: 0.12),
+            trackHeight: 2.5,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SettingRow(
+                label: '字号',
+                value: '${fontSize.round()}',
+                color: muted,
+                child: Slider(
+                  min: ReaderSettingsController.minFontSize,
+                  max: ReaderSettingsController.maxFontSize,
+                  divisions: 15,
+                  value: fontSize,
+                  label: '${fontSize.round()}',
+                  onChanged: _onFontSizePreview,
+                  onChangeEnd: _onFontSizeCommit,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            _SettingRow(
-              label: '字号',
-              value: '${fontSize.round()}',
-              color: muted,
-              child: Slider(
-                min: ReaderSettingsController.minFontSize,
-                max: ReaderSettingsController.maxFontSize,
-                divisions: 15,
-                value: fontSize,
-                label: '${fontSize.round()}',
-                onChanged: _onFontSizePreview,
-                onChangeEnd: _onFontSizeCommit,
+              _SettingRow(
+                label: '行距',
+                value: lineHeight.toStringAsFixed(2),
+                color: muted,
+                child: Slider(
+                  min: ReaderSettingsController.minLineHeight,
+                  max: ReaderSettingsController.maxLineHeight,
+                  divisions: 14,
+                  value: lineHeight,
+                  label: lineHeight.toStringAsFixed(2),
+                  onChanged: _onLineHeightPreview,
+                  onChangeEnd: _onLineHeightCommit,
+                ),
               ),
-            ),
-            _SettingRow(
-              label: '行距',
-              value: lineHeight.toStringAsFixed(2),
-              color: muted,
-              child: Slider(
-                min: ReaderSettingsController.minLineHeight,
-                max: ReaderSettingsController.maxLineHeight,
-                divisions: 14,
-                value: lineHeight,
-                label: lineHeight.toStringAsFixed(2),
-                onChanged: _onLineHeightPreview,
-                onChangeEnd: _onLineHeightCommit,
+              _SettingRow(
+                label: '字重',
+                value: '${fontWeight.round()}',
+                color: muted,
+                child: Slider(
+                  min: ReaderSettingsController.minFontWeight.toDouble(),
+                  max: ReaderSettingsController.maxFontWeight.toDouble(),
+                  divisions:
+                      ReaderSettingsController.fontWeightSteps.length - 1,
+                  value: fontWeight,
+                  label: '${fontWeight.round()}',
+                  onChanged: _onFontWeightPreview,
+                  onChangeEnd: _onFontWeightCommit,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text('底色', style: TextStyle(fontSize: 13, color: muted)),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                for (final option in ReaderPaper.values)
+              const SizedBox(height: 4),
+              // 底色标题与四个色块同一行；文案（白/纸/护眼/夜间）去掉，
+              // 只保留色块 + 选中勾，读屏仍播报底色名。
+              Row(
+                children: [
+                  Text('底色', style: TextStyle(fontSize: 13, color: muted)),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: _PaperOption(
-                      option: option,
-                      selected: option == paper,
-                      foreground: foreground,
-                      onTap: () => controller.setPaper(option),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        for (final option in ReaderPaper.values) ...[
+                          if (option != ReaderPaper.values.first)
+                            const SizedBox(width: 10),
+                          _PaperOption(
+                            option: option,
+                            selected: option == paper,
+                            foreground: foreground,
+                            onTap: () => controller.setPaper(option),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _SettingSwitchRow(
-              title: '对话高亮',
-              subtitle: '给双引号里的人物说话内容加荧光笔',
-              value: settings.showDialogueHighlight,
-              onChanged: controller.setShowDialogueHighlight,
-              foreground: foreground,
-              muted: muted,
-            ),
-            const SizedBox(height: 14),
-            _SettingSwitchRow(
-              title: '段评气泡',
-              subtitle: '关闭只隐藏段尾气泡，章末评论仍在',
-              value: settings.showBubbles,
-              onChanged: controller.setShowBubbles,
-              foreground: foreground,
-              muted: muted,
-            ),
-          ],
+                ],
+              ),
+              const SizedBox(height: 14),
+              _SettingSwitchRow(
+                title: '对话高亮',
+                subtitle: '给双引号里的人物说话内容加荧光笔',
+                value: settings.showDialogueHighlight,
+                onChanged: controller.setShowDialogueHighlight,
+                foreground: foreground,
+                muted: muted,
+              ),
+              const SizedBox(height: 14),
+              _SettingSwitchRow(
+                title: '段评气泡',
+                subtitle: '关闭只隐藏段尾气泡，章末评论仍在',
+                value: settings.showBubbles,
+                onChanged: controller.setShowBubbles,
+                foreground: foreground,
+                muted: muted,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -673,13 +707,17 @@ class _PaperOption extends StatelessWidget {
     // primary 按纸色明暗派生，选中态文字/边框都用它：比 raw seed 稳，
     // 用户选近白/近黑主题色时也不会消失。
     final highlight = Theme.of(context).colorScheme.primary;
-    return InkResponse(
-      onTap: onTap,
-      radius: 34,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
+    // 去掉可见文案后，底色名放到 tooltip / 读屏语义里，避免只能靠颜色辨认。
+    return Tooltip(
+      message: option.label,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: option.label,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 34,
+          child: Container(
             width: 42,
             height: 42,
             alignment: Alignment.center,
@@ -695,16 +733,7 @@ class _PaperOption extends StatelessWidget {
                 ? Icon(Icons.check_rounded, size: 18, color: option.foreground)
                 : null,
           ),
-          const SizedBox(height: 6),
-          Text(
-            option.label,
-            style: TextStyle(
-              fontSize: 11.5,
-              color: selected ? highlight : foreground.withValues(alpha: 0.6),
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -757,61 +786,26 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
 
   @override
   Widget build(BuildContext context) {
-    final muted = widget.foreground.withValues(alpha: 0.55);
-    // 背景铺到屏幕底，内容让出 Home 指示条；这样列表最后一项不会被挡住，
-    // 也不会出现"容器底边没铺满"的灰色空条。
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
-    return SizedBox(
-      height: MediaQuery.sizeOf(context).height * 0.72,
-      child: Container(
-        decoration: BoxDecoration(
-          color: widget.background,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: EdgeInsets.only(bottom: bottomInset),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 8, 10),
-              child: Row(
-                children: [
-                  Text(
-                    '目录',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: widget.foreground,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '共 ${widget.chapters.length} 章',
-                    style: TextStyle(fontSize: 12, color: muted),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    tooltip: '关闭',
-                    color: widget.foreground,
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                  ),
-                ],
-              ),
-            ),
-            Divider(
-              height: 0.5,
-              thickness: 0.5,
-              color: widget.foreground.withValues(alpha: 0.08),
-            ),
-            Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                itemExtent: _itemExtent,
-                itemCount: widget.chapters.length,
-                itemBuilder: (context, index) => _buildItem(context, index),
-              ),
-            ),
-          ],
+    return AppBottomSheet(
+      title: '目录',
+      subtitle: '共 ${widget.chapters.length} 章',
+      // 0.72 屏高：比设置弹层高，目录能多露几行。
+      heightFactor: 0.72,
+      backgroundColor: widget.background,
+      foregroundColor: widget.foreground,
+      closeTooltip: '关闭目录',
+      // 目录可能上千章：常驻一条可拖动的滚动条，按住上下划能快速定位。
+      child: Scrollbar(
+        controller: _scrollController,
+        thumbVisibility: true,
+        interactive: true,
+        thickness: 5,
+        radius: const Radius.circular(3),
+        child: ListView.builder(
+          controller: _scrollController,
+          itemExtent: _itemExtent,
+          itemCount: widget.chapters.length,
+          itemBuilder: (context, index) => _buildItem(context, index),
         ),
       ),
     );

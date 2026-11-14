@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
+import 'package:novel_playlet/app/widgets/detail_circle_button.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book_store.dart';
@@ -31,6 +32,12 @@ import 'ui/preview_harness.dart';
 ///
 /// 离线存储全部用内存假实现：widget test 里 path_provider 没有平台实现，真实
 /// 离线目录的 IO Future 永远不会完成（与 [EmptyOfflineBookStore] 同因）。
+/// 按读屏文案定位底栏圆形按钮（按钮只有图标，没有可见文字）。
+Finder circleButton(String semanticLabel) => find.byWidgetPredicate(
+  (widget) =>
+      widget is DetailCircleButton && widget.semanticLabel == semanticLabel,
+);
+
 void main() {
   setUpAll(() async {
     await loadPreviewFont();
@@ -86,10 +93,10 @@ void main() {
     expect(find.text('离线剑来'), findsWidgets, reason: '书名应来自离线 manifest');
     expect(find.text('共 3 章 · 查看全部'), findsOneWidget);
     expect(find.text('离线第1章'), findsWidgets);
-    // 整本已缓存 → 右侧缓存入口是「已缓存」态（线条图标 + 文字）。
-    expect(find.text('已缓存'), findsOneWidget);
+    // 整本已缓存 → 缓存入口是「已缓存」态（图标 + 读屏文案）。
+    expect(circleButton('已缓存'), findsOneWidget);
     expect(find.byIcon(Icons.download_done_outlined), findsOneWidget);
-    expect(find.text('收藏'), findsOneWidget);
+    expect(circleButton('收藏'), findsOneWidget);
 
     // 断网也能从详情点章节进阅读，正文直接来自离线区。
     await tester.tap(find.text('离线第1章').first);
@@ -107,12 +114,11 @@ void main() {
     );
 
     expect(find.byType(OfflineDownloadButton), findsOneWidget);
-    expect(find.text('缓存'), findsOneWidget);
+    expect(circleButton('缓存'), findsOneWidget);
     expect(find.byIcon(Icons.download_outlined), findsOneWidget);
-    // 左收藏、右缓存、中间主按钮三颗都在，文字都是按钮内文案。
-    expect(find.text('收藏'), findsOneWidget);
+    // 左收藏、中缓存、右主按钮三颗都在，按钮只有图标，状态文案走读屏。
     expect(find.byIcon(Icons.bookmark_add_outlined), findsOneWidget);
-    expect(find.text('开始阅读'), findsOneWidget);
+    expect(find.byIcon(Icons.menu_book_rounded), findsOneWidget);
   });
 
   testWidgets('详情页下载按钮-已缓存：点击进缓存中心页', (tester) async {
@@ -124,9 +130,8 @@ void main() {
       seriesStore: _MemorySeriesStore(),
     );
 
-    expect(find.text('已缓存'), findsOneWidget);
-    expect(find.byIcon(Icons.download_done_outlined), findsOneWidget);
-    await openCacheCenter(tester, find.text('已缓存'));
+    expect(circleButton('已缓存'), findsOneWidget);
+    await openCacheCenter(tester, find.byIcon(Icons.download_done_outlined));
     expect(find.byType(CacheCenterPage), findsOneWidget);
     expect(
       find.text('已离线缓存，可在 设置 → 存储 管理'),
@@ -153,7 +158,7 @@ void main() {
     );
 
     expect(find.byType(OfflineDownloadButton), findsOneWidget);
-    expect(find.text('缓存中'), findsOneWidget, reason: '暂停任务也算缓存中');
+    expect(circleButton('缓存中'), findsOneWidget, reason: '暂停任务也算缓存中');
     expect(find.byIcon(Icons.downloading_outlined), findsOneWidget);
     // 不再显示旧的环形进度 + 百分比。
     expect(find.text('21%'), findsNothing);
@@ -165,7 +170,7 @@ void main() {
       findsNothing,
     );
 
-    await openCacheCenter(tester, find.text('缓存中'));
+    await openCacheCenter(tester, find.byIcon(Icons.downloading_outlined));
     expect(find.byType(CacheCenterPage), findsOneWidget);
   });
 
@@ -176,7 +181,7 @@ void main() {
       bookStore: _MemoryBookStore(),
       seriesStore: _MemorySeriesStore(),
     );
-    expect(find.text('缓存'), findsOneWidget);
+    expect(circleButton('缓存'), findsOneWidget);
 
     // 单任务下载器正跑别的任务时，本书的缓存请求会入队；等它开始前详情按钮
     // 也要显示「缓存中」，而不是还能重复点「缓存」。
@@ -196,11 +201,11 @@ void main() {
         );
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
 
-    expect(find.text('缓存中'), findsOneWidget, reason: '已排队也算缓存中');
+    expect(circleButton('缓存中'), findsOneWidget, reason: '已排队也算缓存中');
     expect(find.byIcon(Icons.downloading_outlined), findsOneWidget);
-    expect(find.text('缓存'), findsNothing);
+    expect(find.byIcon(Icons.download_outlined), findsNothing);
 
-    await openCacheCenter(tester, find.text('缓存中'));
+    await openCacheCenter(tester, find.byIcon(Icons.downloading_outlined));
     expect(find.byType(CacheCenterPage), findsOneWidget);
   });
 }

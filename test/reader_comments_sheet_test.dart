@@ -42,7 +42,9 @@ void main() {
     );
     await _openSheet(tester, api: api, totalCount: 2);
 
-    expect(find.text('本章评论 · 2 条评论'), findsOneWidget);
+    // 标题区拆成主标题 + 副标题（同一行内排布），总数在副标题里。
+    expect(find.text('本章评论'), findsOneWidget);
+    expect(find.text('2 条评论'), findsOneWidget);
     expect(find.text('作者甲'), findsOneWidget);
     expect(find.text('作者'), findsOneWidget, reason: 'isAuthor 时显示作者徽章');
     expect(find.text('这段写得好'), findsOneWidget);
@@ -65,7 +67,7 @@ void main() {
     expect(api.cursors, ['']);
     expect(api.paragraphCounts, [20], reason: '首屏按 count=20 拉取');
     expect(
-      tester.widget<Text>(find.text('本章评论 · 2 条评论')).style?.color,
+      tester.widget<Text>(find.text('本章评论')).style?.color,
       ReaderPaper.white.foreground,
       reason: '文字色跟随传入的纸色',
     );
@@ -85,7 +87,8 @@ void main() {
     // 关闭按钮直接把弹层 pop 掉，不留下遮罩。
     await tester.tap(find.byTooltip('关闭评论'));
     await tester.pumpAndSettle();
-    expect(find.text('本章评论 · 2 条评论'), findsNothing);
+    expect(find.text('本章评论'), findsNothing);
+    expect(find.text('2 条评论'), findsNothing);
   });
 
   testWidgets('点评论配图打开全屏查看器，可翻页并关闭', (tester) async {
@@ -126,7 +129,7 @@ void main() {
     await tester.tap(find.byTooltip('关闭图片'));
     await tester.pumpAndSettle();
     expect(find.byType(CommentImageViewer), findsNothing);
-    expect(find.text('本章评论 · 1 条评论'), findsOneWidget, reason: '关闭后回到评论面板');
+    expect(find.text('本章评论'), findsOneWidget, reason: '关闭后回到评论面板');
   });
 
   testWidgets('全屏查看器：点画面任意处立即关闭（不再等双击仲裁）', (tester) async {
@@ -165,7 +168,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(CommentImageViewer), findsNothing);
-    expect(find.text('本章评论 · 1 条评论'), findsOneWidget);
+    expect(find.text('本章评论'), findsOneWidget);
   });
 
   testWidgets('回复里的配图也渲染成缩略图', (tester) async {
@@ -409,7 +412,8 @@ void main() {
     final api = _FakeApi(pagesByCursor: {'': const BookCommentPage()});
     await _openSheet(tester, api: api, totalCount: 0);
 
-    expect(find.text('本章评论 · 0 条评论'), findsOneWidget);
+    expect(find.text('本章评论'), findsOneWidget);
+    expect(find.text('0 条评论'), findsOneWidget);
     expect(find.text('还没有评论'), findsOneWidget);
     expect(find.byType(ListView), findsNothing);
   });
