@@ -756,6 +756,7 @@ flutter drive --profile -d <iPhone UDID> \
 | `lib/features/video/network_health.dart` | 会话级「疑似离线」标记：断网后切集快速失败、手动重试强制联网 |
 | `lib/features/video/{video_comments_providers,video_comments_sheet}.dart` | 短剧剧评 provider / 剧评与本集评论弹层 |
 | `lib/app/widgets/app_snack_bar.dart` | 全站统一轻提示（1s，替换 SnackBar 默认 4s） |
+| `lib/app/widgets/app_bottom_sheet.dart` | 全站底部弹层骨架：统一圆角/遮罩/底部安全区 + 标题区（主副标题行内排布）+ 右上角关闭 + 内容插槽 |
 | `rust/src/endpoints/video.rs` | 取流、选档、整集下载、缓存淘汰、`/src` 解密 |
 | `rust/src/endpoints/{book,content,dhcontent}.rs` | 详情、目录、正文（DH / AES）与批量正文 |
 | `.github/workflows/ci.yml` / `Makefile` | 质量门禁 |

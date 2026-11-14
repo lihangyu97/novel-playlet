@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme/app_theme.dart';
+import '../../app/widgets/app_bottom_sheet.dart';
 import '../../app/widgets/comment_image_strip.dart';
 import '../../data/api/api_client.dart';
 import '../../data/models/book_comment.dart';
@@ -26,13 +27,8 @@ Future<void> showReaderCommentsSheet(
   required String title,
   required int totalCount,
 }) async {
-  await showModalBottomSheet<void>(
+  await showAppBottomSheet<void>(
     context: context,
-    isScrollControlled: true,
-    // 自绘圆角/底色：透明背景不会在圆角外露出默认的 Material 白底。
-    backgroundColor: Colors.transparent,
-    // 与阅读页设置/目录弹层同款遮罩，保持同一层级的视觉分量。
-    barrierColor: Colors.black.withValues(alpha: 0.3),
     builder: (_) => ReaderCommentsSheet(
       paper: paper,
       bookId: bookId,
@@ -304,50 +300,16 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
   Widget _buildSheet(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final foreground = widget.paper.foreground;
-    // 底部安全区在容器内让出，滚动内容不会被 Home 指示条压住。
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
-    return Container(
-      height: MediaQuery.sizeOf(context).height * 0.76,
-      padding: EdgeInsets.only(bottom: bottomInset),
-      decoration: BoxDecoration(
-        color: widget.paper.background,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-      ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 8, 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${widget.title} · $_totalCount 条评论',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: foreground,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  tooltip: '关闭评论',
-                  color: foreground,
-                  icon: const Icon(Icons.close_rounded, size: 20),
-                ),
-              ],
-            ),
-          ),
-          Divider(
-            height: 0.5,
-            thickness: 0.5,
-            color: foreground.withValues(alpha: 0.08),
-          ),
-          Expanded(child: _buildBody(scheme, foreground)),
-        ],
-      ),
+    return AppBottomSheet(
+      title: widget.title,
+      // 副标题是拉到的真实总数，首屏返回后会跟着修正。
+      subtitle: '$_totalCount 条评论',
+      // 0.76 屏高：一屏能看四五条评论，同时留出阅读页作为上下文。
+      heightFactor: 0.76,
+      backgroundColor: widget.paper.background,
+      foregroundColor: foreground,
+      closeTooltip: '关闭评论',
+      child: _buildBody(scheme, foreground),
     );
   }
 

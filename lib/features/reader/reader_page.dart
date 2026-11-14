@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_theme.dart';
+import '../../app/widgets/app_bottom_sheet.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/chapter.dart';
@@ -300,7 +301,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   /// 阅读纸色对应的一套主题：配色方案按纸色的明暗重新派生。
   ///
-  /// 弹层（设置/目录）也要用它包一层——showModalBottomSheet 挂在 root
+  /// 弹层（设置/目录）也要用它包一层——底部弹层挂在 root
   /// Navigator 上，不包就会拿到全局主题的 primary，在纸色/夜间底色上对比度
   /// 不够（暗色 App + 纸色底时曾经低到 1.5:1）。
   ThemeData _readerTheme(ReaderPaper paper) {
@@ -1092,11 +1093,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   void _openSettings() {
     _hideToolbar();
     final paper = ref.read(readerSettingsProvider).paper;
-    showModalBottomSheet<void>(
+    showAppBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.3),
       builder: (_) =>
           Theme(data: _readerTheme(paper), child: const ReaderSettingsSheet()),
     );
@@ -1110,11 +1108,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (session.chapters.isEmpty) return;
     _hideToolbar();
     final paper = settings.paper;
-    showModalBottomSheet<void>(
+    showAppBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.3),
       builder: (sheetContext) => Theme(
         data: _readerTheme(paper),
         child: ReaderDirectorySheet(
