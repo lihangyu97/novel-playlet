@@ -94,6 +94,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   bool _prepScheduled = false;
   int _pageControllerGeneration = 0;
 
+  /// sentinel 落定切章后，新 PageView 第一帧可能还停在夹取后的页；用目标页
+  /// 的内容盖住这一帧，等控制器校正完再撤掉，避免“先看到前一页再跳”。
+  reader_pagination.ReaderPage? _settlePage;
+  String _settlePageChapterId = '';
+
   /// 从 sentinel 落定切章时不要再播旧的淡入过渡（页面本身已经滑到了目标页）。
   bool _suppressChapterTransition = false;
 
@@ -545,7 +550,31 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                         ),
                       ),
                     ),
-                    if (session.loading)
+                    if (_settlePage != null)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: ColoredBox(
+                            color: paper.background,
+                            child: ReaderPageContent(
+                              // 新正文已经到达就用新分页的目标页；还在加载旧章
+                              // 时用 sentinel 的目标页（两者内容一致）。
+                              page: content.id == _settlePageChapterId
+                                  ? pages[_pageIndex.clamp(0, pages.length - 1)]
+                                  : _settlePage!,
+                              textStyle: textStyle,
+                              textScaler: textScaler,
+                              contentWidth: contentWidth,
+                              horizontalPadding: _horizontalPadding,
+                              showDialogueHighlight:
+                                  settings.showDialogueHighlight,
+                              dialogueHighlightColor:
+                                  settings.dialogueHighlightColor,
+                              onBubbleTap: null,
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (session.loading && _settlePage == null)
                       Positioned(
                         top: 10,
                         left: 0,
@@ -815,6 +844,23 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _pendingEntry = direction < 0
         ? _ChapterEntry.lastPage
         : _ChapterEntry.firstPage;
+    // 目标页的内容先盖住新 PageView 的第一帧：从 sentinel 返回时，控制器
+    // 可能被旧 itemCount 夹到前一页，校正发生在 post-frame；这一层让用户
+    // 看不到中间的错页。
+    final targetPosition = session.contentIndex + direction;
+    if (targetPosition >= 0 && targetPosition < session.chapters.length) {
+      final targetChapter = session.chapters[targetPosition];
+      final prepared = _prepared[targetChapter.id];
+      if (prepared != null && prepared.pagination.pages.isNotEmpty) {
+        final targetPage = direction < 0
+            ? prepared.pagination.pages.last
+            : prepared.pagination.pages.first;
+        setState(() {
+          _settlePage = targetPage;
+          _settlePageChapterId = targetChapter.id;
+        });
+      }
+    }
     final controller = ref.read(readerSessionProvider(widget.args).notifier);
     try {
       if (direction < 0) {
@@ -833,6 +879,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             if (!mounted || !_pageController.hasClients) return;
             _pageController.jumpToPage(_displayOffset + _pageIndex);
           });
+          if (_settlePage != null) setState(() => _settlePage = null);
         }
       }
     }
@@ -1143,9 +1190,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       // PageView 重建前如果旧页数更少，initialPage 可能被旧的 itemCount 夹取
       // （从第 2 章回第 1 章时表现为「信息条 10/10、内容却是第 9 页」）。
       // 新页数布局完成后校正一次，确保控制器、信息条和正文页码一致。
-      if (!_pageController.hasClients) return;
-      if (_pageController.page?.round() != initialPage) {
+      if (_pageController.hasClients &&
+          _pageController.page?.round() != initialPage) {
         _pageController.jumpToPage(initialPage);
+      }
+      // 控制器校正完成，撤掉 sentinel 落定时的目标页覆盖层。
+      if (_settlePage != null && mounted) {
+        setState(() => _settlePage = null);
       }
     });
   }
