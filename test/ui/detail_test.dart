@@ -5,6 +5,7 @@ import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
+import 'package:novel_playlet/features/detail/detail_action_bar.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
@@ -274,10 +275,21 @@ void main() {
 
   testWidgets('阅读页加入书架后返回详情，底栏收藏态同步', (tester) async {
     await pumpPreview(tester, const DetailPage(bookId: '1'));
-    expect(find.text('收藏'), findsOneWidget);
+    final actionBar = find.byType(DetailActionBar);
+    // 底栏按钮只有图标，收藏态用图标区分（文案只留给读屏）。
+    final shelfAdd = find.descendant(
+      of: actionBar,
+      matching: find.byIcon(Icons.bookmark_add_outlined),
+    );
+    expect(shelfAdd, findsOneWidget);
 
-    // 详情 → 开始阅读 → 阅读页顶部「加入书架」。
-    await tester.tap(find.text('开始阅读'));
+    // 详情 → 开始阅读（主操作图标）→ 阅读页顶部「加入书架」。
+    await tester.tap(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.menu_book_rounded),
+      ),
+    );
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(find.byType(ReaderPage), findsOneWidget);
     await tester.tapAt(const Offset(195, 420));
@@ -290,8 +302,14 @@ void main() {
     Navigator.of(tester.element(find.byType(ReaderPage))).pop();
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.byType(DetailPage), findsOneWidget);
-    expect(find.text('已收藏'), findsOneWidget);
-    expect(find.text('收藏'), findsNothing);
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.bookmark_added_outlined),
+      ),
+      findsOneWidget,
+    );
+    expect(shelfAdd, findsNothing);
   });
 
   testWidgets('详情页', (tester) async {

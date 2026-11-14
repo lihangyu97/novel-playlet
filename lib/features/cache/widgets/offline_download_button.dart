@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/widgets/app_snack_bar.dart';
 import '../../../app/router.dart';
-import '../../../app/widgets/detail_icon_label_button.dart';
+import '../../../app/widgets/detail_circle_button.dart';
 import '../../../data/models/chapter.dart';
 import '../../../data/models/json_utils.dart';
 import '../cache_providers.dart';
@@ -13,13 +13,13 @@ import '../offline_task.dart';
 
 /// 通用的「离线缓存」入口（小说详情「缓存整本」/ 短剧详情「缓存整剧」共用）。
 ///
-/// 与收藏、播放/阅读两颗按钮同一套圆形悬浮样式（[DetailIconLabelButton]），
-/// 在底栏中间，三态：
-/// - `缓存`（download_outlined）：没有离线内容，或上次任务失败；点击开始/重试。
-/// - `缓存中`（downloading_outlined）：任务进行中/暂停、manifest 只完成一部分，
+/// 与收藏、播放/阅读两颗按钮同一套圆形悬浮样式（[DetailCircleButton]），
+/// 在底栏中间，三态靠图标与配色表达（文案只给读屏）：
+/// - `download_outlined`：没有离线内容，或上次任务失败；点击开始/重试。
+/// - `downloading_outlined`：任务进行中/暂停、manifest 只完成一部分，
 ///   或已经在下载队列里排队；点击进缓存中心看进度（暂停/继续/取消排队都由
 ///   缓存中心负责）。
-/// - `已缓存`（download_done_outlined）：manifest 完整或任务完成；点击进缓存中心。
+/// - `download_done_outlined`：manifest 完整或任务完成；点击进缓存中心。
 ///
 /// [items] 是整本的章节列表 / 整剧的选集列表（`start*` 需要完整列表才能算
 /// 缺口与总进度）。缓存状态来自离线区 manifest（而非任务表），因此进程重启后
@@ -62,9 +62,9 @@ class OfflineDownloadButton extends ConsumerWidget {
       icon = Icons.download_outlined;
       label = '缓存';
     }
-    return DetailIconLabelButton(
+    return DetailCircleButton(
       icon: icon,
-      label: label,
+      semanticLabel: label,
       active: isCached || inProgress,
       // 缓存中/已缓存都交给缓存中心：那里能看进度，也能暂停/继续/重试。
       onTap: isCached || inProgress

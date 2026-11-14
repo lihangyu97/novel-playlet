@@ -113,18 +113,18 @@ class VideoDetailPage extends ConsumerWidget {
     final resumeIndex = progress == null
         ? 0
         : (progress.episodeIndex < count ? progress.episodeIndex : 0);
-    final primaryLabel = !canPlay
+    final primarySemanticLabel = !canPlay
         ? '加载中…'
         : progress == null
         ? '播放'
         : '继续观看 · 第 ${resumeIndex + 1} 集';
     return DetailActionBar(
-      primaryLabel: primaryLabel,
+      primarySemanticLabel: primarySemanticLabel,
       primaryIcon: Icons.play_arrow_rounded,
       onPrimary: canPlay
           ? () => _openEpisode(context, detail, episodes!, resumeIndex)
           : null,
-      shelfLabel: onShelf ? '已收藏' : '收藏',
+      shelfSemanticLabel: onShelf ? '已收藏' : '收藏',
       shelfActive: onShelf,
       onShelf: detail == null || shelfBusy
           ? null

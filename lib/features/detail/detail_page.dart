@@ -98,7 +98,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         : (chapters.isEmpty
               ? progress.chapterIndex + 1
               : (progress.chapterIndex + 1).clamp(1, chapters.length));
-    final primaryLabel = resumeNumber == null
+    final primarySemanticLabel = resumeNumber == null
         ? '开始阅读'
         : '继续阅读 · 第$resumeNumber章';
     final canOpenReader =
@@ -261,7 +261,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
       ),
       bottomNavigationBar: (bundle != null || preview != null)
           ? DetailActionBar(
-              primaryLabel: primaryLabel,
+              primarySemanticLabel: primarySemanticLabel,
               primaryIcon: Icons.menu_book_rounded,
               onPrimary: canOpenReader
                   ? () => _openReader(
@@ -277,7 +277,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                           : 0,
                     )
                   : null,
-              shelfLabel: onShelf ? '已收藏' : '收藏',
+              shelfSemanticLabel: onShelf ? '已收藏' : '收藏',
               shelfActive: onShelf,
               onShelf: shelfItem == null || shelfBusy
                   ? null
