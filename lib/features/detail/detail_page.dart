@@ -164,7 +164,6 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             ),
           ),
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: 20)),
       ] else if (bundleAsync.hasError)
         SliverFillRemaining(
           hasScrollBody: false,
