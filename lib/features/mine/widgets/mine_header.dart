@@ -28,7 +28,8 @@ class MineHeader extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 20, 8, 4),
+      // 顶部不留额外间距：内容直接贴住安全区（与推荐页搜索框一致）。
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

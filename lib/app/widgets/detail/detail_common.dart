@@ -1,7 +1,6 @@
 import '../app_snack_bar.dart';
 
 import 'dart:async';
-import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -17,9 +16,10 @@ const double detailGutter = 16;
 /// 详情页顶部封面背景。
 ///
 /// 用列表带进来的封面铺满顶部固定高度：自上而下做透明度渐变（顶部
-/// opacity 1、底部 0）并轻微模糊，图片经 Hero 从列表卡片飞进来后直接成为
-/// 背景。高度只由本组件决定，和下方标题/简介/选集的内容高度无关，所以
-/// 详情接口回来、内容变高时背景不会跟着动一下。
+/// opacity 1、底部 0），图片经 Hero 从列表卡片飞进来后直接成为背景。
+/// 不做模糊：封面保持清晰，标题/简介等内容仍按自己的节奏淡入。
+/// 高度只由本组件决定，和下方标题/简介/选集的内容高度无关，所以详情接口
+/// 回来、内容变高时背景不会跟着动一下。
 class DetailCoverBackdrop extends StatelessWidget {
   const DetailCoverBackdrop({
     super.key,
@@ -36,18 +36,14 @@ class DetailCoverBackdrop extends StatelessWidget {
   /// 状态栏以下可见的背景高度。
   final double height;
 
-  /// 背景的固定模糊程度；飞行过程中由 [_coverFlightShuttle] 从 0 渐变到这里。
-  static const double blurSigma = 3;
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final topInset = MediaQuery.paddingOf(context).top;
-    // 230pt 的模糊背景要盖满整屏宽度：按屏宽物理像素的 1.5 倍解码就够
-    // （高斯模糊本身会吃掉细节），不必把上游 1080–1440px 的原图整张解成
-    // RGBA 再交给 ImageFiltered。1.5 是给 hero 飞行放大时留的余量；内存
-    // 请求比磁盘上限（1440）更大时以磁盘为准，Flutter 不会放大，所以高 dpr
-    // 大屏上两个数不必完全相等。
+    // 背景要盖满整屏宽度：按屏宽物理像素的 1.5 倍解码就够，不必把上游
+    // 1080–1440px 的原图整张解成 RGBA。1.5 是给 hero 飞行放大时留的余量；
+    // 内存请求比磁盘上限（1440）更大时以磁盘为准，Flutter 不会放大，所以高
+    // dpr 大屏上两个数不必完全相等。
     final decodeWidth =
         (MediaQuery.sizeOf(context).width *
                 MediaQuery.devicePixelRatioOf(context) *
@@ -81,25 +77,19 @@ class DetailCoverBackdrop extends StatelessWidget {
           blendMode: BlendMode.dstIn,
           child: cover.isEmpty
               ? fallback
-              : ImageFiltered(
-                  imageFilter: ui.ImageFilter.blur(
-                    sigmaX: blurSigma,
-                    sigmaY: blurSigma,
-                  ),
-                  child: CoverHero(
-                    tag: heroTag,
-                    flightShuttleBuilder: _coverFlightShuttle,
-                    child: SizedBox.expand(
-                      child: CachedNetworkImage(
-                        imageUrl: cover,
-                        cacheManager: AppImageCache.manager,
-                        fit: BoxFit.cover,
-                        memCacheWidth: decodeWidth,
-                        // 磁盘也别存原图；1440 已覆盖 Pro Max 的 1.5 倍余量。
-                        maxWidthDiskCache: 1440,
-                        placeholder: (_, _) => fallback,
-                        errorWidget: (_, _, _) => fallback,
-                      ),
+              : CoverHero(
+                  tag: heroTag,
+                  flightShuttleBuilder: _coverFlightShuttle,
+                  child: SizedBox.expand(
+                    child: CachedNetworkImage(
+                      imageUrl: cover,
+                      cacheManager: AppImageCache.manager,
+                      fit: BoxFit.cover,
+                      memCacheWidth: decodeWidth,
+                      // 磁盘也别存原图；1440 已覆盖 Pro Max 的 1.5 倍余量。
+                      maxWidthDiskCache: 1440,
+                      placeholder: (_, _) => fallback,
+                      errorWidget: (_, _, _) => fallback,
                     ),
                   ),
                 ),
@@ -109,8 +99,8 @@ class DetailCoverBackdrop extends StatelessWidget {
   }
 }
 
-/// 封面 Hero 的飞行过程：从清晰的小圆角卡片逐渐放大、模糊、削圆角，
-/// 落位时正好与背景的固定模糊/直角衔接，不会"啪"一下换形。
+/// 封面 Hero 的飞行过程：从清晰的小圆角卡片逐渐放大、削圆角、渐隐，
+/// 落位时正好与背景的渐变/直角衔接，不会"啪"一下换形。
 Widget _coverFlightShuttle(
   BuildContext flightContext,
   Animation<double> animation,
@@ -129,7 +119,7 @@ Widget _coverFlightShuttle(
     builder: (context, _) {
       // push 时动画跑 0→1（卡片 → 背景），pop 时被弹出路由的动画本来就跑
       // 1→0（背景 → 卡片），所以两个方向都用 animation.value 当"背景化"
-      // 的进度即可；不要再按方向取反，否则返回时会先变清晰再变模糊。
+      // 的进度即可；不要再按方向取反，否则返回时会先变清晰再变暗。
       final progress = animation.value;
       // 落位目标是列表卡片的封面：卡片是「上圆下方」——上面两角跟着白底卡
       // 的圆角，下面两角和文字区相接所以是直角。飞行中只圆上面两角、下面
@@ -152,13 +142,7 @@ Widget _coverFlightShuttle(
             ],
           ).createShader(bounds),
           blendMode: BlendMode.dstIn,
-          child: ImageFiltered(
-            imageFilter: ui.ImageFilter.blur(
-              sigmaX: DetailCoverBackdrop.blurSigma * progress,
-              sigmaY: DetailCoverBackdrop.blurSigma * progress,
-            ),
-            child: child,
-          ),
+          child: child,
         ),
       );
     },
