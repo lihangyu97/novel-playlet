@@ -66,6 +66,67 @@ void main() {
     expect(rect.bottom, 520);
   });
 
+  testWidgets('转场完全结束后才移动卡片，转场期间列表不动', (tester) async {
+    tester.view.physicalSize = const Size(400, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              const SizedBox(height: 100),
+              Expanded(
+                child: ListView.builder(
+                  controller: controller,
+                  itemCount: 20,
+                  itemBuilder: (context, index) {
+                    return Builder(
+                      builder: (cardContext) => GestureDetector(
+                        key: Key('card-$index'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => pushRouteRevealingHeroSource(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => const Scaffold(
+                              body: Center(child: Text('详情页')),
+                            ),
+                          ),
+                          cardContext: cardContext,
+                          bottomInset: bottomInset,
+                        ),
+                        child: const SizedBox(height: 100),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    // 第 5 张卡在视口内 [500,600]，可见底边只到 520（视口 100–600，底栏 80）。
+    await tester.tap(find.byKey(const Key('card-4')));
+    await tester.pump();
+    expect(controller.offset, 0, reason: '转场期间列表不能被移动，否则用户会看到跳动');
+
+    await tester.pumpAndSettle();
+    expect(find.text('详情页'), findsOneWidget);
+    expect(controller.offset, 80, reason: '详情页完全进入后才把卡片移进可视区');
+
+    // 返回后卡片已经落在可视区内（Hero 落点不会再飘到固定区外面）。
+    Navigator.of(tester.element(find.text('详情页'))).pop();
+    await tester.pumpAndSettle();
+    final rect = tester.getRect(find.byKey(const Key('card-4')));
+    expect(rect.top, 420);
+    expect(rect.bottom, 520);
+  });
+
   testWidgets('卡片被滚到视口上方：往下滚回来', (tester) async {
     final controller = await pumpList(tester);
     controller.jumpTo(80);

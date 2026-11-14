@@ -58,15 +58,19 @@ class CoverHero extends StatelessWidget {
 /// - 回程：降落目标是同一张卡片，它不在视口里时封面缩回去会飘在固定区外面，
 ///   看起来像「封面盖住了其它元素」。
 ///
-/// 番茄的做法是进详情页后把对应 item 移进视口；这里在点击的同一帧做一次无动画
-/// 位移（路由转场从同一帧开始，用户看到的是封面飞出，而不是列表跳动），
-/// 起点与回程落点就都落在可视区里了。
+/// 番茄的做法是进详情页后把对应 item 移进视口；这里也在详情页转场完全结束后
+/// （调用方监听路由动画，见 `recommend_page._openDetail`）做一次无动画位移：
+/// 列表被详情页盖住时移动用户看不见，返回时落点已经在可视区里。
+///
+/// 代价是去程 Hero 仍从卡片原位起飞：卡片被底栏压住时，飞行中的封面会短暂
+/// 经过底栏上方——这是「转场后再移」这个时序本身的取舍。
 ///
 /// 卡片已经完整可见时是 no-op：最常见的点击路径不会产生多余位移。
 ///
 /// [bottomInset] 是被悬浮底栏盖住的高度（推荐页从外层壳子透传，取值见
 /// `FloatingNavigationBar.totalHeight`）。
 void revealHeroSource(BuildContext cardContext, {double bottomInset = 0}) {
+  if (!cardContext.mounted) return;
   final card = cardContext.findRenderObject();
   if (card is! RenderBox || !card.hasSize) return;
 
@@ -104,4 +108,56 @@ void revealHeroSource(BuildContext cardContext, {double bottomInset = 0}) {
   final target = offset.clamp(minOffset, maxOffset).toDouble();
   if (target == position.pixels) return;
   position.jumpTo(target);
+}
+
+/// push [route]；等进详情的转场**完全结束**后，再把 [cardContext] 对应的卡片
+/// 移进可视区（见 [revealHeroSource]）。
+///
+/// 为什么不在点击同一帧移：详情页已经把列表盖住，转场结束后再动用户看不见；
+/// 等完全进入详情页再移，返回时 Hero 落点已经在视口内。代价是去程飞行仍从
+/// 卡片原位起飞，被底栏压住的卡片会让封面短暂经过底栏上方。
+///
+/// [Route] 在 push 时才 install（动画也在这时创建），所以动画必须在
+/// `Navigator.push` 之后再取。
+Future<T?> pushRouteRevealingHeroSource<T>(
+  BuildContext context,
+  Route<T> route, {
+  required BuildContext cardContext,
+  double bottomInset = 0,
+}) {
+  final future = Navigator.of(context).push(route);
+  final animation = route is TransitionRoute<T> ? route.animation : null;
+
+  var revealed = false;
+  void reveal() {
+    if (revealed) return;
+    revealed = true;
+    revealHeroSource(cardContext, bottomInset: bottomInset);
+  }
+
+  void revealWhenEntered(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
+    animation?.removeStatusListener(revealWhenEntered);
+    reveal();
+  }
+
+  if (animation == null) {
+    // 没有转场动画的路由：push 完直接移。
+    reveal();
+  } else {
+    animation.addStatusListener(revealWhenEntered);
+    // push 刚返回时动画还没开始（status 可能暂时是 completed），不能据此
+    // 立即移动；等第一帧之后再确认一次，兼顾零时长/无动画的路由。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (animation.status == AnimationStatus.completed) {
+        animation.removeStatusListener(revealWhenEntered);
+        reveal();
+      }
+    });
+  }
+
+  return future.whenComplete(() {
+    // 用户可能在转场期间就返回（或被替换路由）：别让监听器留在动画上。
+    animation?.removeStatusListener(revealWhenEntered);
+  });
 }

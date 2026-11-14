@@ -245,25 +245,33 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
   /// 点卡片进详情。
   ///
   /// [cardContext] 是这张卡片自己的 BuildContext（`FeedStaggeredGrid` 的
-  /// itemBuilder 给的是整条 sliver 的，算不出卡片在视口里的位置）：进详情前先
-  /// 用它把卡片完整移进可视区，见 [revealHeroSource]。
+  /// itemBuilder 给的是整条 sliver 的，算不出卡片在视口里的位置）。
+  ///
+  /// 把卡片移进可视区的动作放在详情页转场**完全结束之后**：飞行与转场期间
+  /// 列表还在详情页下面，用户看不到这次跳动；等详情页完全进来再移，返回时
+  /// 落点已经落在视口内。代价是去程 Hero 仍从原位起飞（可能经过底栏），
+  /// 这是「转场后再移」这个时序本身的取舍。
   void _openDetail(RecommendItem item, BuildContext cardContext) {
-    revealHeroSource(cardContext, bottomInset: widget.bottomInset);
     final heroTag = _coverHeroTag(item);
-    switch (item) {
-      case NovelRecommendItem(:final novel):
-        context.pushAppRoute(
-          DetailRoute(bookId: novel.id, preview: novel, heroTag: heroTag),
-        );
-      case VideoRecommendItem(:final video):
-        context.pushAppRoute(
-          VideoDetailRoute(
-            seriesId: video.id,
-            preview: video,
-            heroTag: heroTag,
-          ),
-        );
-    }
+    final route = switch (item) {
+      NovelRecommendItem(:final novel) => DetailRoute(
+        bookId: novel.id,
+        preview: novel,
+        heroTag: heroTag,
+      ),
+      VideoRecommendItem(:final video) => VideoDetailRoute(
+        seriesId: video.id,
+        preview: video,
+        heroTag: heroTag,
+      ),
+    }.toRoute();
+
+    pushRouteRevealingHeroSource(
+      context,
+      route,
+      cardContext: cardContext,
+      bottomInset: widget.bottomInset,
+    );
   }
 
   @override
