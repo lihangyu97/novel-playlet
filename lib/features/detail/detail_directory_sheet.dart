@@ -11,10 +11,8 @@ Future<Chapter?> showDetailDirectorySheet(
 }) {
   return showAppBottomSheet<Chapter>(
     context: context,
-    builder: (_) => _DirectorySheetBody(
-      chapters: chapters,
-      currentIndex: currentIndex,
-    ),
+    builder: (_) =>
+        _DirectorySheetBody(chapters: chapters, currentIndex: currentIndex),
   );
 }
 
