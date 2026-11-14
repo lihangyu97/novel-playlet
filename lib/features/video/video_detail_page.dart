@@ -60,6 +60,9 @@ class VideoDetailPage extends ConsumerWidget {
 
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
+      // 三颗悬浮圆直接盖在正文上（与小说详情、首页悬浮底栏同一套做法），
+      // 正文末尾自己留白见 `_buildContent`。
+      extendBody: true,
       body: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -93,7 +96,8 @@ class VideoDetailPage extends ConsumerWidget {
     );
   }
 
-  /// 底部操作栏：收藏 + 播放/继续观看（与小说详情的书架 + 阅读同款）。
+  /// 底部悬浮操作栏：从左到右「收藏 / 缓存 / 播放」三颗圆（与小说详情的
+  /// 收藏 / 缓存 / 阅读同一套布局）。
   Widget? _buildActionBar(
     BuildContext context,
     WidgetRef ref, {
@@ -116,6 +120,7 @@ class VideoDetailPage extends ConsumerWidget {
         : '继续观看 · 第 ${resumeIndex + 1} 集';
     return DetailActionBar(
       primaryLabel: primaryLabel,
+      primaryIcon: Icons.play_arrow_rounded,
       onPrimary: canPlay
           ? () => _openEpisode(context, detail, episodes!, resumeIndex)
           : null,
@@ -250,6 +255,12 @@ class VideoDetailPage extends ConsumerWidget {
               delay: const Duration(milliseconds: 180),
               child: DetailIdFooter(id: seriesId, label: '短剧 ID'),
             ),
+          ),
+        // 悬浮操作栏盖在正文上方（extendBody）：末尾留出它的高度，最后一行
+        // 滚到底时才停在按钮上面，而不是永远被三颗圆挡住。
+        if (detail != null || preview != null)
+          SliverToBoxAdapter(
+            child: SizedBox(height: DetailActionBar.totalHeight(context) + 8),
           ),
       ],
     );

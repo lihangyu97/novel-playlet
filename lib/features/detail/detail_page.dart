@@ -20,7 +20,7 @@ import 'detail_providers.dart';
 import 'detail_reviews_section.dart';
 import 'detail_reviews_sheet.dart';
 
-/// 小说详情页：Hero 信息 + 简介/标签 + 目录 + 底部「开始阅读 / 加入书架」。
+/// 小说详情页：Hero 信息 + 简介/标签 + 目录 + 底部悬浮「收藏 / 缓存 / 阅读」。
 ///
 /// 页面只负责布局与导航；数据、进度、书架状态都在 detail_providers.dart。
 /// 构造函数与 router.dart 里的 [DetailRoute] 对应，[preview] 用来在接口返回
@@ -186,6 +186,12 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             child: DetailIdFooter(id: bookId, label: '书籍 ID'),
           ),
         ),
+      // 悬浮操作栏盖在正文上方（extendBody）：末尾留出它的高度，最后一行
+      // 滚到底时才停在按钮上面，而不是永远被三颗圆挡住。
+      if (bundle != null || preview != null)
+        SliverToBoxAdapter(
+          child: SizedBox(height: DetailActionBar.totalHeight(context) + 8),
+        ),
     ];
 
     final scheme = Theme.of(context).colorScheme;
@@ -198,6 +204,9 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
     return Scaffold(
+      // 三颗悬浮圆直接盖在正文上（与首页悬浮底栏同一套做法），不再用整条
+      // 底栏把内容截断；正文末尾自己留白见上面的 slivers。
+      extendBody: true,
       body: AnnotatedRegion<SystemUiOverlayStyle>(
         value: overlayStyle,
         child: Stack(
@@ -253,6 +262,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
       bottomNavigationBar: (bundle != null || preview != null)
           ? DetailActionBar(
               primaryLabel: primaryLabel,
+              primaryIcon: Icons.menu_book_rounded,
               onPrimary: canOpenReader
                   ? () => _openReader(
                       context,

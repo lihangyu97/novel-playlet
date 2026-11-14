@@ -151,7 +151,7 @@ await downloader.clearFor(OfflineTaskKind.novel, bookId);   // 删除前取消�
 final queued = ref.watch(offlineQueueProvider);             // List<OfflineQueuedTask>
 ref.read(offlineQueueProvider.notifier).remove(kind, id);   // 取消排队
 
-// UI：详情页底栏按钮（小说/短剧共用）；三态「缓存/缓存中/已缓存」，
+// UI：详情页底部悬浮圆按钮（小说/短剧共用，从左到右 收藏 / 缓存 / 播放·阅读）；三态「缓存/缓存中/已缓存」，
 // 缓存 → start*；缓存中/已缓存 → push CacheCenterRoute()（暂停/继续/重试在缓存中心）
 DetailActionBar(offlineButton: OfflineDownloadButton(
   kind: OfflineTaskKind.novel, id: bookId, title: title, cover: cover, items: chapters))
