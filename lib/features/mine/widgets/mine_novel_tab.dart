@@ -100,14 +100,18 @@ class _MineRecentReadingSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final recent = ref.watch(mineRecentProvider).value;
     if (recent == null || recent.isEmpty) return const SizedBox.shrink();
-    return Column(
-      children: [
-        const MineSectionHeader(title: '最近阅读'),
-        MineRecentReading(
-          items: recent,
-          onOpen: (item) => _openReader(context, item),
-        ),
-      ],
+    // 和 tabs 之间留 8pt：区块标题自己还有 8pt 上边距，合计 16pt。
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        children: [
+          const MineSectionHeader(title: '最近阅读'),
+          MineRecentReading(
+            items: recent,
+            onOpen: (item) => _openReader(context, item),
+          ),
+        ],
+      ),
     );
   }
 

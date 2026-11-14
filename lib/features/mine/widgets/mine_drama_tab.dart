@@ -104,23 +104,27 @@ class _MineRecentWatchingSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(mineDramaHistoryProvider).value;
     if (history == null) return const SizedBox.shrink();
-    return Column(
-      children: [
-        const MineSectionHeader(title: '最近观看'),
-        if (history.isEmpty)
-          const SizedBox(
-            height: 140,
-            child: EmptyView(
-              message: '还没有观看记录，去推荐页看看短剧',
-              icon: Icons.history_rounded,
+    // 和 tabs 之间留 8pt：区块标题自己还有 8pt 上边距，合计 16pt。
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        children: [
+          const MineSectionHeader(title: '最近观看'),
+          if (history.isEmpty)
+            const SizedBox(
+              height: 140,
+              child: EmptyView(
+                message: '还没有观看记录，去推荐页看看短剧',
+                icon: Icons.history_rounded,
+              ),
+            )
+          else
+            MineRecentWatching(
+              items: history,
+              onOpen: (progress) => _resume(context, ref, progress),
             ),
-          )
-        else
-          MineRecentWatching(
-            items: history,
-            onOpen: (progress) => _resume(context, ref, progress),
-          ),
-      ],
+        ],
+      ),
     );
   }
 

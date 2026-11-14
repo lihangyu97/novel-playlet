@@ -12,6 +12,7 @@ import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
 import 'package:novel_playlet/features/mine/widgets/mine_novel_tab.dart';
+import 'package:novel_playlet/features/mine/widgets/mine_recent_tile.dart';
 import 'package:novel_playlet/features/mine/widgets/mine_shelf_grid.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,10 +22,28 @@ import 'preview_harness.dart';
 /// 我的页预览：统一页头（我的 + 统计 + 设置）+ 小说/短剧两个 tab。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/mine_test.dart`。
-/// 这一页的封面都必须是各自内容类型的原生比例：小说 3:4、短剧 7:10。
+/// 最近阅读/观看的封面是正方形；书架/收藏卡仍用各自内容类型的原生比例
+/// （小说 3:4、短剧 7:10）。
 void _expectCoverAspect(WidgetTester tester, String label) {
+  final recentCovers = tester
+      .widgetList<NovelCover>(
+        find.descendant(
+          of: find.byType(MineRecentTile),
+          matching: find.byType(NovelCover),
+        ),
+      )
+      .toList();
+  for (final cover in recentCovers) {
+    expect(
+      cover.width,
+      closeTo(cover.height, 0.01),
+      reason: '$label 最近记录的封面应为正方形',
+    );
+  }
+
   final bad = tester
       .widgetList<NovelCover>(find.byType(NovelCover))
+      .where((cover) => !recentCovers.contains(cover))
       .where((cover) {
         final ratio = cover.height / cover.width;
         return (ratio - kNovelCoverAspect).abs() > 0.002 &&
@@ -36,7 +55,7 @@ void _expectCoverAspect(WidgetTester tester, String label) {
             '(h/w=${(cover.height / cover.width).toStringAsFixed(3)})',
       )
       .toSet();
-  expect(bad, isEmpty, reason: '$label 有封面既不是小说 3:4 也不是短剧 7:10：$bad');
+  expect(bad, isEmpty, reason: '$label 有卡片封面既不是小说 3:4 也不是短剧 7:10：$bad');
 }
 
 /// 点 tab 栏里的「小说 / 短剧」切 tab（标签在页头下方的 tabs 行里）。
@@ -177,7 +196,7 @@ void main() {
     expect(find.byType(AppSurfaceCard), findsNWidgets(4));
     expect(find.text('作者1'), findsWidgets);
     expect(find.text('作者4'), findsWidgets);
-    // 最近阅读（44 宽）和书架卡（_maxCardWidth 内）封面比例也必须统一。
+    // 最近阅读封面为正方形，书架卡仍按小说 3:4。
     _expectCoverAspect(tester, '我的页');
     await expectLater(
       find.byType(MinePage),
