@@ -23,7 +23,7 @@
 - **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下滑切集（竖向翻页）/播完自动下一集、选集弹层、横屏全屏、在线 MP4 边下边播、失败分类与「重新下载这一集」；底排左侧「选集 + 详情 + 本集评论」、中间播放/暂停、右侧「清晰度（拿得到才展示，只读）+ 倍速」；收藏/缓存统一收进「详情」底部弹层（历史「最近观看」直进播放页也从这里操作；详情弹层不重复选集、无关闭叉号）。进度条左右分别显示当前时间/总时长，外沿与下方按钮、倍速 chip 对齐。收藏**只加不移**（与阅读页加入书架一致，已收藏后只读，成功不弹提示条）；缓存三态与详情页同一份 `offlineEntryStatusProvider`。
 - **我的**：统一页头（图标 + 「我的」 + 合并统计 + 右上角设置入口，固定贴顶、不随内容滚动，带一套蓝粉氛围渐变）+ 小说 / 短剧两个 tab（无下划线，当前 tab 主题色高亮且字号稍大，可点击或左右滑动切换，内容各自保活）；小说 tab = 书架 + 最近阅读，短剧 tab = 收藏 + 最近观看；书架/收藏与首页同款白底不定高卡片（瀑布流，小说只展示书名+作者、短剧只展示剧名+集数）；缓存入口在推荐页搜索框右侧。
 - **缓存中心**：离线整本 / 整剧下载的进度、网速、排队、暂停/继续/删除/清空；入口在推荐页搜索框右侧的下载图标按钮（原「我的」页右下角悬浮入口已删除）。
-- **设置**：主题色（天蓝 / 草绿 / 绯红 + 自定义取色，自定义圆点显示上次自定义色）、对话高亮颜色（圆形色块打开 HSV 取色，弹层内用阅读页真实正文预览当前颜色）、深浅色模式（跟随系统 / 手动）、首页推荐布局（双列 / 三列，默认双列）、存储占用与清理、离线下载清晰度。
+- **设置**：主题色（天蓝 / 草绿 / 绯红 + 自定义取色，自定义圆点显示上次自定义色）、对话高亮颜色（圆形色块打开 HSV 取色，弹层内用阅读页真实正文预览当前颜色）、深浅色模式（跟随系统 / 手动）、推荐流布局（双列 / 三列，默认双列）、存储占用与清理、离线下载清晰度。
 
 两个内容链路：
 
@@ -749,7 +749,7 @@ flutter drive --profile -d <iPhone UDID> \
 | `PATCHES.md` | Rust 内核相对 fqapp 的 fork 基线、本地补丁清单与上游同步流程 |
 | `third_party/README.md` | `video_player_avfoundation` 补丁内容与插件升级时如何重放 |
 | `lib/features/recommend/content_source.dart` | 分类策略（tab_type / 搜索 tab / 漫剧兜底） |
-| `lib/features/recommend/recommend_layout.dart` | 首页推荐布局（双列 / 三列）provider 与持久化 |
+| `lib/features/recommend/recommend_layout.dart` | 推荐流布局（双列 / 三列）provider 与持久化 |
 | `lib/features/feed/feed_staggered_grid.dart` | 推荐流瀑布流（sliver 网格 + 列宽换算，卡片不定高） |
 | `lib/app/widgets/surface_card.dart` | 通用白底卡容器（推荐流先接入，后续列表逐步复用） |
 | `lib/features/cache/offline_downloader.dart` | 离线下载引擎（单任务状态机 + 队列） |
@@ -856,7 +856,7 @@ flutter drive --profile -d <iPhone UDID> \
 ### 11.5 推荐流布局与封面比例（2026-11-09）
 
 - **布局**：`SliverMasonryGrid`（`flutter_staggered_grid_view`，CONTRACTS 依赖白名单）按子节点实际
-  高度排版，双列/三列共用一套卡片；列数来自 `recommendLayoutProvider`（设置页「主题 → 首页推荐布局」，
+  高度排版，双列/三列共用一套卡片；列数来自 `recommendLayoutProvider`（设置页「主题 → 推荐流布局」，
   默认双列，持久化 key `home_recommend_layout_v1`，`main.dart` 启动预读避免首页先按双列渲染再跳）。
   旧的固定高度三列网格 `FeedGrid` / `FeedGridMetrics` 已删除，新增 `FeedStaggeredGrid`：
   卡片高度不再预算，列宽由 `SliverLayoutBuilder` 从 sliver 实际拿到的 `crossAxisExtent`

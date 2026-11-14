@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 首页推荐布局偏好：默认双列、切换落盘、新的容器从偏好恢复、非法值回落。
+/// 推荐流布局偏好：默认双列、切换落盘、新的容器从偏好恢复、非法值回落。
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 

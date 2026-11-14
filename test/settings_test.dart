@@ -67,7 +67,7 @@ Widget _wrap(Widget child, {List<Override> overrides = const []}) {
   );
 }
 
-/// 设置页新增「首页推荐布局」卡片后内容变长，「清理缓存」会落到 800×600 的
+/// 设置页新增「推荐流布局」卡片后内容变长，「清理缓存」会落到 800×600 的
 /// 测试首屏外：点击前先把它滚到可见，否则 tap 会因命中不到而静默失败。
 Future<void> _scrollToClearCache(WidgetTester tester) async {
   await tester.scrollUntilVisible(

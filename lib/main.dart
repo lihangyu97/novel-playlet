@@ -41,7 +41,7 @@ Future<void> main() async {
   );
 }
 
-/// 一次读盘同时取回主题色、深浅色模式与首页推荐布局；读不到/超时都用默认值。
+/// 一次读盘同时取回主题色、深浅色模式与推荐流布局；读不到/超时都用默认值。
 Future<({Color seed, ThemeMode mode, RecommendLayout layout})>
 _restorePreferences() async {
   try {

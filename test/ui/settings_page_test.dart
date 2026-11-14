@@ -12,7 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 
-/// 设置页预览：主题色（3 个预设 + 自定义）、深浅色模式、首页推荐布局、存储与视频区块。
+/// 设置页预览：主题色（3 个预设 + 自定义）、深浅色模式、推荐流布局、存储与视频区块。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/settings_page_test.dart`。
 void main() {
@@ -177,7 +177,7 @@ void main() {
     await pumpPreview(tester, const SettingsPage());
     const inset = 32.0; // 卡片 16 外边距 + 16 内边距
 
-    for (final text in ['主题', '对话高亮', '跟随系统', '首页推荐布局', '存储']) {
+    for (final text in ['主题', '对话高亮', '跟随系统', '推荐流布局', '存储']) {
       expect(
         tester.getTopLeft(find.text(text).first).dx,
         inset,
@@ -256,14 +256,14 @@ void main() {
     );
   });
 
-  /// 首页推荐布局：默认双列，可切三列并落盘（推荐页 watch 同一个 provider）。
-  testWidgets('设置页-首页推荐布局默认双列，可切三列', (tester) async {
+  /// 推荐流布局：默认双列，可切三列并落盘（推荐页 watch 同一个 provider）。
+  testWidgets('设置页-推荐流布局默认双列，可切三列', (tester) async {
     await pumpPreview(tester, const SettingsPage());
     final container = ProviderScope.containerOf(
       tester.element(find.byType(SettingsPage)),
     );
 
-    expect(find.text('首页推荐布局'), findsOneWidget);
+    expect(find.text('推荐流布局'), findsOneWidget);
     expect(container.read(recommendLayoutProvider), RecommendLayout.two);
     expect(
       tester.widget<ChoiceChip>(find.byKey(recommendLayoutTwoKey)).selected,
@@ -281,6 +281,19 @@ void main() {
     );
     expect(find.textContaining('封面更大'), findsNothing, reason: '布局说明提示已去掉');
     // 落盘由 test/recommend_layout_test.dart 覆盖（页面测试只验证交互与联动）。
+  });
+
+  /// 标题缩短不改变 Row 的 flex 分配：这里锁住「1.1 倍字体下两个 chip 仍
+  /// 在同一行」，避免以后又把选项塞回 Flexible/Wrap 里。
+  testWidgets('设置页-推荐流布局在 1.1 倍字体下仍为一行', (tester) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 1.1;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await pumpPreview(tester, const SettingsPage());
+
+    final two = tester.getRect(find.byKey(recommendLayoutTwoKey));
+    final three = tester.getRect(find.byKey(recommendLayoutThreeKey));
+    expect(two.top, three.top, reason: '双列/三列应在同一行');
+    expect(two.bottom, three.bottom, reason: '双列/三列应在同一行');
   });
 
   /// 取色器拖动时每帧都会重建预览：换色只能重画色带，不能重新分页。

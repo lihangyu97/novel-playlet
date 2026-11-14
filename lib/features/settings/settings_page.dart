@@ -15,7 +15,7 @@ import 'settings_providers.dart';
 import 'widgets/dialogue_highlight_preview.dart';
 import 'widgets/theme_color_picker.dart';
 
-/// 设置页：主题（主题色 / 深浅色 / 首页推荐布局）+ 存储 + 视频。
+/// 设置页：主题（主题色 / 深浅色 / 推荐流布局）+ 存储 + 视频。
 ///
 /// 从「我的」右上角进。这里只放全局偏好与可重建缓存，书架/阅读进度属于用户
 /// 数据，不给清理入口（那些在「我的」页里操作）。
@@ -460,7 +460,7 @@ class _SwitchRow extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 首页推荐布局
+// 推荐流布局
 // ---------------------------------------------------------------------------
 
 /// 每个布局选项的 key：测试直接点，不依赖文案。
@@ -473,10 +473,11 @@ Key recommendLayoutOptionKey(RecommendLayout layout) =>
 const Key recommendLayoutTwoKey = ValueKey('recommend-layout-two');
 const Key recommendLayoutThreeKey = ValueKey('recommend-layout-three');
 
-/// 首页推荐布局：双列 / 三列瀑布流。
+/// 推荐流布局：双列 / 三列瀑布流。
 ///
-/// 与「离线下载清晰度」同一套控件（小标题 + ChoiceChip），标题和选项收在
-/// 同一行；不再额外写「封面更大 / 一屏更多」的说明文案。
+/// 标题和选项收在同一行。选项不参与 Row 的 flex：标题再短、字体再大，两个
+/// chip 也按自身宽度占位，不会因为标题先分走一半宽度而折成两行；标题自身
+/// 超宽时省略。
 /// 默认双列，改完立即生效（推荐页 watch 同一个 provider）。
 class _FeedLayoutCard extends ConsumerWidget {
   const _FeedLayoutCard();
@@ -492,28 +493,29 @@ class _FeedLayoutCard extends ConsumerWidget {
         children: [
           Expanded(
             child: Text(
-              '首页推荐布局',
+              '推荐流布局',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
             ),
           ),
           const SizedBox(width: 12),
-          Flexible(
-            child: Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                for (final option in RecommendLayout.values)
-                  ChoiceChip(
-                    key: recommendLayoutOptionKey(option),
-                    label: Text(option.label),
-                    selected: option == layout,
-                    onSelected: (_) => controller.setLayout(option),
-                  ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final option in RecommendLayout.values) ...[
+                if (option != RecommendLayout.values.first)
+                  const SizedBox(width: 8),
+                ChoiceChip(
+                  key: recommendLayoutOptionKey(option),
+                  label: Text(option.label),
+                  selected: option == layout,
+                  onSelected: (_) => controller.setLayout(option),
+                ),
               ],
-            ),
+            ],
           ),
         ],
       ),
