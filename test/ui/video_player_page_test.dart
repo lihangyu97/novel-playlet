@@ -10,14 +10,19 @@ import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
+import 'package:novel_playlet/core/storage/offline/offline_series.dart';
 import 'package:novel_playlet/core/storage/offline/offline_series_store.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
+import 'package:novel_playlet/data/models/book_comment.dart';
 import 'package:novel_playlet/data/models/chapter.dart';
+import 'package:novel_playlet/data/models/video_detail.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
+import 'package:novel_playlet/features/detail/detail_action_bar.dart';
 import 'package:novel_playlet/features/video/network_health.dart';
 import 'package:novel_playlet/features/video/video_library_providers.dart';
 import 'package:novel_playlet/features/video/playback_speed.dart';
+import 'package:novel_playlet/features/video/video_detail_page.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
@@ -75,40 +80,123 @@ void main() {
     await _disposePlayer(tester);
   });
 
-  testWidgets('底栏新增收藏/缓存/本集评论入口，收藏只加不移、不弹提示条', (tester) async {
+  testWidgets('底栏：选集 / 详情 / 本集评论，收藏缓存移进详情弹层', (tester) async {
     final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
     final factory = _FakeFactory();
-    final container = await _pumpPlayer(tester, store: store, factory: factory);
+    final api = _FakeApi();
+    final container = await _pumpPlayer(
+      tester,
+      store: store,
+      factory: factory,
+      api: api,
+    );
 
-    // 等收藏态从本地读回来（AsyncNotifier 首次 build 是异步的）。
+    // 底部入口：选集右边是详情，收藏/下载/顶部详情按钮都撤掉了。
+    expect(find.byTooltip('选集'), findsOneWidget);
+    expect(find.byTooltip('详情'), findsOneWidget);
+    expect(find.byTooltip('本集评论'), findsOneWidget);
+    expect(find.byTooltip('剧集详情'), findsNothing);
+    expect(find.byTooltip('收藏'), findsNothing);
+    expect(find.byTooltip('缓存'), findsNothing);
+
+    await tester.tap(find.byTooltip('详情'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.byType(VideoDetailPage), findsOneWidget);
+    expect(find.byTooltip('关闭详情'), findsOneWidget);
+    // 弹层里只有收藏 + 缓存，没有播放/继续观看主按钮。
+    final actionBar = find.byType(DetailActionBar);
+    expect(actionBar, findsOneWidget);
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.bookmark_add_outlined),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.download_outlined),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.play_arrow_rounded),
+      ),
+      findsNothing,
+    );
+
+    // 收藏可以直接在弹层里完成，仍然只加不移。
     final shelfProvider = videoShelfStatusProvider('s1');
     for (var i = 0; i < 5 && container.read(shelfProvider).isLoading; i++) {
       await tester.pump(const Duration(milliseconds: 20));
     }
-
-    expect(find.byTooltip('选集'), findsOneWidget);
-    expect(find.byTooltip('本集评论'), findsOneWidget);
-    expect(find.byTooltip('收藏'), findsOneWidget);
-    expect(find.byTooltip('缓存'), findsOneWidget);
-    expect(find.byTooltip('剧集详情'), findsOneWidget, reason: '历史直进播放页后要能回详情');
-
-    await tester.tap(find.byTooltip('收藏'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(container.read(shelfProvider).value, isTrue);
-    expect(find.byTooltip('已收藏'), findsOneWidget);
-    expect(find.byType(SnackBar), findsNothing, reason: '收藏成功不弹提示条，图标自己变实心就够了');
-
-    // 只加不移：已收藏后按钮只读，再点不会取消。
-    await tester.tap(find.byTooltip('已收藏'));
+    await tester.tap(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.bookmark_add_outlined),
+      ),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(container.read(shelfProvider).value, isTrue);
     expect(
-      find.byIcon(Icons.favorite_rounded),
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.bookmark_added_outlined),
+      ),
       findsOneWidget,
-      reason: '已收藏后仍是实心收藏图标',
     );
+
+    // 关掉弹层回到播放页。
+    await tester.tap(find.byTooltip('关闭详情'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(VideoDetailPage), findsNothing);
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('进度条两侧显示时间；缓存档位清晰度只展示不可切换', (tester) async {
+    final store = _FakeSeriesStore(
+      cachedFile: File('/tmp/episode.mp4'),
+      manifest: OfflineSeries(
+        seriesId: 's1',
+        title: '测试短剧',
+        episodes: [
+          OfflineEpisode(
+            id: 'e1',
+            title: '第 1 集',
+            index: 0,
+            variantName: '720P',
+          ),
+          OfflineEpisode(
+            id: 'e2',
+            title: '第 2 集',
+            index: 1,
+            variantName: '720P',
+          ),
+        ],
+        qualityMaxHeight: 720,
+      ),
+    );
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory, api: _FakeApi());
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // 当前时间在左、总时长在右（假 controller 固定 120s）。
+    expect(find.text('00:00'), findsOneWidget);
+    expect(find.text('02:00'), findsOneWidget);
+    expect(
+      tester.getCenter(find.text('00:00')).dx,
+      lessThan(tester.getCenter(find.text('02:00')).dx),
+    );
+
+    // 缓存档位能拿到：展示 720P，且 chip 没有点击行为。
+    expect(find.text('720P'), findsOneWidget);
+    expect(find.byTooltip('当前清晰度（暂不支持切换）'), findsOneWidget);
 
     await _disposePlayer(tester);
   });
@@ -980,13 +1068,17 @@ Future<void> _disposePlayer(WidgetTester tester) async {
 
 /// 离线 store 的测试替身：固定返回一个存在的「离线文件」。
 class _FakeSeriesStore extends OfflineSeriesStore {
-  _FakeSeriesStore({this.cachedFile});
+  _FakeSeriesStore({this.cachedFile, this.manifest});
 
   final File? cachedFile;
+  final OfflineSeries? manifest;
 
   @override
   Future<File?> episodeFileIfCached(String seriesId, String episodeId) async =>
       cachedFile;
+
+  @override
+  Future<OfflineSeries?> read(String seriesId) async => manifest;
 }
 
 /// ApiClient 测试替身：只关心缓存探测、`mode=stream` 优先与整集下载兜底的分流。
@@ -1019,6 +1111,21 @@ class _FakeApi extends ApiClient {
     cachedCalls += 1;
     return cachedUrl;
   }
+
+  @override
+  Future<VideoDetail> videoDetail(String seriesId) async =>
+      VideoDetail(id: seriesId, title: '测试短剧', episodeCount: _episodes.length);
+
+  @override
+  Future<List<Chapter>> videoEpisodes(String seriesId) async => _episodes;
+
+  @override
+  Future<BookCommentPage> seriesComments(
+    String seriesId, {
+    int count = 10,
+    String cursor = '',
+    int sort = 1,
+  }) async => BookCommentPage.empty;
 
   @override
   Future<VideoSource> videoSource(

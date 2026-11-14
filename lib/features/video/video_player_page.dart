@@ -8,20 +8,20 @@ import 'package:video_player/video_player.dart';
 
 import '../../app/providers.dart';
 import '../../app/router.dart';
+import '../../app/widgets/app_bottom_sheet.dart';
 import '../../app/widgets/app_snack_bar.dart';
 import '../../app/widgets/novel_cover.dart';
+import '../../core/storage/offline/offline_series.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/video_series.dart';
 import '../../data/models/video_source.dart';
 import '../cache/cache_providers.dart';
-import '../cache/offline_task.dart';
-import '../cache/widgets/offline_download_button.dart';
 import 'episode_source_resolver.dart';
 import 'network_health.dart';
 import 'offline_playback.dart';
 import 'playback_failure.dart';
 import 'playback_speed.dart';
-import 'video_library_providers.dart';
+import 'video_detail_page.dart';
 import 'widgets/episode_picker_sheet.dart';
 import 'widgets/playback_speed_sheet.dart';
 import 'widgets/player_option_chip.dart';
@@ -1075,58 +1075,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     episodeCount: _episodes.length,
   );
 
-  /// 收藏：只加不移（与阅读页顶部「加入书架」一致）。
+  /// 打开剧集详情（底部弹层）。历史「最近观看」直进播放页，这是补回来的
+  /// 详情入口；弹层里只保留收藏 / 缓存，点选集直接切当前播放页的集数。
   ///
-  /// 历史「最近观看」是直进播放页的，这里没有入口的话看过就收藏不了；
-  /// 已收藏后按钮变只读态，不再提供取消（取消入口在「我的 → 收藏」里）。
-  /// 成功不弹提示条：图标自己会变成实心，底部操作行不该被 SnackBar 压住。
-  Future<void> _addToShelf() async {
-    final seriesId = widget.args.seriesId;
-    if (seriesId.isEmpty || !_shelfItem.isValid) return;
-    final provider = videoShelfStatusProvider(seriesId);
-    if ((ref.read(provider).value ?? false) || ref.read(provider).isLoading) {
-      return;
-    }
-    try {
-      await ref.read(provider.notifier).add(_shelfItem);
-    } catch (_) {
-      if (!mounted) return;
-      showAppSnackBar(context, '收藏失败，请重试');
-    }
-  }
-
-  /// 缓存整剧：未缓存 → 开始/续传；缓存中、已缓存 → 进缓存中心看进度。
-  ///
-  /// 三态判定和小说阅读页顶部「缓存小说」共用 [offlineEntryStatusProvider]，
-  /// 两个入口不会各算一套。
-  Future<void> _handleCacheTap() async {
-    final args = widget.args;
-    if (args.seriesId.isEmpty) return;
-    final status = ref.read(
-      offlineEntryStatusProvider((
-        kind: OfflineTaskKind.video,
-        id: args.seriesId,
-      )),
-    );
-    if (status != OfflineEntryStatus.none) {
-      await context.pushAppRoute(const CacheCenterRoute());
-      return;
-    }
-    await startOfflineDownload(
-      context,
-      ref,
-      kind: OfflineTaskKind.video,
-      id: args.seriesId,
-      title: args.seriesTitle,
-      cover: args.cover,
-      items: _episodes,
-    );
-  }
-
-  /// 打开剧集详情。历史「最近观看」直进播放页，这是补回来的详情入口；
-  /// 进详情前先暂停，返回后原来在播就继续播，避免详情页的播放按钮和这里
-  /// 同时出声。
-  Future<void> _openVideoDetail() async {
+  /// 打开前先暂停，关闭后原来在播就继续播，避免详情里的声音和播放器叠在
+  /// 一起；和上一版跳详情页的行为保持一致。
+  Future<void> _openDetailSheet() async {
     final args = widget.args;
     if (args.seriesId.isEmpty) return;
     final wasPlaying = _controller?.value.isPlaying ?? false;
@@ -1134,8 +1088,21 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     _hideTimer?.cancel();
     setState(() => _controlsVisible = true);
     try {
-      await context.pushAppRoute(
-        VideoDetailRoute(seriesId: args.seriesId, preview: _shelfItem),
+      await showAppBottomSheet<void>(
+        context: context,
+        builder: (sheetContext) => AppBottomSheet(
+          heightFactor: 0.72,
+          closeTooltip: '关闭详情',
+          child: VideoDetailPage(
+            seriesId: args.seriesId,
+            preview: _shelfItem,
+            embed: true,
+            onPlayEpisode: (episodes, index) {
+              Navigator.of(sheetContext).pop();
+              unawaited(_changeEpisode(index));
+            },
+          ),
+        ),
       );
     } finally {
       if (mounted) {
@@ -1166,6 +1133,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     // 只会更小，也不给入口。
     final showFullscreenHint = showChrome && !_fullscreen && _canFullscreen;
     final speed = ref.watch(playbackSpeedProvider);
+    final quality = _currentQualityLabel();
     ref.listen<double>(playbackSpeedProvider, (_, next) {
       final controller = _controller;
       if (controller == null || !controller.value.isInitialized) return;
@@ -1220,7 +1188,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                       // 全屏横屏时不再避让底部安全区：控制条要完全贴底，
                       // 否则 Home 指示条那一条会在控件下方留出空隙。
                       bottom: !_fullscreen,
-                      child: _chrome(_buildBottomBar(speed)),
+                      child: _chrome(_buildBottomBar(speed, quality)),
                     ),
                   ),
                 // 全屏入口放在视频下方：控制条隐藏时一起淡出且不接收点击
@@ -1673,14 +1641,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
               ],
             ),
           ),
-          // 历史「最近观看」直进播放页，详情页只能从这里回得去。
-          if (widget.args.seriesId.isNotEmpty)
-            IconButton(
-              tooltip: '剧集详情',
-              onPressed: () => unawaited(_openVideoDetail()),
-              icon: const Icon(Icons.info_outline_rounded),
-              color: Colors.white,
-            ),
         ],
       ),
     );
@@ -1712,46 +1672,24 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     );
   }
 
-  /// 收藏按钮（播放页底栏）：状态与详情页共用同一个 provider。
-  Widget _buildShelfButton() {
-    final shelfAsync = ref.watch(
-      videoShelfStatusProvider(widget.args.seriesId),
-    );
-    final onShelf = shelfAsync.value ?? false;
-    // 首次读本地收藏表还没回来时禁用，避免「刚进页面就点」把已收藏的剧
-    // 又加一遍（toggle 依据的初始值会是 null）。
-    final busy = shelfAsync.isLoading && !shelfAsync.hasValue;
-    return _barIconButton(
-      icon: onShelf ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-      tooltip: onShelf ? '已收藏' : '收藏',
-      active: onShelf,
-      // 只加不移：已收藏后按钮只读（与阅读页「已在书架」一致）。
-      onTap: onShelf || busy ? null : () => unawaited(_addToShelf()),
-    );
+  /// 当前集的实际清晰度：只从离线 manifest 的 `variantName` 拿（内核下载时
+  /// 才记录实际档位）。在线播放当前不请求清晰度档，所以多半为空——为空时
+  /// 播放条不展示这一项。
+  String _currentQualityLabel() {
+    final seriesId = widget.args.seriesId;
+    final episode = _episode;
+    if (seriesId.isEmpty || episode == null || episode.id.isEmpty) return '';
+    final manifest = ref.watch(offlineSeriesProvider(seriesId)).value;
+    if (manifest == null) return '';
+    for (final item in manifest.episodes) {
+      if (item.id != episode.id) continue;
+      if (item.variantName.isNotEmpty) return item.variantName;
+      return qualityLabelOf(manifest);
+    }
+    return '';
   }
 
-  /// 缓存按钮（播放页底栏）：未缓存 / 缓存中 / 已缓存三态。
-  Widget _buildCacheButton() {
-    final status = ref.watch(
-      offlineEntryStatusProvider((
-        kind: OfflineTaskKind.video,
-        id: widget.args.seriesId,
-      )),
-    );
-    final (icon, tooltip) = switch (status) {
-      OfflineEntryStatus.cached => (Icons.download_done_rounded, '已缓存'),
-      OfflineEntryStatus.inProgress => (Icons.downloading_rounded, '缓存中'),
-      OfflineEntryStatus.none => (Icons.download_outlined, '缓存'),
-    };
-    return _barIconButton(
-      icon: icon,
-      tooltip: tooltip,
-      active: status != OfflineEntryStatus.none,
-      onTap: () => unawaited(_handleCacheTap()),
-    );
-  }
-
-  Widget _buildBottomBar(double speed) {
+  Widget _buildBottomBar(double speed, String quality) {
     final controller = _controller;
     if (controller == null) return const SizedBox.shrink();
     return Container(
@@ -1774,66 +1712,56 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
           final shown = _dragValue == null
               ? position
               : Duration(milliseconds: _dragValue!.round());
+          const timeStyle = TextStyle(color: Colors.white70, fontSize: 12);
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 2,
-                  thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: 6,
-                  ),
-                  overlayShape: const RoundSliderOverlayShape(
-                    overlayRadius: 14,
-                  ),
-                ),
-                child: Slider(
-                  min: 0,
-                  max: maxMs <= 0 ? 1 : maxMs,
-                  value: shown.inMilliseconds.toDouble().clamp(
-                    0,
-                    maxMs <= 0 ? 1 : maxMs,
-                  ),
-                  // 拖动中只改显示值，松手才真正 seek：每 tick 都 seek 会
-                  // 对回环连发 Range 请求，真机会卡。
-                  onChanged: (ms) {
-                    _hideTimer?.cancel();
-                    setState(() => _dragValue = ms);
-                  },
-                  onChangeEnd: (ms) {
-                    setState(() => _dragValue = null);
-                    _seekTo(Duration(milliseconds: ms.round()));
-                    _scheduleHide();
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: Row(
-                  children: [
-                    Text(
-                      _formatDuration(shown),
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
+              // 当前时间 / 总时长放在进度条左右，外沿和下方按钮行、倍速 chip
+              // 对齐（容器左右各 12pt 内边距）。
+              Row(
+                children: [
+                  Text(_formatDuration(shown), style: timeStyle),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 2,
+                        thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 6,
+                        ),
+                        overlayShape: const RoundSliderOverlayShape(
+                          overlayRadius: 14,
+                        ),
+                      ),
+                      child: Slider(
+                        min: 0,
+                        max: maxMs <= 0 ? 1 : maxMs,
+                        value: shown.inMilliseconds.toDouble().clamp(
+                          0,
+                          maxMs <= 0 ? 1 : maxMs,
+                        ),
+                        // 拖动中只改显示值，松手才真正 seek：每 tick 都 seek 会
+                        // 对回环连发 Range 请求，真机会卡。
+                        onChanged: (ms) {
+                          _hideTimer?.cancel();
+                          setState(() => _dragValue = ms);
+                        },
+                        onChangeEnd: (ms) {
+                          setState(() => _dragValue = null);
+                          _seekTo(Duration(milliseconds: ms.round()));
+                          _scheduleHide();
+                        },
                       ),
                     ),
-                    const Spacer(),
-                    Text(
-                      _formatDuration(duration),
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(_formatDuration(duration), style: timeStyle),
+                ],
               ),
-              const SizedBox(height: 4),
-              // 操作行：左侧「选集 + 本集评论」，中间播放/暂停，右侧
-              // 「收藏 + 缓存 + 倍速」。用 Stack 而不是等宽 Row：倍速 pill 是
-              // 固定宽度，等宽分组在 360 宽的机型上会挤到溢出；Stack 让暂停键
-              // 始终居中，两侧按自身宽度靠边（≥360pt 不会互相压到）。
+              const SizedBox(height: 2),
+              // 操作行：左侧「选集 + 详情 + 本集评论」，中间播放/暂停，右侧
+              // 「清晰度（有才展示）+ 倍速」。用 Stack 而不是等宽 Row：两侧按
+              // 自身宽度靠边，暂停键始终居中，窄屏也不会互相压到。
               SizedBox(
                 width: double.infinity,
                 child: Stack(
@@ -1861,12 +1789,18 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                               tooltip: '选集',
                               onTap: () => unawaited(_openEpisodePicker()),
                             ),
-                            if (widget.args.seriesId.isNotEmpty)
+                            if (widget.args.seriesId.isNotEmpty) ...[
+                              _barIconButton(
+                                icon: Icons.info_outline_rounded,
+                                tooltip: '详情',
+                                onTap: () => unawaited(_openDetailSheet()),
+                              ),
                               _barIconButton(
                                 icon: Icons.chat_bubble_outline_rounded,
                                 tooltip: '本集评论',
                                 onTap: () => unawaited(_openEpisodeComments()),
                               ),
+                            ],
                           ],
                         ),
                       ),
@@ -1879,9 +1813,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (widget.args.seriesId.isNotEmpty) ...[
-                              _buildShelfButton(),
-                              _buildCacheButton(),
+                            if (quality.isNotEmpty) ...[
+                              PlayerOptionChip(
+                                label: quality,
+                                tooltip: '当前清晰度（暂不支持切换）',
+                              ),
+                              const SizedBox(width: 8),
                             ],
                             PlayerOptionChip(
                               label: playbackSpeedLabel(speed),
