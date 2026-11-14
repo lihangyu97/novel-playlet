@@ -202,6 +202,12 @@ await OfflineBookStore.read(bookId)                    ← 磁盘
   在当前目录里重找位置，后台换目录不会把正文挂错章。
 - 离线命中**不回写**自动缓存；自动层只是加速器。
 - ±1 章预取：队列上限 4、worker 并发 1、只写缓存不动 UI；失败静默。
+- **三章阅读窗口**：当前章稳定后，阅读页把前后各一章的正文 + 章评 + 分页一起准备好
+  （正文走 `prepareChapterContent`，章评顺带拉取并本地缓存，分页在 post-frame 预排），
+  窗口外（例如 1→2→3 后的第 1 章）由 `_prunePrepared` 淘汰。PageView 在前后各放一个
+  sentinel 页（上一章最后一页 / 下一章第一页），到边界继续滑/点左右分区和章内翻页走
+  同一条 PageView 动画；落定后原子切章并抑制旧的淡入过渡。sentinel 未就绪时仍回退到
+  原来的越界切章 + 淡入路径。
 - **老正文补锚点**：缓存/离线正文没有 `paraIndices`（升级前写入的老文件）且气泡开启时，
   后台补取一次正文：只有真拿到 `<p idx>` 锚点才回填当前章。自动缓存来源同时写回缓存；
   离线来源只记在会话内（切走再回来仍生效），不覆盖离线 pinned 区、也不写自动缓存。
@@ -253,7 +259,7 @@ ChapterContent{id,title,paragraphs}
   不会挤压右侧按钮）+ 右对齐的两个文本动作：书架状态（`加入书架` → `已在书架`，加入后
   只读、只加不移，状态读 `readerShelfProvider`）与整本缓存状态（`缓存小说` 可点开始下载，
   `缓存中` / `已缓存` 点击进缓存中心；状态与详情页 `OfflineDownloadButton` 共用
-  `offlineEntryStatusProvider`）。底部为目录/评论/日间·夜间/设置，上一章/下一章不再占
+  `offlineEntryStatusProvider`）。底部为目录/详情/评论/日间·夜间/设置，上一章/下一章不再占
   按钮位（点正文左右分区、章边界继续滑动、目录跳章都能切章）。日/夜切换：夜间用
   `ReaderPaper.night`，切回日间回到上次选择的浅色纸（落盘 `reader_day_paper_v1`）。
 

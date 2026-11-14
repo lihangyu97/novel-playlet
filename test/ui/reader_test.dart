@@ -47,6 +47,12 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    // 分页计数/重测段数等回归用例只统计当前章显示路径；邻章预排版默认关闭。
+    ReaderPage.debugDisablePreparation = true;
+  });
+
+  tearDown(() {
+    ReaderPage.debugDisablePreparation = false;
   });
 
   testWidgets('阅读页', (tester) async {
@@ -162,6 +168,105 @@ void main() {
     expect(scrollbar.thumbVisibility, isTrue);
     expect(scrollbar.interactive, isTrue);
     expect(scrollbar.controller, isNotNull);
+  });
+
+  testWidgets('阅读页-上一章 sentinel：首页回翻无感切回上一章', (tester) async {
+    ReaderPage.debugDisablePreparation = false;
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    final provider = readerSessionProvider(
+      const ReaderArgs(bookId: '1', bookTitle: '剑来'),
+    );
+    // 直接走控制器进第 2 章，等上一章 sentinel 也准备好。
+    await container.read(provider.notifier).nextChapter();
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(container.read(provider).contentIndex, 1);
+
+    final pageView = tester.widget<PageView>(find.byType(PageView));
+    final delegate = pageView.childrenDelegate as SliverChildBuilderDelegate;
+    expect(
+      delegate.childCount,
+      greaterThan(1),
+      reason: '第 2 章 PageView 前面应有上一章最后一页 sentinel',
+    );
+    expect(
+      pageView.controller!.page,
+      closeTo(1, 0.01),
+      reason: '当前显示页 = 偏移 1 + 第 2 章第 0 页',
+    );
+
+    // 点左侧 1/3：滑到上一章 sentinel，落定后切回第 1 章。
+    await tester.tapAt(const Offset(40, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(container.read(provider).contentIndex, 0);
+  });
+
+  testWidgets('阅读页-邻章预排版：末页继续翻用 PageView sentinel 无感切章', (tester) async {
+    ReaderPage.debugDisablePreparation = false;
+    final fake = FakePreviewTransport();
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: fake,
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    // 下一章正文和章评都在当前章停留时提前请求/排好。
+    expect(
+      fake.calls.any((call) => call.contains('/chapters/c2')),
+      isTrue,
+      reason: '下一章正文应已预取',
+    );
+    expect(
+      fake.calls.any((call) => call.contains('/chapters/c2/reviews')),
+      isTrue,
+      reason: '下一章章评应已预取',
+    );
+
+    final pageView = tester.widget<PageView>(find.byType(PageView));
+    final delegate = pageView.childrenDelegate as SliverChildBuilderDelegate;
+    final pageCount = delegate.childCount ?? 0;
+    // 下一章第一页已经就绪，PageView 末尾多一个 sentinel。
+    expect(pageCount, greaterThan(1), reason: '至少当前章多页 + next sentinel');
+
+    final info = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((text) => text.data ?? '')
+        .firstWhere((data) => RegExp(r'^\d+/\d+$').hasMatch(data));
+    final currentPages = int.parse(info.split('/').last);
+    expect(
+      pageCount,
+      currentPages + 1,
+      reason: '首章没有上一章 sentinel，末尾应正好多出下一章第一页',
+    );
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    final provider = readerSessionProvider(
+      const ReaderArgs(bookId: '1', bookTitle: '剑来'),
+    );
+    expect(container.read(provider).contentIndex, 0);
+
+    // 跳到当前章最后一页，再点右侧 1/3：走和普通翻页同一条 PageView 动画，
+    // 落定后提交下一章。
+    pageView.controller!.jumpToPage(currentPages - 1);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await tester.tapAt(const Offset(350, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+
+    expect(container.read(provider).contentIndex, 1);
   });
 
   testWidgets('阅读页-书名超宽时省略且不挤压右侧按钮', (tester) async {
