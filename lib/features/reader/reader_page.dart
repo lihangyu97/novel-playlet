@@ -499,8 +499,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       child: NotificationListener<ScrollNotification>(
                         onNotification: _onScrollNotification,
                         child: PageView.builder(
+                          // 换 PageController 时必须同时换 PageView 的 key：
+                          // 同一个 element 里换 controller 会沿用旧 ScrollPosition，
+                          // initialPage 不生效，导致回到上一章时页码/内容错位或
+                          // 先画错页再校正。generation 保证每次 restart 都是新元素。
                           key: ValueKey<String>(
-                            'reader-pager-${pagination.chapterId}',
+                            'reader-pager-${pagination.chapterId}-'
+                            '$_pageControllerGeneration',
                           ),
                           controller: _pageController,
                           // 不用 iOS 回弹物理：回弹不产生 OverscrollNotification，
@@ -1186,19 +1191,34 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _pageController = PageController(initialPage: initialPage, keepPage: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       retired.dispose();
-      if (!mounted || generation != _pageControllerGeneration) return;
-      // PageView 重建前如果旧页数更少，initialPage 可能被旧的 itemCount 夹取
-      // （从第 2 章回第 1 章时表现为「信息条 10/10、内容却是第 9 页」）。
-      // 新页数布局完成后校正一次，确保控制器、信息条和正文页码一致。
-      if (_pageController.hasClients &&
-          _pageController.page?.round() != initialPage) {
-        _pageController.jumpToPage(initialPage);
-      }
-      // 控制器校正完成，撤掉 sentinel 落定时的目标页覆盖层。
-      if (_settlePage != null && mounted) {
-        setState(() => _settlePage = null);
-      }
+      _stabilizeController(initialPage, generation);
     });
+  }
+
+  /// PageView 重建前如果旧页数更少，initialPage 可能被旧的 itemCount 夹取
+  /// （从第 2 章回第 1 章时表现为「信息条 10/10、内容却是第 9 页」）。
+  /// 新页数布局完成后校正，并连续确认几帧再撤 sentinel 覆盖层：不同设备上
+  /// ScrollPosition 的 clamp 可能晚一帧发生，只校正一次仍会闪。
+  void _stabilizeController(int expected, int generation) {
+    var attempts = 0;
+    void check() {
+      if (!mounted || generation != _pageControllerGeneration) return;
+      if (_pageController.hasClients) {
+        if (_pageController.page?.round() != expected) {
+          _pageController.jumpToPage(expected);
+        }
+      }
+      attempts++;
+      if (attempts >= 3) {
+        if (_settlePage != null && mounted) {
+          setState(() => _settlePage = null);
+        }
+        return;
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) => check());
+    }
+
+    check();
   }
 
   void _scheduleJump(int page) {
