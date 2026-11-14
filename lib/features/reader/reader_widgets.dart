@@ -763,11 +763,19 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
       backgroundColor: widget.background,
       foregroundColor: widget.foreground,
       closeTooltip: '关闭目录',
-      child: ListView.builder(
+      // 目录可能上千章：常驻一条可拖动的滚动条，按住上下划能快速定位。
+      child: Scrollbar(
         controller: _scrollController,
-        itemExtent: _itemExtent,
-        itemCount: widget.chapters.length,
-        itemBuilder: (context, index) => _buildItem(context, index),
+        thumbVisibility: true,
+        interactive: true,
+        thickness: 5,
+        radius: const Radius.circular(3),
+        child: ListView.builder(
+          controller: _scrollController,
+          itemExtent: _itemExtent,
+          itemCount: widget.chapters.length,
+          itemBuilder: (context, index) => _buildItem(context, index),
+        ),
       ),
     );
   }

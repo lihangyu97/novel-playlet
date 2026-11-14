@@ -120,6 +120,8 @@ class AppBottomSheet extends StatelessWidget {
         );
 
     final sheet = Container(
+      // 顶部圆角要不被内容盖住：详情弹层直接铺封面/渐变，必须裁到圆角里。
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: background,
         borderRadius: const BorderRadius.vertical(

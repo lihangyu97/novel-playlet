@@ -1111,7 +1111,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final bookId = widget.args.bookId;
     if (bookId.isEmpty) return;
     _hideToolbar();
-    final controller = ref.read(readerSessionProvider(widget.args).notifier);
     final preview = NovelItem(
       id: bookId,
       title: session.bookTitle.isNotEmpty
@@ -1124,21 +1123,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         context: context,
         builder: (sheetContext) => AppBottomSheet(
           heightFactor: 0.72,
-          closeTooltip: '关闭详情',
-          child: DetailPage(
-            bookId: bookId,
-            preview: preview,
-            embed: true,
-            onOpenChapter: (chapter) {
-              Navigator.of(sheetContext).pop();
-              _pendingEntry = null;
-              _rememberPosition();
-              final position = session.chapters.indexWhere(
-                (item) => item.id == chapter.id,
-              );
-              controller.goToChapter(position >= 0 ? position : chapter.index);
-            },
-          ),
+          showClose: false,
+          child: DetailPage(bookId: bookId, preview: preview, embed: true),
         ),
       ),
     );

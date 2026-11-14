@@ -23,6 +23,7 @@ import 'package:novel_playlet/features/video/network_health.dart';
 import 'package:novel_playlet/features/video/video_library_providers.dart';
 import 'package:novel_playlet/features/video/playback_speed.dart';
 import 'package:novel_playlet/features/video/video_detail_page.dart';
+import 'package:novel_playlet/features/video/widgets/episode_picker.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
@@ -103,7 +104,8 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
 
     expect(find.byType(VideoDetailPage), findsOneWidget);
-    expect(find.byTooltip('关闭详情'), findsOneWidget);
+    expect(find.byTooltip('关闭详情'), findsNothing, reason: '详情弹层不再有关闭叉号');
+    expect(find.byType(EpisodePicker), findsNothing, reason: '详情弹层里不再重复选集');
     // 弹层里只有收藏 + 缓存，没有播放/继续观看主按钮。
     final actionBar = find.byType(DetailActionBar);
     expect(actionBar, findsOneWidget);
@@ -151,8 +153,8 @@ void main() {
       findsOneWidget,
     );
 
-    // 关掉弹层回到播放页。
-    await tester.tap(find.byTooltip('关闭详情'));
+    // 点弹层外的遮罩关掉，回到播放页。
+    await tester.tapAt(const Offset(400, 50));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.byType(VideoDetailPage), findsNothing);
 
@@ -460,6 +462,9 @@ void main() {
 
     await tester.tap(find.byTooltip('选集'));
     await tester.pumpAndSettle();
+    // 选集 tab 不要下划线：当前 tab 只靠主色 + 加粗区分。
+    final tabBar = tester.widget<TabBar>(find.byType(TabBar));
+    expect(tabBar.indicator, isA<BoxDecoration>());
     // 弹层里集数只显示数字，点「2」回到播放页选中第 2 集。
     await tester.tap(find.text('2'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));

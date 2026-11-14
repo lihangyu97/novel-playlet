@@ -1092,15 +1092,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
         context: context,
         builder: (sheetContext) => AppBottomSheet(
           heightFactor: 0.72,
-          closeTooltip: '关闭详情',
+          showClose: false,
           child: VideoDetailPage(
             seriesId: args.seriesId,
             preview: _shelfItem,
             embed: true,
-            onPlayEpisode: (episodes, index) {
-              Navigator.of(sheetContext).pop();
-              unawaited(_changeEpisode(index));
-            },
           ),
         ),
       );

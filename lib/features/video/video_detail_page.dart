@@ -38,7 +38,6 @@ class VideoDetailPage extends ConsumerWidget {
     this.preview,
     this.heroTag,
     this.embed = false,
-    this.onPlayEpisode,
   });
 
   final String seriesId;
@@ -50,9 +49,6 @@ class VideoDetailPage extends ConsumerWidget {
   /// 弹层模式：在播放页里以底部弹层打开。底部只保留收藏 / 缓存，
   /// 不显示「播放 / 继续观看」主按钮。
   final bool embed;
-
-  /// 弹层模式点选集：交给播放页直接切集（而不是再 push 一个播放页）。
-  final void Function(List<Chapter> episodes, int index)? onPlayEpisode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -222,28 +218,31 @@ class VideoDetailPage extends ConsumerWidget {
               ),
             ),
           ),
-          if (episodes.isEmpty)
-            const SliverToBoxAdapter(
-              child: SizedBox(
-                height: 168,
-                child: EmptyView(
-                  message: '这部剧暂时没有可播放的集数',
-                  icon: Icons.movie_outlined,
+          // 详情弹层里不再重复选集（播放页已有选集入口）。
+          if (!embed) ...[
+            if (episodes.isEmpty)
+              const SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 168,
+                  child: EmptyView(
+                    message: '这部剧暂时没有可播放的集数',
+                    icon: Icons.movie_outlined,
+                  ),
+                ),
+              )
+            else
+              SliverToBoxAdapter(
+                // 1000+ 集的剧不能整页平铺：36 集一个 tab，默认展开。
+                child: DetailFadeIn(
+                  delay: const Duration(milliseconds: 120),
+                  child: EpisodePicker(
+                    episodes: episodes,
+                    onOpen: (index) =>
+                        _openEpisode(context, detail, episodes, index),
+                  ),
                 ),
               ),
-            )
-          else
-            SliverToBoxAdapter(
-              // 1000+ 集的剧不能整页平铺：36 集一个 tab，默认展开。
-              child: DetailFadeIn(
-                delay: const Duration(milliseconds: 120),
-                child: EpisodePicker(
-                  episodes: episodes,
-                  onOpen: (index) =>
-                      _openEpisode(context, detail, episodes, index),
-                ),
-              ),
-            ),
+          ],
         ] else if (error != null)
           SliverFillRemaining(
             hasScrollBody: false,
@@ -312,11 +311,6 @@ class VideoDetailPage extends ConsumerWidget {
     List<Chapter> episodes,
     int index,
   ) {
-    final external = onPlayEpisode;
-    if (external != null) {
-      external(episodes, index);
-      return;
-    }
     context.pushAppRoute(
       VideoPlayRoute(
         VideoPlayArgs(

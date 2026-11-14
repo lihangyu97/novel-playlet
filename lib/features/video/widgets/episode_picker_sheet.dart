@@ -86,7 +86,8 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
       subtitle: '共 ${widget.episodes.length} 集 · ${widget.seriesTitle}',
       heightFactor: 0.7,
       closeTooltip: '关闭选集',
-      // tab 样式与详情页选集一致：可横向滑动，内容可左右滑。
+      // tab 样式与详情页选集一致：可横向滑动、内容可左右滑，不要下划线，
+      // 当前 tab 只靠主色 + 加粗区分。
       child: Column(
         children: [
           TabBar(
@@ -94,7 +95,7 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
             isScrollable: true,
             tabAlignment: TabAlignment.start,
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            labelPadding: const EdgeInsets.symmetric(horizontal: 10),
+            labelPadding: const EdgeInsets.symmetric(horizontal: 8),
             labelColor: scheme.primary,
             unselectedLabelColor: scheme.onSurfaceVariant,
             labelStyle: const TextStyle(
@@ -105,15 +106,12 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
               fontSize: 13,
               fontWeight: FontWeight.w400,
             ),
+            indicator: const BoxDecoration(),
             indicatorSize: TabBarIndicatorSize.label,
-            indicator: UnderlineTabIndicator(
-              borderSide: BorderSide(width: 2, color: scheme.primary),
-              insets: const EdgeInsets.symmetric(horizontal: 2),
-            ),
             dividerColor: Colors.transparent,
             tabs: [
               for (var tab = 0; tab < _tabCount; tab++)
-                Tab(height: 40, text: _tabLabel(tab)),
+                Tab(height: 36, text: _tabLabel(tab)),
             ],
           ),
           // 78 集（13 行）放不进 0.7 屏高的弹层，每个 tab 内单独滚动。
@@ -143,7 +141,7 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 6,
         crossAxisSpacing: 10,

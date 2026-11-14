@@ -32,7 +32,6 @@ class DetailPage extends ConsumerStatefulWidget {
     this.preview,
     this.heroTag,
     this.embed = false,
-    this.onOpenChapter,
   });
 
   final String bookId;
@@ -44,9 +43,6 @@ class DetailPage extends ConsumerStatefulWidget {
   /// 弹层模式：由阅读页「详情」打开时使用。去掉系统栏适配与滚动顶栏渐变，
   /// 底部操作栏只保留收藏 / 缓存（阅读按钮在弹层里没有意义）。
   final bool embed;
-
-  /// 弹层模式点目录章节：交给阅读页直接跳章，不再 push 新的阅读页。
-  final ValueChanged<Chapter>? onOpenChapter;
 
   @override
   ConsumerState<DetailPage> createState() => _DetailPageState();
@@ -152,34 +148,28 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             ),
           ),
         ),
-        SliverToBoxAdapter(
-          child: DetailFadeIn(
-            delay: const Duration(milliseconds: 120),
-            child: DetailDirectorySection(
-              chapters: chapters,
-              currentIndex: progress?.chapterIndex,
-              onOpenChapter: (chapter) {
-                final external = widget.onOpenChapter;
-                if (external != null) {
-                  external(chapter);
-                  return;
-                }
-                _openReader(
+        if (!widget.embed)
+          SliverToBoxAdapter(
+            child: DetailFadeIn(
+              delay: const Duration(milliseconds: 120),
+              child: DetailDirectorySection(
+                chapters: chapters,
+                currentIndex: progress?.chapterIndex,
+                onOpenChapter: (chapter) => _openReader(
                   context,
                   ref,
                   chapterId: chapter.id,
                   chapterIndex: chapter.index,
-                );
-              },
-              onOpenAll: () => _openDirectory(
-                context,
-                ref,
-                chapters: chapters,
-                currentIndex: progress?.chapterIndex,
+                ),
+                onOpenAll: () => _openDirectory(
+                  context,
+                  ref,
+                  chapters: chapters,
+                  currentIndex: progress?.chapterIndex,
+                ),
               ),
             ),
           ),
-        ),
       ] else if (bundleAsync.hasError)
         SliverFillRemaining(
           hasScrollBody: false,

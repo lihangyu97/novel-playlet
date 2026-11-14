@@ -18,6 +18,7 @@ import 'package:novel_playlet/data/models/chapter.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
 import 'package:novel_playlet/features/detail/detail_action_bar.dart';
+import 'package:novel_playlet/features/detail/detail_directory_section.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
@@ -102,7 +103,12 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
 
     expect(find.byType(DetailPage), findsOneWidget);
-    expect(find.byTooltip('关闭详情'), findsOneWidget);
+    expect(find.byTooltip('关闭详情'), findsNothing, reason: '详情弹层不再有关闭叉号');
+    expect(
+      find.byType(DetailDirectorySection),
+      findsNothing,
+      reason: '详情弹层里不再重复目录',
+    );
     // 高度与目录弹层一致：0.72 屏高。
     expect(
       tester.getSize(find.byType(AppBottomSheet)).height,
@@ -134,9 +140,28 @@ void main() {
       reason: '弹层里不需要阅读主按钮',
     );
 
-    await tester.tap(find.byTooltip('关闭详情'));
+    // 点弹层外的遮罩关闭。
+    await tester.tapAt(const Offset(195, 80));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.byType(DetailPage), findsNothing);
+  });
+
+  testWidgets('阅读页-目录弹层带常驻可拖动滚动条', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('目录'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar));
+    expect(scrollbar.thumbVisibility, isTrue);
+    expect(scrollbar.interactive, isTrue);
+    expect(scrollbar.controller, isNotNull);
   });
 
   testWidgets('阅读页-书名超宽时省略且不挤压右侧按钮', (tester) async {
