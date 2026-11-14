@@ -5,17 +5,16 @@ import 'package:flutter/material.dart';
 import '../../../app/widgets/detail/detail_common.dart';
 import '../../../data/models/chapter.dart';
 
-/// 短剧详情里的选集：默认折叠，展开后按固定集数自动分 tab。
+/// 短剧详情里的选集：常驻展开，按固定集数自动分 tab。
 ///
 /// 上游有些剧 1000+ 集，如果像以前那样平铺一整个 grid，详情页会被撑成灾难。
 /// 这里每 36 集一组、组内每行 6 个，tab 样式与推荐页的分类 tabs 一致（可横向
-/// 滑动、内容可左右滑）；折叠态只保留一行「选集 / 共 N 集 / 展开」。
+/// 滑动、内容可左右滑）；卡片标题行只展示「选集 / 共 N 集」，不再折叠。
 class EpisodePicker extends StatefulWidget {
   const EpisodePicker({
     super.key,
     required this.episodes,
     required this.onOpen,
-    this.initiallyExpanded = false,
     this.episodesPerTab = 36,
     this.columns = 6,
   });
@@ -25,7 +24,6 @@ class EpisodePicker extends StatefulWidget {
   /// 回传整部剧里的绝对下标。
   final ValueChanged<int> onOpen;
 
-  final bool initiallyExpanded;
   final int episodesPerTab;
   final int columns;
 
@@ -38,7 +36,6 @@ class EpisodePicker extends StatefulWidget {
 
 class _EpisodePickerState extends State<EpisodePicker>
     with TickerProviderStateMixin {
-  late bool _expanded = widget.initiallyExpanded;
   TabController? _tabController;
 
   int get _tabCount => (widget.episodes.length / widget.episodesPerTab).ceil();
@@ -71,60 +68,43 @@ class _EpisodePickerState extends State<EpisodePicker>
     super.dispose();
   }
 
-  void _toggle() => setState(() => _expanded = !_expanded);
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final total = widget.episodes.length;
 
-    // 与简介 / 剧评同一套卡风格：标题、tab、集数网格都收在卡片里。
+    // 与简介 / 剧评同一套卡风格：标题、tab、集数网格都收在卡片里；
+    // 选集常驻展开，没有折叠交互。
     return Card(
       margin: const EdgeInsets.fromLTRB(detailGutter, 6, detailGutter, 0),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          InkWell(
-            onTap: _toggle,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 10, 10),
-              child: Row(
-                children: [
-                  Text(
-                    '选集',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            child: Row(
+              children: [
+                Text(
+                  '选集',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '共 $total 集',
+                    textAlign: TextAlign.right,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '共 $total 集',
-                      textAlign: TextAlign.right,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    _expanded ? Icons.expand_less : Icons.expand_more,
-                    size: 20,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeInOutCubicEmphasized,
-            alignment: Alignment.topCenter,
-            child: _expanded
-                ? _buildExpanded(context)
-                : const SizedBox(width: double.infinity),
-          ),
+          _buildExpanded(context),
         ],
       ),
     );

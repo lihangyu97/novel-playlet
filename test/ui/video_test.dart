@@ -368,7 +368,7 @@ void main() {
   });
 
   group('短剧选集', () {
-    testWidgets('默认折叠，展开后 36 集一个 tab、每行 6 个、只显示集数', (tester) async {
+    testWidgets('默认展开，36 集一个 tab、每行 6 个、只显示集数', (tester) async {
       final fake = FakePreviewTransport()..directoryChapterCount = 80;
       const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 80);
       await pumpPreview(
@@ -413,10 +413,7 @@ void main() {
       expect(find.text('37'), findsOneWidget);
       expect(find.text('36'), findsNothing);
 
-      // 点标题可以收起，再点可以重新展开。
-      await tester.tap(find.text('选集'));
-      await tester.pumpAndSettle(const Duration(milliseconds: 300));
-      expect(episodeButtons, findsNothing);
+      // 选集常驻展开，点标题不会收起。
       await tester.tap(find.text('选集'));
       await tester.pumpAndSettle(const Duration(milliseconds: 300));
       expect(episodeButtons, findsWidgets);

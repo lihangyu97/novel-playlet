@@ -229,7 +229,6 @@ class VideoDetailPage extends ConsumerWidget {
                 delay: const Duration(milliseconds: 120),
                 child: EpisodePicker(
                   episodes: episodes,
-                  initiallyExpanded: true,
                   onOpen: (index) =>
                       _openEpisode(context, detail, episodes, index),
                 ),
