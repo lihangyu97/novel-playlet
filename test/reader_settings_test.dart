@@ -33,6 +33,39 @@ void main() {
     );
   });
 
+  test('字重默认 400，可调到 700 并落盘恢复', () async {
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    expect(container.read(readerSettingsProvider).fontWeight, FontWeight.w400);
+
+    container.read(readerSettingsProvider.notifier).setFontWeight(700);
+    await pumpEventQueue();
+    expect(container.read(readerSettingsProvider).fontWeight, FontWeight.w700);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('reader_font_weight_v1'), 700);
+
+    final restored = ProviderContainer();
+    addTearDown(restored.dispose);
+    await restored.read(readerSettingsProvider.notifier).restoreFuture;
+    expect(
+      restored.read(readerSettingsProvider).fontWeight,
+      FontWeight.w700,
+      reason: '下次启动要沿用上次字重',
+    );
+  });
+
+  test('字重只落在 300–800 的整百档', () async {
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final settings = container.read(readerSettingsProvider.notifier);
+    settings.setFontWeight(999);
+    expect(container.read(readerSettingsProvider).fontWeight, FontWeight.w800);
+    settings.setFontWeight(100);
+    expect(container.read(readerSettingsProvider).fontWeight, FontWeight.w300);
+  });
+
   test('对话高亮颜色可改、落盘并在新容器恢复', () async {
     SharedPreferences.setMockInitialValues({});
     final container = ProviderContainer();

@@ -197,11 +197,12 @@ class AppTheme {
     required double fontSize,
     required double lineHeight,
     required Color color,
+    FontWeight fontWeight = FontWeight.w400,
   }) => TextStyle(
     fontSize: fontSize,
     height: lineHeight,
     color: color,
     letterSpacing: 0.2,
-    fontWeight: FontWeight.w400,
+    fontWeight: fontWeight,
   );
 }

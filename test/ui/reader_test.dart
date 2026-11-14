@@ -609,6 +609,56 @@ void main() {
 
   /// 阅读弹层的主题作用域回归：弹层挂在 root Navigator 上，必须显式包一层
   /// 「纸色对应的 Theme」。否则暗色 App + 浅色纸底时，弹层里会用全局的亮色
+  testWidgets('阅读页-设置：字重滑块与底色色块同行', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.text('字重'), findsOneWidget);
+    final sliders = find.byType(Slider);
+    expect(sliders, findsNWidgets(3));
+    final weightSlider = tester.widget<Slider>(sliders.at(2));
+    expect(weightSlider.min, 300);
+    expect(weightSlider.max, 800);
+    expect(weightSlider.divisions, 5);
+
+    // 底色文案去掉，四个色块和「底色」标题在同一行。
+    final sheet = find.byType(ReaderSettingsSheet);
+    for (final label in ['白', '纸', '护眼', '夜间']) {
+      expect(
+        find.descendant(of: sheet, matching: find.text(label)),
+        findsNothing,
+      );
+    }
+    final baseY = tester.getCenter(find.text('底色')).dy;
+    for (final label in ['白', '纸', '护眼', '夜间']) {
+      expect(
+        tester.getCenter(find.byTooltip(label)).dy,
+        closeTo(baseY, 1),
+        reason: '$label 色块应与底色标题同一行',
+      );
+    }
+
+    // 拖（点）到滑块右侧：提交一次字重。
+    final rect = tester.getRect(sliders.at(2));
+    await tester.tapAt(Offset(rect.left + rect.width * 0.9, rect.center.dy));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    expect(
+      container.read(readerSettingsProvider).fontWeight.value,
+      greaterThan(400),
+    );
+  });
+
   /// primary 画文字，在纸色上对比度只有 1.5:1（曾出现目录当前章看不清）。
   testWidgets('阅读页-设置弹层（暗色 App + 纸色底）', (tester) async {
     await pumpPreview(

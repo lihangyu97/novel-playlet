@@ -455,6 +455,7 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
   /// 拖动中的预览值；null = 没在拖，显示 provider 里已提交的值。
   double? _previewFontSize;
   double? _previewLineHeight;
+  double? _previewFontWeight;
 
   void _onFontSizePreview(double value) =>
       setState(() => _previewFontSize = value);
@@ -472,6 +473,14 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
     setState(() => _previewLineHeight = null);
   }
 
+  void _onFontWeightPreview(double value) =>
+      setState(() => _previewFontWeight = value);
+
+  void _onFontWeightCommit(double value) {
+    ref.read(readerSettingsProvider.notifier).setFontWeight(value.round());
+    setState(() => _previewFontWeight = null);
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(readerSettingsProvider);
@@ -479,6 +488,8 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
     // 滑块显示预览值（拖动中跟手），文案同步预览，不读 provider 的旧值。
     final fontSize = _previewFontSize ?? settings.fontSize;
     final lineHeight = _previewLineHeight ?? settings.lineHeight;
+    final fontWeight =
+        _previewFontWeight ?? settings.fontWeight.value.toDouble();
     final paper = settings.paper;
     final foreground = paper.foreground;
     final muted = foreground.withValues(alpha: 0.55);
@@ -535,20 +546,45 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
                   onChangeEnd: _onLineHeightCommit,
                 ),
               ),
-              const SizedBox(height: 6),
-              Text('底色', style: TextStyle(fontSize: 13, color: muted)),
-              const SizedBox(height: 10),
+              _SettingRow(
+                label: '字重',
+                value: '${fontWeight.round()}',
+                color: muted,
+                child: Slider(
+                  min: ReaderSettingsController.minFontWeight.toDouble(),
+                  max: ReaderSettingsController.maxFontWeight.toDouble(),
+                  divisions:
+                      ReaderSettingsController.fontWeightSteps.length - 1,
+                  value: fontWeight,
+                  label: '${fontWeight.round()}',
+                  onChanged: _onFontWeightPreview,
+                  onChangeEnd: _onFontWeightCommit,
+                ),
+              ),
+              const SizedBox(height: 4),
+              // 底色标题与四个色块同一行；文案（白/纸/护眼/夜间）去掉，
+              // 只保留色块 + 选中勾，读屏仍播报底色名。
               Row(
                 children: [
-                  for (final option in ReaderPaper.values)
-                    Expanded(
-                      child: _PaperOption(
-                        option: option,
-                        selected: option == paper,
-                        foreground: foreground,
-                        onTap: () => controller.setPaper(option),
-                      ),
+                  Text('底色', style: TextStyle(fontSize: 13, color: muted)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        for (final option in ReaderPaper.values) ...[
+                          if (option != ReaderPaper.values.first)
+                            const SizedBox(width: 10),
+                          _PaperOption(
+                            option: option,
+                            selected: option == paper,
+                            foreground: foreground,
+                            onTap: () => controller.setPaper(option),
+                          ),
+                        ],
+                      ],
                     ),
+                  ),
                 ],
               ),
               const SizedBox(height: 14),
@@ -671,13 +707,17 @@ class _PaperOption extends StatelessWidget {
     // primary 按纸色明暗派生，选中态文字/边框都用它：比 raw seed 稳，
     // 用户选近白/近黑主题色时也不会消失。
     final highlight = Theme.of(context).colorScheme.primary;
-    return InkResponse(
-      onTap: onTap,
-      radius: 34,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
+    // 去掉可见文案后，底色名放到 tooltip / 读屏语义里，避免只能靠颜色辨认。
+    return Tooltip(
+      message: option.label,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: option.label,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 34,
+          child: Container(
             width: 42,
             height: 42,
             alignment: Alignment.center,
@@ -693,16 +733,7 @@ class _PaperOption extends StatelessWidget {
                 ? Icon(Icons.check_rounded, size: 18, color: option.foreground)
                 : null,
           ),
-          const SizedBox(height: 6),
-          Text(
-            option.label,
-            style: TextStyle(
-              fontSize: 11.5,
-              color: selected ? highlight : foreground.withValues(alpha: 0.6),
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

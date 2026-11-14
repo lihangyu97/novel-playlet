@@ -720,6 +720,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
       color: color,
+      fontWeight: settings.fontWeight,
     ).copyWith(inherit: false, fontFamily: fontFamily);
   }
 
@@ -740,6 +741,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       height: height,
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
+      fontWeight: settings.fontWeight,
       textScale: textScaler.scale(16),
       fontFamily: fontFamily,
       ideas: ideas,
@@ -1185,6 +1187,7 @@ class _PaginationKey {
     required this.height,
     required this.fontSize,
     required this.lineHeight,
+    required this.fontWeight,
     required this.textScale,
     required this.fontFamily,
     required ChapterIdeas ideas,
@@ -1200,6 +1203,7 @@ class _PaginationKey {
   final double height;
   final double fontSize;
   final double lineHeight;
+  final FontWeight fontWeight;
 
   /// 用实际缩放后的字号代替 TextScaler 对象，避免不同实例但等价时漏复用。
   final double textScale;
@@ -1224,6 +1228,7 @@ class _PaginationKey {
       other.height == height &&
       other.fontSize == fontSize &&
       other.lineHeight == lineHeight &&
+      other.fontWeight == fontWeight &&
       other.textScale == textScale &&
       other.fontFamily == fontFamily &&
       mapEquals(other.bubbleCounts, bubbleCounts) &&
@@ -1238,6 +1243,7 @@ class _PaginationKey {
     height,
     fontSize,
     lineHeight,
+    fontWeight,
     textScale,
     fontFamily,
     _unorderedMapHash(bubbleCounts),

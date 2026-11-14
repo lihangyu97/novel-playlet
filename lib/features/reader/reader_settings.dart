@@ -13,6 +13,7 @@ class ReaderSettings {
   const ReaderSettings({
     this.fontSize = 21,
     this.lineHeight = 1.8,
+    this.fontWeight = FontWeight.w400,
     this.paper = ReaderPaper.parchment,
     this.dayPaper = ReaderPaper.parchment,
     this.showBubbles = true,
@@ -28,6 +29,9 @@ class ReaderSettings {
 
   /// 1.3–2.0 的行高倍数。
   final double lineHeight;
+
+  /// 正文字重（300–800，与设置里的滑块一致）。参与分页测量。
+  final FontWeight fontWeight;
 
   final ReaderPaper paper;
 
@@ -54,6 +58,7 @@ class ReaderSettings {
   ReaderSettings copyWith({
     double? fontSize,
     double? lineHeight,
+    FontWeight? fontWeight,
     ReaderPaper? paper,
     ReaderPaper? dayPaper,
     bool? showBubbles,
@@ -62,6 +67,7 @@ class ReaderSettings {
   }) => ReaderSettings(
     fontSize: fontSize ?? this.fontSize,
     lineHeight: lineHeight ?? this.lineHeight,
+    fontWeight: fontWeight ?? this.fontWeight,
     paper: paper ?? this.paper,
     dayPaper: dayPaper ?? this.dayPaper,
     showBubbles: showBubbles ?? this.showBubbles,
@@ -75,6 +81,7 @@ class ReaderSettings {
       other is ReaderSettings &&
       other.fontSize == fontSize &&
       other.lineHeight == lineHeight &&
+      other.fontWeight == fontWeight &&
       other.paper == paper &&
       other.dayPaper == dayPaper &&
       other.showBubbles == showBubbles &&
@@ -85,6 +92,7 @@ class ReaderSettings {
   int get hashCode => Object.hash(
     fontSize,
     lineHeight,
+    fontWeight,
     paper,
     dayPaper,
     showBubbles,
@@ -102,6 +110,7 @@ final readerSettingsProvider =
 class ReaderSettingsController extends Notifier<ReaderSettings> {
   static const _fontSizeKey = 'reader_font_size_v1';
   static const _lineHeightKey = 'reader_line_height_v1';
+  static const _fontWeightKey = 'reader_font_weight_v1';
   static const _paperKey = 'reader_paper_v1';
   static const _dayPaperKey = 'reader_day_paper_v1';
   static const _bubblesKey = 'reader_show_bubbles_v1';
@@ -113,6 +122,11 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
   static const double maxFontSize = 30;
   static const double minLineHeight = 1.3;
   static const double maxLineHeight = 2.0;
+
+  /// 正文字重区间：只开放 300–800 的整百档（细体到特粗）。
+  static const int minFontWeight = 300;
+  static const int maxFontWeight = 800;
+  static const List<int> fontWeightSteps = [300, 400, 500, 600, 700, 800];
 
   /// 用户在磁盘读取返回前就改过设置时，不能被旧的落盘值覆盖。
   bool _userChanged = false;
@@ -151,6 +165,21 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
     if (next == state.lineHeight) return;
     _userChanged = true;
     state = state.copyWith(lineHeight: next);
+    _persist();
+  }
+
+  void setFontWeight(int value) {
+    final stepped = fontWeightSteps.reduce(
+      (best, candidate) =>
+          (candidate - value).abs() < (best - value).abs() ? candidate : best,
+    );
+    final weight = FontWeight.values.firstWhere(
+      (candidate) => candidate.value == stepped,
+      orElse: () => FontWeight.w400,
+    );
+    if (weight == state.fontWeight) return;
+    _userChanged = true;
+    state = state.copyWith(fontWeight: weight);
     _persist();
   }
 
@@ -218,6 +247,15 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
         lineHeight: (prefs.getDouble(_lineHeightKey) ?? fallback.lineHeight)
             .clamp(minLineHeight, maxLineHeight)
             .toDouble(),
+        fontWeight: FontWeight.values.firstWhere(
+          (candidate) =>
+              candidate.value ==
+              (prefs.getInt(_fontWeightKey) ?? fallback.fontWeight.value).clamp(
+                minFontWeight,
+                maxFontWeight,
+              ),
+          orElse: () => fallback.fontWeight,
+        ),
         paper: paper,
         dayPaper: dayPaper,
         showBubbles: prefs.getBool(_bubblesKey) ?? fallback.showBubbles,
@@ -244,6 +282,7 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble(_fontSizeKey, snapshot.fontSize);
       await prefs.setDouble(_lineHeightKey, snapshot.lineHeight);
+      await prefs.setInt(_fontWeightKey, snapshot.fontWeight.value);
       await prefs.setString(_paperKey, snapshot.paper.name);
       await prefs.setString(_dayPaperKey, snapshot.dayPaper.name);
       await prefs.setBool(_bubblesKey, snapshot.showBubbles);
