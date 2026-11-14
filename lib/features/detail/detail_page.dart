@@ -31,6 +31,8 @@ class DetailPage extends ConsumerStatefulWidget {
     required this.bookId,
     this.preview,
     this.heroTag,
+    this.embed = false,
+    this.onOpenChapter,
   });
 
   final String bookId;
@@ -38,6 +40,13 @@ class DetailPage extends ConsumerStatefulWidget {
 
   /// 封面 Hero tag（列表点进来时由 [DetailRoute] 带下来）；null = 不飞入。
   final String? heroTag;
+
+  /// 弹层模式：由阅读页「详情」打开时使用。去掉系统栏适配与滚动顶栏渐变，
+  /// 底部操作栏只保留收藏 / 缓存（阅读按钮在弹层里没有意义）。
+  final bool embed;
+
+  /// 弹层模式点目录章节：交给阅读页直接跳章，不再 push 新的阅读页。
+  final ValueChanged<Chapter>? onOpenChapter;
 
   @override
   ConsumerState<DetailPage> createState() => _DetailPageState();
@@ -149,12 +158,19 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             child: DetailDirectorySection(
               chapters: chapters,
               currentIndex: progress?.chapterIndex,
-              onOpenChapter: (chapter) => _openReader(
-                context,
-                ref,
-                chapterId: chapter.id,
-                chapterIndex: chapter.index,
-              ),
+              onOpenChapter: (chapter) {
+                final external = widget.onOpenChapter;
+                if (external != null) {
+                  external(chapter);
+                  return;
+                }
+                _openReader(
+                  context,
+                  ref,
+                  chapterId: chapter.id,
+                  chapterIndex: chapter.index,
+                );
+              },
               onOpenAll: () => _openDirectory(
                 context,
                 ref,
@@ -204,9 +220,9 @@ class _DetailPageState extends ConsumerState<DetailPage> {
       // 三颗悬浮圆直接盖在正文上（与首页悬浮底栏同一套做法），不再用整条
       // 底栏把内容截断；正文末尾自己留白见上面的 slivers。
       extendBody: true,
-      body: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: overlayStyle,
-        child: Stack(
+      body: _wrapBody(
+        overlayStyle,
+        Stack(
           children: [
             Positioned.fill(
               child: DecoratedBox(
@@ -227,32 +243,35 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                 ),
               ),
             ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: IgnorePointer(
-                child: AnimatedOpacity(
-                  opacity: _scrolled ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  child: Container(
-                    height: topInset + 14,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          theme.scaffoldBackgroundColor,
-                          theme.scaffoldBackgroundColor.withValues(alpha: 0.92),
-                          theme.scaffoldBackgroundColor.withValues(alpha: 0),
-                        ],
-                        stops: const [0, 0.62, 1],
+            if (!widget.embed)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: _scrolled ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: Container(
+                      height: topInset + 14,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            theme.scaffoldBackgroundColor,
+                            theme.scaffoldBackgroundColor.withValues(
+                              alpha: 0.92,
+                            ),
+                            theme.scaffoldBackgroundColor.withValues(alpha: 0),
+                          ],
+                          stops: const [0, 0.62, 1],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -276,6 +295,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                   : null,
               shelfSemanticLabel: onShelf ? '已收藏' : '收藏',
               shelfActive: onShelf,
+              showPrimary: !widget.embed,
               onShelf: shelfItem == null || shelfBusy
                   ? null
                   : () => _toggleShelf(context, ref, shelfItem),
@@ -291,6 +311,12 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             )
           : null,
     );
+  }
+
+  /// 全页模式包一层 [AnnotatedRegion] 适配系统栏；弹层模式不碰系统栏。
+  Widget _wrapBody(SystemUiOverlayStyle style, Widget body) {
+    if (widget.embed) return body;
+    return AnnotatedRegion<SystemUiOverlayStyle>(value: style, child: body);
   }
 
   /// 详情里的字段比卡片全，但 bookId 缺失时退回列表卡片。

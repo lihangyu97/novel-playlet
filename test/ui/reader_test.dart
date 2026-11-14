@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/app/widgets/app_bottom_sheet.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book_store.dart';
@@ -16,6 +17,8 @@ import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/chapter.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/data/models/video_source.dart';
+import 'package:novel_playlet/features/detail/detail_action_bar.dart';
+import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
 import 'package:novel_playlet/features/cache/offline_downloader.dart';
@@ -78,11 +81,62 @@ void main() {
     expect(find.text('下一章'), findsNothing);
     expect(find.text('夜间'), findsOneWidget);
     expect(find.text('目录'), findsOneWidget);
+    expect(find.text('详情'), findsOneWidget, reason: '目录右边应有详情入口');
     expect(find.text('设置'), findsOneWidget);
     await expectLater(
       find.byType(ReaderPage),
       matchesGoldenFile('../goldens/reader_toolbar.png'),
     );
+  });
+
+  testWidgets('阅读页-详情弹层：无标题、保留关闭、只有收藏和缓存', (tester) async {
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('详情'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.byType(DetailPage), findsOneWidget);
+    expect(find.byTooltip('关闭详情'), findsOneWidget);
+    // 高度与目录弹层一致：0.72 屏高。
+    expect(
+      tester.getSize(find.byType(AppBottomSheet)).height,
+      closeTo(844 * 0.72, 1),
+    );
+
+    final actionBar = find.byType(DetailActionBar);
+    expect(actionBar, findsOneWidget);
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.bookmark_add_outlined),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.download_outlined),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: actionBar,
+        matching: find.byIcon(Icons.menu_book_rounded),
+      ),
+      findsNothing,
+      reason: '弹层里不需要阅读主按钮',
+    );
+
+    await tester.tap(find.byTooltip('关闭详情'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(DetailPage), findsNothing);
   });
 
   testWidgets('阅读页-书名超宽时省略且不挤压右侧按钮', (tester) async {

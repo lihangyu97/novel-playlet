@@ -37,6 +37,8 @@ class VideoDetailPage extends ConsumerWidget {
     required this.seriesId,
     this.preview,
     this.heroTag,
+    this.embed = false,
+    this.onPlayEpisode,
   });
 
   final String seriesId;
@@ -44,6 +46,13 @@ class VideoDetailPage extends ConsumerWidget {
 
   /// 封面 Hero tag（列表点进来时由 [VideoDetailRoute] 带下来）；null = 不飞入。
   final String? heroTag;
+
+  /// 弹层模式：在播放页里以底部弹层打开。底部只保留收藏 / 缓存，
+  /// 不显示「播放 / 继续观看」主按钮。
+  final bool embed;
+
+  /// 弹层模式点选集：交给播放页直接切集（而不是再 push 一个播放页）。
+  final void Function(List<Chapter> episodes, int index)? onPlayEpisode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -126,6 +135,7 @@ class VideoDetailPage extends ConsumerWidget {
           : null,
       shelfSemanticLabel: onShelf ? '已收藏' : '收藏',
       shelfActive: onShelf,
+      showPrimary: !embed,
       onShelf: detail == null || shelfBusy
           ? null
           : () => _toggleShelf(context, ref, detail),
@@ -302,6 +312,11 @@ class VideoDetailPage extends ConsumerWidget {
     List<Chapter> episodes,
     int index,
   ) {
+    final external = onPlayEpisode;
+    if (external != null) {
+      external(episodes, index);
+      return;
+    }
     context.pushAppRoute(
       VideoPlayRoute(
         VideoPlayArgs(

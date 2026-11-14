@@ -49,7 +49,7 @@ Future<T?> showAppBottomSheet<T>({
 class AppBottomSheet extends StatelessWidget {
   const AppBottomSheet({
     super.key,
-    required this.title,
+    this.title,
     required this.child,
     this.subtitle,
     this.heightFactor,
@@ -62,8 +62,9 @@ class AppBottomSheet extends StatelessWidget {
     this.showDivider = true,
   });
 
-  /// 主标题。过长时允许折行。
-  final String title;
+  /// 主标题。过长时允许折行；传 null 时整个标题区不渲染，只保留右上角的
+  /// 浮动关闭按钮（给「详情」这类自带封面的弹层用）。
+  final String? title;
 
   /// 副标题（可选）。单行展示，放不下换行到下一行左对齐，不折行。
   final String? subtitle;
@@ -97,6 +98,12 @@ class AppBottomSheet extends StatelessWidget {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final background = backgroundColor ?? theme.colorScheme.surface;
     final foreground = foregroundColor ?? theme.colorScheme.onSurface;
+    final hasTitle = title != null && title!.trim().isNotEmpty;
+    // 没有标题区就没有 Column 的 Flexible/Expanded 撑高来源，必须给固定高度。
+    assert(
+      hasTitle || heightFactor != null,
+      '没有标题的 AppBottomSheet 必须传 heightFactor',
+    );
     final effectiveTitleStyle =
         titleStyle ??
         theme.textTheme.titleMedium?.copyWith(
@@ -121,37 +128,76 @@ class AppBottomSheet extends StatelessWidget {
       ),
       // 弹层底色一直铺到屏幕底：把 Home 指示条的高度做成容器内部留白，
       // 而不是交给外层 SafeArea，否则最底部会露出一条弹层外的透明带。
-      padding: EdgeInsets.only(bottom: bottomInset),
+      // 无标题弹层（详情）由内容自己的底部操作栏避让安全区，这里不再叠一次。
+      padding: EdgeInsets.only(bottom: hasTitle ? bottomInset : 0),
       child: Column(
         mainAxisSize: heightFactor == null
             ? MainAxisSize.min
             : MainAxisSize.max,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _TitleBar(
-            title: title,
-            subtitle: subtitle,
-            titleStyle: effectiveTitleStyle,
-            subtitleStyle: effectiveSubtitleStyle,
-            foreground: foreground,
-            showClose: showClose,
-            closeTooltip: closeTooltip,
-          ),
-          if (showDivider)
-            Divider(
-              height: 0.5,
-              thickness: 0.5,
-              color: foreground.withValues(alpha: 0.08),
+          if (hasTitle) ...[
+            _TitleBar(
+              title: title!,
+              subtitle: subtitle,
+              titleStyle: effectiveTitleStyle,
+              subtitleStyle: effectiveSubtitleStyle,
+              foreground: foreground,
+              showClose: showClose,
+              closeTooltip: closeTooltip,
             ),
-          heightFactor == null
-              ? Flexible(child: child)
-              : Expanded(child: child),
+            if (showDivider)
+              Divider(
+                height: 0.5,
+                thickness: 0.5,
+                color: foreground.withValues(alpha: 0.08),
+              ),
+            heightFactor == null
+                ? Flexible(child: child)
+                : Expanded(child: child),
+          ] else
+            Expanded(
+              child: Stack(
+                children: [
+                  Positioned.fill(child: child),
+                  if (showClose)
+                    Positioned(
+                      top: 10,
+                      right: 12,
+                      child: _FloatingCloseButton(tooltip: closeTooltip),
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
     );
 
     if (heightFactor == null) return sheet;
     return FractionallySizedBox(heightFactor: heightFactor, child: sheet);
+  }
+}
+
+/// 无标题弹层右上角的关闭按钮：圆形半透明底，压在封面/图片上也看得清。
+class _FloatingCloseButton extends StatelessWidget {
+  const _FloatingCloseButton({required this.tooltip});
+
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.32),
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: () => Navigator.of(context).maybePop(),
+        iconSize: 20,
+        color: Colors.white,
+        icon: const Icon(Icons.close_rounded),
+      ),
+    );
   }
 }
 

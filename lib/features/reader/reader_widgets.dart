@@ -266,7 +266,7 @@ class _ReaderTextAction extends StatelessWidget {
   }
 }
 
-/// 工具栏底部：目录 / 评论 / 日间·夜间 / 设置。
+/// 工具栏底部：目录 / 详情 / 评论 / 日间·夜间 / 设置。
 ///
 /// 上一章/下一章不再占按钮位：点击正文左右分区、章边界继续滑动、目录跳章都
 /// 能切章；空出来的位置给日间/夜间切换。
@@ -278,6 +278,7 @@ class ReaderBottomBar extends StatelessWidget {
     required this.foreground,
     required this.isNight,
     required this.onDirectory,
+    required this.onDetail,
     required this.onToggleDayNight,
     required this.onSettings,
     this.onComments,
@@ -293,6 +294,7 @@ class ReaderBottomBar extends StatelessWidget {
   final bool isNight;
 
   final VoidCallback onDirectory;
+  final VoidCallback onDetail;
   final VoidCallback onToggleDayNight;
   final VoidCallback onSettings;
   final VoidCallback? onComments;
@@ -318,6 +320,12 @@ class ReaderBottomBar extends StatelessWidget {
               label: '目录',
               color: foreground,
               onTap: onDirectory,
+            ),
+            _ReaderToolButton(
+              icon: Icons.info_outline_rounded,
+              label: '详情',
+              color: foreground,
+              onTap: onDetail,
             ),
             _ReaderToolButton(
               icon: Icons.forum_outlined,

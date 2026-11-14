@@ -20,6 +20,7 @@ import '../../data/models/novel_item.dart';
 import '../cache/cache_providers.dart';
 import '../cache/offline_task.dart';
 import '../cache/widgets/offline_download_button.dart';
+import '../detail/detail_page.dart';
 import 'reader_actions.dart';
 import 'reader_comments.dart';
 import 'reader_comments_sheet.dart';
@@ -1009,6 +1010,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             settings,
             ref.read(readerSessionProvider(widget.args).notifier),
           ),
+          onDetail: () =>
+              _openDetail(ref.read(readerSessionProvider(widget.args))),
           onToggleDayNight: () =>
               ref.read(readerSettingsProvider.notifier).toggleDayNight(),
           onSettings: _openSettings,
@@ -1097,6 +1100,47 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       context: context,
       builder: (_) =>
           Theme(data: _readerTheme(paper), child: const ReaderSettingsSheet()),
+    );
+  }
+
+  /// 工具栏「详情」：以底部弹层打开小说详情。
+  ///
+  /// 弹层里没有主按钮，只留收藏 / 缓存；点目录章节直接跳当前阅读会话，
+  /// 不再往栈上叠一个新的阅读页。
+  void _openDetail(ReaderSessionState session) {
+    final bookId = widget.args.bookId;
+    if (bookId.isEmpty) return;
+    _hideToolbar();
+    final controller = ref.read(readerSessionProvider(widget.args).notifier);
+    final preview = NovelItem(
+      id: bookId,
+      title: session.bookTitle.isNotEmpty
+          ? session.bookTitle
+          : widget.args.bookTitle,
+      cover: session.cover.isNotEmpty ? session.cover : widget.args.cover,
+    );
+    unawaited(
+      showAppBottomSheet<void>(
+        context: context,
+        builder: (sheetContext) => AppBottomSheet(
+          heightFactor: 0.72,
+          closeTooltip: '关闭详情',
+          child: DetailPage(
+            bookId: bookId,
+            preview: preview,
+            embed: true,
+            onOpenChapter: (chapter) {
+              Navigator.of(sheetContext).pop();
+              _pendingEntry = null;
+              _rememberPosition();
+              final position = session.chapters.indexWhere(
+                (item) => item.id == chapter.id,
+              );
+              controller.goToChapter(position >= 0 ? position : chapter.index);
+            },
+          ),
+        ),
+      ),
     );
   }
 

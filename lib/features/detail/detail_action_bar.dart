@@ -21,6 +21,7 @@ class DetailActionBar extends StatelessWidget {
     required this.shelfActive,
     required this.onShelf,
     this.offlineButton,
+    this.showPrimary = true,
   });
 
   /// 主操作读屏文案（「开始阅读」「继续阅读 · 第3章」「播放」…）。
@@ -38,6 +39,9 @@ class DetailActionBar extends StatelessWidget {
   /// true = 已收藏，点击会取消收藏。
   final bool shelfActive;
   final VoidCallback? onShelf;
+
+  /// 是否显示右侧主操作（播放 / 阅读）。查看详情弹层里只保留收藏 + 缓存。
+  final bool showPrimary;
 
   /// 中间「缓存」入口（`OfflineDownloadButton`）；目录未就绪时为 null。
   ///
@@ -94,13 +98,15 @@ class DetailActionBar extends StatelessWidget {
             const SizedBox(width: _spacing),
             offlineButton!,
           ],
-          const SizedBox(width: _spacing),
-          DetailCircleButton(
-            icon: primaryIcon,
-            semanticLabel: primarySemanticLabel,
-            emphasized: true,
-            onTap: onPrimary,
-          ),
+          if (showPrimary) ...[
+            const SizedBox(width: _spacing),
+            DetailCircleButton(
+              icon: primaryIcon,
+              semanticLabel: primarySemanticLabel,
+              emphasized: true,
+              onTap: onPrimary,
+            ),
+          ],
         ],
       ),
     );
