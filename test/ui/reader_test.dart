@@ -172,11 +172,16 @@ void main() {
 
   testWidgets('阅读页-上一章 sentinel：首页回翻无感切回上一章', (tester) async {
     ReaderPage.debugDisablePreparation = false;
+    // 第 1 章长（约 10 页）、第 2 章短：回到第 1 章时旧 PageView 页数更少，
+    // 用来回归「信息条 10/10、内容却是第 9 页」的 initialPage 夹取问题。
+    final fake = FakePreviewTransport()
+      ..chapterParagraphCounts = <String, int>{'c1': 40, 'c2': 2};
     await pumpPreview(
       tester,
       const ReaderPage(
         args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
       ),
+      transport: fake,
     );
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
 
@@ -208,6 +213,18 @@ void main() {
     await tester.tapAt(const Offset(40, 420));
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
     expect(container.read(provider).contentIndex, 0);
+
+    final returned = tester.widget<PageView>(find.byType(PageView));
+    final info = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((text) => text.data ?? '')
+        .firstWhere((data) => RegExp(r'^\d+/\d+$').hasMatch(data));
+    expect(info, endsWith('/${info.split('/').last}'));
+    expect(
+      returned.controller!.page,
+      closeTo(int.parse(info.split('/').last) - 1, 0.01),
+      reason: '回到上一章应停在最后一页，PageController 与信息条一致',
+    );
   });
 
   testWidgets('阅读页-邻章预排版：末页继续翻用 PageView sentinel 无感切章', (tester) async {

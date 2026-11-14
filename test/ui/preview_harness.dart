@@ -82,6 +82,10 @@ class FakePreviewTransport extends BackendTransport {
   /// 小说推荐流的卡片数；滚动保活测试需要多屏内容。
   int novelItemCount = 9;
 
+  /// 按章节 id 覆盖正文段数（默认 9）。跨章页码回归需要制造“下一章页数
+  /// 比上一章少”的情况。
+  Map<String, int> chapterParagraphCounts = const <String, int>{};
+
   /// 搜索结果条数（默认 6；调大用于验证「搜索态滚动」等场景）。
   int searchItemCount = 6;
 
@@ -548,13 +552,17 @@ class FakePreviewTransport extends BackendTransport {
       };
     }
     if (path.contains('/chapters/')) {
+      final chapterId = Uri.decodeComponent(
+        path.split('/chapters/')[1].split('/').first,
+      );
+      final paragraphCount = chapterParagraphCounts[chapterId] ?? 9;
       return {
         'code': 0,
         'data': {
           'content_decrypted': true,
           'title': '第一章',
           'content': [
-            for (var p = 0; p < 9; p++)
+            for (var p = 0; p < paragraphCount; p++)
               '<p idx="$p">${_paragraphs[p % _paragraphs.length]}${'这是用来验证分页与中文排版的一段正文，长度足够撑满一屏中的若干行。' * 2}</p>',
           ].join(),
         },

@@ -92,6 +92,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   bool _hasPrevSentinel = false;
   bool _hasNextSentinel = false;
   bool _prepScheduled = false;
+  int _pageControllerGeneration = 0;
 
   /// 从 sentinel 落定切章时不要再播旧的淡入过渡（页面本身已经滑到了目标页）。
   bool _suppressChapterTransition = false;
@@ -1134,8 +1135,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   /// 卸载（detach 掉 position）之后再释放旧控制器。
   void _restartPageController(int initialPage) {
     final retired = _pageController;
+    final generation = ++_pageControllerGeneration;
     _pageController = PageController(initialPage: initialPage, keepPage: false);
-    WidgetsBinding.instance.addPostFrameCallback((_) => retired.dispose());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      retired.dispose();
+      if (!mounted || generation != _pageControllerGeneration) return;
+      // PageView 重建前如果旧页数更少，initialPage 可能被旧的 itemCount 夹取
+      // （从第 2 章回第 1 章时表现为「信息条 10/10、内容却是第 9 页」）。
+      // 新页数布局完成后校正一次，确保控制器、信息条和正文页码一致。
+      if (!_pageController.hasClients) return;
+      if (_pageController.page?.round() != initialPage) {
+        _pageController.jumpToPage(initialPage);
+      }
+    });
   }
 
   void _scheduleJump(int page) {
