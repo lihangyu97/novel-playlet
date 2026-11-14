@@ -124,8 +124,10 @@ class RecommendPageState extends ConsumerState<RecommendPage>
           child: Column(
             children: [
               // 搜索框常驻顶部，不随列表滚动收起；右侧固定下载图标入口。
+              // 顶部不留内边距：搜索框上沿直接贴住安全区（状态栏 / 刘海底边），
+              // 与独立搜索页保持一致，点进搜索页时搜索框不会上下跳。
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
                 child: Row(
                   children: [
                     Expanded(
