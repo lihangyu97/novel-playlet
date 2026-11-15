@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/widgets/app_snack_bar.dart';
-import '../feed/feed_search_field.dart';
 import '../feed/feed_staggered_grid.dart';
 import '../feed/feed_view.dart';
 import '../rank/rank_providers.dart';
@@ -14,7 +13,6 @@ import '../../app/widgets/novel_card.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../../app/widgets/top_glow.dart';
-import '../search/search_cue_hint.dart';
 import '../video/widgets/video_card.dart';
 import 'recommend_category.dart';
 import 'recommend_controller.dart';
@@ -22,12 +20,13 @@ import 'recommend_item.dart';
 import 'recommend_layout.dart';
 import 'recommend_state.dart';
 
-/// 合并后的「推荐」页：顶部搜索入口 + 可左右滑动的分类 tabs + 每个分类一条流。
+/// 合并后的「推荐」页：顶部分类 tabs + 右侧搜索入口 + 每个分类一条流。
 ///
-/// 搜索已经拆成独立搜索页（`lib/features/search/`）：顶部搜索框是只读入口，
-/// 点一下进搜索页一次搜小说 / 短剧，推荐页本身只有推荐流。分类变成搜索框下方
-/// 的一级 tabs，各自保留自己的列表、游标与滚动位置；分类 tabs 与内容都支持
-/// 左右滑动（tabs 用与我页共用的 [CategoryTabBar]，内容用 `TabBarView`）。
+/// 搜索是独立页面（`lib/features/search/`）：推荐页顶栏不再放整行搜索框，
+/// 只留右侧一个放大镜图标入口（点一下进搜索页，一次搜小说 / 短剧），整体是
+/// 小红书式的「分类 tabs + 搜索图标」顶栏。分类 tabs 各自保留自己的列表、
+/// 游标与滚动位置；分类 tabs 与内容都支持左右滑动（tabs 用与我页共用的
+/// [CategoryTabBar]，内容用 `TabBarView`）。
 ///
 /// 页面只保留 tab/滚动控制器这类 UI 状态；列表数据全部在
 /// [recommendFeedProvider] 里，切分类不丢已加载的内容。
@@ -54,11 +53,6 @@ class RecommendPageState extends ConsumerState<RecommendPage>
     // 与我的页一致：比默认 300ms 略快，切分类更跟手。
     animationDuration: const Duration(milliseconds: 220),
   );
-
-  /// 搜索框当前轮播到的热词（子组件上报，普通字段，不触发重建）。
-  ///
-  /// 点进搜索页时带过去，让占位从同一条接着轮播、空输入提交直接搜它。
-  String _currentCueWord = '';
 
   /// 每个分类一条列表滚动控制器：分类页保活，滚动位置各自独立；
   /// 底栏再次点「推荐」时只滚当前分类这一条。
@@ -96,16 +90,11 @@ class RecommendPageState extends ConsumerState<RecommendPage>
     );
   }
 
-  /// 顶部搜索框是只读入口：点一下进独立搜索页，一次搜小说 / 短剧。
+  /// 搜索入口是顶栏右侧的放大镜：点一下进独立搜索页，一次搜小说 / 短剧。
   ///
   /// 推荐页本身不再有内联搜索态（旧实现把搜索词塞进三个推荐流 provider），
   /// 返回时推荐流还是原来的内容与滚动位置。
-  void _openSearch() =>
-      context.pushAppRoute(SearchRoute(initialCueWord: _currentCueWord));
-
-  void _openCacheCenter() {
-    context.pushAppRoute(const CacheCenterRoute());
-  }
+  void _openSearch() => context.pushAppRoute(const SearchRoute());
 
   @override
   Widget build(BuildContext context) {
@@ -113,7 +102,7 @@ class RecommendPageState extends ConsumerState<RecommendPage>
     final topInset = MediaQuery.paddingOf(context).top;
     return Stack(
       children: [
-        // 顶部固定模块（搜索框 + 分类 tabs）的蓝粉氛围渐变：固定不滚动。
+        // 顶部固定模块（分类 tabs + 搜索入口）的蓝粉氛围渐变：固定不滚动。
         Positioned(
           top: 0,
           left: 0,
@@ -125,53 +114,36 @@ class RecommendPageState extends ConsumerState<RecommendPage>
           bottom: false,
           child: Column(
             children: [
-              // 搜索框常驻顶部，不随列表滚动收起；右侧固定下载图标入口。
-              // 顶部不留内边距：搜索框上沿直接贴住安全区（状态栏 / 刘海底边），
-              // 与独立搜索页保持一致，点进搜索页时搜索框不会上下跳。
-              // 搜索框与 tabs 之间、tabs 与卡片之间各留 2：tabs 行内的文字
-              // 是底部对齐的（行内上方本来就有一段留白），行外上下再各留
-              // 同样的 2，文字到搜索框、到卡片的两段空白才一样宽，不会看
-              // 上去像「离搜索框更远、贴着卡片」。
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 2),
+              // 顶栏整行与 tabs 同高（[CategoryTabBar.height]）：tabs 填满
+              // 整行、下划线正好落在整行底边，搜索图标在行内垂直居中、与 tab
+              // 文字同一条中线（不再比文字高出一截）。下面再留 8 给内容；
+              // 整行贴住安全区。
+              SizedBox(
+                height: CategoryTabBar.height,
                 child: Row(
                   children: [
+                    // 右侧「40 图标 + 8 留白」的镜像占位：tabs 因此落在屏幕
+                    // 正中，而不是被右侧搜索入口压到左半边。
+                    const SizedBox(width: _SearchEntryButton.width + 8),
                     Expanded(
-                      // 只读入口：可点不可编辑，点一下进独立搜索页（一次搜
-                      // 小说 / 短剧）。提示词是全局的，不再跟当前分类变。
-                      // 语义上它是一个「按钮」而不是只读输入框，读屏才不会被
-                      // 当成可编辑控件。
-                      child: Semantics(
-                        button: true,
-                        label: '搜索',
-                        excludeSemantics: true,
-                        child: FeedSearchField(
-                          hintText: '搜索小说 / 短剧',
-                          // 热词轮播做占位（placeholder），不写进输入框。
-                          hint: SearchCueHint(
-                            fallback: '搜索小说 / 短剧',
-                            onWordChanged: (word) => _currentCueWord = word,
-                          ),
-                          readOnly: true,
-                          onTap: _openSearch,
-                        ),
+                      child: CategoryTabBar(
+                        controller: _tabController,
+                        labels: const ['小说', '短剧', '漫剧'],
+                        // 行内左右留白交给外层 Row 的镜像占位，居中才准。
+                        padding: EdgeInsets.zero,
+                        center: true,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    _CachedEntryButton(onTap: _openCacheCenter),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _SearchEntryButton(onTap: _openSearch),
+                    ),
                   ],
                 ),
               ),
-              // tabs 居中（不再贴左对齐）。上下留白见上：外面两边都是 2。
-              Padding(
-                padding: const EdgeInsets.only(bottom: 2),
-                child: CategoryTabBar(
-                  controller: _tabController,
-                  labels: const ['小说', '短剧', '漫剧'],
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  center: true,
-                ),
-              ),
+              // tabs 的下划线贴在行底边，这里再留 8：排行榜预览卡 / 首屏卡片
+              // 不会贴着下划线，也不会因为榜单卡片收起而改变间距。
+              const SizedBox(height: 8),
               Expanded(
                 child: TabBarView(
                   controller: _tabController,
@@ -373,45 +345,35 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
   }
 }
 
-/// 搜索框右侧的缓存中心入口：跳转缓存中心（离线下载的书 / 短剧）。
+/// 顶栏右侧的搜索入口：一个独立的放大镜图标，点一下进独立搜索页。
 ///
-/// 只放一个下载图标（`download_outlined`，与详情页「缓存」态同一套图标），
-/// 40×40 与搜索框同高、同底色、同圆角（[FeedSearchField.radius]），把视觉
-/// 重心留给输入框；文案只走 Tooltip / 无障碍标签，不再占一行文字。
-class _CachedEntryButton extends StatelessWidget {
-  const _CachedEntryButton({required this.onTap});
+/// 不再套白色圆角底：顶栏本身就是「tabs + 图标」的轻量结构，图标和「我的」
+/// 页头的设置/缓存入口同一套线性图标（同尺寸、同色、同样只带水波纹），
+/// 文字只走 Tooltip / 无障碍标签。缓存中心入口在「我的」页头，顶栏只留搜索。
+class _SearchEntryButton extends StatelessWidget {
+  const _SearchEntryButton({required this.onTap});
+
+  /// 触控区宽度（高度跟随顶栏，即 [CategoryTabBar.height]）。
+  static const double width = 40;
 
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final radius = BorderRadius.circular(FeedSearchField.radius);
-    return Tooltip(
-      message: '已缓存',
-      child: Semantics(
-        button: true,
-        label: '已缓存',
-        child: Material(
-          color: FeedSearchField.surfaceColor(context),
-          borderRadius: radius,
-          child: InkWell(
-            borderRadius: radius,
-            onTap: onTap,
-            child: SizedBox(
-              width: FeedSearchField.height,
-              height: FeedSearchField.height,
-              child: Center(
-                child: Icon(
-                  Icons.download_outlined,
-                  size: 20,
-                  color: scheme.primary,
-                ),
-              ),
-            ),
-          ),
-        ),
+    return IconButton(
+      onPressed: onTap,
+      tooltip: '搜索',
+      iconSize: 22,
+      padding: EdgeInsets.zero,
+      // compact 把 M3 默认给按钮四周留的 8pt 触控外扩收掉，按钮实际就是
+      // 40×行高，右侧「40 + 8」与左侧镜像占位等宽，tabs 才真的居中。
+      visualDensity: VisualDensity.compact,
+      constraints: BoxConstraints.tightFor(
+        width: width,
+        height: CategoryTabBar.height,
       ),
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      icon: const Icon(Icons.search_rounded),
     );
   }
 }

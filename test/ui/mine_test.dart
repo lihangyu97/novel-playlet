@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
+import 'package:novel_playlet/app/widgets/app_section_header.dart';
 import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
+import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
 import 'package:novel_playlet/features/mine/widgets/mine_novel_tab.dart';
@@ -361,7 +363,7 @@ void main() {
     expect(glow().spec, same(kMineTopGlow), reason: '切到短剧 tab 后渐变不应变化');
   });
 
-  /// tab 样式：无下划线，当前 tab 主题色高亮且字号比未选中大一号。
+  /// tab 样式：当前 tab 主题色 + 加粗高亮，字号与未选中一致（只换颜色/字重）。
   testWidgets('我的页-当前 tab 高亮且布局稳定', (tester) async {
     await pumpPreview(tester, const MinePage());
     final scheme = Theme.of(tester.element(find.byType(MinePage))).colorScheme;
@@ -377,17 +379,22 @@ void main() {
     expect(find.byType(TabBar), findsNothing, reason: '不用带下划线的 TabBar');
     expect(styleOf('小说').color, scheme.primary, reason: '当前 tab 用主题色高亮');
     expect(styleOf('短剧').color, scheme.onSurfaceVariant);
-    expect(styleOf('小说').fontSize, CategoryTabBar.selectedFontSize);
+    expect(styleOf('小说').fontSize, CategoryTabBar.fontSize);
     expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
+    expect(
+      styleOf('小说').fontWeight,
+      isNot(styleOf('短剧').fontWeight),
+      reason: '字号不变，靠字重 + 颜色区分选中',
+    );
 
-    // 两个 tab 的字号不同，但文字都贴在同一条底线上：变大的字只向上长。
+    // 两个 tab 字号相同、文字贴在同一条底线上。
     expect(
       tester.getBottomLeft(find.text('小说')).dy,
       tester.getBottomLeft(find.text('短剧')).dy,
       reason: '选中/未选中的文字必须贴同一条底线',
     );
 
-    // 首个 tab 文字左边缘与内容留白（8）对齐，按最大字号预留宽度。
+    // 首个 tab 文字左边缘与内容留白（8）对齐，按选中态字重预留宽度。
     expect(
       tester.getTopLeft(find.text('小说')).dx,
       closeTo(8, 0.5),
@@ -420,7 +427,7 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
     expect(styleOf('短剧').color, scheme.primary);
     expect(styleOf('小说').color, scheme.onSurfaceVariant);
-    expect(styleOf('短剧').fontSize, CategoryTabBar.selectedFontSize);
+    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
     expect(tester.getRect(find.byType(CategoryTabBar)), barBefore);
     expect(tester.getTopLeft(find.text('小说')).dx, novelLeftBefore);
     expect(tester.getTopLeft(find.text('短剧')).dx, dramaLeftBefore);
@@ -428,9 +435,9 @@ void main() {
     expect(tester.getBottomLeft(find.text('短剧')).dy, dramaBottomBefore);
   });
 
-  /// 拖动 TabBarView 时：未过半仍由原 tab 高亮；一过中线高亮/字号立刻切给
-  /// 新 tab（不等松手）。两种状态都是确定的字号，不做逐帧插值。
-  testWidgets('我的页-滑动过半才切换 tab 状态', (tester) async {
+  /// 拖动 TabBarView 时：字号/颜色/下划线都跟着动画连续走（不再到中点突然
+  /// 切换），只有无障碍语义在过半时切到新 tab。
+  testWidgets('我的页-拖动时高亮与下划线连续跟随', (tester) async {
     await pumpPreview(tester, const MinePage());
     final scheme = Theme.of(tester.element(find.byType(MinePage))).colorScheme;
     TextStyle styleOf(String label) {
@@ -441,28 +448,122 @@ void main() {
       return tester.widget<Text>(finder).style!;
     }
 
+    bool semanticSelected(String label) {
+      final ancestors = find.ancestor(
+        of: find.descendant(
+          of: find.byType(CategoryTabBar),
+          matching: find.text(label),
+        ),
+        matching: find.byType(Semantics),
+      );
+      // 取最近一个显式声明了 selected 的 Semantics（InkWell 自带的那个
+      // 不声明 selected，跳过）。
+      for (final element in ancestors.evaluate()) {
+        final selected = (element.widget as Semantics).properties.selected;
+        if (selected != null) return selected;
+      }
+      return false;
+    }
+
+    final underline = find.byKey(const Key('category_tab_underline'));
+    final underlineStart = tester.getRect(underline).left;
+
     final gesture = await tester.startGesture(
       tester.getCenter(find.byType(TabBarView)),
     );
-    // 拖动约 24%：不过半，小说仍然是唯一的选中态。
-    await gesture.moveBy(const Offset(-20, 0));
+    // 拖动约 10%：还远没过半，但颜色已经朝短剧方向插值；字号始终保持一致。
+    await gesture.moveBy(const Offset(-40, 0));
     await tester.pump();
-    await gesture.moveBy(const Offset(-90, 0));
-    await tester.pump();
-    expect(styleOf('小说').color, scheme.primary);
-    expect(styleOf('小说').fontSize, CategoryTabBar.selectedFontSize);
-    expect(styleOf('短剧').color, scheme.onSurfaceVariant);
-    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
-
-    // 再拖到约 57%：一过中线，高亮和字号一起切给短剧，不等松手。
-    await gesture.moveBy(const Offset(-130, 0));
-    await tester.pump();
-    expect(styleOf('短剧').color, scheme.primary, reason: '过半立即高亮新 tab');
-    expect(styleOf('短剧').fontSize, CategoryTabBar.selectedFontSize);
-    expect(styleOf('小说').color, scheme.onSurfaceVariant);
     expect(styleOf('小说').fontSize, CategoryTabBar.fontSize);
+    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
+    expect(styleOf('小说').color, isNot(scheme.primary));
+    expect(styleOf('短剧').color, isNot(scheme.onSurfaceVariant));
+    expect(
+      tester.getRect(underline).left,
+      greaterThan(underlineStart + 0.5),
+      reason: '下划线跟着手指滑',
+    );
+    expect(semanticSelected('小说'), isTrue, reason: '未过半语义仍是小说');
+
+    // 拖到约 51%：一过中线，无障碍语义切到短剧（视觉仍在插值）。
+    await gesture.moveBy(const Offset(-160, 0));
+    await tester.pump();
+    expect(semanticSelected('短剧'), isTrue);
+    expect(semanticSelected('小说'), isFalse);
 
     await gesture.up();
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(styleOf('短剧').color, scheme.primary);
+    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
+    expect(
+      tester.getRect(underline).left,
+      closeTo(tester.getRect(find.text('短剧')).left, 0.5),
+    );
+  });
+
+  /// 缓存中心入口在页头右上角、设置按钮左边（推荐页顶栏收掉缓存入口后
+  /// 挪过来的）；两枚图标同一套线性图标、同尺寸。
+  testWidgets('我的页-缓存入口在设置左边并进缓存中心', (tester) async {
+    await pumpPreview(tester, const MinePage());
+    final cache = find.byTooltip('缓存');
+    final settings = find.byTooltip('设置');
+    expect(cache, findsOneWidget);
+    expect(settings, findsOneWidget);
+    expect(
+      tester.getCenter(cache).dx,
+      lessThan(tester.getCenter(settings).dx),
+      reason: '缓存入口在设置左边',
+    );
+    expect(
+      tester.getCenter(cache).dy,
+      closeTo(tester.getCenter(settings).dy, 0.5),
+      reason: '两枚图标在同一行',
+    );
+    expect(
+      find.descendant(
+        of: cache,
+        matching: find.byIcon(Icons.download_outlined),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(cache);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(CacheCenterPage), findsOneWidget);
+  });
+
+  /// tabs 上下留白一致：页头统计 → tab 文字、下划线 → 第一个区块标题，
+  /// 两段都是 8pt（以前下面是 12pt，看着比上面空）。
+  testWidgets('我的页-tabs 上下留白一致且收紧', (tester) async {
+    await pumpPreview(tester, const MinePage());
+    final bar = tester.getRect(find.byType(CategoryTabBar));
+    final stats = tester.getRect(find.textContaining('本 · 收藏'));
+    final tabText = tester.getRect(find.text('小说'));
+    // 第一个区块标题的文字（有最近阅读时是「最近阅读」、没有时是「我的书架」）。
+    final section = tester.getRect(
+      find
+          .descendant(
+            of: find.byType(AppSectionHeader).first,
+            matching: find.byType(Text),
+          )
+          .first,
+    );
+
+    const gap = 8.0;
+    expect(
+      tabText.top - stats.bottom,
+      closeTo(gap, 0.5),
+      reason: '统计到 tab 文字留 8pt',
+    );
+    expect(
+      section.top - bar.bottom,
+      closeTo(gap, 0.5),
+      reason: '下划线（贴行底）到第一个区块标题留 8pt',
+    );
+    expect(
+      (tabText.top - stats.bottom) - (section.top - bar.bottom),
+      closeTo(0, 0.5),
+      reason: '上下两段留白必须一样宽',
+    );
   });
 }

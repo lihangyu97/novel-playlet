@@ -174,16 +174,11 @@ final class RankRoute extends AppRoute<void> {
 /// 独立搜索页路由。
 ///
 /// 搜索词是页面自己的状态（见 `lib/features/search/search_providers.dart`），
-/// 不通过路由传，返回推荐页也不会带出搜索态。只把推荐页**当前轮播到的热词**
-/// 带过去：搜索页占位从同一条接着显示，空输入提交时直接搜它。
+/// 不通过路由传，返回推荐页也不会带出搜索态。
 final class SearchRoute extends AppRoute<void> {
-  const SearchRoute({this.initialCueWord = ''});
-
-  /// 推荐页搜索框当前轮播到的热词；空串 = 没有热词，占位回退静态提示。
-  final String initialCueWord;
+  const SearchRoute();
 
   @override
-  Route<void> toRoute() => MaterialPageRoute<void>(
-    builder: (_) => SearchPage(initialCueWord: initialCueWord),
-  );
+  Route<void> toRoute() =>
+      MaterialPageRoute<void>(builder: (_) => const SearchPage());
 }

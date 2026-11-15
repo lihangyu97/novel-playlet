@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/shell/floating_navigation_bar.dart';
 import 'package:novel_playlet/app/shell/home_shell.dart';
-import 'package:novel_playlet/features/feed/feed_search_field.dart';
+import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -57,7 +57,7 @@ void main() {
     );
     expect(find.text('推荐'), findsOneWidget);
     expect(find.text('我的'), findsOneWidget);
-    // 合并后底部只剩「推荐 / 我的」，分类在搜索框下方的 tabs 里。
+    // 合并后底部只剩「推荐 / 我的」，三个分类在顶栏 tabs 里。
     expect(find.text('小说'), findsOneWidget);
     await expectLater(
       find.byType(HomeShell),
@@ -124,7 +124,7 @@ void main() {
     expect(verticalOffset(tester), 0, reason: '再次点击推荐应滚回顶部');
   });
 
-  testWidgets('首页-滚动后搜索框常驻顶部', (tester) async {
+  testWidgets('首页-滚动后顶栏常驻顶部', (tester) async {
     final fake = FakePreviewTransport()..novelItemCount = 30;
     await pumpPreview(tester, const HomeShell(), transport: fake);
     await tester.drag(
@@ -133,10 +133,11 @@ void main() {
     );
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(
-      find.byType(FeedSearchField),
+      find.byType(CategoryTabBar),
       findsOneWidget,
-      reason: '搜索框常驻顶部，滚动后也不收起',
+      reason: '分类 tabs 常驻顶部，滚动后也不收起',
     );
+    expect(find.byTooltip('搜索'), findsOneWidget, reason: '搜索入口与 tabs 同行常驻');
     expect(find.text('小说'), findsOneWidget);
     await expectLater(
       find.byType(HomeShell),

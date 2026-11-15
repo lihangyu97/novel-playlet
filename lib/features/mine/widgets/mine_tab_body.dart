@@ -93,31 +93,28 @@ Widget mineTabSection<T>({
 
 /// 「最近阅读 / 最近观看」整块：区块标题 + 列表，没有记录时给同高（140）的
 /// 空态提示。两个 tab 共用，空态规则不会再一个隐藏、一个留白。
+///
+/// 不再额外加顶部留白：tabs 的下划线贴行底，区块标题自己的 8pt 上边距就是
+/// 「下划线 → 第一个标题」的间距（与页头到 tabs 的 8pt 等宽）。
 Widget mineRecentSection({
   required String title,
   required bool isEmpty,
   required String emptyMessage,
   required Widget child,
 }) {
-  return Padding(
-    padding: const EdgeInsets.only(top: 8),
-    child: Column(
-      children: [
-        AppSectionHeader(
-          title: title,
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-        ),
-        if (isEmpty)
-          SizedBox(
-            height: 140,
-            child: EmptyView(
-              message: emptyMessage,
-              icon: Icons.history_rounded,
-            ),
-          )
-        else
-          child,
-      ],
-    ),
+  return Column(
+    children: [
+      AppSectionHeader(
+        title: title,
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+      ),
+      if (isEmpty)
+        SizedBox(
+          height: 140,
+          child: EmptyView(message: emptyMessage, icon: Icons.history_rounded),
+        )
+      else
+        child,
+    ],
   );
 }

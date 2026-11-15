@@ -5,6 +5,9 @@ import 'package:novel_playlet/features/rank/rank_page.dart';
 import 'package:novel_playlet/features/rank/rank_providers.dart';
 import 'package:novel_playlet/features/rank/widgets/rank_preview_card.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
+import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
+import 'package:novel_playlet/app/widgets/compact_card_row.dart';
+import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/features/recommend/recommend_category.dart';
 
@@ -66,6 +69,35 @@ Map<String, dynamic> _rankBoardPayload() => {
                 'pure_category_tags': '玄幻',
                 'score': '9.${9 - i}',
                 'rank_score': '${10 - i}000万热度',
+              },
+            ],
+          },
+      ],
+    },
+  },
+};
+
+/// 短剧/漫剧榜的回包：`video_data` + `genre_tab=4/5` 时上游按视频条目回答。
+Map<String, dynamic> _rankVideoBoardPayload() => {
+  'code': 0,
+  'data': {
+    'has_more': false,
+    'cell_view': {
+      'cell_alias': '根据播放热度排行',
+      'cell_data': [
+        for (var i = 1; i <= 12; i++)
+          {
+            'video_data': [
+              {
+                'series_id': 'video-$i',
+                'title': '短剧$i',
+                'cover': '',
+                'episode_cnt': 60 + i,
+                'score': '8.${9 - i % 9}',
+                'secondary_info_list': [
+                  {'data_type': 3, 'content': '逆袭'},
+                  {'data_type': 2, 'content': '${10 - i % 9}000万热度'},
+                ],
               },
             ],
           },
@@ -213,10 +245,10 @@ void main() {
     expect(find.text('榜书1'), findsOneWidget);
   });
 
-  testWidgets('首页榜单预览卡-标题/更多/只铺前三', (tester) async {
+  testWidgets('首页榜单预览卡-标题在卡片外、只铺前十、可左右滑', (tester) async {
     final data = RankPreviewData(
       tab: const RankTab(name: '推荐榜', algo: 101),
-      board: RankBoard(entries: [_book(1), _book(2), _book(3), _book(4)]),
+      board: RankBoard(entries: [for (var i = 1; i <= 12; i++) _book(i)]),
     );
     await pumpPreview(
       tester,
@@ -228,17 +260,58 @@ void main() {
       ),
     );
 
+    // 版式与搜索结果页一致：榜名在卡片外面，下面是同款紧凑卡。
     expect(find.text('推荐榜'), findsOneWidget);
     expect(find.text('更多'), findsOneWidget);
-    expect(find.text('榜书1'), findsOneWidget);
-    expect(find.text('榜书2'), findsOneWidget);
-    expect(find.text('榜书3'), findsOneWidget);
-    expect(find.text('榜书4'), findsNothing);
-    expect(find.text('作者1 · 玄幻 · 9000万热度'), findsOneWidget);
+    expect(
+      find.ancestor(
+        of: find.text('推荐榜'),
+        matching: find.byType(AppSurfaceCard),
+      ),
+      findsNothing,
+      reason: '榜名在卡片外面，不再包在白色卡片里',
+    );
+    final firstCard = find.byType(NovelGridCard).first;
+    expect(
+      tester.getTopLeft(find.text('推荐榜')).dy,
+      lessThan(tester.getTopLeft(firstCard).dy),
+      reason: '榜名在卡片上方',
+    );
+    // 一屏 3.5 张的卡宽口径（与搜索结果同一套）。
+    expect(
+      tester.getSize(firstCard).width,
+      closeTo(CompactCardRow.cardWidthFor(390), 0.01),
+    );
+    // 只预览前十（上游一页 12 条也截到 10）。
+    for (var i = 1; i <= 10; i++) {
+      expect(find.text('榜书$i'), findsOneWidget, reason: '缺少第 $i 条');
+    }
+    expect(find.text('榜书11'), findsNothing);
+    expect(find.text('榜书12'), findsNothing);
+    // 卡面元信息与搜索卡一致：作者一行、热度单独一行，分类不再挤进来。
+    expect(find.text('作者1'), findsOneWidget);
+    expect(find.text('9000万热度'), findsOneWidget);
+    expect(find.text('作者1 · 玄幻 · 9000万热度'), findsNothing);
     // 首页卡片不再带 1/2/3 名次标号。
     expect(find.text('1'), findsNothing);
     expect(find.text('2'), findsNothing);
     expect(find.text('3'), findsNothing);
+
+    // 十张卡超出一屏：这一行可以左右滑。
+    final scrollFinder = find.byType(SingleChildScrollView);
+    expect(scrollFinder, findsOneWidget);
+    expect(
+      tester.widget<SingleChildScrollView>(scrollFinder).scrollDirection,
+      Axis.horizontal,
+    );
+    final before = tester.getTopLeft(firstCard).dx;
+    await tester.drag(scrollFinder, const Offset(-200, 0));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(firstCard).dx,
+      lessThan(before),
+      reason: '榜单卡行必须能左右滑动',
+    );
   });
 
   testWidgets('推荐页-首次进入榜单未回来时先显示骨架卡', (tester) async {
@@ -315,15 +388,44 @@ void main() {
     expect(find.text('榜书2'), findsOneWidget);
     expect(find.text('榜书3'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('推荐榜')).dy,
-      lessThan(tester.getTopLeft(find.byType(NovelGridCard).first).dy),
-      reason: '榜单卡片应在瀑布流上方',
+      tester.getBottomLeft(find.byType(RankPreviewCardView)).dy,
+      lessThanOrEqualTo(tester.getTopLeft(find.text('剑来')).dy),
+      reason: '榜单区块应在推荐瀑布流上方',
+    );
+    // tabs 的下划线贴行底：下划线到榜单卡片留 8pt，不贴着卡片。
+    final bar = tester.getRect(find.byType(CategoryTabBar));
+    final card = tester.getRect(find.byType(RankPreviewCardView));
+    expect(
+      card.top - bar.bottom,
+      closeTo(8, 0.5),
+      reason: '下划线到榜单卡片留 8pt，实际 ${card.top - bar.bottom}',
     );
 
     await tester.tap(find.text('更多'));
     await tester.pumpAndSettle();
     expect(find.byType(RankPage), findsOneWidget);
     expect(find.byType(AppBar), findsOneWidget);
+  });
+
+  testWidgets('推荐页-短剧/漫剧 tab 也有各自的榜单区块', (tester) async {
+    final fake = FakePreviewTransport()
+      ..rankBoardPayload = _rankVideoBoardPayload();
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      transport: fake,
+      rankCatalog: _catalog(),
+    );
+    await tester.tap(find.text('短剧'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('短剧榜'), findsOneWidget, reason: '短剧 tab 要有短剧榜');
+    expect(find.text('短剧1'), findsOneWidget);
+    expect(find.text('更多'), findsOneWidget);
+
+    await tester.tap(find.text('漫剧'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('漫剧榜'), findsOneWidget, reason: '漫剧 tab 要有漫剧榜');
+    expect(find.text('短剧1'), findsOneWidget);
   });
 
   testWidgets('排行榜-首屏不满一屏自动补页，触底翻页后到底', (tester) async {

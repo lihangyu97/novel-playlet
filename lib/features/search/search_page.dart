@@ -7,14 +7,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/router.dart';
 import '../../app/widgets/app_pill.dart';
 import '../../app/widgets/app_section_header.dart';
+import '../../app/widgets/compact_card_row.dart';
 import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/inline_error_row.dart';
-import '../../app/widgets/media_card.dart';
 import '../../app/widgets/novel_card.dart';
 import '../../app/widgets/novel_cover.dart';
-import '../../app/widgets/skeleton.dart';
 import '../../app/widgets/states.dart';
-import '../../app/widgets/surface_card.dart';
 import '../../app/widgets/top_glow.dart';
 import '../../data/models/hot_search.dart';
 import '../feed/feed_search_field.dart';
@@ -33,23 +31,14 @@ import 'search_providers.dart';
 /// 同一部剧出现两次、还把同一个请求打两遍。现在短剧行直接展示这份混排结果
 /// （漫剧卡片混在其中，但卡面不再显示「漫剧」标签）。
 ///
-/// 从推荐页顶部搜索框点进来（推荐页的搜索框是只读入口）。搜索词只属于这个
-/// 页面（autoDispose），返回后推荐页仍停在原来的推荐流，不会被搜索改写。
+/// 从推荐页顶栏右侧的搜索图标点进来。搜索词只属于这个页面（autoDispose），
+/// 返回后推荐页仍停在原来的推荐流，不会被搜索改写。
 ///
 /// 卡片直接复用首页推荐流的两张卡（[NovelGridCard] / [VideoCard]，白底卡 +
-/// 原生封面比例），只按屏宽算一个更窄的卡宽、字号整体缩一档：观感是「首页
-/// 同款卡片的小号版」，而不是另做一套搜索条目。一屏露出 3.5 张卡，第 4 张只
-/// 露半边，暗示这一行可以往右滑。
+/// 原生封面比例），行内宽度/字号口径统一在 [CompactCardRow]（与首页榜单
+/// 预览同一套）：观感是「首页同款卡片的小号版」，而不是另做一套搜索条目。
 class SearchPage extends ConsumerStatefulWidget {
-  const SearchPage({super.key, this.initialCueWord = ''});
-
-  /// 推荐页搜索框当前轮播到的热词：占位从同一条接着显示，空输入提交时直接
-  /// 搜它（没有热词时占位回退静态提示）。
-  final String initialCueWord;
-
-  /// 卡片行左右留白与卡片间距：与首页推荐流一致（8）。
-  static const double rowPadding = 8;
-  static const double cardGap = 8;
+  const SearchPage({super.key});
 
   /// 搜索页的分类顺序（只保留有独立搜索链路的两类）。
   ///
@@ -59,19 +48,6 @@ class SearchPage extends ConsumerStatefulWidget {
     RecommendCategory.novel,
     RecommendCategory.drama,
   ];
-
-  /// 一屏露出的卡片数：3 张完整卡 + 半张，提示「还能往右滑」。
-  static const double visibleCards = 3.5;
-
-  /// 屏幕宽度 → 卡宽：3 张完整卡之间 3 个间距，两侧各 [rowPadding]。
-  static double cardWidthFor(double maxWidth) =>
-      (maxWidth - rowPadding * 2 - cardGap * 3) / visibleCards;
-
-  /// 卡片字号相对首页缩小的比例。
-  ///
-  /// 卡宽只有首页双列的一半多一点，字号不缩会让标题/元信息显得又大又挤；
-  /// 缩一档后标题仍放得下两行，才像「同款卡片的小号版」。
-  static const double cardFontScale = 0.88;
 
   @override
   ConsumerState<SearchPage> createState() => _SearchPageState();
@@ -83,12 +59,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   /// 搜索框当前轮播到的热词（子组件上报，普通字段，不触发重建）。
   String _currentCueWord = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _currentCueWord = widget.initialCueWord;
-  }
 
   @override
   void dispose() {
@@ -178,9 +148,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   // 顶部不留内边距：搜索框上沿贴住安全区，与推荐页入口同位置，
                   // 从推荐页点进来时搜索框不会往下跳 8pt。
                   padding: const EdgeInsets.fromLTRB(
-                    SearchPage.rowPadding,
+                    CompactCardRow.rowPadding,
                     0,
-                    SearchPage.rowPadding,
+                    CompactCardRow.rowPadding,
                     4,
                   ),
                   child: FeedSearchField(
@@ -189,7 +159,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     hintText: '搜索小说 / 短剧',
                     hint: SearchCueHint(
                       fallback: '搜索小说 / 短剧',
-                      initialWord: widget.initialCueWord,
                       onWordChanged: (word) => _currentCueWord = word,
                     ),
                     autofocus: true,
@@ -564,16 +533,16 @@ class _SearchSection extends ConsumerWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = SearchPage.cardWidthFor(constraints.maxWidth);
+        final width = CompactCardRow.cardWidthFor(constraints.maxWidth);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             AppSectionHeader(
               title: category.label,
               padding: const EdgeInsets.fromLTRB(
-                SearchPage.rowPadding,
+                CompactCardRow.rowPadding,
                 16,
-                SearchPage.rowPadding,
+                CompactCardRow.rowPadding,
                 8,
               ),
             ),
@@ -585,7 +554,7 @@ class _SearchSection extends ConsumerWidget {
               Semantics(
                 container: true,
                 label: '正在搜索${category.label}',
-                child: _SkeletonRow(
+                child: CompactSkeletonRow(
                   key: ValueKey('search-skeleton-${category.name}'),
                   width: width,
                   coverAspect: coverAspect,
@@ -624,34 +593,11 @@ class _CardRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    // 卡片内部所有字号按同一比例缩一档（不直接改共享卡片组件）：卡片宽度变了
-    // 但字号还是首页尺寸会「字挤满卡」。
-    final compactTheme = theme.copyWith(
-      textTheme: theme.textTheme.apply(
-        fontSizeFactor: SearchPage.cardFontScale,
-      ),
-    );
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: SearchPage.rowPadding),
-      child: Theme(
-        data: compactTheme,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final item in items)
-              Padding(
-                padding: const EdgeInsets.only(right: SearchPage.cardGap),
-                child: _CompactCard(
-                  category: category,
-                  item: item,
-                  width: width,
-                ),
-              ),
-          ],
-        ),
-      ),
+    return CompactCardRow(
+      children: [
+        for (final item in items)
+          _CompactCard(category: category, item: item, width: width),
+      ],
     );
   }
 }
@@ -728,111 +674,7 @@ class _CompactCard extends StatelessWidget {
   }
 }
 
-/// 一行的加载骨架：4 张与真卡同宽同高的色块占位。
-///
-/// 一屏露出 3.5 张，骨架铺 4 张让第 4 张压在屏幕边上，和真卡行看起来一致；
-/// 两行并行请求，哪一行先回来哪一行先换成真卡。
-class _SkeletonRow extends StatelessWidget {
-  const _SkeletonRow({
-    super.key,
-    required this.width,
-    required this.coverAspect,
-  });
-
-  final double width;
-  final double coverAspect;
-
-  static const int _cardCount = 4;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: SearchPage.rowPadding),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (var i = 0; i < _cardCount; i++)
-            Padding(
-              padding: const EdgeInsets.only(right: SearchPage.cardGap),
-              child: _SkeletonCard(width: width, coverAspect: coverAspect),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 骨架卡：白底卡 + 封面/标题/元信息三处色块。
-///
-/// 高度口径和真卡（[MediaCard]）一致：封面按内容域原生比例，文字区用同一个
-/// 「字号缩一档」后的行高算两行标题 + 一行元信息，换真卡时行高不跳。
-class _SkeletonCard extends StatelessWidget {
-  const _SkeletonCard({required this.width, required this.coverAspect});
-
-  final double width;
-  final double coverAspect;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final textScaler = MediaQuery.textScalerOf(context);
-    final compactTextTheme = theme.textTheme.apply(
-      fontSizeFactor: SearchPage.cardFontScale,
-    );
-    final titleLineHeight =
-        textScaler.scale(compactTextTheme.bodyMedium?.fontSize ?? 14) *
-        MediaCard.titleLineHeightFactor;
-    final metaLineHeight =
-        textScaler.scale(compactTextTheme.bodySmall?.fontSize ?? 12) *
-        (compactTextTheme.bodySmall?.height ?? 1.0);
-    return SizedBox(
-      width: width,
-      child: AppSurfaceCard(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SkeletonBox(width: width, height: width * coverAspect),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 标题固定两行（与真卡 naturalTitleHeight=false 时一致）。
-                  SizedBox(
-                    height: titleLineHeight * 2,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SkeletonBar(
-                          width: width * 0.5,
-                          height: titleLineHeight * 0.58,
-                        ),
-                        const SizedBox(height: 6),
-                        SkeletonBar(
-                          width: width * 0.35,
-                          height: titleLineHeight * 0.58,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  SkeletonBar(
-                    width: width * 0.28,
-                    height: metaLineHeight * 0.6,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 分类行里的失败 / 空态：只占一行，不撑出整块空白（加载中走 [_SkeletonRow]）。
+/// 分类行里的失败 / 空态：只占一行，不撑出整块空白（加载中走 [CompactSkeletonRow]）。
 class _SectionStatus extends StatelessWidget {
   const _SectionStatus({required this.message, this.icon, this.onRetry});
 
@@ -847,9 +689,9 @@ class _SectionStatus extends StatelessWidget {
       icon: icon ?? Icons.error_outline_rounded,
       onRetry: onRetry,
       padding: const EdgeInsets.fromLTRB(
-        SearchPage.rowPadding,
+        CompactCardRow.rowPadding,
         2,
-        SearchPage.rowPadding,
+        CompactCardRow.rowPadding,
         2,
       ),
     );
