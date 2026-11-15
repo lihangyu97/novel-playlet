@@ -12,6 +12,8 @@ import '../../app/router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_bottom_sheet.dart';
 import '../../app/widgets/chapter_directory_sheet.dart';
+import '../../app/widgets/embedded_detail_sheet.dart';
+import '../../app/widgets/inline_error_row.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/chapter.dart';
@@ -751,52 +753,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         : session.index;
     final chapter = session.chapterAt(failedIndex);
     final title = chapter == null ? '正文加载失败' : '「${chapter.title}」加载失败';
-    return Container(
+    return InlineErrorRow(
+      message: '$title：${session.error ?? ''}',
+      foreground: foreground,
+      background: foreground.withValues(alpha: 0.07),
       padding: const EdgeInsets.fromLTRB(12, 4, 2, 4),
-      decoration: BoxDecoration(
-        color: foreground.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.error_outline_rounded,
-            size: 16,
-            color: foreground.withValues(alpha: 0.8),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '$title：${session.error ?? ''}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11.5,
-                height: 1.3,
-                color: foreground.withValues(alpha: 0.8),
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => unawaited(controller.retry()),
-            style: TextButton.styleFrom(
-              foregroundColor: foreground,
-              minimumSize: const Size(0, 32),
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              textStyle: const TextStyle(fontSize: 12),
-            ),
-            child: const Text('重试'),
-          ),
-          IconButton(
-            onPressed: controller.dismissError,
-            tooltip: '关闭',
-            iconSize: 16,
-            visualDensity: VisualDensity.compact,
-            color: foreground.withValues(alpha: 0.6),
-            icon: const Icon(Icons.close_rounded),
-          ),
-        ],
-      ),
+      onRetry: () => unawaited(controller.retry()),
+      onDismiss: controller.dismissError,
     );
   }
 
@@ -1594,13 +1557,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       cover: session.cover.isNotEmpty ? session.cover : widget.args.cover,
     );
     unawaited(
-      showAppBottomSheet<void>(
+      showEmbeddedDetailSheet(
         context: context,
-        builder: (sheetContext) => AppBottomSheet(
-          heightFactor: 0.72,
-          showClose: false,
-          child: DetailPage(bookId: bookId, preview: preview, embed: true),
-        ),
+        builder: (_) =>
+            DetailPage(bookId: bookId, preview: preview, embed: true),
       ),
     );
   }

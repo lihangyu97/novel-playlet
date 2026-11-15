@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../../app/widgets/app_section_header.dart';
 
 import '../../data/models/chapter.dart';
 import 'detail_style.dart';
@@ -35,7 +36,7 @@ class DetailDirectorySection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          DetailSectionHeader(
+          AppSectionHeader(
             title: '目录',
             padding: const EdgeInsets.fromLTRB(
               detailGutter,

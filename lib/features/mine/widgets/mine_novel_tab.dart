@@ -5,13 +5,11 @@ import '../../../app/providers.dart';
 import '../../../app/router.dart';
 import '../../../app/widgets/cover_hero.dart';
 import '../../../app/widgets/novel_cover.dart';
-import '../../../app/widgets/states.dart';
 import '../../../core/storage/reading_store.dart';
 import '../../../data/models/novel_item.dart';
 import '../mine_providers.dart';
 import 'media_manage_sheet.dart';
 import 'mine_grid_metrics.dart';
-import 'mine_header.dart';
 import 'mine_recent_reading.dart';
 import 'mine_shelf_grid.dart';
 import 'mine_tab_body.dart';
@@ -31,38 +29,26 @@ class MineNovelTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineShelfProvider);
-    final shelf = async.value;
     final metrics = MineGridMetrics.of(context);
-    return MineTabBody(
+    return mineTabSection<NovelItem>(
       bottomInset: bottomInset,
-      placeholder: async.hasError
-          ? ErrorView(
-              message: '读取本地书架失败，请重试',
-              onRetry: () => ref.invalidate(mineShelfProvider),
-            )
-          : const LoadingView(label: '正在读取书架…'),
+      async: async,
+      errorMessage: '读取本地书架失败，请重试',
+      loadingLabel: '正在读取书架…',
+      onRetry: () => ref.invalidate(mineShelfProvider),
+      title: '我的书架',
+      hint: async.value?.isEmpty == false ? '长按管理' : null,
       recent: const _MineRecentReadingSection(),
-      grid: shelf == null
-          ? null
-          : Column(
-              children: [
-                MineSectionHeader(
-                  title: '我的书架',
-                  hint: shelf.isEmpty ? null : '长按管理',
-                ),
-                MineShelfGrid(
-                  shelf: shelf,
-                  crossAxisCount: metrics.columns,
-                  itemWidth: metrics.itemWidth,
-                  spacing: MineGridMetrics.spacing,
-                  coverAspect: kNovelCoverAspect,
-                  heroTagOf: (item) =>
-                      CoverHeroTag.novel('mine-shelf', item.id),
-                  onOpen: (item) => _openDetail(context, item),
-                  onLongPress: (item) => _showShelfMenu(context, ref, item),
-                ),
-              ],
-            ),
+      gridBuilder: (shelf) => MineShelfGrid(
+        shelf: shelf,
+        crossAxisCount: metrics.columns,
+        itemWidth: metrics.itemWidth,
+        spacing: MineGridMetrics.spacing,
+        coverAspect: kNovelCoverAspect,
+        heroTagOf: (item) => CoverHeroTag.novel('mine-shelf', item.id),
+        onOpen: (item) => _openDetail(context, item),
+        onLongPress: (item) => _showShelfMenu(context, ref, item),
+      ),
     );
   }
 
@@ -99,17 +85,15 @@ class _MineRecentReadingSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final recent = ref.watch(mineRecentProvider).value;
-    if (recent == null || recent.isEmpty) return const SizedBox.shrink();
-    // 不再额外加顶部留白：tabs 的下划线贴行底，区块标题自己的 8pt 上边距
-    // 就是「下划线 → 第一个标题」的间距。
-    return Column(
-      children: [
-        const MineSectionHeader(title: '最近阅读'),
-        MineRecentReading(
-          items: recent,
-          onOpen: (item) => _openReader(context, item),
-        ),
-      ],
+    if (recent == null) return const SizedBox.shrink();
+    return mineRecentSection(
+      title: '最近阅读',
+      isEmpty: recent.isEmpty,
+      emptyMessage: '还没有阅读记录，去推荐页找一本小说',
+      child: MineRecentReading(
+        items: recent,
+        onOpen: (item) => _openReader(context, item),
+      ),
     );
   }
 

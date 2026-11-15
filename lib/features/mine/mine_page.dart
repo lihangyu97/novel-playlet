@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/router.dart';
 import '../../app/widgets/category_tab_bar.dart';
+import '../../app/widgets/keep_alive_box.dart';
 import '../../app/widgets/top_glow.dart';
 import 'mine_drama_providers.dart';
 import 'mine_providers.dart';
@@ -112,11 +113,11 @@ class _MinePageState extends State<MinePage>
                   child: TabBarView(
                     controller: _tabController,
                     children: [
-                      _KeepAliveTab(
+                      KeepAliveBox(
                         key: MinePage.novelTabKey,
                         child: MineNovelTab(bottomInset: widget.bottomInset),
                       ),
-                      _KeepAliveTab(
+                      KeepAliveBox(
                         key: MinePage.dramaTabKey,
                         child: MineDramaTab(bottomInset: widget.bottomInset),
                       ),
@@ -161,28 +162,5 @@ class _MineStats extends ConsumerWidget {
         color: theme.colorScheme.onSurfaceVariant,
       ),
     );
-  }
-}
-
-/// [TabBarView] 的保活壳：tab 滑走不销毁内容，滚动位置与已加载数据都保留
-/// （与推荐页的分类页同一套做法）。
-class _KeepAliveTab extends StatefulWidget {
-  const _KeepAliveTab({super.key, required this.child});
-
-  final Widget child;
-
-  @override
-  State<_KeepAliveTab> createState() => _KeepAliveTabState();
-}
-
-class _KeepAliveTabState extends State<_KeepAliveTab>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    return widget.child;
   }
 }

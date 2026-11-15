@@ -386,6 +386,8 @@ void main() {
       expect(find.text('选集'), findsOneWidget);
       expect(find.text('共 80 集'), findsOneWidget);
       expect(episodeButtons, findsWidgets);
+      // 集数按钮尺寸与播放页选集弹层一致（44 高），详情页不再单独压扁。
+      expect(tester.getSize(episodeButtons.first).height, 44);
 
       // 36 集一个 tab，自动分组。
       expect(find.text('1-36'), findsOneWidget);

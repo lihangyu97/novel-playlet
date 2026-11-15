@@ -11,16 +11,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/router.dart';
 import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/novel_cover.dart';
+import '../../app/widgets/app_section_header.dart';
 import '../../app/widgets/states.dart';
 import '../../core/cache/app_cache.dart' show formatBytes;
 import '../../core/storage/offline/offline_book.dart';
 import '../../core/storage/offline/offline_series.dart';
 import '../../data/models/chapter.dart';
+import '../../data/models/json_utils.dart' show apiErrorCopy;
 import '../../data/models/novel_item.dart';
 import '../../data/models/video_series.dart';
 import 'cache_providers.dart';
-import 'offline_queue.dart';
-import 'offline_downloader.dart';
+import 'widgets/offline_download_button.dart';
 import 'offline_task.dart';
 
 /// 缓存中心：从「我的」右下角悬浮缓存按钮进入，按小说 / 短剧分区列出正在下载、
@@ -206,11 +207,17 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
                 padding: const EdgeInsets.only(bottom: 28),
                 children: [
                   if (novelEntries.isNotEmpty) ...[
-                    const _SectionTitle(title: '小说'),
+                    const AppSectionHeader(
+                      title: '小说',
+                      padding: EdgeInsets.fromLTRB(16, 14, 16, 2),
+                    ),
                     for (final entry in novelEntries) _tile(entry),
                   ],
                   if (videoEntries.isNotEmpty) ...[
-                    const _SectionTitle(title: '短剧'),
+                    const AppSectionHeader(
+                      title: '短剧',
+                      padding: EdgeInsets.fromLTRB(16, 14, 16, 2),
+                    ),
                     for (final entry in videoEntries) _tile(entry),
                   ],
                 ],
@@ -453,7 +460,7 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
       await _startFromManifest(entry);
     } catch (error) {
       if (!mounted) return;
-      _showStartError(error);
+      showAppSnackBar(context, apiErrorCopy(error, fallback: '开始下载失败，请重试'));
     }
   }
 
@@ -462,23 +469,27 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
       await _startFromManifest(entry);
     } catch (error) {
       if (!mounted) return;
-      _showStartError(error);
+      showAppSnackBar(context, apiErrorCopy(error, fallback: '开始下载失败，请重试'));
     }
   }
 
   /// 从 manifest 重建完整章节/选集列表再开始下载（start* 按文件缺口续传）。
+  ///
+  /// 入队回执、空间不足/队列满的引导统一走 [startOfflineDownload]：与详情页
+  /// 缓存按钮同一份文案，不再各写一套。
   Future<void> _startFromManifest(_CacheEntry entry) async {
-    final downloader = ref.read(offlineDownloaderProvider.notifier);
-    final OfflineStartDisposition disposition;
     switch (entry.kind) {
       case OfflineTaskKind.novel:
         final book = await ref.read(offlineBookStoreProvider).read(entry.id);
         if (book == null || !mounted) return;
-        disposition = await downloader.startNovelBook(
-          bookId: book.bookId,
+        await startOfflineDownload(
+          context,
+          ref,
+          kind: OfflineTaskKind.novel,
+          id: book.bookId,
           title: book.title,
           cover: book.cover,
-          chapters: [
+          items: [
             for (final chapter in book.chapters)
               Chapter(
                 id: chapter.id,
@@ -493,11 +504,14 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
             .read(offlineSeriesStoreProvider)
             .read(entry.id);
         if (series == null || !mounted) return;
-        disposition = await downloader.startVideoSeries(
-          seriesId: series.seriesId,
+        await startOfflineDownload(
+          context,
+          ref,
+          kind: OfflineTaskKind.video,
+          id: series.seriesId,
           title: series.title,
           cover: series.cover,
-          episodes: [
+          items: [
             for (final episode in series.episodes)
               Chapter(
                 id: episode.id,
@@ -507,43 +521,6 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
           ],
         );
     }
-    if (disposition == OfflineStartDisposition.queued && mounted) {
-      showAppSnackBar(context, '已加入缓存队列，等前面的任务完成后自动开始');
-    }
-  }
-
-  /// 下载启动失败的提示文案（容量 / 队列满 / 其它）。
-  void _showStartError(Object error) {
-    final message = switch (error) {
-      OfflineQuotaExceeded() =>
-        '离线缓存已满：已用 ${formatBytes(error.usedBytes)}'
-            ' / 上限 ${formatBytes(error.capBytes)}，请先在本页删除不需要的缓存。',
-      OfflineQueueFullException() =>
-        '缓存队列已满（最多 ${error.maxLength} 个），请先等前面的任务完成。',
-      _ => '开始下载失败，请重试',
-    };
-    showAppSnackBar(context, message);
-  }
-}
-
-/// 分区标题「小说 / 短剧」。
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 2),
-      child: Text(
-        title,
-        style: theme.textTheme.titleMedium?.copyWith(
-          fontWeight: context.appWeight(FontWeight.w600),
-        ),
-      ),
-    );
   }
 }
 

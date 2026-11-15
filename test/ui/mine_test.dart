@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
+import 'package:novel_playlet/app/widgets/app_section_header.dart';
 import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
@@ -538,7 +539,15 @@ void main() {
     final bar = tester.getRect(find.byType(CategoryTabBar));
     final stats = tester.getRect(find.textContaining('本 · 收藏'));
     final tabText = tester.getRect(find.text('小说'));
-    final section = tester.getRect(find.text('我的书架'));
+    // 第一个区块标题的文字（有最近阅读时是「最近阅读」、没有时是「我的书架」）。
+    final section = tester.getRect(
+      find
+          .descendant(
+            of: find.byType(AppSectionHeader).first,
+            matching: find.byType(Text),
+          )
+          .first,
+    );
 
     const gap = 8.0;
     expect(

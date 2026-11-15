@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
+import '../../../app/widgets/color_swatch_dot.dart';
 import '../../../app/widgets/app_bottom_sheet.dart';
 
 /// 底部的自定义颜色弹层：HSV 取色（色相条 + 饱和度/明度面板）。
@@ -131,7 +132,13 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                _ColorChip(color: _color, size: 18),
+                ColorSwatchDot(
+                  color: _color,
+                  size: 18,
+                  unselectedBorder: Theme.of(context)
+                      .colorScheme
+                      .outlineVariant,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   _hexOf(_color),
@@ -463,30 +470,6 @@ class _HuePainter extends CustomPainter {
   @override
   bool shouldRepaint(_HuePainter oldDelegate) =>
       oldDelegate.hue != hue || oldDelegate.inset != inset;
-}
-
-/// 圆形色块（当前选中色 / 预览用）。
-class _ColorChip extends StatelessWidget {
-  const _ColorChip({required this.color, required this.size});
-
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: Theme.of(context).colorScheme.outlineVariant,
-          width: 1,
-        ),
-      ),
-    );
-  }
 }
 
 /// `#4FC3F7` 这种不带 alpha 的十六进制，方便用户跟设计稿对色。

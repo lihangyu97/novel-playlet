@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/widgets/inline_error_row.dart';
+
 /// 首页流底部状态：加载下一页 / 失败重试 / 到底了。
 ///
 /// 翻页失败不替换整页，只在列表末尾给一次重试，已加载的卡片保持可读。
@@ -38,13 +40,10 @@ class FeedFooter extends StatelessWidget {
         child: CircularProgressIndicator(strokeWidth: 2),
       );
     } else if (error != null) {
-      child = Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(error, textAlign: TextAlign.center, style: mutedStyle),
-          if (retryable)
-            TextButton(onPressed: onRetry, child: const Text('重试')),
-        ],
+      child = InlineErrorRow(
+        message: error,
+        onRetry: retryable ? onRetry : null,
+        padding: EdgeInsets.zero,
       );
     } else if (!hasMore) {
       child = Text('没有更多了', style: mutedStyle);

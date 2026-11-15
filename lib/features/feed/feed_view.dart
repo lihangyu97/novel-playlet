@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/widgets/states.dart';
+import '../../app/widgets/app_section_header.dart';
 import 'feed_footer.dart';
-import 'feed_section_title.dart';
 import 'feed_state.dart';
 
 /// 首页流的通用骨架：可选区块标题 + 列表 sliver + 底部状态。
@@ -156,7 +156,7 @@ class _FeedViewState<T> extends State<FeedView<T>> {
         physics: _physics,
         slivers: [
           if (widget.title != null)
-            SliverToBoxAdapter(child: FeedSectionTitle(title: widget.title!)),
+            SliverToBoxAdapter(child: AppSectionHeader(title: widget.title!)),
           if (widget.header != null) SliverToBoxAdapter(child: widget.header!),
           widget.sliverBuilder(context, data),
           SliverToBoxAdapter(

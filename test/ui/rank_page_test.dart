@@ -165,7 +165,7 @@ void main() {
     expect(find.text('逆袭 · 全62集 · 9000万热度'), findsOneWidget);
     expect(find.textContaining('短剧简介1'), findsOneWidget);
     expect(find.text('都市脑洞'), findsWidgets);
-    expect(find.text('已经到底了'), findsOneWidget);
+    expect(find.text('没有更多了'), findsOneWidget, reason: '底部文案与首页流一致');
     expect(tester.widget<Text>(find.text('1')).style?.color, scheme.error);
   });
 
@@ -426,6 +426,79 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.text('漫剧榜'), findsOneWidget, reason: '漫剧 tab 要有漫剧榜');
     expect(find.text('短剧1'), findsOneWidget);
+  });
+
+  testWidgets('排行榜-首屏不满一屏自动补页，触底翻页后到底', (tester) async {
+    final calls = <String>[];
+    await pumpPreview(
+      tester,
+      RankPage(
+        catalogLoader: () async => _catalog(),
+        pageLoader:
+            ({
+              required rankId,
+              required tab,
+              required offset,
+              required startAt,
+            }) async {
+              calls.add('${tab.algo}@$offset');
+              if (offset == 0) {
+                return RankBoard(
+                  hasMore: true,
+                  nextOffset: 3,
+                  entries: [_book(1), _book(2), _book(3)],
+                );
+              }
+              return RankBoard(entries: [_book(4)]);
+            },
+      ),
+    );
+    // 3 行填不满一屏：FeedView 首帧后自动补下一页（以前排行榜页没有这个兜底）。
+    await tester.pumpAndSettle();
+    expect(calls, ['101@0', '101@3']);
+    expect(find.text('榜书4'), findsOneWidget);
+    expect(find.text('没有更多了'), findsOneWidget);
+
+    // 已经到底：继续下滑不会再发请求。
+    await tester.drag(find.text('榜书1'), const Offset(0, -600));
+    await tester.pumpAndSettle();
+    expect(calls, ['101@0', '101@3']);
+  });
+
+  testWidgets('排行榜-翻页失败在底部给重试', (tester) async {
+    var requested = 0;
+    var failures = 0;
+    await pumpPreview(
+      tester,
+      RankPage(
+        catalogLoader: () async => _catalog(),
+        pageLoader:
+            ({
+              required rankId,
+              required tab,
+              required offset,
+              required startAt,
+            }) async {
+              requested = offset;
+              if (offset == 0) {
+                return RankBoard(
+                  hasMore: true,
+                  nextOffset: 2,
+                  entries: [_book(1), _book(2)],
+                );
+              }
+              failures++;
+              if (failures == 1) throw StateError('offline');
+              return RankBoard(entries: [_book(3)]);
+            },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('重试'), findsOneWidget);
+    await tester.tap(find.text('重试'));
+    await tester.pumpAndSettle();
+    expect(find.text('榜书3'), findsOneWidget);
+    expect(requested, 2);
   });
 
   testWidgets('排行榜-接口失败显示错误并重试', (tester) async {

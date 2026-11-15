@@ -5,8 +5,11 @@ import '../../app/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/router.dart';
+import '../../app/widgets/app_pill.dart';
+import '../../app/widgets/app_section_header.dart';
 import '../../app/widgets/compact_card_row.dart';
 import '../../app/widgets/cover_hero.dart';
+import '../../app/widgets/inline_error_row.dart';
 import '../../app/widgets/novel_card.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
@@ -142,8 +145,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             child: Column(
               children: [
                 Padding(
-                  // 顶部不留内边距：搜索框上沿贴住安全区，进页面时不会先
-                  // 空一段再落位。
+                  // 顶部不留内边距：搜索框上沿贴住安全区，与推荐页入口同位置，
+                  // 从推荐页点进来时搜索框不会往下跳 8pt。
                   padding: const EdgeInsets.fromLTRB(
                     CompactCardRow.rowPadding,
                     0,
@@ -265,45 +268,11 @@ class _SearchHistorySection extends ConsumerWidget {
             runSpacing: 8,
             children: [
               for (final keyword in history)
-                _SearchHistoryChip(
-                  keyword: keyword,
-                  onTap: () => onSearch(keyword),
-                ),
+                AppPill(label: keyword, onTap: () => onSearch(keyword)),
             ],
           ),
         ),
       ],
-    );
-  }
-}
-
-/// 单个历史关键词：可点的小圆角 pill（与详情页标签同一套观感）。
-class _SearchHistoryChip extends StatelessWidget {
-  const _SearchHistoryChip({required this.keyword, required this.onTap});
-
-  final String keyword;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Material(
-      color: scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(99),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          child: Text(
-            keyword,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurface),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -568,17 +537,13 @@ class _SearchSection extends ConsumerWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
+            AppSectionHeader(
+              title: category.label,
               padding: const EdgeInsets.fromLTRB(
                 CompactCardRow.rowPadding,
                 16,
                 CompactCardRow.rowPadding,
                 8,
-              ),
-              child: Text(
-                category.label,
-                style: Theme.of(context).textTheme.titleMedium
-                    ?.copyWith(fontWeight: context.appWeight(FontWeight.w600)),
               ),
             ),
             if (items.isNotEmpty)
@@ -719,44 +684,15 @@ class _SectionStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Padding(
+    return InlineErrorRow(
+      message: message,
+      icon: icon ?? Icons.error_outline_rounded,
+      onRetry: onRetry,
       padding: const EdgeInsets.fromLTRB(
         CompactCardRow.rowPadding,
         2,
         CompactCardRow.rowPadding,
         2,
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 16,
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              message,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          if (onRetry != null)
-            TextButton(
-              onPressed: onRetry,
-              style: TextButton.styleFrom(
-                minimumSize: const Size(0, 32),
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text('重试'),
-            ),
-        ],
       ),
     );
   }

@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_bottom_sheet.dart';
+import '../../app/widgets/color_swatch_dot.dart';
+import '../../app/widgets/setting_switch_row.dart';
 import 'reader_pagination.dart';
 import 'reader_settings.dart';
 
@@ -580,7 +582,7 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
                 ),
               ),
               if (canFollowGlobal)
-                _SettingSwitchRow(
+                SettingSwitchRow(
                   title: '跟随全局字重',
                   subtitle: '关闭后可单独调整阅读器正文',
                   value: settings.followGlobalFontWeight,
@@ -605,10 +607,15 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
                         for (final option in ReaderPaper.values) ...[
                           if (option != ReaderPaper.values.first)
                             const SizedBox(width: 10),
-                          _PaperOption(
-                            option: option,
+                          ColorSwatchDot(
+                            color: option.background,
+                            size: 42,
+                            tooltip: option.label,
                             selected: option == paper,
-                            foreground: foreground,
+                            ringColor: Theme.of(context).colorScheme.primary,
+                            iconColor: option.foreground,
+                            unselectedBorder: foreground.withValues(alpha: 0.2),
+                            unselectedBorderWidth: 0.8,
                             onTap: () => controller.setPaper(option),
                           ),
                         ],
@@ -618,7 +625,7 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
                 ],
               ),
               const SizedBox(height: 14),
-              _SettingSwitchRow(
+              SettingSwitchRow(
                 title: '对话高亮',
                 subtitle: '给双引号里的人物说话内容加荧光笔',
                 value: settings.showDialogueHighlight,
@@ -627,7 +634,7 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
                 muted: muted,
               ),
               const SizedBox(height: 14),
-              _SettingSwitchRow(
+              SettingSwitchRow(
                 title: '段评气泡',
                 subtitle: '关闭只隐藏段尾气泡，章末评论仍在',
                 value: settings.showBubbles,
@@ -639,47 +646,6 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// 阅读设置里的一行开关：左侧标题 + 说明，右侧 Switch。
-class _SettingSwitchRow extends StatelessWidget {
-  const _SettingSwitchRow({
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.onChanged,
-    required this.foreground,
-    required this.muted,
-  });
-
-  final String title;
-  final String subtitle;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  final Color foreground;
-  final Color muted;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: TextStyle(fontSize: 13, color: foreground)),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: TextStyle(fontSize: 11, height: 1.3, color: muted),
-              ),
-            ],
-          ),
-        ),
-        Switch(value: value, onChanged: onChanged),
-      ],
     );
   }
 }
@@ -715,56 +681,6 @@ class _SettingRow extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _PaperOption extends StatelessWidget {
-  const _PaperOption({
-    required this.option,
-    required this.selected,
-    required this.foreground,
-    required this.onTap,
-  });
-
-  final ReaderPaper option;
-  final bool selected;
-  final Color foreground;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    // primary 按纸色明暗派生，选中态文字/边框都用它：比 raw seed 稳，
-    // 用户选近白/近黑主题色时也不会消失。
-    final highlight = Theme.of(context).colorScheme.primary;
-    // 去掉可见文案后，底色名放到 tooltip / 读屏语义里，避免只能靠颜色辨认。
-    return Tooltip(
-      message: option.label,
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: option.label,
-        child: InkResponse(
-          onTap: onTap,
-          radius: 34,
-          child: Container(
-            width: 42,
-            height: 42,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: option.background,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: selected ? highlight : foreground.withValues(alpha: 0.2),
-                width: selected ? 2 : 0.8,
-              ),
-            ),
-            child: selected
-                ? Icon(Icons.check_rounded, size: 18, color: option.foreground)
-                : null,
-          ),
-        ),
-      ),
     );
   }
 }

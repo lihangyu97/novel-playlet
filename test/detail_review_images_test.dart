@@ -7,7 +7,7 @@ import 'package:novel_playlet/app/widgets/comment_image_strip.dart';
 import 'package:novel_playlet/app/widgets/comment_image_viewer.dart';
 import 'package:novel_playlet/data/models/book_comment.dart';
 import 'package:novel_playlet/data/models/comment_image.dart';
-import 'package:novel_playlet/features/detail/detail_reviews_section.dart';
+import 'package:novel_playlet/app/widgets/comment_row.dart';
 
 import 'test_images.dart';
 
@@ -23,7 +23,7 @@ void main() {
           home: Scaffold(
             body: Padding(
               padding: const EdgeInsets.all(20),
-              child: DetailReviewRow(
+              child: CommentRow(
                 comment: BookComment(
                   id: 'c1',
                   userName: '读者甲',

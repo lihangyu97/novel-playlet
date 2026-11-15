@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/router.dart';
-import '../../../app/theme/app_theme.dart';
+import '../../../app/widgets/app_section_header.dart';
 import '../../../app/widgets/compact_card_row.dart';
-import '../../../app/widgets/cover_hero.dart';
 import '../../../app/widgets/novel_card.dart';
 import '../../../app/widgets/novel_cover.dart';
 import '../../../data/models/rank.dart';
 import '../../recommend/recommend_category.dart';
 import '../../video/widgets/video_card.dart';
+import '../rank_entry_route.dart';
 import '../rank_providers.dart';
 
 /// 首页瀑布流上方的榜单区块。
@@ -49,55 +49,35 @@ String _previewTitle(RecommendCategory category) => switch (category) {
   RecommendCategory.anime => '漫剧榜',
 };
 
-/// 榜单区块的标题行：榜名在卡片外面，右侧「更多」。
-///
-/// 版式对齐搜索结果页的分类标题（titleMedium + w600、左右 8 留白），只把
-/// 「更多」放在同一行右侧；骨架态不传 [onMore]（按钮不可点就不该出现）。
-class _RankSectionHeader extends StatelessWidget {
-  const _RankSectionHeader({required this.title, this.onMore});
+/// 「更多 >」：进排行榜页（版式同搜索结果页分类标题右侧的动作）。
+class _MoreButton extends StatelessWidget {
+  const _MoreButton({required this.onTap});
 
-  final String title;
-  final VoidCallback? onMore;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Padding(
-      // 左边与内容留白对齐；右边少留 4，让「更多 >」的箭头贴近内容边。
-      padding: const EdgeInsets.fromLTRB(8, 0, 4, 6),
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        minimumSize: Size.zero,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        foregroundColor: scheme.onSurfaceVariant,
+        textStyle: theme.textTheme.bodySmall,
+      ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            title,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: context.appWeight(FontWeight.w600),
-            ),
+          const Text('更多'),
+          Icon(
+            Icons.chevron_right_rounded,
+            size: 16,
+            color: scheme.onSurfaceVariant,
           ),
-          const Spacer(),
-          if (onMore != null)
-            TextButton(
-              onPressed: onMore,
-              style: TextButton.styleFrom(
-                minimumSize: Size.zero,
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
-                foregroundColor: scheme.onSurfaceVariant,
-                textStyle: theme.textTheme.bodySmall,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('更多'),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    size: 16,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ],
-              ),
-            ),
         ],
       ),
     );
@@ -120,7 +100,11 @@ class _RankPreviewSkeleton extends StatelessWidget {
       key: const Key('rank_preview_skeleton'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _RankSectionHeader(title: _previewTitle(category)),
+        AppSectionHeader(
+          title: _previewTitle(category),
+          // 左边与内容留白对齐；右边少留 4，让「更多 >」的箭头贴近内容边。
+          padding: const EdgeInsets.fromLTRB(8, 0, 4, 6),
+        ),
         LayoutBuilder(
           builder: (context, constraints) => CompactSkeletonRow(
             width: CompactCardRow.cardWidthFor(constraints.maxWidth),
@@ -154,30 +138,11 @@ class RankPreviewCardView extends StatelessWidget {
     context.pushAppRoute(RankRoute(initialAlgo: tab.algo));
   }
 
-  void _openEntry(BuildContext context, RankEntry entry) {
-    if (entry.isEmpty) return;
-    final source = _heroSource;
-    final route = entry.isVideo
-        ? VideoDetailRoute(
-            seriesId: entry.id,
-            preview: entry.toVideoSeries(),
-            heroTag: CoverHeroTag.video(source, entry.id),
-          )
-        : DetailRoute(
-            bookId: entry.id,
-            preview: entry.toNovelItem(),
-            heroTag: CoverHeroTag.novel(source, entry.id),
-          );
-    context.pushAppRoute(route);
-  }
-
   /// 榜单条目 → 与搜索结果同款的紧凑卡：封面按内容域原生比例、评分走封面
   /// 角标，元信息只有作者（短剧/漫剧为集数），热度有就单独一行。
   Widget _card(BuildContext context, RankEntry entry, double width) {
-    final heroTag = entry.isVideo
-        ? CoverHeroTag.video(_heroSource, entry.id)
-        : CoverHeroTag.novel(_heroSource, entry.id);
-    void onTap() => _openEntry(context, entry);
+    final heroTag = rankEntryHeroTag(entry, _heroSource);
+    void onTap() => openRankEntry(context, entry, source: _heroSource);
     if (entry.isVideo) {
       return VideoCard(
         key: ValueKey('rank-preview-${entry.id}'),
@@ -212,9 +177,11 @@ class RankPreviewCardView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _RankSectionHeader(
+        AppSectionHeader(
           title: data.tab.name,
-          onMore: () => _openRank(context, data.tab),
+          trailing: _MoreButton(onTap: () => _openRank(context, data.tab)),
+          // 左边与内容留白对齐；右边少留 4，让「更多 >」的箭头贴近内容边。
+          padding: const EdgeInsets.fromLTRB(8, 0, 4, 6),
         ),
         LayoutBuilder(
           builder: (context, constraints) {

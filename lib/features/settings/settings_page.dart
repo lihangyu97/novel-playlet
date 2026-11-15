@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/app_version.dart';
 import '../../app/theme/app_font_weight.dart';
 import '../../app/theme/app_theme.dart';
+import '../../app/widgets/app_section_header.dart';
+import '../../app/widgets/color_swatch_dot.dart';
+import '../../app/widgets/setting_switch_row.dart';
 import '../../app/theme/theme_settings.dart';
 import '../../app/widgets/app_snack_bar.dart';
 import '../../core/cache/app_cache.dart';
@@ -34,7 +37,15 @@ class SettingsPage extends StatelessWidget {
           physics: const ClampingScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 28),
           children: const [
-            _SectionTitle('主题'),
+            AppSectionHeader(
+              title: '主题',
+              padding: EdgeInsets.fromLTRB(
+                _contentInset,
+                20,
+                _contentInset,
+                10,
+              ),
+            ),
             _ThemeColorCard(),
             SizedBox(height: 12),
             _DialogueHighlightColorCard(),
@@ -43,9 +54,25 @@ class SettingsPage extends StatelessWidget {
             SizedBox(height: 12),
             _GlobalFontWeightCard(),
             _FeedLayoutCard(),
-            _SectionTitle('WebDAV'),
+            AppSectionHeader(
+              title: 'WebDAV',
+              padding: EdgeInsets.fromLTRB(
+                _contentInset,
+                20,
+                _contentInset,
+                10,
+              ),
+            ),
             WebDavSyncCard(),
-            _SectionTitle('存储'),
+            AppSectionHeader(
+              title: '存储',
+              padding: EdgeInsets.fromLTRB(
+                _contentInset,
+                20,
+                _contentInset,
+                10,
+              ),
+            ),
             _StorageCard(),
             SizedBox(height: 12),
             // 下载清晰度是「存多少」的一部分：和占用/清理同区，不再单开一
@@ -54,24 +81,6 @@ class SettingsPage extends StatelessWidget {
             _AppVersionFooter(),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.title);
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(_contentInset, 20, _contentInset, 10),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleMedium
-            ?.copyWith(fontWeight: context.appWeight(FontWeight.w600)),
       ),
     );
   }
@@ -161,17 +170,20 @@ class _ThemeColorCard extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               for (final option in themeColorOptions)
-                _PresetDot(
-                  option: option,
+                ColorSwatchDot(
+                  color: option.color,
+                  tooltip: option.name,
                   selected: option.color == seed,
                   onTap: () => controller.setSeed(option.color),
                 ),
-              _ColorDot(
+              ColorSwatchDot(
                 key: themeCustomColorKey,
                 color: customSeed,
                 selected: customSelected,
+                showCheck: false,
+                icon: Icons.palette_outlined,
                 tooltip: '自定义主题色',
-                semanticsLabel: '自定义',
+                semanticLabel: '自定义',
                 onTap: () async {
                   final picked = await showThemeColorPicker(
                     context,
@@ -252,9 +264,11 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
             ),
           ),
           const SizedBox(width: 12),
-          _ColorDot(
+          ColorSwatchDot(
             key: dialogueHighlightColorKey,
             color: settings.dialogueHighlightColor,
+            showCheck: false,
+            icon: Icons.palette_outlined,
             tooltip: '自定义对话高亮样式与颜色',
             onTap: () async {
               final picked = await showThemeColorPicker(
@@ -320,118 +334,6 @@ class _DialogueHighlightPreviewSlot extends ConsumerWidget {
   }
 }
 
-/// 圆形色块：实心显示当前颜色，点开取色；[selected] 时描一圈 onSurface 边。
-///
-/// 主题卡第 4 个「自定义」圆点与「对话高亮」色块共用（两者只差选中态和
-/// 语义文案，视觉必须一致，不要再各写一份）。
-class _ColorDot extends StatelessWidget {
-  const _ColorDot({
-    super.key,
-    required this.color,
-    required this.tooltip,
-    required this.onTap,
-    this.selected = false,
-    this.semanticsLabel,
-  });
-
-  final Color color;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  /// 当前颜色是否正在生效（描选中边）。
-  final bool selected;
-
-  /// 读屏文案；null = 用 [tooltip]。主题卡的自定义圆点用「自定义」而不是
-  /// 完整 tooltip，避免读屏把「自定义主题色」和预设色混在一起播报。
-  final String? semanticsLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final iconColor =
-        ThemeData.estimateBrightnessForColor(color) == Brightness.light
-        ? Colors.black54
-        : Colors.white70;
-    return Tooltip(
-      message: tooltip,
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: semanticsLabel ?? tooltip,
-        child: InkResponse(
-          onTap: onTap,
-          radius: 30,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              border: selected
-                  ? Border.all(color: scheme.onSurface, width: 2)
-                  : null,
-            ),
-            child: Icon(Icons.palette_outlined, size: 17, color: iconColor),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 预设色圆点。选中时外圈用 onSurface 描一圈 + 打勾，避免浅色格子看不见。
-class _PresetDot extends StatelessWidget {
-  const _PresetDot({
-    required this.option,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final ThemeColorOption option;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    // 勾的颜色按背景亮暗选：早期用亮度阈值 0.55，天蓝/草绿这类中间色会配上
-    // 对比度不足的白勾。estimateBrightnessForColor 是 Material 自己的判定。
-    final checkColor =
-        ThemeData.estimateBrightnessForColor(option.color) == Brightness.light
-        ? Colors.black87
-        : Colors.white;
-    return Tooltip(
-      message: option.name,
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: option.name,
-        child: InkResponse(
-          onTap: onTap,
-          radius: 30,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: option.color,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: selected ? scheme.onSurface : Colors.transparent,
-                width: 2,
-              ),
-            ),
-            child: selected
-                ? Icon(Icons.check_rounded, size: 20, color: checkColor)
-                : null,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
 // 深浅色模式
 // ---------------------------------------------------------------------------
@@ -457,7 +359,8 @@ class _AppearanceCard extends ConsumerWidget {
         children: [
           // 跟随系统时深色由系统决定，这一项没有意义，直接收起。
           if (!following) ...[
-            _SwitchRow(
+            SettingSwitchRow(
+              padding: const EdgeInsets.symmetric(vertical: 4),
               title: '深色模式',
               subtitle: '关闭后固定使用浅色外观',
               value: dark,
@@ -469,7 +372,8 @@ class _AppearanceCard extends ConsumerWidget {
                   .withValues(alpha: 0.5),
             ),
           ],
-          _SwitchRow(
+          SettingSwitchRow(
+            padding: const EdgeInsets.symmetric(vertical: 4),
             title: '跟随系统',
             subtitle: '深色 / 浅色由系统外观决定',
             value: following,
@@ -479,56 +383,6 @@ class _AppearanceCard extends ConsumerWidget {
                   : (platformDark ? ThemeMode.dark : ThemeMode.light),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SwitchRow extends StatelessWidget {
-  const _SwitchRow({
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String title;
-  final String subtitle;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: context.appWeight(FontWeight.w600),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Switch(value: value, onChanged: onChanged),
         ],
       ),
     );

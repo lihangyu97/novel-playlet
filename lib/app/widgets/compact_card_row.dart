@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'media_card.dart';
+import 'skeleton.dart';
 import 'surface_card.dart';
 
 /// 紧凑卡行：一行横向可滑的小号卡片（搜索结果行、首页榜单预览行共用）。
@@ -117,7 +118,6 @@ class _CompactSkeletonCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final textScaler = MediaQuery.textScalerOf(context);
     final compactTextTheme = theme.textTheme.apply(
       fontSizeFactor: CompactCardRow.cardFontScale,
@@ -128,20 +128,6 @@ class _CompactSkeletonCard extends StatelessWidget {
     final metaLineHeight =
         textScaler.scale(compactTextTheme.bodySmall?.fontSize ?? 12) *
         (compactTextTheme.bodySmall?.height ?? 1.0);
-    // 浅色卡上用很浅的灰；深色卡上用略亮一档，和卡片底色区分开。
-    final blockColor = scheme.onSurface.withValues(
-      alpha: theme.brightness == Brightness.dark ? 0.14 : 0.07,
-    );
-
-    Widget bar(double barWidth, double barHeight) => Container(
-      width: barWidth,
-      height: barHeight,
-      decoration: BoxDecoration(
-        color: blockColor,
-        borderRadius: BorderRadius.circular(barHeight / 2),
-      ),
-    );
-
     return SizedBox(
       width: width,
       child: AppSurfaceCard(
@@ -149,11 +135,7 @@ class _CompactSkeletonCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: width,
-              height: width * coverAspect,
-              color: blockColor,
-            ),
+            SkeletonBox(width: width, height: width * coverAspect),
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
               child: Column(
@@ -165,14 +147,23 @@ class _CompactSkeletonCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        bar(width * 0.5, titleLineHeight * 0.58),
+                        SkeletonBar(
+                          width: width * 0.5,
+                          height: titleLineHeight * 0.58,
+                        ),
                         const SizedBox(height: 6),
-                        bar(width * 0.35, titleLineHeight * 0.58),
+                        SkeletonBar(
+                          width: width * 0.35,
+                          height: titleLineHeight * 0.58,
+                        ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 3),
-                  bar(width * 0.28, metaLineHeight * 0.6),
+                  SkeletonBar(
+                    width: width * 0.28,
+                    height: metaLineHeight * 0.6,
+                  ),
                 ],
               ),
             ),

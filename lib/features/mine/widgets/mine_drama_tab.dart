@@ -6,7 +6,6 @@ import '../../../app/router.dart';
 import '../../../app/widgets/app_snack_bar.dart';
 import '../../../app/widgets/cover_hero.dart';
 import '../../../app/widgets/novel_cover.dart';
-import '../../../app/widgets/states.dart';
 import '../../../core/storage/reading_store.dart';
 import '../../../data/models/json_utils.dart';
 import '../../../data/models/video_series.dart';
@@ -14,7 +13,6 @@ import '../mine_drama_providers.dart';
 import 'media_manage_sheet.dart';
 import 'mine_drama_shelf_grid.dart';
 import 'mine_grid_metrics.dart';
-import 'mine_header.dart';
 import 'mine_recent_watching.dart';
 import 'mine_tab_body.dart';
 
@@ -33,39 +31,26 @@ class MineDramaTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineDramaShelfProvider);
-    final collections = async.value;
     final metrics = MineGridMetrics.of(context);
-    return MineTabBody(
+    return mineTabSection<VideoSeries>(
       bottomInset: bottomInset,
-      placeholder: async.hasError
-          ? ErrorView(
-              message: '读取短剧收藏失败，请重试',
-              onRetry: () => ref.invalidate(mineDramaShelfProvider),
-            )
-          : const LoadingView(label: '正在读取短剧数据…'),
+      async: async,
+      errorMessage: '读取短剧收藏失败，请重试',
+      loadingLabel: '正在读取短剧数据…',
+      onRetry: () => ref.invalidate(mineDramaShelfProvider),
+      title: '我的收藏',
+      hint: async.value?.isEmpty == false ? '长按管理' : null,
       recent: const _MineRecentWatchingSection(),
-      grid: collections == null
-          ? null
-          : Column(
-              children: [
-                MineSectionHeader(
-                  title: '我的收藏',
-                  hint: collections.isEmpty ? null : '长按管理',
-                ),
-                MineDramaShelfGrid(
-                  items: collections,
-                  crossAxisCount: metrics.columns,
-                  itemWidth: metrics.itemWidth,
-                  spacing: MineGridMetrics.spacing,
-                  coverAspect: kVideoCoverAspect,
-                  heroTagOf: (item) =>
-                      CoverHeroTag.video('mine-drama-shelf', item.id),
-                  onOpen: (item) => _openDetail(context, item),
-                  onLongPress: (item) =>
-                      _showCollectionMenu(context, ref, item),
-                ),
-              ],
-            ),
+      gridBuilder: (collections) => MineDramaShelfGrid(
+        items: collections,
+        crossAxisCount: metrics.columns,
+        itemWidth: metrics.itemWidth,
+        spacing: MineGridMetrics.spacing,
+        coverAspect: kVideoCoverAspect,
+        heroTagOf: (item) => CoverHeroTag.video('mine-drama-shelf', item.id),
+        onOpen: (item) => _openDetail(context, item),
+        onLongPress: (item) => _showCollectionMenu(context, ref, item),
+      ),
     );
   }
 
@@ -104,25 +89,14 @@ class _MineRecentWatchingSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(mineDramaHistoryProvider).value;
     if (history == null) return const SizedBox.shrink();
-    // 不再额外加顶部留白：tabs 的下划线贴行底，区块标题自己的 8pt 上边距
-    // 就是「下划线 → 第一个标题」的间距。
-    return Column(
-      children: [
-        const MineSectionHeader(title: '最近观看'),
-        if (history.isEmpty)
-          const SizedBox(
-            height: 140,
-            child: EmptyView(
-              message: '还没有观看记录，去推荐页看看短剧',
-              icon: Icons.history_rounded,
-            ),
-          )
-        else
-          MineRecentWatching(
-            items: history,
-            onOpen: (progress) => _resume(context, ref, progress),
-          ),
-      ],
+    return mineRecentSection(
+      title: '最近观看',
+      isEmpty: history.isEmpty,
+      emptyMessage: '还没有观看记录，去推荐页看看短剧',
+      child: MineRecentWatching(
+        items: history,
+        onOpen: (progress) => _resume(context, ref, progress),
+      ),
     );
   }
 
