@@ -58,7 +58,9 @@ class DetailHeroInfo extends StatelessWidget {
       if (detail != null && detail!.wordLabel.isNotEmpty) detail!.wordLabel,
     ].join(' · ');
 
-    // 评分 / 在读 / 更新至 合并成同一行。
+    // 评分 / 在读 同一行；「更新至 …」单独起一行：章节名往往很长，和评分/
+    // 在读挤一行时会被 Flexible 提前截断，单独一行可以用满卡片宽度，只有真
+    // 的超出宽度才省略。
     final infoStyle = theme.textTheme.bodySmall?.copyWith(
       color: scheme.onSurfaceVariant,
     );
@@ -92,10 +94,12 @@ class DetailHeroInfo extends StatelessWidget {
         ),
       );
     }
-    if (lastChapter.isNotEmpty) {
-      addSeparator();
-      segments.add(
-        Flexible(
+
+    final extras = <Widget>[
+      if (segments.isNotEmpty) Row(children: segments),
+      if (lastChapter.isNotEmpty)
+        Padding(
+          padding: EdgeInsets.only(top: segments.isEmpty ? 0 : 4),
           child: Text(
             '更新至 $lastChapter',
             maxLines: 1,
@@ -103,13 +107,17 @@ class DetailHeroInfo extends StatelessWidget {
             style: infoStyle,
           ),
         ),
-      );
-    }
+    ];
 
     return DetailTitleSection(
       title: title,
       subtitle: subtitle,
-      extra: segments.isEmpty ? null : Row(children: segments),
+      extra: extras.isEmpty
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: extras,
+            ),
     );
   }
 }

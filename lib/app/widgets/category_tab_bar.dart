@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
@@ -6,9 +8,11 @@ import '../theme/app_theme.dart';
 /// 漫剧」共用）。
 ///
 /// 视觉约定：
-/// - 左对齐、**无下划线/指示条**；当前 tab 用主题色高亮、字号比未选中略大；
-/// - 首个 tab 的文字左边缘与内容留白（8pt）对齐，**按选中字号（最大字号）
+/// - 默认左对齐，**无下划线/指示条**；当前 tab 用主题色高亮、字号比未选中略大；
+/// - 默认首个 tab 的文字左边缘与内容留白（8pt）对齐，**按选中字号（最大字号）
 ///   预留宽度**：字号在 15/17 间切换时左边缘和相邻 tab 都不挪位；
+/// - [center] 为 true 时整组 tabs 在可用宽度内居中（推荐页用），居中只影响
+///   整行落点，tab 之间的间距/字号规则完全不变；内容超宽时照旧可横向滚动；
 /// - 每个 tab 宽度固定、整行高度固定、文字**贴同一条底线**：选中/未选中只
 ///   有"字号 15 / 17"两种确定状态，变大的字只向上长，不会推挤邻居；
 /// - 高亮跟随 [TabController.animation] 的**过半阈值**切换（拖动时一过中线
@@ -20,6 +24,7 @@ class CategoryTabBar extends StatefulWidget {
     required this.controller,
     required this.labels,
     this.padding = const EdgeInsets.symmetric(horizontal: 8),
+    this.center = false,
   }) : assert(labels.length == controller.length);
 
   /// 整行固定高度（含上下触控留白）：比搜索框 40 略矮，顶栏更紧凑。
@@ -33,7 +38,8 @@ class CategoryTabBar extends StatefulWidget {
   ///
   /// 左侧不留内边距：首个 tab 的文字左边缘直接贴整行留白，和页头/区块标题对齐；
   /// 宽度仍按**选中字号**预留，所以字号变化时左边缘不动、相邻 tab 也不挪。
-  static const double _tabGap = 20;
+  /// [center] 时会在整组前面补上同样一段，让文字块左右留白对称。
+  static const double tabGap = 20;
 
   /// 与 [TabBarView] 共用的 tab 控制器。
   final TabController controller;
@@ -43,6 +49,12 @@ class CategoryTabBar extends StatefulWidget {
 
   /// 整行左右留白（不含 tab 自身的可点留白）。
   final EdgeInsetsGeometry padding;
+
+  /// true = 整组 tabs 在可用宽度内居中；false = 左对齐（默认）。
+  ///
+  /// 只改整行的落点，不改 tab 之间的间距；可用宽度放不下时仍然是横向滚动，
+  /// 滚动内容从留白处开始，不会因为居中而看不到首个 tab。
+  final bool center;
 
   @override
   State<CategoryTabBar> createState() => _CategoryTabBarState();
@@ -116,28 +128,55 @@ class _CategoryTabBarState extends State<CategoryTabBar> {
         ? 0.0
         : (CategoryTabBar.height - lineHeight) / 2;
 
-    // 撑满一行：tabs 按起始端左对齐（不要被外层 Column 居中），超宽时才滚动。
+    // 撑满一行：默认按起始端左对齐（不要被外层 Column 居中），超宽时才滚动；
+    // [CategoryTabBar.center] 时用 ConstrainedBox 把行撑到可用宽度再居中。
+    final tabs = [
+      for (var i = 0; i < widget.labels.length; i++)
+        _CategoryTab(
+          label: widget.labels[i],
+          width: slotWidths[i],
+          bottomInset: labelBottomInset,
+          selected: i == _selectedIndex,
+          inactiveStyle: inactiveStyle,
+          activeStyle: activeStyle,
+          onTap: () => widget.controller.animateTo(i),
+        ),
+    ];
     return SizedBox(
       width: double.infinity,
       height: CategoryTabBar.height,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const ClampingScrollPhysics(),
-        padding: widget.padding,
-        child: Row(
-          children: [
-            for (var i = 0; i < widget.labels.length; i++)
-              _CategoryTab(
-                label: widget.labels[i],
-                width: slotWidths[i],
-                bottomInset: labelBottomInset,
-                selected: i == _selectedIndex,
-                inactiveStyle: inactiveStyle,
-                activeStyle: activeStyle,
-                onTap: () => widget.controller.animateTo(i),
-              ),
-          ],
-        ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final horizontalPadding = widget.padding.horizontal;
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const ClampingScrollPhysics(),
+            padding: widget.padding,
+            child: widget.center
+                ? ConstrainedBox(
+                    // 放得下时把行撑满可用宽度，交给 Row 居中；放不下时按
+                    // 内容宽度撑开，退化成横向滚动。
+                    constraints: BoxConstraints(
+                      minWidth: math.max(
+                        0.0,
+                        constraints.maxWidth - horizontalPadding,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // 每个 tab 的宽度都带一段尾部留白（右边缘不贴下一个
+                        // tab 的文字）。第一个 tab 前面补同样一段，文字块
+                        // 左右两侧的留白才相等，视觉上才是真的居中。
+                        const SizedBox(width: CategoryTabBar.tabGap),
+                        ...tabs,
+                      ],
+                    ),
+                  )
+                : Row(children: tabs),
+          );
+        },
       ),
     );
   }
@@ -155,7 +194,7 @@ class _CategoryTabBarState extends State<CategoryTabBar> {
       maxLines: 1,
     )..layout();
     final metric = (
-      width: painter.width + CategoryTabBar._tabGap,
+      width: painter.width + CategoryTabBar.tabGap,
       lineHeight: painter.height,
     );
     painter.dispose();
