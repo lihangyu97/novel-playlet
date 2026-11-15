@@ -965,11 +965,11 @@ class _DialogueHighlightPainter extends CustomPainter {
 
   /// 半个波长为一段的二次贝塞尔波浪：控制点交替在上下，拼出连续的波纹。
   ///
-  /// 半波 3.2、峰谷 ±2.4：太小（1.5/2.5）在正文里看不出是波浪，太大又会和
-  /// 下一行的字打架。
+  /// 半波 6.4（整波 12.8）、峰谷 ±2.4：波距太密会像锯齿，太疏又不像波浪；
+  /// 振幅再大就会顶到上一行/下一行的字。
   static Path _wavePath(double left, double right, double y) {
     const amplitude = 2.4;
-    const halfWave = 3.2;
+    const halfWave = 6.4;
     final path = Path()..moveTo(left, y);
     var x = left;
     var up = true;

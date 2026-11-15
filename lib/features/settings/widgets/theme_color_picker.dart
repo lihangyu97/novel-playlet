@@ -113,12 +113,26 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 当前候选中色：色块 + 十六进制，靠右排在标题下面一行。
+            // 样式/模式类选项放最上面（对话高亮用它放三种画法），下面是调色区。
+            if (widget.leading != null) ...[
+              widget.leading!,
+              const SizedBox(height: 14),
+            ],
+            _SaturationValuePanel(hsv: _hsv, onChanged: _updateHsv),
+            const SizedBox(height: 16),
+            // 色相条让出右侧一小块给「色块 + 十六进制」：当前值就在刚拖的那
+            // 根条旁边，不用再往上看；色相条本身仍然是整条可拖的。
             Row(
-              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                _ColorChip(color: _color, size: 22),
-                const SizedBox(width: 8),
+                Expanded(
+                  child: _HueBar(
+                    hue: _hsv.hue,
+                    onChanged: (hue) => _updateHsv(_hsv.withHue(hue)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _ColorChip(color: _color, size: 18),
+                const SizedBox(width: 6),
                 Text(
                   _hexOf(_color),
                   style: theme.textTheme.bodySmall?.copyWith(
@@ -127,17 +141,6 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
                   ),
                 ),
               ],
-            ),
-            if (widget.leading != null) ...[
-              const SizedBox(height: 12),
-              widget.leading!,
-            ],
-            const SizedBox(height: 12),
-            _SaturationValuePanel(hsv: _hsv, onChanged: _updateHsv),
-            const SizedBox(height: 16),
-            _HueBar(
-              hue: _hsv.hue,
-              onChanged: (hue) => _updateHsv(_hsv.withHue(hue)),
             ),
             const SizedBox(height: 20),
             widget.previewBuilder?.call(_previewColor) ??

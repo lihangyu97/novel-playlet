@@ -327,6 +327,23 @@ void main() {
       DialogueHighlightStyle.values,
       reason: '荧光笔 / 下划线 / 波浪线三种画法',
     );
+
+    // 布局：样式按钮组在色板上方，十六进制缩到色相条右边（同一行）。
+    final styleRect = tester.getRect(find.byKey(dialogueHighlightStyleKey));
+    final panelRect = tester.getRect(
+      find.byKey(const Key('theme-color-sv-panel')),
+    );
+    expect(styleRect.bottom, lessThan(panelRect.top), reason: '样式在最上面');
+    final hueRect = tester.getRect(
+      find.byKey(const Key('theme-color-hue-bar')),
+    );
+    final hexRect = tester.getRect(find.text('#FFD54F'));
+    expect(hexRect.left, greaterThan(hueRect.right), reason: '颜色值在色相条右边');
+    expect(
+      hexRect.center.dy,
+      closeTo(hueRect.center.dy, 2),
+      reason: '颜色值与色相条同一条水平线',
+    );
     expect(group.selected, {
       DialogueHighlightStyle.marker,
     }, reason: '默认荧光笔，老用户观感不变');
