@@ -8,19 +8,18 @@ import '../theme/app_theme.dart';
 /// 漫剧」共用）。
 ///
 /// 视觉约定：
-/// - 默认左对齐；当前 tab 用主题色高亮、字号比未选中略大，文字正下方有一条
-///   **与文字等宽的主色下划线**（小红书式短下划线，不是整行分割线）；
+/// - 默认左对齐；当前 tab 用主题色 + 加粗高亮（**字号不变**），文字正下方有
+///   一条**与文字等宽的主色下划线**（小红书式短下划线，不是整行分割线）；
 /// - 下划线是一条**跟着切换动画滑动的线**（[TabController.animation]）：点
 ///   tab 时从原位滑到新位置并顺带改变宽度，左右拖动内容区时跟着手指走；
-/// - 文字颜色/字号/字重在滑动过程中**连续插值**（同 [TextStyle.lerp]），
-///   不是到中点突然跳变；只有「视觉上选中」的判定（无障碍 selected、字号
-///   语义）在过半时切换；
-/// - 默认首个 tab 的文字左边缘与内容留白（8pt）对齐，**槽位宽度按选中字号
-///   （最大字号）预留**：字号在 15/17 间变化时左边缘和相邻 tab 都不挪位；
+/// - 文字颜色/字重在滑动过程中**连续插值**（同 [TextStyle.lerp]），不是到
+///   中点突然跳变；只有「视觉上选中」的判定（无障碍 selected）在过半时切换；
+/// - 默认首个 tab 的文字左边缘与内容留白（8pt）对齐，**槽位宽度按选中态
+///   （加粗）预留**：字重变化时左边缘和相邻 tab 都不挪位；
 /// - [center] 为 true 时整组 tabs 在可用宽度内居中（推荐页用），居中只影响
 ///   整行落点，tab 之间的间距/字号规则完全不变；内容超宽时照旧可横向滚动；
-/// - 每个 tab 槽位宽度固定、整行高度固定、文字**贴同一条底线**：变大的字只
-///   向上长，不会推挤邻居；
+/// - 每个 tab 槽位宽度固定、整行高度固定、文字**贴同一条底线**，字号相同，
+///   不会推挤邻居；
 /// - 下划线**贴在整行底边**：文字底边与行底边之间只隔 [underlineGap] +
 ///   [underlineHeight]，行内不再留额外下边距，这样「tabs 上边距」与「下划线
 ///   到下方内容」的两段留白都由调用方（页头 / 内容区）统一决定，两段能做成
@@ -35,11 +34,14 @@ class CategoryTabBar extends StatefulWidget {
   }) : assert(labels.length == controller.length);
 
   /// 整行固定高度（含文字上方的触控留白和下划线）。
-  static const double height = 35;
+  ///
+  /// 15pt 字（行盒约 23）+ 顶部 4 + 下划线区 5 = 32：文字上方留 4、下划线
+  /// 紧贴文字下方 2pt，整行底边就是下划线底边，调用方在上下各留 8 就是
+  /// 等宽的「页头 → tabs」与「下划线 → 内容」。
+  static const double height = 32;
 
-  /// 未选中 / 选中字号，两者差值就是滑动时文字"放大"的幅度。
+  /// tab 字号：选中/未选中**同一个字号**，高亮只靠颜色 + 字重 + 下划线。
   static const double fontSize = 15;
-  static const double selectedFontSize = 17;
 
   /// 文字底边到下划线的间距 + 下划线自身高度。
   ///
@@ -87,14 +89,14 @@ class _CategoryTabBarState extends State<CategoryTabBar> {
       letterSpacing: 0.2,
     );
     final activeStyle = base.copyWith(
-      fontSize: CategoryTabBar.selectedFontSize,
+      fontSize: CategoryTabBar.fontSize,
       fontWeight: context.appWeight(FontWeight.w700),
       color: scheme.primary,
       letterSpacing: 0.2,
     );
 
-    // 宽度按选中态预留（两种状态里更宽的那个），字号插值过程中不会推挤
-    // 相邻 tab；下划线也按这条宽度算，静止时与选中文字等宽。
+    // 宽度按选中态（加粗，两种状态里更宽的那个）预留，字重插值过程中不会
+    // 推挤相邻 tab；下划线也按这条宽度算，静止时与选中文字等宽。
     final textWidths = [
       for (final label in widget.labels)
         _measureTextWidth(context, label, activeStyle),
@@ -135,7 +137,7 @@ class _CategoryTabBarState extends State<CategoryTabBar> {
                   _CategoryTab(
                     label: widget.labels[i],
                     width: slotWidths[i],
-                    // 颜色/字号/字重连续插值：离当前索引越近越"选中"。
+                    // 颜色/字重连续插值：离当前索引越近越"选中"（字号不变）。
                     style: TextStyle.lerp(
                       inactiveStyle,
                       activeStyle,
@@ -229,7 +231,7 @@ class _CategoryTab extends StatelessWidget {
   /// 整格宽度（文字宽度 + [CategoryTabBar.tabGap] 的尾部可点区域）。
   final double width;
 
-  /// 当前帧的文字样式（颜色/字号/字重已按动画进度插值）。
+  /// 当前帧的文字样式（颜色/字重已按动画进度插值；字号固定）。
   final TextStyle style;
 
   /// 无障碍语义上的选中态：过半即切换（视觉上早就开始渐变）。
@@ -249,7 +251,7 @@ class _CategoryTab extends StatelessWidget {
           height: CategoryTabBar.height,
           child: Align(
             // 左下对齐：左边缘始终贴内容留白；文字贴行底上方 [underlineGap]
-            // + [underlineHeight] 处，字号变化只向上长，底线不动。
+            // + [underlineHeight] 处，底线固定。
             alignment: Alignment.bottomLeft,
             child: Padding(
               padding: const EdgeInsets.only(

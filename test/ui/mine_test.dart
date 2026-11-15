@@ -362,7 +362,7 @@ void main() {
     expect(glow().spec, same(kMineTopGlow), reason: '切到短剧 tab 后渐变不应变化');
   });
 
-  /// tab 样式：无下划线，当前 tab 主题色高亮且字号比未选中大一号。
+  /// tab 样式：当前 tab 主题色 + 加粗高亮，字号与未选中一致（只换颜色/字重）。
   testWidgets('我的页-当前 tab 高亮且布局稳定', (tester) async {
     await pumpPreview(tester, const MinePage());
     final scheme = Theme.of(tester.element(find.byType(MinePage))).colorScheme;
@@ -378,17 +378,22 @@ void main() {
     expect(find.byType(TabBar), findsNothing, reason: '不用带下划线的 TabBar');
     expect(styleOf('小说').color, scheme.primary, reason: '当前 tab 用主题色高亮');
     expect(styleOf('短剧').color, scheme.onSurfaceVariant);
-    expect(styleOf('小说').fontSize, CategoryTabBar.selectedFontSize);
+    expect(styleOf('小说').fontSize, CategoryTabBar.fontSize);
     expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
+    expect(
+      styleOf('小说').fontWeight,
+      isNot(styleOf('短剧').fontWeight),
+      reason: '字号不变，靠字重 + 颜色区分选中',
+    );
 
-    // 两个 tab 的字号不同，但文字都贴在同一条底线上：变大的字只向上长。
+    // 两个 tab 字号相同、文字贴在同一条底线上。
     expect(
       tester.getBottomLeft(find.text('小说')).dy,
       tester.getBottomLeft(find.text('短剧')).dy,
       reason: '选中/未选中的文字必须贴同一条底线',
     );
 
-    // 首个 tab 文字左边缘与内容留白（8）对齐，按最大字号预留宽度。
+    // 首个 tab 文字左边缘与内容留白（8）对齐，按选中态字重预留宽度。
     expect(
       tester.getTopLeft(find.text('小说')).dx,
       closeTo(8, 0.5),
@@ -421,7 +426,7 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
     expect(styleOf('短剧').color, scheme.primary);
     expect(styleOf('小说').color, scheme.onSurfaceVariant);
-    expect(styleOf('短剧').fontSize, CategoryTabBar.selectedFontSize);
+    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
     expect(tester.getRect(find.byType(CategoryTabBar)), barBefore);
     expect(tester.getTopLeft(find.text('小说')).dx, novelLeftBefore);
     expect(tester.getTopLeft(find.text('短剧')).dx, dramaLeftBefore);
@@ -465,16 +470,11 @@ void main() {
     final gesture = await tester.startGesture(
       tester.getCenter(find.byType(TabBarView)),
     );
-    // 拖动约 10%：还远没过半，但字号/颜色已经朝短剧方向插值。
+    // 拖动约 10%：还远没过半，但颜色已经朝短剧方向插值；字号始终保持一致。
     await gesture.moveBy(const Offset(-40, 0));
     await tester.pump();
-    expect(styleOf('小说').fontSize, lessThan(CategoryTabBar.selectedFontSize));
-    expect(
-      styleOf('小说').fontSize,
-      greaterThan(CategoryTabBar.fontSize),
-      reason: '字号是连续插值，不是到中点才跳',
-    );
-    expect(styleOf('短剧').fontSize, greaterThan(CategoryTabBar.fontSize));
+    expect(styleOf('小说').fontSize, CategoryTabBar.fontSize);
+    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
     expect(styleOf('小说').color, isNot(scheme.primary));
     expect(styleOf('短剧').color, isNot(scheme.onSurfaceVariant));
     expect(
@@ -493,8 +493,7 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
     expect(styleOf('短剧').color, scheme.primary);
-    expect(styleOf('短剧').fontSize, CategoryTabBar.selectedFontSize);
-    expect(styleOf('小说').fontSize, CategoryTabBar.fontSize);
+    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
     expect(
       tester.getRect(underline).left,
       closeTo(tester.getRect(find.text('短剧')).left, 0.5),
