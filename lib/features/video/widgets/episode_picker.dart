@@ -6,6 +6,7 @@ import '../../../app/theme/app_theme.dart';
 
 import '../../../app/widgets/detail/detail_common.dart';
 import '../../../data/models/chapter.dart';
+import 'episode_tile.dart';
 
 /// 短剧详情里的选集：常驻展开，按固定集数自动分 tab。
 ///
@@ -174,7 +175,6 @@ class _EpisodePickerState extends State<EpisodePicker>
   Widget _buildGrid(int tab) {
     final start = tab * widget.episodesPerTab;
     final end = math.min(start + widget.episodesPerTab, widget.episodes.length);
-    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: LayoutBuilder(
@@ -191,24 +191,13 @@ class _EpisodePickerState extends State<EpisodePicker>
               for (var index = start; index < end; index++)
                 SizedBox(
                   width: itemWidth,
-                  height: EpisodePicker.buttonHeight,
-                  child: OutlinedButton(
-                    onPressed: () => widget.onOpen(index),
-                    style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                      textStyle: theme.textTheme.bodySmall?.copyWith(
-                        fontSize: 12,
-                      ),
-                      side: BorderSide(color: theme.colorScheme.outlineVariant),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
+                  child: EpisodeTile(
                     // 1000+ 集的剧只需要集数：去掉「第…集」前后缀。
-                    child: Text('${index + 1}'),
+                    index: index,
+                    height: EpisodePicker.buttonHeight,
+                    radius: 8,
+                    fontSize: 12,
+                    onTap: () => widget.onOpen(index),
                   ),
                 ),
             ],

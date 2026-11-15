@@ -3,11 +3,13 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
+import 'package:novel_playlet/app/widgets/chapter_directory_sheet.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/data/models/book_detail.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/features/detail/detail_action_bar.dart';
+import 'package:novel_playlet/features/detail/detail_directory_section.dart';
 import 'package:novel_playlet/features/detail/detail_hero.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
@@ -390,6 +392,56 @@ void main() {
       findsOneWidget,
     );
     expect(shelfAdd, findsNothing);
+  });
+
+  group('目录', () {
+    testWidgets('小说详情-目录行不画分割线', (tester) async {
+      await pumpPreview(tester, const DetailPage(bookId: '1'));
+      final section = find.byType(DetailDirectorySection);
+      await tester.scrollUntilVisible(
+        section,
+        240,
+        scrollable: _verticalScrollable,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: section, matching: find.byType(Divider)),
+        findsNothing,
+        reason: '目录行之间只靠行高/留白分行',
+      );
+    });
+
+    testWidgets('小说详情-查看全部目录复用阅读器弹层（可拖动滚动条）', (tester) async {
+      await pumpPreview(tester, const DetailPage(bookId: '1'));
+      final openAll = find.text('共 24 章 · 查看全部');
+      await tester.scrollUntilVisible(
+        openAll,
+        240,
+        scrollable: _verticalScrollable,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(openAll);
+      await tester.pumpAndSettle();
+
+      // 与阅读器目录是同一个组件，不再是另一套列表。
+      final sheet = find.byType(ChapterDirectorySheet);
+      expect(sheet, findsOneWidget);
+      final scrollbar = tester.widget<Scrollbar>(
+        find.descendant(of: sheet, matching: find.byType(Scrollbar)),
+      );
+      expect(scrollbar.thumbVisibility, isTrue);
+      expect(scrollbar.interactive, isTrue, reason: '右侧滚动条要能按住拖动');
+      // 详情页比阅读器多一层卷标题。
+      expect(find.text('第一卷'), findsOneWidget);
+
+      // 点章节直接进阅读页（弹层回传章节）。详情页正文里的目录卡片也有
+      // 同名章节，按弹层范围圈定。
+      await tester.tap(
+        find.descendant(of: sheet, matching: find.text('第一章 山中有剑')),
+      );
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.byType(ReaderPage), findsOneWidget);
+    });
   });
 
   testWidgets('详情页', (tester) async {

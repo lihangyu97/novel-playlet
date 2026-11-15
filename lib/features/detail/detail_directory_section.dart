@@ -81,20 +81,15 @@ class DetailDirectorySection extends StatelessWidget {
               ),
             )
           else
-            for (var i = 0; i < preview.length; i++) ...[
+            // 行间不画分割线：只靠行高和留白分行，和书评/剧评列表一致。
+            for (final (i, chapter) in preview.indexed)
               _ChapterRow(
-                key: ValueKey(preview[i].id),
-                chapter: preview[i],
-                current: preview[i].index == currentIndex,
-                onTap: () => onOpenChapter(preview[i]),
+                key: ValueKey(chapter.id),
+                chapter: chapter,
+                current: chapter.index == currentIndex,
+                last: i == preview.length - 1,
+                onTap: () => onOpenChapter(chapter),
               ),
-              if (i < preview.length - 1)
-                const Divider(
-                  height: 1,
-                  indent: detailGutter,
-                  endIndent: detailGutter,
-                ),
-            ],
           const SizedBox(height: 6),
         ],
       ),
@@ -108,10 +103,14 @@ class _ChapterRow extends StatelessWidget {
     required this.chapter,
     required this.onTap,
     this.current = false,
+    this.last = false,
   });
 
   final Chapter chapter;
   final bool current;
+
+  /// 最后一行给卡片底部留白，不靠 Divider 收尾。
+  final bool last;
   final VoidCallback onTap;
 
   @override
@@ -124,9 +123,11 @@ class _ChapterRow extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: detailGutter,
-          vertical: 12,
+        padding: EdgeInsets.fromLTRB(
+          detailGutter,
+          12,
+          detailGutter,
+          last ? detailGutter : 12,
         ),
         child: Row(
           children: [

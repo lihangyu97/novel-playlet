@@ -11,6 +11,7 @@ import '../../app/providers.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_bottom_sheet.dart';
+import '../../app/widgets/chapter_directory_sheet.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/chapter.dart';
@@ -1616,11 +1617,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       context: context,
       builder: (sheetContext) => Theme(
         data: _readerTheme(paper),
-        child: ReaderDirectorySheet(
+        child: ChapterDirectorySheet(
           chapters: session.chapters,
           currentIndex: session.index,
-          background: paper.background,
-          foreground: paper.foreground,
+          backgroundColor: paper.background,
+          foregroundColor: paper.foreground,
           onSelected: (index) {
             Navigator.of(sheetContext).pop();
             _pendingEntry = null;
