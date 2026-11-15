@@ -422,7 +422,7 @@ void main() {
       final state = container.read(offlineDownloaderProvider)!;
       expect(state.status, OfflineTaskStatus.paused);
       expect(state.completed, 2);
-      expect(state.error, contains('空间不足'));
+      expect(state.error, contains('离线缓存已满'));
       expect(await smallCapStore.hasEpisode('s1', 'e2'), isFalse);
     });
 

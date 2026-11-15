@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
 
+import '../../../app/widgets/app_section_header.dart';
 import '../../../app/widgets/detail/detail_common.dart';
 import '../../../data/models/chapter.dart';
 import 'episode_tile.dart';
@@ -73,8 +74,6 @@ class _EpisodePickerState extends State<EpisodePicker>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final total = widget.episodes.length;
 
     // 与简介 / 剧评同一套卡风格：标题、tab、集数网格都收在卡片里；
@@ -84,28 +83,10 @@ class _EpisodePickerState extends State<EpisodePicker>
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          Padding(
+          AppSectionHeader(
+            title: '选集',
+            hint: '共 $total 集',
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Row(
-              children: [
-                Text(
-                  '选集',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: context.appWeight(FontWeight.w600),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '共 $total 集',
-                    textAlign: TextAlign.right,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
           _buildExpanded(context),
         ],

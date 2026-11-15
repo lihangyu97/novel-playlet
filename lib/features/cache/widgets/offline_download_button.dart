@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/widgets/app_snack_bar.dart';
+import '../../../core/cache/app_cache.dart' show formatBytes;
 import '../../../app/router.dart';
 import '../../../app/widgets/detail_circle_button.dart';
 import '../../../data/models/chapter.dart';
@@ -123,8 +124,8 @@ Future<void> startOfflineDownload(
     if (!context.mounted) return;
     _showMessage(
       context,
-      '离线区空间不足（已用 ${_formatBytes(error.usedBytes)} / 上限 '
-      '${_formatBytes(error.capBytes)}），请先在「我的 → 缓存」页删除不需要的缓存',
+      '离线缓存已满（已用 ${formatBytes(error.usedBytes)} / 上限 '
+      '${formatBytes(error.capBytes)}），请先删除不需要的缓存',
     );
   } on OfflineQueueFullException catch (error) {
     if (!context.mounted) return;
@@ -137,15 +138,4 @@ Future<void> startOfflineDownload(
 
 void _showMessage(BuildContext context, String message) {
   showAppSnackBar(context, message);
-}
-
-String _formatBytes(int bytes) {
-  if (bytes >= 1024 * 1024 * 1024) {
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
-  }
-  if (bytes >= 1024 * 1024) {
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-  }
-  if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  return '$bytes B';
 }
