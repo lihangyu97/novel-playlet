@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/widgets/compact_card_row.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/states.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
@@ -248,7 +249,7 @@ void main() {
 
     // 卡宽 = (屏宽 - 两侧留白 - 3 个卡间距) / 3.5。
     final screenWidth = _screenWidth(tester);
-    final expected = SearchPage.cardWidthFor(screenWidth);
+    final expected = CompactCardRow.cardWidthFor(screenWidth);
     expect(expected, closeTo(100, 0.01));
     final card = tester.getSize(find.byType(NovelGridCard).first);
     expect(card.width, closeTo(expected, 0.01));
@@ -256,7 +257,7 @@ void main() {
     // 第 4 张卡右边缘已经超出屏幕：一屏只完整露出 3 张 + 半张。
     final fourth = find.byType(NovelGridCard).at(3);
     final fourthLeft =
-        SearchPage.rowPadding + 3 * (expected + SearchPage.cardGap);
+        CompactCardRow.rowPadding + 3 * (expected + CompactCardRow.cardGap);
     expect(tester.getTopLeft(fourth).dx, closeTo(fourthLeft, 0.01));
     expect(tester.getTopLeft(fourth).dx + expected, greaterThan(screenWidth));
   });

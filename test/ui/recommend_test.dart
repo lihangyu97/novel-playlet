@@ -184,10 +184,18 @@ void main() {
       closeTo(390 - bar.right, 0.5),
       reason: '搜索入口一侧的留白要有左侧镜像，tabs 才在屏幕中间',
     );
-    // 搜索入口与 tabs 同一行：方块底边与下划线同一条线，右侧留白 8。
-    final entryRect = tester.getRect(entry);
-    expect(entryRect.bottom, closeTo(bar.bottom, 0.5));
-    expect(entryRect.right, closeTo(390 - 8, 0.5));
+    // 搜索入口与 tabs 同一行：整行贴行底，右侧留白 8；图标本身没有底色，
+    // 只占 40×40 的触控区（Tooltip 是图标内容，量按钮本身）。
+    final entryButton = tester.getRect(find.byType(IconButton));
+    expect(entryButton.bottom, closeTo(bar.bottom, 0.5));
+    expect(entryButton.right, closeTo(390 - 8, 0.5));
+    expect(
+      (tester.getRect(find.byIcon(Icons.search_rounded)).center.dy -
+              tester.getRect(find.text('小说')).center.dy)
+          .abs(),
+      lessThan(3),
+      reason: '放大镜与 tab 文字基本同一水平线',
+    );
 
     final scrollView = tester.widget<SingleChildScrollView>(
       find.descendant(

@@ -6,6 +6,8 @@ import 'package:novel_playlet/features/rank/rank_providers.dart';
 import 'package:novel_playlet/features/rank/widgets/rank_preview_card.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
+import 'package:novel_playlet/app/widgets/compact_card_row.dart';
+import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/features/recommend/recommend_category.dart';
 
@@ -229,13 +231,36 @@ void main() {
       ),
     );
 
+    // 版式与搜索结果页一致：榜名在卡片外面，下面是同款紧凑卡。
     expect(find.text('推荐榜'), findsOneWidget);
     expect(find.text('更多'), findsOneWidget);
+    expect(
+      find.ancestor(
+        of: find.text('推荐榜'),
+        matching: find.byType(AppSurfaceCard),
+      ),
+      findsNothing,
+      reason: '榜名在卡片外面，不再包在白色卡片里',
+    );
+    final firstCard = find.byType(NovelGridCard).first;
+    expect(
+      tester.getTopLeft(find.text('推荐榜')).dy,
+      lessThan(tester.getTopLeft(firstCard).dy),
+      reason: '榜名在卡片上方',
+    );
+    // 一屏 3.5 张的卡宽口径（与搜索结果同一套）。
+    expect(
+      tester.getSize(firstCard).width,
+      closeTo(CompactCardRow.cardWidthFor(390), 0.01),
+    );
     expect(find.text('榜书1'), findsOneWidget);
     expect(find.text('榜书2'), findsOneWidget);
     expect(find.text('榜书3'), findsOneWidget);
-    expect(find.text('榜书4'), findsNothing);
-    expect(find.text('作者1 · 玄幻 · 9000万热度'), findsOneWidget);
+    expect(find.text('榜书4'), findsNothing, reason: '只预览前三条');
+    // 卡面元信息与搜索卡一致：作者一行、热度单独一行，分类不再挤进来。
+    expect(find.text('作者1'), findsOneWidget);
+    expect(find.text('9000万热度'), findsOneWidget);
+    expect(find.text('作者1 · 玄幻 · 9000万热度'), findsNothing);
     // 首页卡片不再带 1/2/3 名次标号。
     expect(find.text('1'), findsNothing);
     expect(find.text('2'), findsNothing);
@@ -316,9 +341,9 @@ void main() {
     expect(find.text('榜书2'), findsOneWidget);
     expect(find.text('榜书3'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('推荐榜')).dy,
-      lessThan(tester.getTopLeft(find.byType(NovelGridCard).first).dy),
-      reason: '榜单卡片应在瀑布流上方',
+      tester.getBottomLeft(find.byType(RankPreviewCardView)).dy,
+      lessThanOrEqualTo(tester.getTopLeft(find.text('剑来')).dy),
+      reason: '榜单区块应在推荐瀑布流上方',
     );
     // tabs 的下划线贴行底：下划线到榜单卡片留 8pt，不贴着卡片。
     final bar = tester.getRect(find.byType(CategoryTabBar));

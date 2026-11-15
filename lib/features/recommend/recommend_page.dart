@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/widgets/app_snack_bar.dart';
-import '../feed/feed_search_field.dart';
 import '../feed/feed_staggered_grid.dart';
 import '../feed/feed_view.dart';
 import '../rank/rank_providers.dart';
@@ -24,7 +23,7 @@ import 'recommend_state.dart';
 /// 合并后的「推荐」页：顶部分类 tabs + 右侧搜索入口 + 每个分类一条流。
 ///
 /// 搜索是独立页面（`lib/features/search/`）：推荐页顶栏不再放整行搜索框，
-/// 只留右侧一个放大镜入口（点一下进搜索页，一次搜小说 / 短剧），整体是
+/// 只留右侧一个放大镜图标入口（点一下进搜索页，一次搜小说 / 短剧），整体是
 /// 小红书式的「分类 tabs + 搜索图标」顶栏。分类 tabs 各自保留自己的列表、
 /// 游标与滚动位置；分类 tabs 与内容都支持左右滑动（tabs 用与我页共用的
 /// [CategoryTabBar]，内容用 `TabBarView`）。
@@ -347,48 +346,29 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
   }
 }
 
-/// 顶栏右侧的搜索入口：40×40 圆角方块 + 一个放大镜，点一下进独立搜索页。
+/// 顶栏右侧的搜索入口：一个独立的放大镜图标，点一下进独立搜索页。
 ///
-/// 小红书式：推荐页不再有整行搜索框，搜索入口收成一个图标按钮，占的正是
-/// 以前「已缓存」按钮的位置（同尺寸、同底色、同圆角），文字只走 Tooltip /
-/// 无障碍标签。缓存中心入口已经挪到「我的」页头，顶栏只留搜索。
+/// 不再套白色圆角底：顶栏本身就是「tabs + 图标」的轻量结构，图标和「我的」
+/// 页头的设置/缓存入口同一套线性图标（同尺寸、同色、同样只带水波纹），
+/// 文字只走 Tooltip / 无障碍标签。缓存中心入口在「我的」页头，顶栏只留搜索。
 class _SearchEntryButton extends StatelessWidget {
   const _SearchEntryButton({required this.onTap});
 
-  /// 与「我的」页头图标按钮同高，也是本页顶栏的行高。
+  /// 图标按钮的触控区大小，也是本页顶栏的行高。
   static const double size = 40;
 
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final radius = BorderRadius.circular(FeedSearchField.radius);
-    return Tooltip(
-      message: '搜索',
-      child: Semantics(
-        button: true,
-        label: '搜索',
-        child: Material(
-          color: FeedSearchField.surfaceColor(context),
-          borderRadius: radius,
-          child: InkWell(
-            borderRadius: radius,
-            onTap: onTap,
-            child: SizedBox(
-              width: size,
-              height: size,
-              child: Center(
-                child: Icon(
-                  Icons.search_rounded,
-                  size: 20,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
+    return IconButton(
+      onPressed: onTap,
+      tooltip: '搜索',
+      iconSize: 22,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(width: size, height: size),
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      icon: const Icon(Icons.search_rounded),
     );
   }
 }
