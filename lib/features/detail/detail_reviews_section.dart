@@ -4,6 +4,7 @@ import '../../app/theme/app_theme.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/widgets/comment_emoji_text.dart';
 import '../../app/widgets/comment_image_strip.dart';
 import '../../app/widgets/detail/detail_common.dart';
 import '../../data/models/book_comment.dart';
@@ -249,8 +250,8 @@ class DetailReviewRow extends StatelessWidget {
                 ),
                 if (text.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  Text(
-                    text,
+                  CommentEmojiText(
+                    text: text,
                     maxLines: maxLines,
                     overflow: maxLines == null
                         ? TextOverflow.visible

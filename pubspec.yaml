@@ -54,3 +54,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/config/
+    # 评论/回复正文的方括号表情（官方 53 个 token 对应的 120×120 webp）。
+    # 素材来自 fqapp 的 drawable-xxhdpi，单张 1.6–3.4 KB，合计约 126 KB。
+    - assets/images/emoji/

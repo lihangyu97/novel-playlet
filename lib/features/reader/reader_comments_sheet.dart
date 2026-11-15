@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_bottom_sheet.dart';
+import '../../app/widgets/comment_emoji_text.dart';
 import '../../app/widgets/comment_image_strip.dart';
 import '../../data/api/api_client.dart';
 import '../../data/models/book_comment.dart';
@@ -426,8 +427,8 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
                     _buildNameRow(comment, scheme, foreground),
                     if (comment.text.trim().isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(
-                        comment.text,
+                      CommentEmojiText(
+                        text: comment.text,
                         style: TextStyle(
                           fontSize: 14,
                           height: 1.5,
@@ -647,8 +648,8 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
                 ),
                 if (reply.text.trim().isNotEmpty) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    reply.text,
+                  CommentEmojiText(
+                    text: reply.text,
                     style: TextStyle(
                       fontSize: 13,
                       height: 1.45,
