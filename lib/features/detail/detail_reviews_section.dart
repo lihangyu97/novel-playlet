@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../app/theme/app_theme.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/widgets/comment_image_strip.dart';
@@ -154,7 +157,7 @@ class _LoadedReviews extends StatelessWidget {
                 '查看全部 $total 条',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: scheme.primary,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: context.appWeight(FontWeight.w600),
                 ),
               ),
               Icon(
@@ -217,7 +220,7 @@ class DetailReviewRow extends StatelessWidget {
               initial,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onPrimaryContainer,
-                fontWeight: FontWeight.w600,
+                fontWeight: context.appWeight(FontWeight.w600),
               ),
             ),
           ),
@@ -234,7 +237,7 @@ class DetailReviewRow extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
+                          fontWeight: context.appWeight(FontWeight.w600),
                         ),
                       ),
                     ),

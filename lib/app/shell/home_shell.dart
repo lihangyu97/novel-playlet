@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../theme/app_theme.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/mine/mine_page.dart';
@@ -108,8 +111,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             return TextStyle(
               fontSize: 12,
               fontWeight: states.contains(WidgetState.selected)
-                  ? FontWeight.w600
-                  : FontWeight.w400,
+                  ? context.appWeight(FontWeight.w600)
+                  : context.appWeight(FontWeight.w400),
               color: states.contains(WidgetState.selected)
                   ? scheme.primary
                   : scheme.onSurfaceVariant,

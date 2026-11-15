@@ -37,12 +37,13 @@ class DialogueHighlightPreview extends StatefulWidget {
       _DialogueHighlightPreviewState();
 }
 
-/// 分页缓存键：只有这四项变化才需要重新分页。
+/// 分页缓存键：只有这几项变化才需要重新分页。
 typedef _PaginationKey = ({
   double contentWidth,
   TextScaler textScaler,
   Brightness brightness,
   String? fontFamily,
+  FontWeight fontWeight,
 });
 
 class _PaginationCache {
@@ -71,11 +72,13 @@ class _DialogueHighlightPreviewState extends State<DialogueHighlightPreview> {
     final paper = theme.brightness == Brightness.dark
         ? ReaderPaper.night
         : ReaderPaper.parchment;
+    final fontWeight = context.appWeight(FontWeight.w400);
     final textStyle =
         AppTheme.readerText(
           fontSize: 17,
           lineHeight: 1.7,
           color: paper.foreground,
+          fontWeight: fontWeight,
         ).copyWith(
           inherit: false,
           fontFamily: theme.textTheme.bodyMedium?.fontFamily,
@@ -89,6 +92,7 @@ class _DialogueHighlightPreviewState extends State<DialogueHighlightPreview> {
           textScaler: textScaler,
           brightness: theme.brightness,
           fontFamily: theme.textTheme.bodyMedium?.fontFamily,
+          fontWeight: fontWeight,
         );
         var cache = _cache;
         if (cache == null || _cacheKey != key) {

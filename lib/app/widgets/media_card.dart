@@ -106,7 +106,7 @@ class MediaCard extends StatelessWidget {
     final scheme = theme.colorScheme;
     final coverHeight = width * coverAspect;
     final titleStyle = theme.textTheme.bodyMedium?.copyWith(
-      fontWeight: FontWeight.w600,
+      fontWeight: context.appWeight(FontWeight.w600),
       height: titleLineHeightFactor,
     );
     // 紧凑网格把标题盒固定撑成两行：书名只有一行时也把标题与元信息的间距
@@ -288,10 +288,10 @@ class _CornerBadge extends StatelessWidget {
           text,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
+          style: TextStyle(
             color: Colors.white,
             fontSize: 11,
-            fontWeight: FontWeight.w600,
+            fontWeight: context.appWeight(FontWeight.w600),
             height: 1.15,
           ),
         ),

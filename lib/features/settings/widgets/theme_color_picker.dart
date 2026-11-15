@@ -242,7 +242,7 @@ class _ThemePreviewState extends State<_ThemePreview> {
                   style: TextStyle(
                     fontSize: 12.5,
                     color: previewScheme.primary,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: context.appWeight(FontWeight.w600),
                   ),
                 ),
               ],

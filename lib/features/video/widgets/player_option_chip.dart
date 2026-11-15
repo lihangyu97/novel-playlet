@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/theme/app_theme.dart';
+
 /// 播放器控制条上的文字选项 chip（倍速 / 清晰度共用）。
 ///
 /// 播放页是黑底视频 + 白色控制条，这个组件故意不走 `colorScheme`：与
@@ -41,7 +43,10 @@ class PlayerOptionChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         side: border,
       ),
-      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      textStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: context.appWeight(FontWeight.w600),
+      ),
     );
 
     if (onTap == null) {
@@ -61,9 +66,9 @@ class PlayerOptionChip extends StatelessWidget {
             ),
             child: Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                fontWeight: FontWeight.w600,
+                fontWeight: context.appWeight(FontWeight.w600),
                 color: Colors.white70,
               ),
             ),

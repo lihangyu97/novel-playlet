@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_version.dart';
-import '../../app/widgets/app_snack_bar.dart';
+import '../../app/theme/app_font_weight.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/theme_settings.dart';
+import '../../app/widgets/app_snack_bar.dart';
 import '../../core/cache/app_cache.dart';
 // 设置页集中放全站偏好，会跨 feature 引用偏好 provider（视频清晰度 / 推荐布局）。
 // 偏好本身归功能域所有，但入口统一在设置页，所以这里的跨域 import 是约定的。
@@ -15,7 +16,7 @@ import 'settings_providers.dart';
 import 'widgets/dialogue_highlight_preview.dart';
 import 'widgets/theme_color_picker.dart';
 
-/// 设置页：主题（主题色 / 深浅色 / 首页推荐布局）+ 存储 + 视频。
+/// 设置页：主题（主题色 / 深浅色 / 推荐流布局 / 全局字重）+ 存储 + 视频。
 ///
 /// 从「我的」右上角进。这里只放全局偏好与可重建缓存，书架/阅读进度属于用户
 /// 数据，不给清理入口（那些在「我的」页里操作）。
@@ -39,6 +40,7 @@ class SettingsPage extends StatelessWidget {
             SizedBox(height: 12),
             _AppearanceCard(),
             SizedBox(height: 12),
+            _GlobalFontWeightCard(),
             _FeedLayoutCard(),
             _SectionTitle('存储'),
             _StorageCard(),
@@ -65,7 +67,7 @@ class _SectionTitle extends StatelessWidget {
       child: Text(
         title,
         style: Theme.of(context).textTheme.titleMedium
-            ?.copyWith(fontWeight: FontWeight.w600),
+            ?.copyWith(fontWeight: context.appWeight(FontWeight.w600)),
       ),
     );
   }
@@ -207,7 +209,7 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
                 Text(
                   '对话高亮',
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+                    fontWeight: context.appWeight(FontWeight.w600),
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -437,7 +439,7 @@ class _SwitchRow extends StatelessWidget {
                 Text(
                   title,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+                    fontWeight: context.appWeight(FontWeight.w600),
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -460,7 +462,89 @@ class _SwitchRow extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 首页推荐布局
+// 全局字重（仅 Android）
+// ---------------------------------------------------------------------------
+
+/// 全局字重滑块；测试用它拖动和断言。
+const Key globalFontWeightKey = Key('settings-global-font-weight');
+
+/// 全局字重：只有 Android 显示，iOS 保持现在的写死字重。
+///
+/// 拖动时只更新本地预览，松手才写入 provider：整站主题重建一次即可，避免
+/// 每个 tick 都重建 MaterialApp。阅读器默认跟随这个值，进入阅读器后还能
+/// 单独覆盖。
+class _GlobalFontWeightCard extends ConsumerStatefulWidget {
+  const _GlobalFontWeightCard();
+
+  @override
+  ConsumerState<_GlobalFontWeightCard> createState() =>
+      _GlobalFontWeightCardState();
+}
+
+class _GlobalFontWeightCardState extends ConsumerState<_GlobalFontWeightCard> {
+  double? _preview;
+
+  @override
+  Widget build(BuildContext context) {
+    if (Theme.of(context).platform != TargetPlatform.android) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final weight = ref.watch(appFontWeightProvider);
+    final value = _preview ?? weight.value.toDouble();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: _Card(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Text(
+                    '全局字重',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: context.appWeight(FontWeight.w600),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  '${value.round()}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+            Slider(
+              key: globalFontWeightKey,
+              min: appFontWeightSteps.first.toDouble(),
+              max: appFontWeightSteps.last.toDouble(),
+              divisions: appFontWeightSteps.length - 1,
+              value: value,
+              label: '${value.round()}',
+              onChanged: (next) => setState(() => _preview = next),
+              onChangeEnd: (next) {
+                ref
+                    .read(appFontWeightProvider.notifier)
+                    .setFontWeight(appFontWeightFromValue(next.round()));
+                setState(() => _preview = null);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 推荐流布局
 // ---------------------------------------------------------------------------
 
 /// 每个布局选项的 key：测试直接点，不依赖文案。
@@ -473,10 +557,11 @@ Key recommendLayoutOptionKey(RecommendLayout layout) =>
 const Key recommendLayoutTwoKey = ValueKey('recommend-layout-two');
 const Key recommendLayoutThreeKey = ValueKey('recommend-layout-three');
 
-/// 首页推荐布局：双列 / 三列瀑布流。
+/// 推荐流布局：双列 / 三列瀑布流。
 ///
-/// 与「离线下载清晰度」同一套控件（小标题 + ChoiceChip），标题和选项收在
-/// 同一行；不再额外写「封面更大 / 一屏更多」的说明文案。
+/// 标题和选项收在同一行。选项不参与 Row 的 flex：标题再短、字体再大，两个
+/// chip 也按自身宽度占位，不会因为标题先分走一半宽度而折成两行；标题自身
+/// 超宽时省略。
 /// 默认双列，改完立即生效（推荐页 watch 同一个 provider）。
 class _FeedLayoutCard extends ConsumerWidget {
   const _FeedLayoutCard();
@@ -492,28 +577,29 @@ class _FeedLayoutCard extends ConsumerWidget {
         children: [
           Expanded(
             child: Text(
-              '首页推荐布局',
+              '推荐流布局',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
+                fontWeight: context.appWeight(FontWeight.w600),
               ),
             ),
           ),
           const SizedBox(width: 12),
-          Flexible(
-            child: Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                for (final option in RecommendLayout.values)
-                  ChoiceChip(
-                    key: recommendLayoutOptionKey(option),
-                    label: Text(option.label),
-                    selected: option == layout,
-                    onSelected: (_) => controller.setLayout(option),
-                  ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final option in RecommendLayout.values) ...[
+                if (option != RecommendLayout.values.first)
+                  const SizedBox(width: 8),
+                ChoiceChip(
+                  key: recommendLayoutOptionKey(option),
+                  label: Text(option.label),
+                  selected: option == layout,
+                  onSelected: (_) => controller.setLayout(option),
+                ),
               ],
-            ),
+            ],
           ),
         ],
       ),
@@ -546,7 +632,7 @@ class _VideoDownloadQualityCard extends ConsumerWidget {
           Text(
             '离线下载清晰度',
             style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
+              fontWeight: context.appWeight(FontWeight.w600),
             ),
           ),
           const SizedBox(height: 10),
@@ -716,7 +802,7 @@ class _StorageCardState extends ConsumerState<_StorageCard> {
               child: Text(
                 '共 ${formatBytes(usage.total)}',
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+                  fontWeight: context.appWeight(FontWeight.w600),
                 ),
               ),
             ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+
 /// 一级分类 tabs 的通用样式（我的页「小说 / 短剧」、推荐页「小说 / 短剧 /
 /// 漫剧」共用）。
 ///
@@ -91,13 +93,13 @@ class _CategoryTabBarState extends State<CategoryTabBar> {
     final base = theme.textTheme.titleMedium ?? const TextStyle();
     final inactiveStyle = base.copyWith(
       fontSize: CategoryTabBar.fontSize,
-      fontWeight: FontWeight.w500,
+      fontWeight: context.appWeight(FontWeight.w500),
       color: scheme.onSurfaceVariant,
       letterSpacing: 0.2,
     );
     final activeStyle = base.copyWith(
       fontSize: CategoryTabBar.selectedFontSize,
-      fontWeight: FontWeight.w700,
+      fontWeight: context.appWeight(FontWeight.w700),
       color: scheme.primary,
       letterSpacing: 0.2,
     );

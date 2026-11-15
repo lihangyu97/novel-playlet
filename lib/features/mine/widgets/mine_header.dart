@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/theme/app_theme.dart';
+
 /// 我的页页头：图标 + 主标题 + 一行合并统计 + 设置入口。
 ///
 /// 小说/短剧两个 tab 共用**同一个**页头（固定贴顶、不随内容滚动），不再按
@@ -48,7 +50,7 @@ class MineHeader extends StatelessWidget {
               Text(
                 title,
                 style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
+                  fontWeight: context.appWeight(FontWeight.w700),
                   letterSpacing: -0.2,
                 ),
               ),
@@ -87,7 +89,9 @@ class MineSectionHeader extends StatelessWidget {
       title,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+      style: theme.textTheme.titleMedium?.copyWith(
+        fontWeight: context.appWeight(FontWeight.w600),
+      ),
     );
     final hintText = hint == null
         ? null

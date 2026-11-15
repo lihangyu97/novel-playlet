@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+
+import '../../app/theme/app_theme.dart';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
@@ -1510,10 +1513,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
             Text(
               failure.title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
                 fontSize: 16,
-                fontWeight: FontWeight.w600,
+                fontWeight: context.appWeight(FontWeight.w600),
               ),
             ),
             const SizedBox(height: 8),
@@ -1621,10 +1624,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                   widget.args.seriesTitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
                     fontSize: 15,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: context.appWeight(FontWeight.w600),
                   ),
                 ),
                 const SizedBox(height: 2),

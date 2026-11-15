@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
+import '../theme/app_theme.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/models/comment_image.dart';
@@ -171,10 +174,10 @@ class _CommentThumbnail extends StatelessWidget {
                     child: Center(
                       child: Text(
                         '+$overlayCount',
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.white,
                           fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: context.appWeight(FontWeight.w600),
                         ),
                       ),
                     ),

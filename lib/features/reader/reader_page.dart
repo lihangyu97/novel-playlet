@@ -215,6 +215,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final provider = readerSessionProvider(widget.args);
     final session = ref.watch(provider);
     final settings = ref.watch(readerSettingsProvider);
+    final fontWeight = ref.watch(readerEffectiveFontWeightProvider);
     final controller = ref.read(provider.notifier);
     // 段评是当前「正在显示」那一章的；切章加载期间正文仍是上一章，用
     // contentIndex 而不是 index，避免把下一章的计数画到上一章上。
@@ -267,7 +268,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   // 其余控件都显式传色，包一层主题只影响气泡与空/错态视图。
                   child: Theme(
                     data: _readerTheme(settings.paper),
-                    child: _buildBody(session, settings, controller, ideas),
+                    child: _buildBody(
+                      session,
+                      settings,
+                      controller,
+                      ideas,
+                      fontWeight,
+                    ),
                   ),
                 ),
               ),
@@ -308,6 +315,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     ReaderSettings settings,
     ReaderController controller,
     ChapterIdeas ideas,
+    FontWeight fontWeight,
   ) {
     final paper = settings.paper;
     final error = session.error;
@@ -335,7 +343,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (content.isEmpty) {
       return _buildStatus(paper, _buildEmptyChapter(session, controller));
     }
-    return _buildPagedContent(session, settings, content, controller, ideas);
+    return _buildPagedContent(
+      session,
+      settings,
+      content,
+      controller,
+      ideas,
+      fontWeight,
+    );
   }
 
   /// 共享状态视图在夜间底色下要换一套亮色 scheme，否则文字会看不清。
@@ -405,13 +420,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     ChapterContent content,
     ReaderController controller,
     ChapterIdeas ideas,
+    FontWeight fontWeight,
   ) {
     final paper = settings.paper;
     final foreground = paper.foreground;
     // 在 build 阶段取一次主题字体，避免在 LayoutBuilder 的布局阶段做
     // InheritedWidget 查找；测量与渲染用同一个值。
     final fontFamily = Theme.of(context).textTheme.bodyMedium?.fontFamily;
-    final textStyle = _readerTextStyle(settings, foreground, fontFamily);
+    final textStyle = _readerTextStyle(
+      settings,
+      foreground,
+      fontFamily,
+      fontWeight,
+    );
     final textScaler = MediaQuery.textScalerOf(context);
     final infoStyle = TextStyle(
       fontSize: 11.5,
@@ -429,7 +450,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           height: pageHeight,
           fontSize: settings.fontSize,
           lineHeight: settings.lineHeight,
-          fontWeight: settings.fontWeight,
+          fontWeight: fontWeight,
           fontFamily: fontFamily,
           textScaler: textScaler,
           showBubbles: settings.showBubbles,
@@ -926,12 +947,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     ReaderSettings settings,
     Color color,
     String? fontFamily,
+    FontWeight fontWeight,
   ) {
     return AppTheme.readerText(
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
       color: color,
-      fontWeight: settings.fontWeight,
+      fontWeight: fontWeight,
     ).copyWith(inherit: false, fontFamily: fontFamily);
   }
 

@@ -478,7 +478,7 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 13,
-              fontWeight: FontWeight.w600,
+              fontWeight: context.appWeight(FontWeight.w600),
               color: foreground,
             ),
           ),
@@ -635,7 +635,7 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 12,
-                          fontWeight: FontWeight.w500,
+                          fontWeight: context.appWeight(FontWeight.w500),
                           color: foreground,
                         ),
                       ),
@@ -702,7 +702,7 @@ class _ReaderCommentsSheetState extends ConsumerState<ReaderCommentsSheet> {
         initial,
         style: TextStyle(
           fontSize: radius * 0.8,
-          fontWeight: FontWeight.w600,
+          fontWeight: context.appWeight(FontWeight.w600),
           color: scheme.primary,
         ),
       ),

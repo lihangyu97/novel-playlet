@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../app/theme/app_theme.dart';
+
 import '../../../app/widgets/app_bottom_sheet.dart';
 import '../../../data/models/chapter.dart';
 
@@ -98,13 +100,13 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
             labelPadding: const EdgeInsets.symmetric(horizontal: 8),
             labelColor: scheme.primary,
             unselectedLabelColor: scheme.onSurfaceVariant,
-            labelStyle: const TextStyle(
+            labelStyle: TextStyle(
               fontSize: 13,
-              fontWeight: FontWeight.w600,
+              fontWeight: context.appWeight(FontWeight.w600),
             ),
-            unselectedLabelStyle: const TextStyle(
+            unselectedLabelStyle: TextStyle(
               fontSize: 13,
-              fontWeight: FontWeight.w400,
+              fontWeight: context.appWeight(FontWeight.w400),
             ),
             indicator: const BoxDecoration(),
             indicatorSize: TabBarIndicatorSize.label,
@@ -158,7 +160,9 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: selected ? scheme.onPrimary : scheme.onSurface,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            fontWeight: selected
+                ? context.appWeight(FontWeight.w700)
+                : context.appWeight(FontWeight.w500),
           ),
         );
         void onTap() => Navigator.of(context).pop(index);

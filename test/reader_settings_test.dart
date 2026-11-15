@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/theme/app_font_weight.dart';
 import 'package:novel_playlet/features/reader/reader_settings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -64,6 +65,63 @@ void main() {
     expect(container.read(readerSettingsProvider).fontWeight, FontWeight.w800);
     settings.setFontWeight(100);
     expect(container.read(readerSettingsProvider).fontWeight, FontWeight.w300);
+  });
+
+  test('阅读器默认跟随全局字重，单独调字重后覆盖', () async {
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer(
+      overrides: [
+        appEffectiveFontWeightProvider.overrideWithValue(FontWeight.w600),
+      ],
+    );
+    addTearDown(container.dispose);
+    expect(
+      container.read(readerSettingsProvider).followGlobalFontWeight,
+      isTrue,
+    );
+    expect(
+      container.read(readerEffectiveFontWeightProvider),
+      FontWeight.w600,
+      reason: '默认跟随全局时应使用全局值',
+    );
+
+    container.read(readerSettingsProvider.notifier).setFontWeight(700);
+    await pumpEventQueue();
+    expect(
+      container.read(readerSettingsProvider).followGlobalFontWeight,
+      isFalse,
+    );
+    expect(container.read(readerEffectiveFontWeightProvider), FontWeight.w700);
+
+    final restored = ProviderContainer(
+      overrides: [
+        appEffectiveFontWeightProvider.overrideWithValue(FontWeight.w600),
+      ],
+    );
+    addTearDown(restored.dispose);
+    await restored.read(readerSettingsProvider.notifier).restoreFuture;
+    expect(
+      restored.read(readerSettingsProvider).followGlobalFontWeight,
+      isFalse,
+      reason: '用户手动调过阅读器字重后，下次启动不能又被全局覆盖',
+    );
+    expect(restored.read(readerEffectiveFontWeightProvider), FontWeight.w700);
+  });
+
+  test('老版本已存阅读器字重的用户迁移为不跟随全局', () async {
+    SharedPreferences.setMockInitialValues({'reader_font_weight_v1': 700});
+    final container = ProviderContainer(
+      overrides: [
+        appEffectiveFontWeightProvider.overrideWithValue(FontWeight.w600),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container.read(readerSettingsProvider.notifier).restoreFuture;
+    expect(
+      container.read(readerSettingsProvider).followGlobalFontWeight,
+      isFalse,
+    );
+    expect(container.read(readerEffectiveFontWeightProvider), FontWeight.w700);
   });
 
   test('对话高亮颜色可改、落盘并在新容器恢复', () async {

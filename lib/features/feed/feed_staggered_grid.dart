@@ -32,7 +32,7 @@ class FeedStaggeredGrid<T> extends StatefulWidget {
 
   final List<T> items;
 
-  /// 列数（双列 / 三列），由设置里的首页推荐布局决定。
+  /// 列数（双列 / 三列），由设置里的推荐流布局决定。
   final int columns;
 
   /// (context, item, cellWidth) -> 卡片。卡片自己带 `ValueKey(itemId)`。

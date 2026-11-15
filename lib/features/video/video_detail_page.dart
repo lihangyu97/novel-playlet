@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../app/theme/app_theme.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/widgets/app_snack_bar.dart';
@@ -286,7 +289,7 @@ class VideoDetailPage extends ConsumerWidget {
         Text(
           '$raw分',
           style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w600,
+            fontWeight: context.appWeight(FontWeight.w600),
           ),
         ),
       ],

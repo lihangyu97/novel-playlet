@@ -78,7 +78,7 @@ class MineRecentTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
+                      fontWeight: context.appWeight(FontWeight.w600),
                     ),
                   ),
                   const SizedBox(height: _titleGap),

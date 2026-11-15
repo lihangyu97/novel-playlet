@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../app/theme/app_theme.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/router.dart';
@@ -231,7 +234,7 @@ class _SearchHistoryView extends ConsumerWidget {
               Text(
                 '搜索历史',
                 style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
+                  fontWeight: context.appWeight(FontWeight.w600),
                 ),
               ),
               const Spacer(),
@@ -359,7 +362,7 @@ class _SearchSection extends ConsumerWidget {
               child: Text(
                 category.label,
                 style: Theme.of(context).textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w600),
+                    ?.copyWith(fontWeight: context.appWeight(FontWeight.w600)),
               ),
             ),
             if (items.isNotEmpty)

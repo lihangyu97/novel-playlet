@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../app/theme/app_theme.dart';
+
 import '../../data/models/chapter_ideas.dart';
 
 /// 段评气泡的尾巴宽度（逻辑值，未乘缩放）：气泡本体 = 盒子宽度减尾巴，
@@ -71,7 +73,7 @@ class ReaderParagraphBubble extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 height: 1,
-                fontWeight: FontWeight.w600,
+                fontWeight: context.appWeight(FontWeight.w600),
                 color: color,
               ),
             ),

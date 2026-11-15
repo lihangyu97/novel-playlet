@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../app/theme/app_font_weight.dart';
 import '../../app/theme/app_theme.dart';
 
 /// 阅读排版偏好。
@@ -14,6 +15,7 @@ class ReaderSettings {
     this.fontSize = 21,
     this.lineHeight = 1.8,
     this.fontWeight = FontWeight.w400,
+    this.followGlobalFontWeight = true,
     this.paper = ReaderPaper.parchment,
     this.dayPaper = ReaderPaper.parchment,
     this.showBubbles = true,
@@ -30,8 +32,19 @@ class ReaderSettings {
   /// 1.3–2.0 的行高倍数。
   final double lineHeight;
 
-  /// 正文字重（300–800，与设置里的滑块一致）。参与分页测量。
+  /// 正文字重覆盖值（300–800，与设置里的滑块一致）。
+  ///
+  /// [followGlobalFontWeight] 为 true 时不用它，改用全局字重；用户拖过
+  /// 阅读器里的字重滑块后会自动关掉跟随。参与分页测量。
   final FontWeight fontWeight;
+
+  /// 是否跟随「设置 → 全局字重」。默认跟随；老版本已经单独调过阅读器字重
+  /// 的用户在恢复时会被迁移为 false，避免升级后丢掉自己的设置。
+  final bool followGlobalFontWeight;
+
+  /// 当前实际用于正文的字重。
+  FontWeight effectiveFontWeight(FontWeight global) =>
+      followGlobalFontWeight ? global : fontWeight;
 
   final ReaderPaper paper;
 
@@ -59,6 +72,7 @@ class ReaderSettings {
     double? fontSize,
     double? lineHeight,
     FontWeight? fontWeight,
+    bool? followGlobalFontWeight,
     ReaderPaper? paper,
     ReaderPaper? dayPaper,
     bool? showBubbles,
@@ -68,6 +82,8 @@ class ReaderSettings {
     fontSize: fontSize ?? this.fontSize,
     lineHeight: lineHeight ?? this.lineHeight,
     fontWeight: fontWeight ?? this.fontWeight,
+    followGlobalFontWeight:
+        followGlobalFontWeight ?? this.followGlobalFontWeight,
     paper: paper ?? this.paper,
     dayPaper: dayPaper ?? this.dayPaper,
     showBubbles: showBubbles ?? this.showBubbles,
@@ -82,6 +98,7 @@ class ReaderSettings {
       other.fontSize == fontSize &&
       other.lineHeight == lineHeight &&
       other.fontWeight == fontWeight &&
+      other.followGlobalFontWeight == followGlobalFontWeight &&
       other.paper == paper &&
       other.dayPaper == dayPaper &&
       other.showBubbles == showBubbles &&
@@ -93,6 +110,7 @@ class ReaderSettings {
     fontSize,
     lineHeight,
     fontWeight,
+    followGlobalFontWeight,
     paper,
     dayPaper,
     showBubbles,
@@ -111,6 +129,8 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
   static const _fontSizeKey = 'reader_font_size_v1';
   static const _lineHeightKey = 'reader_line_height_v1';
   static const _fontWeightKey = 'reader_font_weight_v1';
+  static const _followGlobalFontWeightKey =
+      'reader_follow_global_font_weight_v1';
   static const _paperKey = 'reader_paper_v1';
   static const _dayPaperKey = 'reader_day_paper_v1';
   static const _bubblesKey = 'reader_show_bubbles_v1';
@@ -177,9 +197,17 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
       (candidate) => candidate.value == stepped,
       orElse: () => FontWeight.w400,
     );
-    if (weight == state.fontWeight) return;
+    if (weight == state.fontWeight && !state.followGlobalFontWeight) return;
     _userChanged = true;
-    state = state.copyWith(fontWeight: weight);
+    state = state.copyWith(fontWeight: weight, followGlobalFontWeight: false);
+    _persist();
+  }
+
+  /// 跟随/取消跟随全局字重。取消时保留上次的阅读器字重作为覆盖值。
+  void setFollowGlobalFontWeight(bool value) {
+    if (value == state.followGlobalFontWeight) return;
+    _userChanged = true;
+    state = state.copyWith(followGlobalFontWeight: value);
     _persist();
   }
 
@@ -241,6 +269,9 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
           ? fallback.dayPaper
           : storedDayPaper;
       final restored = ReaderSettings(
+        followGlobalFontWeight:
+            prefs.getBool(_followGlobalFontWeightKey) ??
+            !prefs.containsKey(_fontWeightKey),
         fontSize: (prefs.getDouble(_fontSizeKey) ?? fallback.fontSize)
             .clamp(minFontSize, maxFontSize)
             .toDouble(),
@@ -283,6 +314,10 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
       await prefs.setDouble(_fontSizeKey, snapshot.fontSize);
       await prefs.setDouble(_lineHeightKey, snapshot.lineHeight);
       await prefs.setInt(_fontWeightKey, snapshot.fontWeight.value);
+      await prefs.setBool(
+        _followGlobalFontWeightKey,
+        snapshot.followGlobalFontWeight,
+      );
       await prefs.setString(_paperKey, snapshot.paper.name);
       await prefs.setString(_dayPaperKey, snapshot.dayPaper.name);
       await prefs.setBool(_bubblesKey, snapshot.showBubbles);
@@ -300,3 +335,10 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
     }
   }
 }
+
+/// 阅读器正文当前实际字重：跟随全局时取 Android 生效值，否则取阅读器覆盖值。
+final readerEffectiveFontWeightProvider = Provider<FontWeight>((ref) {
+  final settings = ref.watch(readerSettingsProvider);
+  final global = ref.watch(appEffectiveFontWeightProvider);
+  return settings.effectiveFontWeight(global);
+});

@@ -3,6 +3,9 @@ import '../../app/widgets/app_snack_bar.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../../app/theme/app_theme.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/router.dart';
@@ -537,7 +540,7 @@ class _SectionTitle extends StatelessWidget {
       child: Text(
         title,
         style: theme.textTheme.titleMedium?.copyWith(
-          fontWeight: FontWeight.w600,
+          fontWeight: context.appWeight(FontWeight.w600),
         ),
       ),
     );
@@ -717,7 +720,7 @@ class _CacheTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
+                        fontWeight: context.appWeight(FontWeight.w600),
                       ),
                     ),
                     const SizedBox(height: 4),

@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../app/theme/app_theme.dart';
+
 import '../../../app/widgets/detail/detail_common.dart';
 import '../../../data/models/chapter.dart';
 
@@ -88,7 +90,7 @@ class _EpisodePickerState extends State<EpisodePicker>
                 Text(
                   '选集',
                   style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+                    fontWeight: context.appWeight(FontWeight.w600),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -129,13 +131,13 @@ class _EpisodePickerState extends State<EpisodePicker>
           labelPadding: const EdgeInsets.symmetric(horizontal: 8),
           labelColor: Theme.of(context).colorScheme.primary,
           unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-          labelStyle: const TextStyle(
+          labelStyle: TextStyle(
             fontSize: 13,
-            fontWeight: FontWeight.w600,
+            fontWeight: context.appWeight(FontWeight.w600),
           ),
-          unselectedLabelStyle: const TextStyle(
+          unselectedLabelStyle: TextStyle(
             fontSize: 13,
-            fontWeight: FontWeight.w400,
+            fontWeight: context.appWeight(FontWeight.w400),
           ),
           // 不要下划线：当前 tab 只靠主色 + 加粗区分（与顶部分类 tabs 一致）。
           indicator: const BoxDecoration(),
