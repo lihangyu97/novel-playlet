@@ -412,7 +412,8 @@ async fn playlet_share_requests_video_share_type() {
 
 /// 热评复用同一次列表请求（`a13/w.java:563-599`）：`:group_id` 是 vid、
 /// `comment_source=4`、`comment_type=4`、`group_type=30`、`count=20`、
-/// `business_param.book_id` 在剧集场景也是 vid；返回的 total 就是右栏计数。
+/// `business_param.book_id` 是剧集 id；播放页「本集评论」的 server_channel=18
+/// （17 会返回 total>0 但 data_list 为空的「成功」响应）。
 #[tokio::test]
 async fn playlet_hot_comments_match_the_official_request() {
     let upstream = MockUpstream::start(|_| {
@@ -445,13 +446,43 @@ async fn playlet_hot_comments_match_the_official_request() {
     assert_eq!(sent["group_type"], 30);
     assert_eq!(sent["sort"], 1);
     assert_eq!(sent["count"], 20);
-    assert_eq!(sent["business_param"]["book_id"], "VID-7");
+    assert_eq!(sent["business_param"]["book_id"], "123");
     assert_eq!(sent["business_param"]["need_count"], true);
-    assert_eq!(sent["server_channel"], 17, "缺省场景 channel");
+    assert_eq!(sent["business_param"]["req_type"], 0);
+    assert_eq!(sent["cursor"], "");
+    assert_eq!(sent["server_channel"], 18, "播放页本集评论 channel");
     upstream.shutdown();
 }
 
-/// 调用方可以覆盖场景 channel（官方按场景取 17/26/37/48）。
+/// 本集评论用响应 `common_list_info.cursor` 翻页：后续页原样回传 cursor，
+/// `need_count` 变 false，channel 仍是 18。
+#[tokio::test]
+async fn playlet_hot_comments_paginate_with_cursor() {
+    let upstream = MockUpstream::start(|_| MockReply::json(json!({"code": 0, "data": {}}))).await;
+    let dir = TempDir::new("playlet-hot-cursor");
+    let server = server_with(&dir, &upstream.origin).await;
+
+    let (status, _) = json_body(
+        dispatch(
+            &server,
+            &api_get(
+                "/api/v1/series/123/hot-comments",
+                "vid=VID-7&cursor=CURSOR-A",
+            ),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let sent = body_of(&upstream.last_request().expect("call"));
+    assert_eq!(sent["cursor"], "CURSOR-A");
+    assert_eq!(sent["business_param"]["need_count"], false);
+    assert_eq!(sent["business_param"]["book_id"], "123");
+    assert_eq!(sent["server_channel"], 18);
+    upstream.shutdown();
+}
+
+/// 调用方可以覆盖场景 channel（播放页默认 18，官方其他场景另有取值）。
 #[tokio::test]
 async fn playlet_hot_comments_accept_the_scene_channel() {
     let upstream = MockUpstream::start(|_| MockReply::json(json!({"code": 0, "data": {}}))).await;

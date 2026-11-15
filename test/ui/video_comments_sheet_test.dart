@@ -60,7 +60,7 @@ Map<String, dynamic> _commentEntry(
 
 Map<String, dynamic> _page(
   List<Map<String, dynamic>> comments, {
-  int total = 0,
+  int? total,
   String cursor = '',
   bool hasMore = false,
 }) => {
@@ -68,7 +68,7 @@ Map<String, dynamic> _page(
   'data': {
     'data_list': comments,
     'common_list_info': {
-      'total': total > 0 ? '$total' : '${comments.length}',
+      'total': '${total ?? comments.length}',
       'cursor': cursor,
       'has_more': hasMore,
     },
@@ -113,7 +113,7 @@ void main() {
     await _pumpSheet(tester, transport);
 
     expect(find.text('剧评'), findsOneWidget);
-    expect(find.text('共 42 条'), findsOneWidget);
+    expect(find.text('42 条评论'), findsOneWidget);
     expect(find.text('这部剧节奏很好'), findsOneWidget);
     expect(find.text('第二集开始上头'), findsOneWidget);
     final query = Uri.splitQueryString(
@@ -132,7 +132,7 @@ void main() {
     await _pumpSheet(tester, transport, vid: 'e1');
 
     expect(find.text('本集评论'), findsOneWidget);
-    expect(find.text('共 7 条'), findsOneWidget);
+    expect(find.text('7 条评论'), findsOneWidget);
     expect(find.text('这集打戏不错'), findsOneWidget);
     expect(
       transport.calls.single,
@@ -156,6 +156,40 @@ void main() {
   testWidgets('空态：本集评论', (tester) async {
     await _pumpSheet(tester, _SheetTransport((_, _) => _page([])), vid: 'e1');
     expect(find.text('本集还没有评论'), findsOneWidget);
+  });
+
+  testWidgets('首屏空列表但 total>0：自动重试一次后展示评论', (tester) async {
+    var calls = 0;
+    final transport = _SheetTransport((_, _) {
+      calls++;
+      if (calls == 1) return _page([], total: 64);
+      return _page([_commentEntry('c1', '重试后的评论')], total: 64);
+    });
+    await _pumpSheet(tester, transport, vid: 'e1');
+    expect(transport.calls, hasLength(1));
+    expect(find.text('本集还没有评论'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(transport.calls, hasLength(2), reason: '空成功只自动重试一次');
+    expect(find.text('重试后的评论'), findsOneWidget);
+    expect(find.text('64 条评论'), findsOneWidget);
+  });
+
+  testWidgets('首屏持续空列表但 total>0：报可重试错误，不显示空态和总数', (tester) async {
+    final transport = _SheetTransport((_, _) => _page([], total: 64));
+    await _pumpSheet(tester, transport, vid: 'e1');
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(transport.calls, hasLength(2));
+    expect(find.text('本集评论加载失败，请重试'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+    expect(find.text('本集还没有评论'), findsNothing);
+    expect(find.text('64 条评论'), findsNothing);
   });
 
   testWidgets('首屏失败显示重试，重试成功后回到列表', (tester) async {
@@ -184,8 +218,39 @@ void main() {
     await _pumpSheet(tester, transport, initialPage: initial);
 
     expect(find.text('详情页已经拿到的第一条'), findsOneWidget);
-    expect(find.text('共 3 条'), findsOneWidget);
+    expect(find.text('3 条评论'), findsOneWidget);
     expect(transport.calls, isEmpty, reason: '初始页已含数据，不应再打接口');
+  });
+
+  testWidgets('本集评论滚到底用 cursor 拉下一页', (tester) async {
+    final transport = _SheetTransport((path, query) {
+      if (query['cursor'] == 'p2') {
+        return _page([_commentEntry('e20', '本集第二页')], total: 0);
+      }
+      return _page(
+        [
+          for (var i = 0; i < 20; i++)
+            _commentEntry('e$i', '本集第一页评论 $i，内容足够长让列表能滚动起来'),
+        ],
+        total: 40,
+        cursor: 'p2',
+        hasMore: true,
+      );
+    });
+    await _pumpSheet(tester, transport, vid: 'e1');
+
+    expect(transport.calls, hasLength(1));
+    await tester.drag(find.byType(ListView), const Offset(0, -2000));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      transport.calls.any((call) => call.contains('cursor=p2')),
+      isTrue,
+      reason: '本集评论也要把 cursor 传回',
+    );
+    expect(find.text('本集第二页'), findsOneWidget);
+    expect(find.text('40 条评论'), findsOneWidget, reason: '翻页页 total=0 不能覆盖首屏总数');
   });
 
   testWidgets('剧评滚到底用 cursor 拉下一页，并按 id 去重', (tester) async {

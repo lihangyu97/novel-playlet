@@ -82,7 +82,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: sheet, matching: find.text('共 3 条')),
+      find.descendant(of: sheet, matching: find.text('3 条评论')),
       findsOneWidget,
     );
 
