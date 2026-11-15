@@ -341,10 +341,20 @@ loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（
 
 播放页点「本集评论」
  └─ GET /api/v1/series/{sid}/hot-comments?vid={当前集id}
-      → 本集评论（官方热评，comment_source=4 / group_type=30，最多 20 条、无 cursor）
+      → 本集评论（官方热评，comment_source=4 / group_type=30 / server_channel=18，
+        20 条/页，common_list_info.cursor 翻页；business_param.book_id=剧集 id）
 ```
 
 - 短剧评论没有评分字段，卡片/弹层都不画星级；vid 为空时 Dart 侧直接短路，避免上游静默退化成剧级评论。
+- **本集评论 channel 必须 18**：17 会返回 `code=0`、`common_list_info.total>0`、`data_list=[]`
+  的「成功」空响应（实测同一剧集 17 空列表、18 返回 20 条）。弹层首屏遇到「total>0 但列表空」
+  会自动重试一次，仍空则显示可重试错误，不再显示「共 N 条 + 还没有评论」。
+- **评论列表统一**：阅读页段评/章评、详情页书评、短剧剧评、本集评论都由同一个
+  `CommentListSheet` + `CommentFeed` 驱动。共享层只维护列表/分页/错误/空态/footer/
+  评论行排版；书评 `_BookReviewsFeed` 持有 legacy offset，短剧 `_VideoCommentsFeed` 持有
+  `common_list_info.cursor`，阅读页 `_ReaderParagraphFeed` 持有段评 cursor + 回复懒加载，
+  阅读页通过 `CommentSheetStyle` 跟随纸色主题，其余评论跟随 App 明暗主题。短剧翻页页的
+  total 常为 0，共享层保留首屏 total。评论行不再画列表分割线，空态/加载/失败样式四套一致。
 - 剧评失败静默（provider 返回 null，详情页整块不渲染）；评论弹层首屏失败才显示「重试」。
 - 弹幕（`/videos/{vid}/danmaku`）本期不接；写评论/点赞/回复也不接。
 
@@ -358,7 +368,7 @@ loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（
 | 打开评论面板 | 1 次评论列表（20 条/页），滚动翻页每页 1 次，「N 条回复」每次展开 1 次 |
 | 进入小说详情页 | 1 次书评（20 条），弹窗滚动翻页每页 1 次 |
 | 进入短剧详情页 | 1 次剧评（20 条），弹窗滚动翻页每页 1 次 |
-| 打开播放页「本集评论」 | 1 次 hot-comments（≤20 条，不分页） |
+| 打开播放页「本集评论」 | 1 次 hot-comments（20 条/页）；滚动近底每页 1 次 |
 
 ---
 
@@ -775,10 +785,11 @@ flutter drive --profile -d <iPhone UDID> \
 | `lib/features/sync/widgets/webdav_{sync_card,config_sheet}.dart` | 设置页云同步卡片与配置/测试连接表单 |
 | `lib/core/storage/reading_store.dart` | 书架/收藏 tombstone、同步导出与按条 LWW 合并 |
 
-| `lib/features/reader/{reader_comments,reader_comments_sheet,reader_bubble}.dart` | 段评 provider / 评论面板 / 段尾气泡 |
-| `lib/features/detail/{detail_reviews_section,detail_reviews_sheet}.dart` | 详情页书评卡片与弹窗 |
+| `lib/features/reader/{reader_comments,reader_comments_sheet,reader_bubble}.dart` | 段评 provider / 评论面板（共用列表壳 + 回复 Feed）/ 段尾气泡 |
+| `lib/app/widgets/comment_list_sheet.dart` | 全部评论列表共用壳：`CommentListSheet` / `CommentFeed` / 评论行 / 回复区 / 纸色 Style |
+| `lib/features/detail/{detail_reviews_section,detail_reviews_sheet}.dart` | 详情页书评卡片与弹窗（书评 offset Feed） |
 | `lib/features/video/network_health.dart` | 会话级「疑似离线」标记：断网后切集快速失败、手动重试强制联网 |
-| `lib/features/video/{video_comments_providers,video_comments_sheet}.dart` | 短剧剧评 provider / 剧评与本集评论弹层 |
+| `lib/features/video/{video_comments_providers,video_comments_sheet}.dart` | 短剧剧评 provider / 剧评与本集评论弹层（cursor Feed） |
 | `lib/app/widgets/app_snack_bar.dart` | 全站统一轻提示（1s，替换 SnackBar 默认 4s） |
 | `lib/app/widgets/app_bottom_sheet.dart` | 全站底部弹层骨架：统一圆角/遮罩/底部安全区 + 标题区（主副标题行内排布）+ 右上角关闭 + 内容插槽 |
 | `rust/src/endpoints/video.rs` | 取流、选档、整集下载、缓存淘汰、`/src` 解密 |

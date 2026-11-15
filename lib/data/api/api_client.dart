@@ -504,20 +504,25 @@ class ApiClient {
   /// 某一集的评论（官方「右栏热评」：按 vid 取，`total` 就是该集评论数）。
   ///
   /// 上游还是同一条 `comment/list`，但 `group_id` 换成 vid、`group_type=30`
-  /// （SeriesVideo）、`comment_source=4` / `comment_type=4`；一次最多 20 条，
-  /// 没有 cursor，所以只当「本集评论」首屏用，不做翻页。
+  /// （SeriesVideo）、`comment_source=4` / `comment_type=4`；每页最多 20 条，
+  /// 用响应 `common_list_info.cursor` 翻页（该游标是带 session_id/offset 的 JSON 串）。
   ///
   /// [vid] 为空时接口会静默退回剧集 id（变成整部剧的评论），调用方必须先
   /// 判断 vid 非空，否则「每集评论」会悄悄串成剧级评论。
   Future<BookCommentPage> episodeComments(
     String seriesId,
     String vid, {
-    int serverChannel = 17,
+    int serverChannel = 18,
+    String cursor = '',
   }) async {
     if (seriesId.isEmpty || vid.isEmpty) return BookCommentPage.empty;
     final payload = await _getJson(
       '/api/v1/series/${Uri.encodeComponent(seriesId)}/hot-comments',
-      {'vid': vid, 'server_channel': '$serverChannel'},
+      {
+        'vid': vid,
+        'server_channel': '$serverChannel',
+        if (cursor.isNotEmpty) 'cursor': cursor,
+      },
       timeout: const Duration(seconds: 20),
     );
     return BookCommentPage.fromCommentListPayload(payload);

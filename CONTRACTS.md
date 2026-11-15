@@ -79,7 +79,7 @@ Future<BookCommentPage> paragraphComments(String bookId, String itemId, {require
 Future<BookCommentPage> bookComments(String bookId, {int count = 10, int offset = 0}); // 详情页书评（旧接口，带评分/context）
 Future<CommentReplyPage> commentReplies(String commentId, {required String bookId, required String groupId, int count = 10}); // 评论回复，groupId = 章节 itemId
 Future<BookCommentPage> seriesComments(String seriesId, {int count = 20, String cursor = '', int sort = 1}); // 短剧整体剧评，cursor 翻页
-Future<BookCommentPage> episodeComments(String seriesId, String vid); // 某一集评论（官方热评，≤20 条、无翻页）
+Future<BookCommentPage> episodeComments(String seriesId, String vid, {String cursor = ''}); // 某一集评论（官方热评，20 条/页，cursor 翻页）
 Future<VideoSource> videoSource(String episodeId, {bool refresh = false, int? maxHeight}); // refresh=1 删缓存重下；默认带 variants=0；maxHeight=下载清晰度上限
 Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 /src，不打上游
 // 以上错误统一抛 ApiException（message 可直接展示）
@@ -220,8 +220,10 @@ final task = ref.watch(offlineTaskProvider);   // OfflineTask?（含 speedBytesP
    上游 `comment_source=1 / group_type=1(Book)`，`cursor` 翻页；详情页剧评卡片取首屏，
    同一页数据复用给「全部剧评」弹层，打开弹层不再重复拉首屏。
 2. `episodeComments(seriesId, vid)`：`GET /api/v1/series/{sid}/hot-comments?vid={vid}` → 某一集的评论
-   （`comment_source=4 / comment_type=4 / group_type=30(SeriesVideo)`），`common_list_info.total`
-   就是该集评论数。上游一次最多 20 条、没有 cursor，所以播放页「本集评论」只做首屏、不做翻页。
+   （`comment_source=4 / comment_type=4 / group_type=30(SeriesVideo) / server_channel=18`），
+   `common_list_info.total` 就是该集评论数。`business_param.book_id` 按官方用剧集 id；
+   关键字段是 `server_channel=18`（17 会返回 total>0 但 `data_list` 为空的「成功」响应）。
+   上游每页最多 20 条，响应 `common_list_info.cursor` 是带 `session_id`/`offset` 的 JSON 串；`episodeComments` 原样回传即可翻页。
 3. 弹幕（`GET /api/v1/videos/{vid}/danmaku`）是另一条链路（按播放时间轴取数），本期不接。
 
 约定：
@@ -231,6 +233,7 @@ final task = ref.watch(offlineTaskProvider);   // OfflineTask?（含 speedBytesP
 - **模型复用**：短剧评论与段评/书评共用 `BookComment` / `BookCommentPage`，但短剧评论没有
   `score`，详情卡片和弹层都不画星级（`showStars: false`）。
 - **失败静默**：`videoSeriesCommentsProvider` 失败返回 null，详情页整块不插入剧评卡片，不制造错误态。
+- **列表壳共用**：阅读页段评/章评、详情页书评、短剧剧评、本集评论统一走 `lib/app/widgets/comment_list_sheet.dart` 的 `CommentListSheet` + `CommentFeed`；书评的 offset 分页、短剧/段评的 cursor 分页、段评的回复懒加载、阅读页纸色主题分别在各自的 Feed/Style 里，UI、空态、失败重试、翻页 footer、评论行排版只有一份。
 - **只读**：不提供发评论/点赞/回复入口（内核有写接口，本期不接）。
 
 ## 导航

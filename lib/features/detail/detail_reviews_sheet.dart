@@ -1,13 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/providers.dart';
 import '../../app/widgets/app_bottom_sheet.dart';
-import '../../app/widgets/states.dart';
+import '../../app/widgets/comment_list_sheet.dart';
+import '../../data/api/api_client.dart';
 import '../../data/models/book_comment.dart';
-import '../../data/models/json_utils.dart';
 import 'detail_providers.dart';
 import 'detail_reviews_section.dart';
 
@@ -27,197 +23,58 @@ Future<void> showDetailReviewsSheet(
   );
 }
 
-/// 全部书评弹层：列表 + offset 翻页（每页 [bookReviewsPageSize] 条）。
-class DetailReviewsSheet extends ConsumerStatefulWidget {
+/// 全部书评弹层：数据源是 legacy offset 分页，UI 与短剧评论共用。
+class DetailReviewsSheet extends StatelessWidget {
   const DetailReviewsSheet({super.key, required this.bookId, this.initialPage});
 
   final String bookId;
   final BookCommentPage? initialPage;
 
   @override
-  ConsumerState<DetailReviewsSheet> createState() => _DetailReviewsSheetState();
+  Widget build(BuildContext context) {
+    return CommentListSheet(
+      feedBuilder: (api) => _BookReviewsFeed(api: api, bookId: bookId),
+      initialPage: initialPage,
+    );
+  }
 }
 
-class _DetailReviewsSheetState extends ConsumerState<DetailReviewsSheet> {
-  final ScrollController _scrollController = ScrollController();
-  final List<BookComment> _comments = <BookComment>[];
+/// 小说书评的接口差异都收在这里：legacy `/books/{id}/comments` + offset 分页。
+class _BookReviewsFeed extends CommentFeed {
+  const _BookReviewsFeed({required this.api, required this.bookId});
 
-  int _totalCount = 0;
-  int _nextOffset = 0;
-  bool _hasMore = false;
-
-  /// 首屏加载（只有没带 initialPage 时才可能走到）。
-  bool _loading = false;
-
-  /// 翻页请求进行中；用来禁用重复触发并显示列表底部转圈。
-  bool _loadingMore = false;
-
-  /// 首屏失败文案；非 null 时整页显示错误 + 重试。
-  String? _error;
-
-  /// 翻页失败文案；非 null 时列表底部显示重试（已加载的内容保留）。
-  String? _loadMoreError;
+  final ApiClient api;
+  final String bookId;
 
   @override
-  void initState() {
-    super.initState();
-    _scrollController.addListener(_handleScroll);
-    final initial = widget.initialPage;
-    if (initial != null && initial.comments.isNotEmpty) {
-      _adopt(initial);
-    } else {
-      _loading = true;
-      unawaited(_loadFirstPage());
-    }
+  String get title => '书评';
+
+  @override
+  String get emptyMessage => '还没有书评';
+
+  @override
+  String get errorMessage => '书评加载失败，请重试';
+
+  @override
+  String get closeTooltip => '关闭书评';
+
+  @override
+  Widget? buildScore(BookComment comment) =>
+      DetailReviewStars(stars: comment.stars);
+
+  @override
+  Future<BookCommentPage> load(String cursor) {
+    final offset = int.tryParse(cursor) ?? 0;
+    return api.bookComments(bookId, count: bookReviewsPageSize, offset: offset);
   }
 
   @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  /// 用一页数据重置列表状态：首屏（含传入的初始页）与重试共用。
-  void _adopt(BookCommentPage page) {
-    _comments
-      ..clear()
-      ..addAll(page.comments);
-    _totalCount = page.totalCount > 0 ? page.totalCount : page.comments.length;
-    _nextOffset = page.nextOffset;
-    _hasMore = page.hasMore;
-    _loadMoreError = null;
-  }
-
-  /// 首屏请求：没有详情页传来的第一页时自己拉一次。
-  Future<void> _loadFirstPage() async {
-    try {
-      final page = await ref
-          .read(apiClientProvider)
-          .bookComments(widget.bookId, count: bookReviewsPageSize);
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _adopt(page);
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = apiErrorCopy(error, fallback: '书评加载失败，请重试');
-      });
-    }
-  }
-
-  void _retryFirstPage() {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    unawaited(_loadFirstPage());
-  }
-
-  void _handleScroll() {
-    if (!_scrollController.hasClients) return;
-    final position = _scrollController.position;
-    // 提前约一屏的高度开始加载：等用户真的滚到底时下一页通常已经在路上。
-    if (position.pixels >= position.maxScrollExtent - 240) {
-      unawaited(_loadMore());
-    }
-  }
-
-  Future<void> _loadMore() async {
-    if (_loading || _loadingMore || !_hasMore || _loadMoreError != null) return;
-    setState(() => _loadingMore = true);
-    final offset = _nextOffset;
-    try {
-      final page = await ref
-          .read(apiClientProvider)
-          .bookComments(
-            widget.bookId,
-            count: bookReviewsPageSize,
-            offset: offset,
-          );
-      if (!mounted) return;
-      setState(() {
-        _loadingMore = false;
-        _comments.addAll(page.comments);
-        if (page.totalCount > 0) _totalCount = page.totalCount;
-        // 上游的 has_more 不完全可信：next_offset 没前进（或本页为空）就当作
-        // 到底，避免滚动到底时反复拉同一页、列表无限增长。
-        final advanced = page.nextOffset > offset;
-        _nextOffset = advanced
-            ? page.nextOffset
-            : offset + page.comments.length;
-        _hasMore = page.hasMore && page.comments.isNotEmpty && advanced;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _loadingMore = false;
-        _loadMoreError = apiErrorCopy(error, fallback: '加载失败，请重试');
-      });
-    }
-  }
-
-  void _retryLoadMore() {
-    setState(() => _loadMoreError = null);
-    unawaited(_loadMore());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AppBottomSheet(
-      title: '书评',
-      subtitle: _totalCount > 0 ? '共 $_totalCount 条' : null,
-      // 约 0.8 屏高：一屏能看五六条书评，同时留出上方详情页作为上下文。
-      heightFactor: 0.8,
-      closeTooltip: '关闭书评',
-      child: _buildBody(context),
-    );
-  }
-
-  Widget _buildBody(BuildContext context) {
-    if (_loading) return const LoadingView();
-    if (_error != null) {
-      return ErrorView(message: _error!, onRetry: _retryFirstPage);
-    }
-    if (_comments.isEmpty) {
-      return const EmptyView(message: '还没有书评', icon: Icons.forum_outlined);
-    }
-    final hasFooter = _loadingMore || _loadMoreError != null;
-    return ListView.builder(
-      controller: _scrollController,
-      padding: const EdgeInsets.only(bottom: 24),
-      itemCount: _comments.length + (hasFooter ? 1 : 0),
-      itemBuilder: (context, index) {
-        if (index >= _comments.length) return _buildFooter();
-        return Column(
-          children: [
-            DetailReviewRow(
-              comment: _comments[index],
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-            ),
-            if (index < _comments.length - 1 || hasFooter)
-              const Divider(height: 1, indent: 66, endIndent: 20),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildFooter() {
-    final error = _loadMoreError;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Center(
-        child: error != null
-            ? TextButton(onPressed: _retryLoadMore, child: const Text('重试'))
-            : const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-      ),
-    );
+  String nextCursor(BookCommentPage page, String previousCursor) {
+    final previous = int.tryParse(previousCursor) ?? 0;
+    if (page.nextOffset > previous) return '${page.nextOffset}';
+    // 老接口偶尔不推进 next_offset；只要本页有内容就按本页条数前进，
+    // 由共享层再用 added>0 / hasMore 兜住循环。
+    final fallback = previous + page.comments.length;
+    return fallback > previous ? '$fallback' : '';
   }
 }

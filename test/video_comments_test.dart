@@ -171,9 +171,24 @@ void main() {
         ),
       );
       expect(query['vid'], 'e1');
-      expect(query['server_channel'], '17');
+      expect(query['server_channel'], '18', reason: '播放页本集评论用 18；17 会返回空列表');
       expect(page.comments, hasLength(2));
       expect(page.totalCount, 7);
+    });
+
+    test('翻页把 cursor 原样带上', () async {
+      final transport = _FakeTransport(_commentPayload());
+      final api = ApiClient(transport);
+
+      await api.episodeComments('v1', 'e1', cursor: 'CURSOR-A');
+
+      final query = Uri.splitQueryString(
+        transport.calls.single.substring(
+          transport.calls.single.indexOf('?') + 1,
+        ),
+      );
+      expect(query['cursor'], 'CURSOR-A');
+      expect(query['server_channel'], '18');
     });
 
     test('vid 为空时不发请求（否则上游会静默退回剧级评论）', () async {

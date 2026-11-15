@@ -388,20 +388,23 @@ struct PlayletHotCommentBody {
     series_id: String,
     vid: String,
     server_channel: i64,
+    cursor: String,
     insert_ids: Vec<String>,
 }
 
 fn playlet_hot_comment_body(p: &PlayletHotCommentBody) -> ApiResult<Vec<u8>> {
-    // 官方的 group_id/book_id 取 vid 还是剧集 id 由「是不是书场景」决定
-    // （`jVar.C()`）；剧集播放页走 SeriesVideo 分支，两者都用 vid。
+    // 官方抓包：path/group_id 是 vid（剧集详情/播放页的书场景），
+    // business_param.book_id 仍是剧集 id；17 号 channel 会返回 total>0 但
+    // data_list 为空的「成功」响应，本集评论必须用播放页场景的 18。
     let group_id = if p.vid.is_empty() {
         p.series_id.clone()
     } else {
         p.vid.clone()
     };
     let mut business = json!({
-        "book_id": group_id,
-        "need_count": true,
+        "book_id": p.series_id,
+        "need_count": p.cursor.is_empty(),
+        "req_type": 0,
     });
     if !p.insert_ids.is_empty() {
         business["insert_comment_ids"] = json!(p.insert_ids);
@@ -411,6 +414,7 @@ fn playlet_hot_comment_body(p: &PlayletHotCommentBody) -> ApiResult<Vec<u8>> {
         "comment_source": 4,
         "comment_type": 4,
         "count": 20,
+        "cursor": p.cursor,
         "group_id": group_id,
         "group_type": 30,
         "server_channel": p.server_channel,
@@ -422,7 +426,7 @@ fn playlet_hot_comment_body(p: &PlayletHotCommentBody) -> ApiResult<Vec<u8>> {
 /// `GET /api/v1/videos/:vid/hot-comments?series_id=…` -> 官方热评 + 评论计数。
 ///
 /// `server_channel` 由调用场景决定（`FanqieHotCommentArgsBrick.java:17-29`：
-/// 17/26/37/48），场景到 channel 的映射**未取证**，所以由调用方给，缺省 17。
+/// 17/26/37/48），播放页「本集评论」的线上抓包是 **18**；调用方仍可覆盖。
 ///
 /// 官方评论点赞走**独立的 digg 接口**，不是 `do_action`
 /// （`com/dragon/read/social/t.java:803-831`：`W(NovelComment)` 与
@@ -633,11 +637,13 @@ fn handle_playlet_hot_comments<'a>(
         } else {
             vid.clone()
         };
+        let cursor = params.get_str("cursor");
 
         let body = playlet_hot_comment_body(&PlayletHotCommentBody {
             series_id,
             vid,
-            server_channel: int_default(&params.get_str("server_channel"), 17),
+            server_channel: int_default(&params.get_str("server_channel"), 18),
+            cursor,
             insert_ids: split_csv(&params.get_str("insert_comment_ids")),
         })?;
 

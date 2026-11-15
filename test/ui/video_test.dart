@@ -272,7 +272,7 @@ void main() {
 
     await tester.tap(find.text('查看全部 2 条'));
     await tester.pumpAndSettle();
-    expect(find.text('共 2 条'), findsOneWidget);
+    expect(find.text('2 条评论'), findsOneWidget);
     expect(find.text('第二集开始上头'), findsOneWidget, reason: '弹层里应能看到全部评论');
   });
 
