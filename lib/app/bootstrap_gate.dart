@@ -4,6 +4,7 @@ import 'theme/app_theme.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/sync/sync_lifecycle.dart';
 import 'providers.dart';
 import 'shell/home_shell.dart';
 
@@ -18,7 +19,7 @@ class BootstrapGate extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final bootstrap = ref.watch(bootstrapProvider);
     return bootstrap.when(
-      data: (_) => const HomeShell(),
+      data: (_) => const SyncLifecycle(child: HomeShell()),
       loading: () => const _Splash(),
       error: (error, _) => _StartupError(
         message: '$error',

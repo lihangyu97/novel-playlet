@@ -100,6 +100,8 @@ void main() {
       tester.element(find.byType(SettingsPage)),
     );
 
+    await tester.scrollUntilVisible(find.text('下载清晰度'), 300);
+    await tester.pumpAndSettle();
     expect(find.text('下载清晰度'), findsOneWidget);
     expect(find.text('离线下载清晰度'), findsNothing, reason: '标题精简为「下载清晰度」');
     expect(
@@ -124,6 +126,8 @@ void main() {
   /// 四档清晰度收在一个按钮组里，不再是一排独立 chip。
   testWidgets('设置页-下载清晰度用 M3 按钮组（SegmentedButton）', (tester) async {
     await pumpPreview(tester, const SettingsPage());
+    await tester.scrollUntilVisible(find.text('下载清晰度'), 300);
+    await tester.pumpAndSettle();
 
     final segmented = _qualitySegments(tester);
     expect(
@@ -158,6 +162,8 @@ void main() {
       ('推荐流布局', find.byType(SegmentedButton<RecommendLayout>)),
       ('下载清晰度', find.byType(SegmentedButton<VideoDownloadQuality>)),
     ]) {
+      await tester.scrollUntilVisible(find.text(title), 300);
+      await tester.pumpAndSettle();
       final titleRect = tester.getRect(find.text(title));
       final groupRect = tester.getRect(group);
       expect(

@@ -11,12 +11,13 @@ import '../../core/cache/app_cache.dart';
 // 偏好本身归功能域所有，但入口统一在设置页，所以这里的跨域 import 是约定的。
 import '../cache/download_quality.dart';
 import '../reader/reader_settings.dart';
+import '../sync/widgets/webdav_sync_card.dart';
 import '../recommend/recommend_layout.dart';
 import 'settings_providers.dart';
 import 'widgets/dialogue_highlight_preview.dart';
 import 'widgets/theme_color_picker.dart';
 
-/// 设置页：主题（主题色 / 深浅色 / 推荐流布局 / 全局字重）+ 存储（占用清理 + 下载清晰度）。
+/// 设置页：主题（主题色 / 深浅色 / 推荐流布局 / 全局字重）+ 存储（占用清理 + 下载清晰度）+ WebDAV。
 ///
 /// 从「我的」右上角进。这里只放全局偏好与可重建缓存，书架/阅读进度属于用户
 /// 数据，不给清理入口（那些在「我的」页里操作）。
@@ -42,6 +43,8 @@ class SettingsPage extends StatelessWidget {
             SizedBox(height: 12),
             _GlobalFontWeightCard(),
             _FeedLayoutCard(),
+            _SectionTitle('WebDAV'),
+            WebDavSyncCard(),
             _SectionTitle('存储'),
             _StorageCard(),
             SizedBox(height: 12),

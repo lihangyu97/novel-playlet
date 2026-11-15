@@ -23,7 +23,7 @@
 - **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下滑切集（竖向翻页）/播完自动下一集、选集弹层、横屏全屏、在线 MP4 边下边播、失败分类与「重新下载这一集」；底排左侧「选集 + 详情 + 本集评论」、中间播放/暂停、右侧「清晰度（拿得到才展示，只读）+ 倍速」；倍速**点开是贴着 chip 的小浮窗**（M3 `MenuAnchor` + `MenuItemButton`，竖排 1.0/1.25/1.5/2.0/3.0x，当前档打勾，选完即关；浮窗打开期间控制条的 3.5s 自动隐藏被冻结），不再是遮大半屏的底部弹层；收藏/缓存统一收进「详情」底部弹层（历史「最近观看」直进播放页也从这里操作；详情弹层不重复选集、无关闭叉号）。进度条左右分别显示当前时间/总时长，外沿与下方按钮、倍速 chip 对齐。收藏**只加不移**（与阅读页加入书架一致，已收藏后只读，成功不弹提示条）；缓存三态与详情页同一份 `offlineEntryStatusProvider`。
 - **我的**：统一页头（图标 + 「我的」 + 合并统计 + 右上角设置入口，固定贴顶、不随内容滚动，带一套蓝粉氛围渐变）+ 小说 / 短剧两个 tab（无下划线，当前 tab 主题色高亮且字号稍大，可点击或左右滑动切换，内容各自保活）；小说 tab = 书架 + 最近阅读，短剧 tab = 收藏 + 最近观看；书架/收藏与首页同款白底不定高卡片（瀑布流，小说只展示书名+作者、短剧只展示剧名+集数）；缓存入口在推荐页搜索框右侧。
 - **缓存中心**：离线整本 / 整剧下载的进度、网速、排队、暂停/继续/删除/清空；入口在推荐页搜索框右侧的下载图标按钮（原「我的」页右下角悬浮入口已删除）。
-- **设置**：主题色（天蓝 / 草绿 / 绯红 + 自定义取色，自定义圆点显示上次自定义色）、对话高亮（卡片右侧圆形色块打开弹层，弹层里先选样式按钮组——荧光笔 / 下划线 / 波浪线——再用 HSV 取色，示例正文按当前样式与颜色实时预览）、深浅色模式（跟随系统 / 手动）、推荐流布局（双列 / 三列，M3 按钮组 `SegmentedButton`，默认双列）、全局字重（仅 Android；阅读器默认跟随，可在阅读器内覆盖）、存储（占用明细 + 右下角**只留图标**的清理按钮 + 卡片内小字「不包括主动缓存的小说、短剧」）与「下载清晰度」（四档并进存储区块，同样是按钮组；不再单开「视频」区块）。
+- **设置**：主题色（天蓝 / 草绿 / 绯红 + 自定义取色，自定义圆点显示上次自定义色）、对话高亮（卡片右侧圆形色块打开弹层，弹层里先选样式按钮组——荧光笔 / 下划线 / 波浪线——再用 HSV 取色，示例正文按当前样式与颜色实时预览）、深浅色模式（跟随系统 / 手动）、推荐流布局（双列 / 三列，M3 按钮组 `SegmentedButton`，默认双列）、全局字重（仅 Android；阅读器默认跟随，可在阅读器内覆盖）、WebDAV 云同步（书架/收藏/阅读进度/观看进度；凭据进 Keychain/Keystore，文件按 release/beta/dev 分目录）、存储（占用明细 + 右下角**只留图标**的清理按钮 + 卡片内小字「不包括主动缓存的小说、短剧」）与「下载清晰度」（四档并进存储区块，同样是按钮组；不再单开「视频」区块）。
 
 两个内容链路：
 
@@ -765,6 +765,10 @@ flutter drive --profile -d <iPhone UDID> \
 | `lib/data/models/comment_image.dart` | 评论配图 URL 解析与归一（协议相对地址 / `&amp;` / 去重） |
 | `lib/app/widgets/comment_image_{loader,strip,viewer}.dart` | 评论配图加载（AppImageCache）/ 缩略图 / 全屏查看器 |
 | `lib/features/settings/widgets/dialogue_highlight_preview.dart` | 对话高亮取色弹层里的阅读页示例预览 |
+| `lib/features/sync/{webdav_config,webdav_client,sync_service,sync_status}.dart` | WebDAV 云同步：配置安全存储、HTTP 客户端、合并上传、状态机 |
+| `lib/features/sync/widgets/webdav_{sync_card,config_sheet}.dart` | 设置页云同步卡片与配置/测试连接表单 |
+| `lib/core/storage/reading_store.dart` | 书架/收藏 tombstone、同步导出与按条 LWW 合并 |
+
 | `lib/features/reader/{reader_comments,reader_comments_sheet,reader_bubble}.dart` | 段评 provider / 评论面板 / 段尾气泡 |
 | `lib/features/detail/{detail_reviews_section,detail_reviews_sheet}.dart` | 详情页书评卡片与弹窗 |
 | `lib/features/video/network_health.dart` | 会话级「疑似离线」标记：断网后切集快速失败、手动重试强制联网 |
@@ -886,3 +890,23 @@ flutter drive --profile -d <iPhone UDID> \
 - **golden**：新增 `feed_staggered_grid.png`（瀑布流本身）、`recommend_three_columns.png`、`recommend_dark.png`；
   推荐流/搜索页/设置页改版后需 `--update-goldens` 重生成 `recommend*.png`、`home*.png`、`search*.png`、`settings*.png`。
 
+
+### 11.6 WebDAV 云同步（2026-11-15）
+
+- **入口**：设置 → WebDAV。配置表单填 WebDAV 根地址、账号、应用密码；密码只进
+  `flutter_secure_storage`（iOS Keychain / Android Keystore），不写 SharedPreferences、
+  日志或同步 JSON。表单先「测试连接」（MKCOL + PUT/GET/DELETE 探针），成功后才允许保存。
+- **文件**：`novel-playlet/<release|beta|dev>/sync.json`。渠道由 `appFlavor` 与构建模式决定：
+  release 包用 `release`，beta 包用 `beta`，debug 包用 `dev`，互不覆盖。文件只有书架、收藏、
+  阅读/观看进度，封面只存 URL，不存正文/图片/密码，通常小于 100 KB。
+- **合并**：`ReadingStore.exportSyncData()` 导出快照；`applySyncData()` 按条目合并：
+  - 书架/收藏：每个条目有 `u`（最后修改毫秒）和 `d`（tombstone），取较新者，删除也能同步；
+  - 阅读/观看进度：按 `updatedAt` 取较新；
+  - 最近阅读/最近观看由合并后的进度按时间重建，不再单独存一份冲突源。
+- **同步时机**：App 回前台/退后台自动同步一次；设置页可手动「立即同步」。阅读进度本身
+  400ms 防抖落盘，不能每次落盘都上传；WebDAV 免费流量足够（1 GB 上传 / 3 GB 下载每月），
+  但仍要避免高频整包上传。
+- **错误**：云端 JSON 损坏或渠道不匹配时停止同步并报错，绝不用空数据覆盖；401/403、409、
+  507 分别提示账号、上级目录、网盘配额问题。
+- **测试**：`webdav_client_test.dart` 用本地 `HttpServer` 覆盖认证/探针/读写；`reading_store_sync_test.dart`
+  覆盖 tombstone/进度合并；`webdav_sync_service_test.dart` 覆盖上传、拉取、损坏文件保护。
