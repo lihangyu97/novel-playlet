@@ -31,7 +31,8 @@ class EpisodePicker extends StatefulWidget {
   final int episodesPerTab;
   final int columns;
 
-  static const double buttonHeight = 34;
+  /// 集数按钮高度：与播放页选集弹层同一尺寸（44），详情页不再单独压扁。
+  static const double buttonHeight = 44;
   static const double buttonSpacing = 6;
 
   @override
@@ -174,10 +175,8 @@ class _EpisodePickerState extends State<EpisodePicker>
                   width: itemWidth,
                   child: EpisodeTile(
                     // 1000+ 集的剧只需要集数：去掉「第…集」前后缀。
+                    // 尺寸/字号与播放页选集弹层完全一致（组件默认值）。
                     index: index,
-                    height: EpisodePicker.buttonHeight,
-                    radius: 8,
-                    fontSize: 12,
                     onTap: () => widget.onOpen(index),
                   ),
                 ),

@@ -39,9 +39,10 @@ class EpisodeTile extends StatelessWidget {
       onPressed: onTap,
       style: TextButton.styleFrom(
         padding: EdgeInsets.zero,
+        // 高度必须由 minimumSize 决定：compact 视觉密度会把最小高度再压 8pt，
+        // 详情页（Wrap 不给高度）就会比播放页（Grid 固定 44）矮一截。
         minimumSize: Size(0, height),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        visualDensity: VisualDensity.compact,
         // 无描边：未选中靠淡底色区分，选中是主色实心。
         backgroundColor: selected
             ? scheme.primary
