@@ -64,8 +64,10 @@ void main() {
 
     expect(store.config?.baseUrl, 'https://dav.example.com/dav/');
     expect(store.config?.password, 'app-password');
-    expect(find.text('WebDAV 云同步'), findsOneWidget);
-    expect(find.textContaining('dav.example.com'), findsOneWidget);
+    expect(find.text('WebDAV'), findsOneWidget);
+    expect(find.textContaining('dav.example.com'), findsNothing);
+    expect(find.byKey(webDavSyncNowKey), findsOneWidget);
+    expect(find.textContaining('上次同步'), findsOneWidget);
     expect(client.files.keys.single.path, endsWith('/sync.json'));
   });
 }

@@ -343,8 +343,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('12 MB'), findsOneWidget);
     await _scrollToClearCache(tester);
+    expect(find.textContaining('12 MB'), findsOneWidget);
     await tester.tap(_clearCacheButton);
     await tester.pumpAndSettle();
     expect(find.text('清理缓存？'), findsOneWidget);
@@ -440,6 +440,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await _scrollToClearCache(tester);
     expect(find.text('0 B'), findsWidgets);
     expect(_clearCacheIconButton(tester).onPressed, isNull);
   });

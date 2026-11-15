@@ -157,8 +157,7 @@ class _WebDavConfigSheetState extends ConsumerState<WebDavConfigSheet> {
   @override
   Widget build(BuildContext context) {
     return AppBottomSheet(
-      title: 'WebDAV 同步',
-      subtitle: '同步书架、收藏和阅读/观看进度',
+      title: 'WebDAV',
       closeTooltip: '关闭 WebDAV 配置',
       child: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
@@ -188,7 +187,6 @@ class _WebDavConfigSheetState extends ConsumerState<WebDavConfigSheet> {
                     decoration: const InputDecoration(
                       labelText: 'WebDAV 地址',
                       hintText: 'https://dav.jianguoyun.com/dav/',
-                      helperText: '坚果云填根地址即可，App 会自动创建目录',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -219,7 +217,6 @@ class _WebDavConfigSheetState extends ConsumerState<WebDavConfigSheet> {
                     decoration: InputDecoration(
                       labelText: '应用密码',
                       hintText: _existing == null ? '不是登录密码' : '已保存，留空表示不修改',
-                      helperText: '在网盘安全设置里生成，不要填登录密码',
                       border: const OutlineInputBorder(),
                     ),
                   ),
@@ -272,14 +269,6 @@ class _WebDavConfigSheetState extends ConsumerState<WebDavConfigSheet> {
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    '同步文件只包含书架、收藏和进度，不包含正文、封面或密码。',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant
-                          .withValues(alpha: 0.8),
-                    ),
                   ),
                 ],
               ),

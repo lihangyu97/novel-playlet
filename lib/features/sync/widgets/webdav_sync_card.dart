@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../app/theme/app_theme.dart';
 import '../../../app/widgets/app_snack_bar.dart';
 import '../sync_meta.dart';
 import '../sync_status.dart';
@@ -12,7 +11,7 @@ const Key webDavSyncCardKey = Key('settings-webdav-sync');
 const Key webDavConfigureKey = Key('settings-webdav-configure');
 const Key webDavSyncNowKey = Key('settings-webdav-sync-now');
 
-/// 设置页「云同步」卡片。
+/// 设置页「WebDAV」卡片。
 ///
 /// 配置本身在弹层里完成；这里只展示连接状态、上次同步时间和两个动作。
 class WebDavSyncCard extends ConsumerWidget {
@@ -27,94 +26,54 @@ class WebDavSyncCard extends ConsumerWidget {
     final metaAsync = ref.watch(syncMetaProvider);
     final config = configAsync.value;
     final lastSync = status.lastSyncAt ?? metaAsync.value?.lastSyncAt;
-    final host = config == null
-        ? null
-        : Uri.tryParse(config.baseUrl)?.host ?? config.baseUrl;
+    final configured = config != null;
 
     return Padding(
       key: webDavSyncCardKey,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Card(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Icon(Icons.cloud_outlined, color: scheme.primary, size: 22),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'WebDAV 云同步',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: context.appWeight(FontWeight.w600),
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          configAsync.hasError
-                              ? '读取同步配置失败'
-                              : config == null
-                              ? '同步书架、收藏和阅读/观看进度'
-                              : '$host · ${_statusText(status, lastSync)}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                            height: 1.3,
-                          ),
-                        ),
-                      ],
-                    ),
+              Icon(Icons.cloud_outlined, color: scheme.primary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  configAsync.hasError
+                      ? '读取配置失败'
+                      : configured
+                      ? _statusText(status, lastSync)
+                      : '未配置',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
                   ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    key: webDavConfigureKey,
-                    onPressed: () => _configure(context, ref),
-                    child: Text(config == null ? '配置' : '修改'),
-                  ),
-                ],
-              ),
-              if (config != null) ...[
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    if (status.phase == SyncPhase.error)
-                      Expanded(
-                        child: Text(
-                          status.message,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.error,
-                          ),
-                        ),
-                      )
-                    else
-                      const Spacer(),
-                    const SizedBox(width: 8),
-                    FilledButton.tonalIcon(
-                      key: webDavSyncNowKey,
-                      onPressed: status.isSyncing
-                          ? null
-                          : () => _syncNow(context, ref),
-                      icon: status.isSyncing
-                          ? const SizedBox(
-                              width: 15,
-                              height: 15,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.sync_rounded, size: 18),
-                      label: Text(status.isSyncing ? '同步中…' : '立即同步'),
-                    ),
-                  ],
                 ),
-              ],
+              ),
+              IconButton(
+                key: webDavConfigureKey,
+                tooltip: configured ? '修改 WebDAV' : '配置 WebDAV',
+                onPressed: () => _configure(context, ref),
+                icon: const Icon(Icons.edit_outlined, size: 19),
+                visualDensity: VisualDensity.compact,
+              ),
+              IconButton(
+                key: webDavSyncNowKey,
+                tooltip: '立即同步',
+                onPressed: !configured || status.isSyncing
+                    ? null
+                    : () => _syncNow(context, ref),
+                icon: status.isSyncing
+                    ? const SizedBox(
+                        width: 17,
+                        height: 17,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync_rounded, size: 20),
+                visualDensity: VisualDensity.compact,
+              ),
             ],
           ),
         ),
@@ -146,7 +105,7 @@ String _statusText(SyncStatus status, DateTime? lastSync) {
   if (status.isSyncing) return '正在同步…';
   if (status.phase == SyncPhase.error) return '同步失败';
   final time = lastSync == null ? null : _formatTime(lastSync);
-  return time == null ? '已配置，尚未同步' : '上次同步 $time';
+  return time == null ? '尚未同步' : '上次同步 $time';
 }
 
 String _formatTime(DateTime time) {
