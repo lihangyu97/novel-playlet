@@ -12,6 +12,7 @@ import '../../app/router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_bottom_sheet.dart';
 import '../../app/widgets/chapter_directory_sheet.dart';
+import '../../app/widgets/embedded_detail_sheet.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/chapter.dart';
@@ -1594,13 +1595,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       cover: session.cover.isNotEmpty ? session.cover : widget.args.cover,
     );
     unawaited(
-      showAppBottomSheet<void>(
+      showEmbeddedDetailSheet(
         context: context,
-        builder: (sheetContext) => AppBottomSheet(
-          heightFactor: 0.72,
-          showClose: false,
-          child: DetailPage(bookId: bookId, preview: preview, embed: true),
-        ),
+        builder: (_) =>
+            DetailPage(bookId: bookId, preview: preview, embed: true),
       ),
     );
   }

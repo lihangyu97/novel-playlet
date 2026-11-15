@@ -11,7 +11,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../app/providers.dart';
 import '../../app/router.dart';
-import '../../app/widgets/app_bottom_sheet.dart';
+import '../../app/widgets/embedded_detail_sheet.dart';
 import '../../app/widgets/app_snack_bar.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../core/storage/offline/offline_series.dart';
@@ -1093,16 +1093,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     _hideTimer?.cancel();
     setState(() => _controlsVisible = true);
     try {
-      await showAppBottomSheet<void>(
+      await showEmbeddedDetailSheet(
         context: context,
-        builder: (sheetContext) => AppBottomSheet(
-          heightFactor: 0.72,
-          showClose: false,
-          child: VideoDetailPage(
-            seriesId: args.seriesId,
-            preview: _shelfItem,
-            embed: true,
-          ),
+        builder: (_) => VideoDetailPage(
+          seriesId: args.seriesId,
+          preview: _shelfItem,
+          embed: true,
         ),
       );
     } finally {

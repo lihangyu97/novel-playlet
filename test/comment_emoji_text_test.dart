@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/widgets/comment_emoji_text.dart';
 import 'package:novel_playlet/data/models/book_comment.dart';
-import 'package:novel_playlet/features/detail/detail_reviews_section.dart';
+import 'package:novel_playlet/app/widgets/comment_row.dart';
 
 /// 评论正文的方括号表情：只替换官方收录的 token，未知 token 保留原文。
 void main() {
@@ -144,9 +144,10 @@ void main() {
       MaterialApp(
         theme: AppTheme.light(),
         home: const Scaffold(
-          body: DetailReviewRow(
+          body: CommentRow(
             comment: BookComment(id: 'c1', text: '这条[赞]', userName: '读者甲'),
-            showStars: false,
+            padding: EdgeInsets.zero,
+            showAuthorBadge: false,
           ),
         ),
       ),

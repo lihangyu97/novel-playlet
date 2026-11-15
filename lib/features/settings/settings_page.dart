@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/app_version.dart';
 import '../../app/theme/app_font_weight.dart';
 import '../../app/theme/app_theme.dart';
+import '../../app/widgets/app_section_header.dart';
+import '../../app/widgets/setting_switch_row.dart';
 import '../../app/theme/theme_settings.dart';
 import '../../app/widgets/app_snack_bar.dart';
 import '../../core/cache/app_cache.dart';
@@ -34,7 +36,15 @@ class SettingsPage extends StatelessWidget {
           physics: const ClampingScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 28),
           children: const [
-            _SectionTitle('主题'),
+            AppSectionHeader(
+              title: '主题',
+              padding: EdgeInsets.fromLTRB(
+                _contentInset,
+                20,
+                _contentInset,
+                10,
+              ),
+            ),
             _ThemeColorCard(),
             SizedBox(height: 12),
             _DialogueHighlightColorCard(),
@@ -43,9 +53,25 @@ class SettingsPage extends StatelessWidget {
             SizedBox(height: 12),
             _GlobalFontWeightCard(),
             _FeedLayoutCard(),
-            _SectionTitle('WebDAV'),
+            AppSectionHeader(
+              title: 'WebDAV',
+              padding: EdgeInsets.fromLTRB(
+                _contentInset,
+                20,
+                _contentInset,
+                10,
+              ),
+            ),
             WebDavSyncCard(),
-            _SectionTitle('存储'),
+            AppSectionHeader(
+              title: '存储',
+              padding: EdgeInsets.fromLTRB(
+                _contentInset,
+                20,
+                _contentInset,
+                10,
+              ),
+            ),
             _StorageCard(),
             SizedBox(height: 12),
             // 下载清晰度是「存多少」的一部分：和占用/清理同区，不再单开一
@@ -54,24 +80,6 @@ class SettingsPage extends StatelessWidget {
             _AppVersionFooter(),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.title);
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(_contentInset, 20, _contentInset, 10),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleMedium
-            ?.copyWith(fontWeight: context.appWeight(FontWeight.w600)),
       ),
     );
   }
@@ -457,7 +465,8 @@ class _AppearanceCard extends ConsumerWidget {
         children: [
           // 跟随系统时深色由系统决定，这一项没有意义，直接收起。
           if (!following) ...[
-            _SwitchRow(
+            SettingSwitchRow(
+              padding: const EdgeInsets.symmetric(vertical: 4),
               title: '深色模式',
               subtitle: '关闭后固定使用浅色外观',
               value: dark,
@@ -469,7 +478,8 @@ class _AppearanceCard extends ConsumerWidget {
                   .withValues(alpha: 0.5),
             ),
           ],
-          _SwitchRow(
+          SettingSwitchRow(
+            padding: const EdgeInsets.symmetric(vertical: 4),
             title: '跟随系统',
             subtitle: '深色 / 浅色由系统外观决定',
             value: following,
@@ -479,56 +489,6 @@ class _AppearanceCard extends ConsumerWidget {
                   : (platformDark ? ThemeMode.dark : ThemeMode.light),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SwitchRow extends StatelessWidget {
-  const _SwitchRow({
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String title;
-  final String subtitle;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: context.appWeight(FontWeight.w600),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Switch(value: value, onChanged: onChanged),
         ],
       ),
     );

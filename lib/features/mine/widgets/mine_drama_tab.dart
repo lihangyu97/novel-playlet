@@ -14,7 +14,7 @@ import '../mine_drama_providers.dart';
 import 'media_manage_sheet.dart';
 import 'mine_drama_shelf_grid.dart';
 import 'mine_grid_metrics.dart';
-import 'mine_header.dart';
+import '../../../app/widgets/app_section_header.dart';
 import 'mine_recent_watching.dart';
 import 'mine_tab_body.dart';
 
@@ -48,9 +48,10 @@ class MineDramaTab extends ConsumerWidget {
           ? null
           : Column(
               children: [
-                MineSectionHeader(
+                AppSectionHeader(
                   title: '我的收藏',
                   hint: collections.isEmpty ? null : '长按管理',
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
                 ),
                 MineDramaShelfGrid(
                   items: collections,
@@ -109,7 +110,10 @@ class _MineRecentWatchingSection extends ConsumerWidget {
       padding: const EdgeInsets.only(top: 8),
       child: Column(
         children: [
-          const MineSectionHeader(title: '最近观看'),
+          const AppSectionHeader(
+            title: '最近观看',
+            padding: EdgeInsets.fromLTRB(8, 8, 8, 8),
+          ),
           if (history.isEmpty)
             const SizedBox(
               height: 140,
