@@ -17,13 +17,16 @@ import '../rank_providers.dart';
 /// 版式与搜索结果页的分类行一致：榜名（推荐榜 / 短剧榜 / 漫剧榜）在卡片
 /// **外面**，右侧「更多」带当前榜的 `algo` 进排行榜页、落地自动定位；下面
 /// 是一行横向可滑的紧凑卡（与搜索结果同一套宽度/字号，见 [CompactCardRow]），
-/// 只取前三。榜单接口失败/空榜时整块收起，推荐流本体不受影响。
+/// 取前 [previewCount] 条、一屏露 3.5 张、其余横向滑。榜单接口失败/空榜时
+/// 整块收起，推荐流本体不受影响。
 class RankPreviewCard extends ConsumerWidget {
   const RankPreviewCard({super.key, required this.category});
 
   final RecommendCategory category;
 
-  static const int previewCount = 3;
+  /// 首页预览条数：上游一页回 12 条（内核 `limit=12`），这里取前 10 条，
+  /// 留一点余量；不足 10 条时有多少铺多少。
+  static const int previewCount = 10;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -101,8 +104,8 @@ class _RankSectionHeader extends StatelessWidget {
   }
 }
 
-/// 榜单预览骨架：标题先出（榜名按分类映射），下面铺与真卡同口径的 3 张
-/// 骨架卡，接口回来换真卡时高度不跳。
+/// 榜单预览骨架：标题先出（榜名按分类映射），下面铺与真卡同口径的几张
+/// 骨架卡（只铺一屏多一点，够暗示横向可滑），接口回来换真卡时高度不跳。
 class _RankPreviewSkeleton extends StatelessWidget {
   const _RankPreviewSkeleton({required this.category});
 
@@ -122,7 +125,8 @@ class _RankPreviewSkeleton extends StatelessWidget {
           builder: (context, constraints) => CompactSkeletonRow(
             width: CompactCardRow.cardWidthFor(constraints.maxWidth),
             coverAspect: coverAspect,
-            count: RankPreviewCard.previewCount,
+            // 骨架只铺一屏多一点，不必按真实条数铺满。
+            count: 4,
           ),
         ),
         const SizedBox(height: 12),

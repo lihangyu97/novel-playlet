@@ -114,18 +114,17 @@ class RecommendPageState extends ConsumerState<RecommendPage>
           bottom: false,
           child: Column(
             children: [
-              // 顶栏整行高度按搜索入口（40）定；tabs 行贴行底对齐，下划线
-              // 正好落在整行底边上（与搜索入口底边齐平），下面再留 8 给内容。
-              // 整行贴住安全区，不再像以前那样先摆一整行搜索框、tabs 只能在
-              // 它下面。
+              // 顶栏整行与 tabs 同高（[CategoryTabBar.height]）：tabs 填满
+              // 整行、下划线正好落在整行底边，搜索图标在行内垂直居中、与 tab
+              // 文字同一条中线（不再比文字高出一截）。下面再留 8 给内容；
+              // 整行贴住安全区。
               SizedBox(
-                height: _SearchEntryButton.size,
+                height: CategoryTabBar.height,
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     // 右侧「40 图标 + 8 留白」的镜像占位：tabs 因此落在屏幕
                     // 正中，而不是被右侧搜索入口压到左半边。
-                    const SizedBox(width: _SearchEntryButton.size + 8),
+                    const SizedBox(width: _SearchEntryButton.width + 8),
                     Expanded(
                       child: CategoryTabBar(
                         controller: _tabController,
@@ -354,8 +353,8 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
 class _SearchEntryButton extends StatelessWidget {
   const _SearchEntryButton({required this.onTap});
 
-  /// 图标按钮的触控区大小，也是本页顶栏的行高。
-  static const double size = 40;
+  /// 触控区宽度（高度跟随顶栏，即 [CategoryTabBar.height]）。
+  static const double width = 40;
 
   final VoidCallback onTap;
 
@@ -365,8 +364,14 @@ class _SearchEntryButton extends StatelessWidget {
       onPressed: onTap,
       tooltip: '搜索',
       iconSize: 22,
+      padding: EdgeInsets.zero,
+      // compact 把 M3 默认给按钮四周留的 8pt 触控外扩收掉，按钮实际就是
+      // 40×行高，右侧「40 + 8」与左侧镜像占位等宽，tabs 才真的居中。
       visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: size, height: size),
+      constraints: BoxConstraints.tightFor(
+        width: width,
+        height: CategoryTabBar.height,
+      ),
       color: Theme.of(context).colorScheme.onSurfaceVariant,
       icon: const Icon(Icons.search_rounded),
     );

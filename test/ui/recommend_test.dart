@@ -265,21 +265,17 @@ void main() {
     );
   });
 
-  /// 顶栏收紧：整行 40（与搜索入口同高），tabs 行内居中；下划线贴行底后
-  /// 再留 8pt 给榜单卡片 / 首屏卡片。
+  /// 顶栏收紧：整行与 tabs 同高，搜索图标与 tab 文字同一条中线；下划线
+  /// 贴行底后再留 8pt 给榜单区块 / 首屏卡片。
   testWidgets('推荐页-顶栏收紧且给内容留出间距', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     final bar = tester.getRect(find.byType(CategoryTabBar));
     expect(bar.height, CategoryTabBar.height);
-    expect(
-      bar.bottom,
-      closeTo(40, 0.5),
-      reason: '顶栏整行 40，tabs 行贴行底，下划线正好在整行底边',
-    );
+    expect(bar.top, closeTo(0, 0.5), reason: '顶栏与 tabs 同高，整行贴住安全区');
     expect(
       tester.getRect(find.byType(TabBarView)).top,
-      closeTo(40 + 8, 0.5),
-      reason: '下划线到内容区留 8pt',
+      closeTo(CategoryTabBar.height + 8, 0.5),
+      reason: '下划线（贴行底）到内容区留 8pt',
     );
   });
 
