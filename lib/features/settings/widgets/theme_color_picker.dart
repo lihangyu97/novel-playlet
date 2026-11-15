@@ -15,6 +15,10 @@ import '../../../app/widgets/app_bottom_sheet.dart';
 /// 对话高亮预览一段正文）。预览会跟随当前取色更新：拖动时色块/十六进制
 /// 逐帧变化，预览区（ThemeData / 分页）按 ~90ms 合并，避免每帧重活。
 ///
+/// [leading] 用来在色板上面再插一块调用方自己的控件（对话高亮用它放「荧光笔 /
+/// 下划线 / 波浪线」样式按钮组）。它是个现成的 widget、不由本弹层重建：调用方
+/// 传进来的通常自己会 watch 对应 provider，所以点选后能原地刷新，不需要重开弹层。
+///
 /// 注意 `enableDrag: false`：弹层默认的纵向拖动手势会和取色面板打架，而且
 /// sheet 的 VerticalDrag 更早接受（约 18pt，子级 Pan 要 36pt），结果是
 /// 「拖明度」变成「拖弹层」，明度根本调不动。这里关掉 sheet 拖动。
@@ -23,6 +27,7 @@ Future<Color?> showThemeColorPicker(
   required Color initial,
   String title = '自定义主题色',
   Widget Function(Color color)? previewBuilder,
+  Widget? leading,
 }) {
   return showAppBottomSheet<Color>(
     context: context,
@@ -31,6 +36,7 @@ Future<Color?> showThemeColorPicker(
       initial: initial,
       title: title,
       previewBuilder: previewBuilder,
+      leading: leading,
     ),
   );
 }
@@ -41,6 +47,7 @@ class ThemeColorPickerSheet extends StatefulWidget {
     required this.initial,
     this.title = '自定义主题色',
     this.previewBuilder,
+    this.leading,
   });
 
   final Color initial;
@@ -48,6 +55,9 @@ class ThemeColorPickerSheet extends StatefulWidget {
 
   /// 自定义预览区；null = 主题色默认预览（按钮 + 强调色）。
   final Widget Function(Color color)? previewBuilder;
+
+  /// 色板上方的额外控件（如对话高亮的样式按钮组）。
+  final Widget? leading;
 
   @override
   State<ThemeColorPickerSheet> createState() => _ThemeColorPickerSheetState();
@@ -118,6 +128,10 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
                 ),
               ],
             ),
+            if (widget.leading != null) ...[
+              const SizedBox(height: 12),
+              widget.leading!,
+            ],
             const SizedBox(height: 12),
             _SaturationValuePanel(hsv: _hsv, onChanged: _updateHsv),
             const SizedBox(height: 16),

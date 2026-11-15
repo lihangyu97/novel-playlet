@@ -252,7 +252,7 @@ void main() {
     await tester.tap(find.byKey(dialogueHighlightColorKey));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
 
-    expect(find.text('自定义对话高亮颜色'), findsOneWidget);
+    expect(find.text('对话高亮样式与颜色'), findsOneWidget);
     expect(
       find.byKey(const Key('dialogue-highlight-preview')),
       findsOneWidget,
@@ -297,8 +297,9 @@ void main() {
     );
   });
 
-  /// 对话高亮样式：三选一，默认荧光笔；换样式后取色弹层里的预览同步换画法。
-  testWidgets('设置页-对话高亮样式可切换，取色预览跟着样式走', (tester) async {
+  /// 对话高亮的样式与颜色都收在圆点打开的弹层里：卡片上只有色块，弹层里先挑
+  /// 画法再挑颜色，示例正文按当前样式 + 颜色渲染。
+  testWidgets('设置页-对话高亮样式与颜色在同一个弹层里', (tester) async {
     await pumpPreview(
       tester,
       const SettingsPage(),
@@ -307,6 +308,16 @@ void main() {
     final container = ProviderScope.containerOf(
       tester.element(find.byType(SettingsPage)),
     );
+
+    expect(
+      find.byKey(dialogueHighlightStyleKey),
+      findsNothing,
+      reason: '样式按钮组不再占卡片，只在弹层里出现',
+    );
+
+    await tester.ensureVisible(find.byKey(dialogueHighlightColorKey));
+    await tester.tap(find.byKey(dialogueHighlightColorKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
 
     final group = tester.widget<SegmentedButton<DialogueHighlightStyle>>(
       find.byKey(dialogueHighlightStyleKey),
@@ -320,19 +331,21 @@ void main() {
       DialogueHighlightStyle.marker,
     }, reason: '默认荧光笔，老用户观感不变');
 
-    await tester.ensureVisible(find.text('波浪线'));
-    await tester.pump();
     await tester.tap(find.text('波浪线'));
-    await tester.pump();
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(
       container.read(readerSettingsProvider).dialogueHighlightStyle,
       DialogueHighlightStyle.wavy,
+      reason: '样式在弹层里点完立即生效',
     );
-
-    // 取色弹层里的示例正文按当前样式渲染：选色时就该看到最终效果。
-    await tester.ensureVisible(find.byKey(dialogueHighlightColorKey));
-    await tester.tap(find.byKey(dialogueHighlightColorKey));
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(
+      tester
+          .widget<SegmentedButton<DialogueHighlightStyle>>(
+            find.byKey(dialogueHighlightStyleKey),
+          )
+          .selected,
+      {DialogueHighlightStyle.wavy},
+    );
     expect(
       tester
           .widget<DialogueHighlightPreview>(
@@ -340,6 +353,26 @@ void main() {
           )
           .style,
       DialogueHighlightStyle.wavy,
+      reason: '示例正文跟着画法换（不重开弹层）',
+    );
+
+    // 取消只回滚颜色，样式已经落库：再打开时仍是波浪线。
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.byKey(dialogueHighlightColorKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(
+      tester
+          .widget<SegmentedButton<DialogueHighlightStyle>>(
+            find.byKey(dialogueHighlightStyleKey),
+          )
+          .selected,
+      {DialogueHighlightStyle.wavy},
+    );
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('../goldens/settings_dialogue_picker.png'),
     );
   });
 
