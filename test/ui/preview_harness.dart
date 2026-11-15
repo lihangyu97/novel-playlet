@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
+import 'package:novel_playlet/app/theme/app_font_weight.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
@@ -757,10 +758,14 @@ Future<void> loadPreviewFont() async {
   }
 }
 
-ThemeData previewTheme(Color seed, [Brightness brightness = Brightness.light]) {
+ThemeData previewTheme(
+  Color seed, [
+  Brightness brightness = Brightness.light,
+  FontWeight fontWeight = FontWeight.w400,
+]) {
   final base = brightness == Brightness.light
-      ? AppTheme.light(seed)
-      : AppTheme.dark(seed);
+      ? AppTheme.light(seed, fontWeight)
+      : AppTheme.dark(seed, fontWeight);
   return base.copyWith(
     textTheme: base.textTheme.apply(fontFamily: previewFontFamily),
     primaryTextTheme: base.primaryTextTheme.apply(
@@ -776,15 +781,22 @@ class PreviewApp extends ConsumerWidget {
     super.key,
     required this.home,
     this.brightness = Brightness.light,
+    this.platform = TargetPlatform.android,
   });
 
   final Widget home;
   final Brightness brightness;
+  final TargetPlatform platform;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final seed = ref.watch(themeSeedProvider);
-    final theme = previewTheme(seed, brightness);
+    final fontWeight = ref.watch(appEffectiveFontWeightProvider);
+    final theme = previewTheme(
+      seed,
+      brightness,
+      fontWeight,
+    ).copyWith(platform: platform);
     return MaterialApp(
       theme: theme,
       debugShowCheckedModeBanner: false,
@@ -811,6 +823,7 @@ Future<void> pumpPreview(
   FakePreviewTransport? transport,
   bool settle = true,
   Brightness brightness = Brightness.light,
+  TargetPlatform platform = TargetPlatform.android,
 
   /// 页面专属的 provider 覆写（追加在预览默认覆写之后）。
   ///
@@ -862,7 +875,7 @@ Future<void> pumpPreview(
         if (store != null) readingStoreProvider.overrideWithValue(store),
         ...extraOverrides,
       ],
-      child: PreviewApp(home: page, brightness: brightness),
+      child: PreviewApp(home: page, brightness: brightness, platform: platform),
     ),
   );
   if (!settle) return;

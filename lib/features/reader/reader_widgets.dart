@@ -192,7 +192,7 @@ class ReaderTopBar extends StatelessWidget {
                   style: TextStyle(
                     fontSize: _actionFontSize,
                     height: 1.2,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: context.appWeight(FontWeight.w500),
                     color: foreground,
                   ),
                 ),
@@ -258,8 +258,10 @@ class _ReaderTextAction extends StatelessWidget {
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         // 从主题 labelLarge 派生：textStyle 会整体替换按钮默认文字样式，
         // 直接给 const TextStyle 会丢掉主题字体（自定义字体下中文变豆腐块）。
-        textStyle: Theme.of(context).textTheme.labelLarge
-            ?.copyWith(fontSize: _actionFontSize, fontWeight: FontWeight.w500),
+        textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+          fontSize: _actionFontSize,
+          fontWeight: context.appWeight(FontWeight.w500),
+        ),
       ),
       child: Text(label),
     );
@@ -485,11 +487,16 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
   Widget build(BuildContext context) {
     final settings = ref.watch(readerSettingsProvider);
     final controller = ref.read(readerSettingsProvider.notifier);
+    final effectiveFontWeight = ref.watch(readerEffectiveFontWeightProvider);
+    // 全局字重入口只在 Android 出现；iOS 仍保留阅读器自己的滑块。
+    final canFollowGlobal =
+        Theme.of(context).platform == TargetPlatform.android;
+    final followingGlobal = canFollowGlobal && settings.followGlobalFontWeight;
     // 滑块显示预览值（拖动中跟手），文案同步预览，不读 provider 的旧值。
     final fontSize = _previewFontSize ?? settings.fontSize;
     final lineHeight = _previewLineHeight ?? settings.lineHeight;
     final fontWeight =
-        _previewFontWeight ?? settings.fontWeight.value.toDouble();
+        _previewFontWeight ?? effectiveFontWeight.value.toDouble();
     final paper = settings.paper;
     final foreground = paper.foreground;
     final muted = foreground.withValues(alpha: 0.55);
@@ -557,10 +564,22 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
                       ReaderSettingsController.fontWeightSteps.length - 1,
                   value: fontWeight,
                   label: '${fontWeight.round()}',
-                  onChanged: _onFontWeightPreview,
-                  onChangeEnd: _onFontWeightCommit,
+                  onChanged: followingGlobal ? null : _onFontWeightPreview,
+                  onChangeEnd: followingGlobal ? null : _onFontWeightCommit,
                 ),
               ),
+              if (canFollowGlobal)
+                _SettingSwitchRow(
+                  title: '跟随全局字重',
+                  subtitle: '关闭后可单独调整阅读器正文',
+                  value: settings.followGlobalFontWeight,
+                  onChanged: (value) {
+                    controller.setFollowGlobalFontWeight(value);
+                    setState(() => _previewFontWeight = null);
+                  },
+                  foreground: foreground,
+                  muted: muted,
+                ),
               const SizedBox(height: 4),
               // 底色标题与四个色块同一行；文案（白/纸/护眼/夜间）去掉，
               // 只保留色块 + 选中勾，读屏仍播报底色名。
@@ -841,7 +860,9 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 14,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  fontWeight: selected
+                      ? context.appWeight(FontWeight.w600)
+                      : context.appWeight(FontWeight.w400),
                   color: selected
                       ? highlight
                       : widget.foreground.withValues(alpha: 0.82),

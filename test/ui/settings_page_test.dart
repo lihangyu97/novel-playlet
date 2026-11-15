@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/app_version.dart';
+import 'package:novel_playlet/app/theme/app_font_weight.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
 import 'package:novel_playlet/features/settings/widgets/dialogue_highlight_preview.dart';
@@ -25,16 +27,77 @@ void main() {
   });
 
   testWidgets('设置页', (tester) async {
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
+    expect(
+      find.byKey(globalFontWeightKey),
+      findsNothing,
+      reason: 'iOS/macOS 不显示全局字重',
+    );
     await expectLater(
       find.byType(SettingsPage),
       matchesGoldenFile('../goldens/settings.png'),
     );
   });
 
+  testWidgets('设置页-Android 全局字重外观', (tester) async {
+    final originalPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await pumpPreview(tester, const SettingsPage());
+      await tester.ensureVisible(find.byKey(globalFontWeightKey));
+      await tester.pumpAndSettle();
+      await expectLater(
+        find.byType(SettingsPage),
+        matchesGoldenFile('../goldens/settings_android.png'),
+      );
+    } finally {
+      debugDefaultTargetPlatformOverride = originalPlatform;
+    }
+  });
+
+  testWidgets('设置页-全局字重仅 Android 显示并影响主题', (tester) async {
+    final originalPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await pumpPreview(tester, const SettingsPage());
+
+      expect(find.byKey(globalFontWeightKey), findsOneWidget);
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(SettingsPage)),
+      );
+      expect(container.read(appEffectiveFontWeightProvider), FontWeight.w400);
+
+      await tester.ensureVisible(find.byKey(globalFontWeightKey));
+      await tester.pump();
+      final rect = tester.getRect(find.byKey(globalFontWeightKey));
+      await tester.tapAt(Offset(rect.right - 8, rect.center.dy));
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(appEffectiveFontWeightProvider).value,
+        greaterThan(400),
+      );
+      final context = tester.element(find.byType(SettingsPage));
+      expect(
+        Theme.of(context).extension<AppFontWeightScale>()?.delta,
+        greaterThan(0),
+      );
+    } finally {
+      debugDefaultTargetPlatformOverride = originalPlatform;
+    }
+  });
+
   /// 离线下载清晰度：默认 720P，可切换并落盘。
   testWidgets('设置页-离线下载清晰度默认 720P，可切换', (tester) async {
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
 
     expect(find.text('离线下载清晰度'), findsOneWidget);
     expect(
@@ -58,7 +121,11 @@ void main() {
   });
 
   testWidgets('设置页-只有三个预设色 + 一个自定义入口', (tester) async {
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
 
     expect(themeColorOptions, hasLength(3));
     expect(find.byTooltip('天蓝'), findsOneWidget);
@@ -74,7 +141,11 @@ void main() {
       'app_seed_color_v1': 0xFFEF5350,
       'app_custom_seed_color_v1': 0xFF7E57C2,
     });
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
     await tester.tap(find.byKey(themeCustomColorKey));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
 
@@ -105,7 +176,11 @@ void main() {
 
   testWidgets('设置页-对话高亮颜色可自定义，示例文本跟随取色', (tester) async {
     SharedPreferences.setMockInitialValues({});
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
     final container = ProviderScope.containerOf(
       tester.element(find.byType(SettingsPage)),
     );
@@ -144,7 +219,11 @@ void main() {
       'app_seed_color_v1': 0xFFEF5350,
       'app_custom_seed_color_v1': 0xFF66BB6A,
     });
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
 
     final dot = tester.widget<AnimatedContainer>(
       find.descendant(
@@ -160,7 +239,11 @@ void main() {
   });
 
   testWidgets('设置页-对话高亮色块无边框且与主题圆点同尺寸', (tester) async {
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
     final swatch = find.byKey(dialogueHighlightColorKey);
     expect(tester.getSize(swatch), const Size(44, 44));
     final box = tester.widget<Container>(
@@ -174,7 +257,11 @@ void main() {
   });
 
   testWidgets('设置页-区块标题/标签/控件左右边界对齐', (tester) async {
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
     const inset = 32.0; // 卡片 16 外边距 + 16 内边距
 
     for (final text in ['主题', '对话高亮', '跟随系统', '推荐流布局', '存储']) {
@@ -203,14 +290,22 @@ void main() {
   });
 
   testWidgets('设置页-存储提示只剩离线缓存一条', (tester) async {
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
 
     expect(find.textContaining('离线缓存不在此列'), findsOneWidget);
     expect(find.textContaining('书架与阅读进度不会动'), findsNothing);
   });
 
   testWidgets('设置页-跟随时隐藏深色模式，关闭跟随后可手动切换', (tester) async {
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
     final container = ProviderScope.containerOf(
       tester.element(find.byType(SettingsPage)),
     );
@@ -249,7 +344,11 @@ void main() {
   /// 换主题色必须「全站跟着变」：底色/按钮/选中态都由新的 seed 派生。
   testWidgets('设置页-绯红主题', (tester) async {
     SharedPreferences.setMockInitialValues({'app_seed_color_v1': 0xFFEF5350});
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
     await expectLater(
       find.byType(SettingsPage),
       matchesGoldenFile('../goldens/settings_theme_red.png'),
@@ -258,7 +357,11 @@ void main() {
 
   /// 推荐流布局：默认双列，可切三列并落盘（推荐页 watch 同一个 provider）。
   testWidgets('设置页-推荐流布局默认双列，可切三列', (tester) async {
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
     final container = ProviderScope.containerOf(
       tester.element(find.byType(SettingsPage)),
     );
@@ -288,7 +391,11 @@ void main() {
   testWidgets('设置页-推荐流布局在 1.1 倍字体下仍为一行', (tester) async {
     tester.platformDispatcher.textScaleFactorTestValue = 1.1;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    await pumpPreview(tester, const SettingsPage());
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
 
     final two = tester.getRect(find.byKey(recommendLayoutTwoKey));
     final three = tester.getRect(find.byKey(recommendLayoutThreeKey));
@@ -349,6 +456,7 @@ void main() {
     await pumpPreview(
       tester,
       const SettingsPage(),
+      platform: TargetPlatform.iOS,
       brightness: Brightness.dark,
       extraOverrides: [
         themeModeProvider.overrideWith(
@@ -367,6 +475,7 @@ void main() {
     await pumpPreview(
       tester,
       const SettingsPage(),
+      platform: TargetPlatform.iOS,
       extraOverrides: [
         appVersionProvider.overrideWith(
           (ref) async => const AppVersion(name: '1.0.0', build: '15'),

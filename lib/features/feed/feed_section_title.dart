@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme/app_theme.dart';
+
 /// 首页流区块标题：跟着内容一起滚走。
 class FeedSectionTitle extends StatelessWidget {
   const FeedSectionTitle({super.key, required this.title});
@@ -14,7 +16,7 @@ class FeedSectionTitle extends StatelessWidget {
       child: Text(
         title,
         style: theme.textTheme.titleMedium?.copyWith(
-          fontWeight: FontWeight.w600,
+          fontWeight: context.appWeight(FontWeight.w600),
         ),
       ),
     );

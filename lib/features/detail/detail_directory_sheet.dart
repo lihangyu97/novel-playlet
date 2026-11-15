@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme/app_theme.dart';
+
 import '../../app/widgets/app_bottom_sheet.dart';
 import '../../data/models/chapter.dart';
 
@@ -60,7 +62,7 @@ class _DirectorySheetBody extends StatelessWidget {
                           chapter.volumeName,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: scheme.primary,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: context.appWeight(FontWeight.w600),
                           ),
                         ),
                       ),
@@ -102,7 +104,9 @@ class _SheetChapterTile extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: current ? scheme.primary : scheme.onSurface,
-                  fontWeight: current ? FontWeight.w600 : FontWeight.w400,
+                  fontWeight: current
+                      ? context.appWeight(FontWeight.w600)
+                      : context.appWeight(FontWeight.w400),
                 ),
               ),
             ),

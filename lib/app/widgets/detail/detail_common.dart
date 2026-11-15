@@ -188,7 +188,7 @@ class DetailTitleSection extends StatelessWidget {
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
+              fontWeight: context.appWeight(FontWeight.w700),
               height: 1.25,
             ),
           ),
@@ -315,7 +315,7 @@ class DetailIntroCard extends StatelessWidget {
             Text(
               '简介',
               style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
+                fontWeight: context.appWeight(FontWeight.w600),
               ),
             ),
             const SizedBox(height: 8),
@@ -370,7 +370,7 @@ class _ExpandableIntroState extends State<ExpandableIntro> {
     // 系统开了粗体时 TextPainter 与 Text 的样式必须一致，否则测量结果失真。
     if (MediaQuery.boldTextOf(context)) {
       style = (style ?? const TextStyle()).copyWith(
-        fontWeight: FontWeight.w700,
+        fontWeight: context.appWeight(FontWeight.w700),
       );
     }
 
@@ -460,7 +460,7 @@ class DetailSectionHeader extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
+              fontWeight: context.appWeight(FontWeight.w600),
             ),
           ),
           // trailing 靠右但不抢占固定宽度：窄屏/大字号下让它自己省略，
@@ -568,7 +568,7 @@ class DetailIdFooter extends StatelessWidget {
               Text(
                 'ID',
                 style: theme.textTheme.labelSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
+                  fontWeight: context.appWeight(FontWeight.w600),
                   letterSpacing: 0.6,
                   color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
                 ),

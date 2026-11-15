@@ -108,7 +108,7 @@ class AppBottomSheet extends StatelessWidget {
         titleStyle ??
         theme.textTheme.titleMedium?.copyWith(
           fontSize: 16,
-          fontWeight: FontWeight.w700,
+          fontWeight: context.appWeight(FontWeight.w700),
           height: 1.3,
           color: foreground,
         );

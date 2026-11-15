@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme/app_theme.dart';
+
 import '../../app/widgets/detail/detail_common.dart';
 import '../../data/models/book_detail.dart';
 import '../../data/models/novel_item.dart';
@@ -72,7 +74,7 @@ class DetailHeroInfo extends StatelessWidget {
         Text(
           score,
           style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w600,
+            fontWeight: context.appWeight(FontWeight.w600),
           ),
         ),
       );

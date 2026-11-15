@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'bootstrap_gate.dart';
+import 'theme/app_font_weight.dart';
 import 'theme/app_scroll_behavior.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_settings.dart';
@@ -21,11 +22,14 @@ class NovelPlayletApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final seed = ref.watch(themeSeedProvider);
     final themeMode = ref.watch(themeModeProvider);
+    // iOS 的 effective 值恒为 400，所以这里直接传也不会改变 iOS 观感；
+    // Android 才真正跟着设置里的全局字重走。
+    final fontWeight = ref.watch(appEffectiveFontWeightProvider);
     return MaterialApp(
       title: 'novel-playlet',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(seed),
-      darkTheme: AppTheme.dark(seed),
+      theme: AppTheme.light(seed, fontWeight),
+      darkTheme: AppTheme.dark(seed, fontWeight),
       themeMode: themeMode,
       scrollBehavior: const AppScrollBehavior(),
       locale: const Locale('zh', 'CN'),

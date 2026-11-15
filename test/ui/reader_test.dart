@@ -751,6 +751,21 @@ void main() {
     expect(weightSlider.max, 800);
     expect(weightSlider.divisions, 5);
 
+    // Android 默认跟随全局字重，字重滑块先禁用；关掉跟随后才能单独调。
+    expect(find.text('跟随全局字重'), findsOneWidget);
+    final followRow = find.ancestor(
+      of: find.text('跟随全局字重'),
+      matching: find.byType(Row),
+    );
+    final followSwitch = find.descendant(
+      of: followRow,
+      matching: find.byType(Switch),
+    );
+    expect(tester.widget<Switch>(followSwitch).value, isTrue);
+    await tester.tap(followSwitch);
+    await tester.pump();
+    expect(tester.widget<Slider>(sliders.at(2)).onChanged, isNotNull);
+
     // 底色文案去掉，四个色块和「底色」标题在同一行。
     final sheet = find.byType(ReaderSettingsSheet);
     for (final label in ['白', '纸', '护眼', '夜间']) {

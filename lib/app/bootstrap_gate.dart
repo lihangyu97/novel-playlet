@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import 'theme/app_theme.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'providers.dart';
@@ -91,7 +94,7 @@ class _StartupError extends StatelessWidget {
                 '阅读环境启动失败',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w600),
+                    ?.copyWith(fontWeight: context.appWeight(FontWeight.w600)),
               ),
               const SizedBox(height: 10),
               Text(

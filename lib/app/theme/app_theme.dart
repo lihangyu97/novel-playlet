@@ -20,6 +20,39 @@ enum ReaderPaper {
   final Color foreground;
 }
 
+/// 全局字重偏移：由「设置 → 全局字重」写入。
+///
+/// `delta` 是相对标准 400 的档位差（300 = -1，700 = +3）。组件里写死的
+/// 强调字重通过 [AppTheme.weightOf] 叠加这个偏移；iOS 恒为 0。
+@immutable
+class AppFontWeightScale extends ThemeExtension<AppFontWeightScale> {
+  const AppFontWeightScale({required this.delta});
+
+  final int delta;
+
+  @override
+  AppFontWeightScale copyWith({int? delta}) =>
+      AppFontWeightScale(delta: delta ?? this.delta);
+
+  @override
+  AppFontWeightScale lerp(ThemeExtension<AppFontWeightScale>? other, double t) {
+    if (other is! AppFontWeightScale) return this;
+    return t < 0.5 ? this : other;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is AppFontWeightScale && other.delta == delta;
+
+  @override
+  int get hashCode => delta.hashCode;
+}
+
+/// 便捷写法：`context.appWeight(FontWeight.w600)`。
+extension AppFontWeightContext on BuildContext {
+  FontWeight appWeight(FontWeight base) => AppTheme.weightOf(this, base);
+}
+
 /// 把「用户选的主题色」原样带进 ThemeData。
 ///
 /// 页面平时不需要它：填色/文字/描边一律用 `Theme.of(context).colorScheme`
@@ -81,22 +114,66 @@ class AppTheme {
         : Colors.white;
   }
 
-  static ThemeData light([Color seed = appSeedColor]) =>
-      _build(seed, Brightness.light);
+  static ThemeData light([
+    Color seed = appSeedColor,
+    FontWeight fontWeight = FontWeight.w400,
+  ]) => _build(seed, Brightness.light, fontWeight);
 
-  static ThemeData dark([Color seed = appSeedColor]) =>
-      _build(seed, Brightness.dark);
+  static ThemeData dark([
+    Color seed = appSeedColor,
+    FontWeight fontWeight = FontWeight.w400,
+  ]) => _build(seed, Brightness.dark, fontWeight);
 
   /// 由 seed + 明暗直接得到完整主题，用于「局部预览」（取色器里的按钮示例）。
   ///
   /// 注意别用 `Theme.of(context).copyWith(colorScheme: ...)` 造临时主题：
   /// copyWith 会保留外层的 [AppAccent] 扩展，`accentOf` 会读到旧 seed。
-  static ThemeData themed(Color seed, Brightness brightness) =>
-      _build(seed, brightness);
+  static ThemeData themed(
+    Color seed,
+    Brightness brightness, [
+    FontWeight fontWeight = FontWeight.w400,
+  ]) => _build(seed, brightness, fontWeight);
 
   /// 当前主题色（用户自定义过就是它，否则默认天蓝）。
   static Color accentOf(BuildContext context) =>
       Theme.of(context).extension<AppAccent>()?.seed ?? appSeedColor;
+
+  /// 给写死的强调字重叠加全局偏移。
+  ///
+  /// 例：全局选 500 时，`w600` 的小标题实际画成 `w700`，和 `textTheme`
+  /// 的基础字重一起变粗；iOS 的偏移恒为 0，保留原样。
+  static FontWeight weightOf(BuildContext context, FontWeight base) {
+    final delta = Theme.of(context).extension<AppFontWeightScale>()?.delta ?? 0;
+    return _shiftWeight(base, delta);
+  }
+
+  static FontWeight _shiftWeight(FontWeight base, int delta) {
+    final value = (base.value + delta * 100).clamp(100, 900);
+    return FontWeight.values.firstWhere((weight) => weight.value == value);
+  }
+
+  static TextTheme _shiftTextTheme(TextTheme textTheme, int delta) {
+    TextStyle? shift(TextStyle? style) => style?.copyWith(
+      fontWeight: _shiftWeight(style.fontWeight ?? FontWeight.w400, delta),
+    );
+    return TextTheme(
+      displayLarge: shift(textTheme.displayLarge),
+      displayMedium: shift(textTheme.displayMedium),
+      displaySmall: shift(textTheme.displaySmall),
+      headlineLarge: shift(textTheme.headlineLarge),
+      headlineMedium: shift(textTheme.headlineMedium),
+      headlineSmall: shift(textTheme.headlineSmall),
+      titleLarge: shift(textTheme.titleLarge),
+      titleMedium: shift(textTheme.titleMedium),
+      titleSmall: shift(textTheme.titleSmall),
+      bodyLarge: shift(textTheme.bodyLarge),
+      bodyMedium: shift(textTheme.bodyMedium),
+      bodySmall: shift(textTheme.bodySmall),
+      labelLarge: shift(textTheme.labelLarge),
+      labelMedium: shift(textTheme.labelMedium),
+      labelSmall: shift(textTheme.labelSmall),
+    );
+  }
 
   /// 由 seed 生成配色方案。App、阅读页弹层、取色器预览都必须走这里，
   /// 否则同一 seed 在不同地方会派生出不同颜色。
@@ -115,7 +192,11 @@ class AppTheme {
     );
   }
 
-  static ThemeData _build(Color seed, Brightness brightness) {
+  static ThemeData _build(
+    Color seed,
+    Brightness brightness,
+    FontWeight fontWeight,
+  ) {
     final scheme = schemeFor(seed, brightness);
     final base = ThemeData(
       useMaterial3: true,
@@ -124,16 +205,24 @@ class AppTheme {
           ? canvas
           : scheme.surface,
     );
+    final delta = (fontWeight.value - FontWeight.w400.value) ~/ 100;
+    final textTheme = _shiftTextTheme(base.textTheme, delta);
+    final primaryTextTheme = _shiftTextTheme(base.primaryTextTheme, delta);
     return base.copyWith(
-      extensions: [AppAccent(seed: seed)],
+      textTheme: textTheme,
+      primaryTextTheme: primaryTextTheme,
+      extensions: [
+        AppAccent(seed: seed),
+        AppFontWeightScale(delta: delta),
+      ],
       appBarTheme: AppBarTheme(
         backgroundColor: base.scaffoldBackgroundColor,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: base.textTheme.titleLarge?.copyWith(
-          fontWeight: FontWeight.w600,
+        titleTextStyle: textTheme.titleLarge?.copyWith(
+          fontWeight: _shiftWeight(FontWeight.w600, delta),
           color: scheme.onSurface,
         ),
         iconTheme: IconThemeData(color: scheme.onSurface),
@@ -145,9 +234,12 @@ class AppTheme {
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
             fontSize: 12,
-            fontWeight: states.contains(WidgetState.selected)
-                ? FontWeight.w600
-                : FontWeight.w400,
+            fontWeight: _shiftWeight(
+              states.contains(WidgetState.selected)
+                  ? FontWeight.w600
+                  : FontWeight.w400,
+              delta,
+            ),
             color: states.contains(WidgetState.selected)
                 ? scheme.primary
                 : scheme.onSurfaceVariant,
@@ -175,7 +267,10 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          textStyle: TextStyle(
+            fontSize: 15,
+            fontWeight: _shiftWeight(FontWeight.w600, delta),
+          ),
         ),
       ),
       // OutlinedButton 以前用 M3 默认的 StadiumBorder，和 FilledButton 的 12
@@ -186,7 +281,10 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          textStyle: TextStyle(
+            fontSize: 15,
+            fontWeight: _shiftWeight(FontWeight.w600, delta),
+          ),
         ),
       ),
     );

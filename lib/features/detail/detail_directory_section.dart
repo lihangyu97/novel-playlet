@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme/app_theme.dart';
+
 import '../../data/models/chapter.dart';
 import 'detail_style.dart';
 
@@ -135,7 +137,9 @@ class _ChapterRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: current ? scheme.primary : scheme.onSurface,
-                  fontWeight: current ? FontWeight.w600 : FontWeight.w400,
+                  fontWeight: current
+                      ? context.appWeight(FontWeight.w600)
+                      : context.appWeight(FontWeight.w400),
                 ),
               ),
             ),
