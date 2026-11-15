@@ -128,8 +128,12 @@ class RecommendPageState extends ConsumerState<RecommendPage>
               // 搜索框常驻顶部，不随列表滚动收起；右侧固定下载图标入口。
               // 顶部不留内边距：搜索框上沿直接贴住安全区（状态栏 / 刘海底边），
               // 与独立搜索页保持一致，点进搜索页时搜索框不会上下跳。
+              // 搜索框与 tabs 之间、tabs 与卡片之间各留 2：tabs 行内的文字
+              // 是底部对齐的（行内上方本来就有一段留白），行外上下再各留
+              // 同样的 2，文字到搜索框、到卡片的两段空白才一样宽，不会看
+              // 上去像「离搜索框更远、贴着卡片」。
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 2),
                 child: Row(
                   children: [
                     Expanded(
@@ -158,12 +162,15 @@ class RecommendPageState extends ConsumerState<RecommendPage>
                   ],
                 ),
               ),
-              // 榜单卡片直接贴住 tabs（卡片顶部不再留白）；样式与我的页共用
-              // CategoryTabBar。
-              CategoryTabBar(
-                controller: _tabController,
-                labels: const ['小说', '短剧', '漫剧'],
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+              // tabs 居中（不再贴左对齐）。上下留白见上：外面两边都是 2。
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: CategoryTabBar(
+                  controller: _tabController,
+                  labels: const ['小说', '短剧', '漫剧'],
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  center: true,
+                ),
               ),
               Expanded(
                 child: TabBarView(

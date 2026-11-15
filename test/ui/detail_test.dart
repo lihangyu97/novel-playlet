@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
+import 'package:novel_playlet/app/widgets/chapter_directory_sheet.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/data/models/book_detail.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/features/detail/detail_action_bar.dart';
+import 'package:novel_playlet/features/detail/detail_directory_section.dart';
+import 'package:novel_playlet/features/detail/detail_hero.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/reader/reader_page.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
@@ -168,7 +173,7 @@ void main() {
       expect(find.text('剑来'), findsWidgets);
     });
 
-    testWidgets('小说详情-作者行带状态字数，评分/在读/更新至合并一行', (tester) async {
+    testWidgets('小说详情-作者行带状态字数，评分/在读一行、更新至单独一行', (tester) async {
       const preview = NovelItem(id: '1', title: '剑来', author: '作者');
       await pumpPreview(
         tester,
@@ -180,12 +185,86 @@ void main() {
       expect(find.text('烽火戏诸侯 · 连载中 · 132.8万字'), findsOneWidget);
       expect(find.textContaining('玄幻 ·'), findsNothing);
 
-      // 评分 / 在读 / 更新至 合并成一行：三者的中线应一致。
-      final score = tester.getCenter(find.text('9.3')).dy;
-      final readers = tester.getCenter(find.text('1.2万人在读')).dy;
-      final updated = tester.getCenter(find.text('更新至 第一千零二十四章 开天')).dy;
-      expect(readers, closeTo(score, 0.5));
-      expect(updated, closeTo(score, 0.5));
+      // 评分 / 在读 合并成一行：两者中线一致。
+      final score = tester.getCenter(find.text('9.3'));
+      final readers = tester.getCenter(find.text('1.2万人在读'));
+      expect(readers.dy, closeTo(score.dy, 0.5));
+
+      // 「更新至 …」单独起一行：章节名不再和评分/在读抢同一行的宽度。
+      final updatedFinder = find.text('更新至 第一千零二十四章 开天');
+      final updated = tester.getRect(updatedFinder);
+      expect(updated.top, greaterThan(readers.dy), reason: '更新至应排在评分/在读的下一行');
+      final titleSection = tester.getRect(find.byType(DetailTitleSection));
+      expect(
+        updated.left,
+        closeTo(titleSection.left + detailGutter + 4, 1),
+        reason: '更新至与书名左对齐（同一内容留白）',
+      );
+      expect(
+        updated.right,
+        lessThanOrEqualTo(titleSection.right - detailGutter - 4),
+        reason: '更新至不能越出内容区',
+      );
+      final text = tester.widget<Text>(updatedFinder);
+      expect(text.maxLines, 1);
+      expect(text.overflow, TextOverflow.ellipsis, reason: '只有超出卡片宽度才省略');
+
+      // 评分 / 在读 / 更新至与「作者 · 状态 · 字数」同一字号，信息区不出现
+      // 两套正文字号。
+      final subtitleSize = tester
+          .widget<Text>(find.text('烽火戏诸侯 · 连载中 · 132.8万字'))
+          .style!
+          .fontSize;
+      for (final value in ['9.3', '1.2万人在读', '更新至 第一千零二十四章 开天']) {
+        expect(
+          tester.widget<Text>(find.text(value)).style!.fontSize,
+          subtitleSize,
+          reason: '「$value」字号应与作者行一致',
+        );
+      }
+    });
+
+    testWidgets('小说详情-超长章节名用满整行后才省略', (tester) async {
+      // 这句在旧布局里和评分/在读挤一行会被截得很短；单独一行时可以用满
+      // 整行，只有真的超出卡片宽度才省略。
+      const chapter = '第一千零二十四章 开天辟地剑气长城倒悬山月色如霜雪照大千世界';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Center(
+            child: SizedBox(
+              width: 390,
+              child: DetailHeroInfo(
+                detail: const BookDetail(
+                  title: '剑来',
+                  readCount: '1.2万人在读',
+                  score: '9.3',
+                  lastChapterTitle: chapter,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final finder = find.text('更新至 $chapter');
+      final rect = tester.getRect(finder);
+      final info = tester.getRect(find.byType(DetailHeroInfo));
+      expect(
+        rect.left,
+        closeTo(info.left + detailGutter + 4, 1),
+        reason: '更新至与书名左对齐（同一内容留白）',
+      );
+      expect(
+        rect.width,
+        closeTo(info.width - (detailGutter + 4) * 2, 1),
+        reason: '长章节名可以占满整行，不跟评分/在读分宽度',
+      );
+      final paragraph = tester.renderObject<RenderParagraph>(finder);
+      expect(
+        paragraph.didExceedMaxLines,
+        isTrue,
+        reason: '超出卡片宽度时才省略，而不是被行内其他内容挤掉',
+      );
     });
 
     testWidgets('详情页-封面同时作为顶部背景（顶部不透明到底部透明）', (tester) async {
@@ -313,6 +392,56 @@ void main() {
       findsOneWidget,
     );
     expect(shelfAdd, findsNothing);
+  });
+
+  group('目录', () {
+    testWidgets('小说详情-目录行不画分割线', (tester) async {
+      await pumpPreview(tester, const DetailPage(bookId: '1'));
+      final section = find.byType(DetailDirectorySection);
+      await tester.scrollUntilVisible(
+        section,
+        240,
+        scrollable: _verticalScrollable,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: section, matching: find.byType(Divider)),
+        findsNothing,
+        reason: '目录行之间只靠行高/留白分行',
+      );
+    });
+
+    testWidgets('小说详情-查看全部目录复用阅读器弹层（可拖动滚动条）', (tester) async {
+      await pumpPreview(tester, const DetailPage(bookId: '1'));
+      final openAll = find.text('共 24 章 · 查看全部');
+      await tester.scrollUntilVisible(
+        openAll,
+        240,
+        scrollable: _verticalScrollable,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(openAll);
+      await tester.pumpAndSettle();
+
+      // 与阅读器目录是同一个组件，不再是另一套列表。
+      final sheet = find.byType(ChapterDirectorySheet);
+      expect(sheet, findsOneWidget);
+      final scrollbar = tester.widget<Scrollbar>(
+        find.descendant(of: sheet, matching: find.byType(Scrollbar)),
+      );
+      expect(scrollbar.thumbVisibility, isTrue);
+      expect(scrollbar.interactive, isTrue, reason: '右侧滚动条要能按住拖动');
+      // 详情页比阅读器多一层卷标题。
+      expect(find.text('第一卷'), findsOneWidget);
+
+      // 点章节直接进阅读页（弹层回传章节）。详情页正文里的目录卡片也有
+      // 同名章节，按弹层范围圈定。
+      await tester.tap(
+        find.descendant(of: sheet, matching: find.text('第一章 山中有剑')),
+      );
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.byType(ReaderPage), findsOneWidget);
+    });
   });
 
   testWidgets('详情页', (tester) async {

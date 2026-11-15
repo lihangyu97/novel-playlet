@@ -146,18 +146,38 @@ void main() {
     );
   });
 
-  testWidgets('推荐页-分类 tabs 横向可滚动', (tester) async {
+  testWidgets('推荐页-分类 tabs 居中、可与搜索框等距', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     expect(
       find.byType(CategoryTabBar),
       findsOneWidget,
       reason: '与我的页共用同一套 tabs',
     );
-    // 首个 tab 的文字左边缘与搜索框左边缘对齐（同一个内容留白）。
+    // 一组 tabs 在整行里居中：按 tab 槽位（而不是文字宽度）量，左右两侧
+    // 空白只差居中时补的那段尾部留白，字号大小不影响结论。
+    final bar = tester.getRect(find.byType(CategoryTabBar));
+    final slots = find.descendant(
+      of: find.byType(CategoryTabBar),
+      matching: find.byType(InkWell),
+    );
+    final firstSlot = tester.getRect(slots.first);
+    final lastSlot = tester.getRect(slots.last);
     expect(
-      tester.getTopLeft(find.text('小说')).dx,
-      closeTo(tester.getTopLeft(find.byType(FeedSearchField)).dx, 0.5),
-      reason: '首个 tab 文字应与搜索框左对齐',
+      (firstSlot.left - bar.left) - (bar.right - lastSlot.right),
+      closeTo(CategoryTabBar.tabGap, 0.5),
+      reason: 'tabs 应居中（左侧多出的正是居中时补的前导留白）',
+    );
+    // 文字到搜索框、到下方内容的两段空白一样宽（以前下方贴着卡片）。
+    final first = tester.getRect(find.text('小说'));
+    final searchBottom = tester.getRect(find.byType(FeedSearchField)).bottom;
+    final contentTop = tester.getRect(find.byType(TabBarView)).top;
+    final above = first.top - searchBottom;
+    final below = contentTop - first.bottom;
+    expect(above, greaterThan(0));
+    expect(
+      above,
+      closeTo(below, 0.5),
+      reason: 'tabs 上方/下方留白应等距，实际 above=$above below=$below',
     );
     final scrollView = tester.widget<SingleChildScrollView>(
       find.descendant(

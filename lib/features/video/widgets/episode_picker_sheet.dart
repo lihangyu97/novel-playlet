@@ -6,6 +6,7 @@ import '../../../app/theme/app_theme.dart';
 
 import '../../../app/widgets/app_bottom_sheet.dart';
 import '../../../data/models/chapter.dart';
+import 'episode_tile.dart';
 
 /// 选集弹层每个 tab 的集数：78 集 = 13 行 × 6 列，正好比一屏多一点。
 ///
@@ -140,8 +141,6 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
   Widget _buildGrid(int tab) {
     final start = tab * episodesPerTab;
     final end = math.min(start + episodesPerTab, widget.episodes.length);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -153,42 +152,14 @@ class _EpisodePickerBodyState extends State<_EpisodePickerBody>
       itemCount: end - start,
       itemBuilder: (context, localIndex) {
         final index = start + localIndex;
-        final selected = index == widget.currentIndex;
-        final label = Text(
-          '${index + 1}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: selected ? scheme.onPrimary : scheme.onSurface,
-            fontWeight: selected
-                ? context.appWeight(FontWeight.w700)
-                : context.appWeight(FontWeight.w500),
-          ),
+        return EpisodeTile(
+          index: index,
+          selected: index == widget.currentIndex,
+          height: 44,
+          radius: 10,
+          fontSize: 14,
+          onTap: () => Navigator.of(context).pop(index),
         );
-        void onTap() => Navigator.of(context).pop(index);
-        return selected
-            ? FilledButton(
-                onPressed: onTap,
-                style: FilledButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: const Size(0, 44),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: label,
-              )
-            : OutlinedButton(
-                onPressed: onTap,
-                style: OutlinedButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: const Size(0, 44),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: label,
-              );
       },
     );
   }

@@ -12,6 +12,7 @@ import 'package:novel_playlet/features/detail/detail_reviews_section.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/features/video/video_detail_page.dart';
 import 'package:novel_playlet/features/video/widgets/episode_picker.dart';
+import 'package:novel_playlet/features/video/widgets/episode_tile.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -379,7 +380,7 @@ void main() {
 
       final episodeButtons = find.descendant(
         of: find.byType(EpisodePicker),
-        matching: find.byType(OutlinedButton),
+        matching: find.byType(EpisodeTile),
       );
       // 默认展开：直接看到选集和集数按钮。
       expect(find.text('选集'), findsOneWidget);
