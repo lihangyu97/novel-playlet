@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../app/widgets/grid_metrics.dart';
+
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
 /// 瀑布流网格（sliver 形态）：卡片不定高，按列自上而下排。
@@ -109,10 +112,11 @@ class _FeedStaggeredGridState<T> extends State<FeedStaggeredGrid<T>> {
       // masonry 内部口径一致，逐帧同步。
       sliver: SliverLayoutBuilder(
         builder: (context, constraints) {
-          final cellWidth =
-              (constraints.crossAxisExtent -
-                  FeedStaggeredGrid.crossAxisSpacing * (widget.columns - 1)) /
-              widget.columns;
+          final cellWidth = gridCellWidth(
+            availableWidth: constraints.crossAxisExtent,
+            columns: widget.columns,
+            spacing: FeedStaggeredGrid.crossAxisSpacing,
+          );
           if (_canReuseSliver(cellWidth)) return _cachedSliver!;
           return _buildSliver(cellWidth);
         },

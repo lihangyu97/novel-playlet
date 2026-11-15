@@ -1,4 +1,5 @@
 import 'comment_image.dart';
+import '../../core/relative_time.dart';
 import 'json_utils.dart';
 
 /// 一条评论（段评 / 章末评论 / 书评共用）。
@@ -65,22 +66,8 @@ class BookComment {
   /// 书评的 5 星展示（0–10 分折半）。
   double get stars => (score.clamp(0, 10)) / 2;
 
-  /// 列表里的时间文案：一天内用相对时间，更早给日期。
-  String timeLabel({DateTime? now}) {
-    final created = createdAt;
-    if (created == null) return '';
-    final reference = now ?? DateTime.now();
-    final diff = reference.difference(created);
-    if (diff.inSeconds < 60) return '刚刚';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
-    if (diff.inHours < 24) return '${diff.inHours}小时前';
-    if (diff.inDays < 30) return '${diff.inDays}天前';
-    final month = created.month.toString().padLeft(2, '0');
-    final day = created.day.toString().padLeft(2, '0');
-    return created.year == reference.year
-        ? '$month-$day'
-        : '${created.year}-$month-$day';
-  }
+  /// 列表里的时间文案：全 App 同一套相对时间（见 [relativeTime]）。
+  String timeLabel({DateTime? now}) => relativeTime(createdAt, now: now);
 
   /// 解析 `data_list[]` 里的一条（`{comment: {...}, stat: {...}}`）。
   static BookComment? fromCommentListEntry(Object? raw) {

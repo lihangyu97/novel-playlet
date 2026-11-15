@@ -2,15 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
-import '../../app/router.dart';
-import '../../app/widgets/cover_hero.dart';
-import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../../data/models/json_utils.dart' show isRetryableError;
 import '../../data/models/rank.dart';
 import '../feed/feed_state.dart';
 import '../feed/feed_view.dart';
+import 'rank_entry_route.dart';
 import 'rank_providers.dart';
+import 'widgets/rank_entry_row.dart';
 
 /// 榜单目录加载器（测试可注入）。
 typedef RankCatalogLoader = Future<RankCatalog> Function();
@@ -325,20 +324,7 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
   }
 
   void _openEntry(RankEntry entry) {
-    if (entry.isEmpty) return;
-    final source = 'rank-${widget.tab.algo}';
-    final route = entry.isVideo
-        ? VideoDetailRoute(
-            seriesId: entry.id,
-            preview: entry.toVideoSeries(),
-            heroTag: CoverHeroTag.video(source, entry.id),
-          )
-        : DetailRoute(
-            bookId: entry.id,
-            preview: entry.toNovelItem(),
-            heroTag: CoverHeroTag.novel(source, entry.id),
-          );
-    context.pushAppRoute(route);
+    openRankEntry(context, entry, source: 'rank-${widget.tab.algo}');
   }
 
   @override
@@ -361,9 +347,9 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
       sliverBuilder: (context, state) => SliverList(
         delegate: SliverChildBuilderDelegate((context, index) {
           final entry = state.items[index];
-          return _RankRow(
+          return RankEntryRow(
             entry: entry,
-            tab: widget.tab,
+            source: 'rank-${widget.tab.algo}',
             onTap: () => _openEntry(entry),
           );
         }, childCount: state.items.length),
@@ -428,171 +414,6 @@ class _RankTabBar extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-/// 榜单里的一行：名次 + 封面 + 标题/评分/元信息/简介/标签。
-class _RankRow extends StatelessWidget {
-  const _RankRow({required this.entry, required this.tab, required this.onTap});
-
-  final RankEntry entry;
-  final RankTab tab;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final top = entry.position <= 3;
-    final coverWidth = 56.0;
-    final coverAspect = entry.isVideo ? kVideoCoverAspect : kNovelCoverAspect;
-    final heroSource = 'rank-${tab.algo}';
-    final heroTag = entry.isVideo
-        ? CoverHeroTag.video(heroSource, entry.id)
-        : CoverHeroTag.novel(heroSource, entry.id);
-
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 26,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  '${entry.position}',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: top ? scheme.error : scheme.onSurfaceVariant,
-                    fontSize: top ? 16 : 13,
-                    height: 1.2,
-                    fontWeight: top ? FontWeight.w700 : FontWeight.w500,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            CoverHero(
-              tag: heroTag,
-              child: NovelCover(
-                url: entry.cover,
-                width: coverWidth,
-                height: coverWidth * coverAspect,
-                radius: 8,
-                placeholderColor: coverPlaceholderColorOf(entry.colorDominate),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          entry.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: scheme.onSurface,
-                            fontSize: 14.5,
-                            height: 1.3,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      if (entry.scoreLabel.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          entry.scoreLabel,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.primary,
-                            fontSize: 12.5,
-                            height: 1.2,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (entry.metaLabel.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      entry.metaLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 11.5,
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
-                  if (entry.abstract.isNotEmpty) ...[
-                    const SizedBox(height: 5),
-                    Text(
-                      entry.abstract.replaceAll(RegExp(r'\s+'), ' ').trim(),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.9),
-                        fontSize: 11.5,
-                        height: 1.45,
-                      ),
-                    ),
-                  ],
-                  if (entry.tags.isNotEmpty) ...[
-                    const SizedBox(height: 7),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: [
-                        for (final tag in entry.tags.take(3))
-                          _RankTag(text: tag),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _RankTag extends StatelessWidget {
-  const _RankTag({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        text,
-        maxLines: 1,
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: scheme.onSurfaceVariant,
-          fontSize: 10,
-          height: 1.2,
-        ),
-      ),
     );
   }
 }

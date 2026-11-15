@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
+import '../../../app/widgets/grid_metrics.dart';
+
 /// 我的页书架/收藏瀑布流的列数与列宽换算。
 ///
 /// 小说与短剧两个 tab 共用一套规则，保证卡片宽度完全一致；宽屏（iPad）
@@ -34,9 +36,10 @@ class MineGridMetrics {
       2,
       math.min(6, (availableWidth / _maxCardWidth).ceil()),
     );
-    final itemWidth = math.max(
-      0.0,
-      (availableWidth - spacing * (columns - 1)) / columns,
+    final itemWidth = gridCellWidth(
+      availableWidth: availableWidth,
+      columns: columns,
+      spacing: spacing,
     );
     return MineGridMetrics._(columns: columns, itemWidth: itemWidth);
   }

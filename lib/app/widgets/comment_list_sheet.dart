@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/api/api_client.dart';
+import '../../core/relative_time.dart';
 import '../../data/models/book_comment.dart';
 import '../../data/models/comment_reply.dart';
 import '../providers.dart';
@@ -504,7 +505,7 @@ class _CommentListSheetState extends ConsumerState<CommentListSheet> {
   ) {
     final muted = foreground.withValues(alpha: 0.5);
     final name = reply.userName.trim().isEmpty ? '匿名读者' : reply.userName.trim();
-    final time = _timeLabel(reply.createdAt);
+    final time = relativeTime(reply.createdAt);
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
@@ -583,20 +584,4 @@ class _ReplyState {
   bool loaded = false;
   bool? error;
   List<CommentReply> replies = const <CommentReply>[];
-}
-
-/// [CommentReply] 没带 `BookComment.timeLabel`，但时间戳语义完全一致。
-String _timeLabel(DateTime? createdAt) {
-  if (createdAt == null) return '';
-  final now = DateTime.now();
-  final diff = now.difference(createdAt);
-  if (diff.inSeconds < 60) return '刚刚';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
-  if (diff.inHours < 24) return '${diff.inHours}小时前';
-  if (diff.inDays < 30) return '${diff.inDays}天前';
-  final month = createdAt.month.toString().padLeft(2, '0');
-  final day = createdAt.day.toString().padLeft(2, '0');
-  return createdAt.year == now.year
-      ? '$month-$day'
-      : '${createdAt.year}-$month-$day';
 }

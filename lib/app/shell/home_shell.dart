@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/mine/mine_page.dart';
 import '../../features/recommend/recommend_page.dart';
+import '../widgets/keep_alive_box.dart';
 import 'floating_navigation_bar.dart';
 
 /// 两 tab 外壳：推荐 / 我的。
@@ -97,7 +98,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         physics: const NeverScrollableScrollPhysics(),
         children: [
           for (final tab in _tabs)
-            _KeepAlivePage(child: tab.builder(bottomInset)),
+            KeepAliveBox(child: tab.builder(bottomInset)),
         ],
       ),
       bottomNavigationBar: Center(
@@ -131,27 +132,4 @@ class _ShellTab {
 
   final FloatingNavigationDestination destination;
   final Widget Function(double bottomInset) builder;
-}
-
-/// 让 [PageView] 离屏的页面保持存活（滚动位置、搜索框内容、已加载列表都
-/// 在子树 State 里，销毁后回来会重置）。
-class _KeepAlivePage extends StatefulWidget {
-  const _KeepAlivePage({required this.child});
-
-  final Widget child;
-
-  @override
-  State<_KeepAlivePage> createState() => _KeepAlivePageState();
-}
-
-class _KeepAlivePageState extends State<_KeepAlivePage>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    return widget.child;
-  }
 }
