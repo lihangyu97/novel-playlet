@@ -157,6 +157,55 @@ void main() {
       expect(highlighter, findsNothing);
     });
 
+    testWidgets('样式切换只换画法：同一条矩形上带 style 并重绘', (tester) async {
+      final pagination = ReaderPagination.build(
+        chapterId: 'c1',
+        paragraphs: const ['“你来了。”他说。'],
+        spec: spec(),
+      );
+      const textStyle = TextStyle(fontSize: 18, height: 1.6);
+      const picked = Color(0xFF66BB6A);
+      Widget build(DialogueHighlightStyle style) => MaterialApp(
+        home: Scaffold(
+          body: ReaderPageContent(
+            page: pagination.pages.first,
+            textStyle: textStyle,
+            textScaler: TextScaler.noScaling,
+            contentWidth: 300,
+            horizontalPadding: 20,
+            dialogueHighlightColor: picked,
+            dialogueHighlightStyle: style,
+          ),
+        ),
+      );
+
+      final highlighter = find.byKey(
+        const ValueKey('reader-dialogue-highlight'),
+      );
+      dynamic painterOf() =>
+          tester.widget<CustomPaint>(highlighter).painter as dynamic;
+
+      // 荧光笔是「面」：沿用原来的低透明度，保证老用户观感不变。
+      await tester.pumpWidget(build(DialogueHighlightStyle.marker));
+      final markerPainter = painterOf();
+      expect(markerPainter.style, DialogueHighlightStyle.marker);
+      expect(markerPainter.color, picked.withValues(alpha: 0.34));
+
+      // 下划线 / 波浪线是「线」：要实一些，否则叠在纸上几乎看不见。
+      await tester.pumpWidget(build(DialogueHighlightStyle.underline));
+      expect(painterOf().style, DialogueHighlightStyle.underline);
+      expect(painterOf().color, picked.withValues(alpha: 0.85));
+
+      await tester.pumpWidget(build(DialogueHighlightStyle.wavy));
+      expect(painterOf().style, DialogueHighlightStyle.wavy);
+      expect(painterOf().color, picked.withValues(alpha: 0.85));
+      expect(
+        painterOf().shouldRepaint(markerPainter),
+        isTrue,
+        reason: '换样式必须触发重绘（否则切了样式画面不变）',
+      );
+    });
+
     test('跨行对话每一行都有一段矩形', () {
       final longDialogue = '“${'这是一段很长的对话内容，' * 8}”';
       final pagination = ReaderPagination.build(

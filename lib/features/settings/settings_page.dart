@@ -201,11 +201,14 @@ class _ThemeColorCard extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 对话高亮颜色
+// 对话高亮（样式 + 颜色）
 // ---------------------------------------------------------------------------
 
 /// 「对话高亮」色块的 key：测试用它点开取色弹层。
 const Key dialogueHighlightColorKey = Key('settings-dialogue-highlight-color');
+
+/// 「对话高亮」样式按钮组的 key：测试用它点选荧光笔 / 下划线 / 波浪线。
+const Key dialogueHighlightStyleKey = Key('settings-dialogue-highlight-style');
 
 /// 阅读页人物对话荧光笔的颜色。和主题色分开：主题色决定全站配色，对话高亮
 /// 只是阅读页的一层标记色，用户可以单独挑一个顺眼的荧光笔颜色。
@@ -220,6 +223,8 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
     final scheme = theme.colorScheme;
     return _Card(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      // 样式和颜色都收进右边圆点打开的弹层里：圆点亮的是当前颜色，点开先挑
+      // 画法再挑颜色，预览跟着两者一起变。
       child: Row(
         children: [
           Expanded(
@@ -234,7 +239,7 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '阅读页人物对话的荧光笔颜色',
+                  '样式与颜色，点右侧圆点调整',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                     height: 1.3,
@@ -247,14 +252,16 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
           _ColorDot(
             key: dialogueHighlightColorKey,
             color: settings.dialogueHighlightColor,
-            tooltip: '自定义对话高亮颜色',
+            tooltip: '自定义对话高亮样式与颜色',
             onTap: () async {
               final picked = await showThemeColorPicker(
                 context,
                 initial: settings.dialogueHighlightColor,
-                title: '自定义对话高亮颜色',
+                title: '对话高亮样式与颜色',
+                // 画法直接写阅读设置（弹层里点完立刻生效）；颜色等「确定」。
+                leading: const _DialogueHighlightStylePicker(),
                 previewBuilder: (color) =>
-                    DialogueHighlightPreview(color: color),
+                    _DialogueHighlightPreviewSlot(color: color),
               );
               if (picked == null) return;
               controller.setDialogueHighlightColor(picked);
@@ -262,6 +269,50 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 取色弹层里的「标记样式」按钮组。
+///
+/// 自己 watch 阅读设置：点一下立即写入并刷新弹层预览，不用退出重开。
+/// 取消弹层只回滚颜色，样式已经生效（和开关类设置的手感一致）。
+class _DialogueHighlightStylePicker extends ConsumerWidget {
+  const _DialogueHighlightStylePicker();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final style = ref.watch(readerSettingsProvider).dialogueHighlightStyle;
+    return SegmentedButton<DialogueHighlightStyle>(
+      key: dialogueHighlightStyleKey,
+      style: _segmentedStyle(Theme.of(context)),
+      segments: [
+        for (final style in DialogueHighlightStyle.values)
+          ButtonSegment(value: style, label: Text(style.label)),
+      ],
+      selected: {style},
+      showSelectedIcon: false,
+      onSelectionChanged: (selected) => ref
+          .read(readerSettingsProvider.notifier)
+          .setDialogueHighlightStyle(selected.single),
+    );
+  }
+}
+
+/// 取色弹层里的预览槽：颜色由弹层按帧传进来，样式自己 watch。
+///
+/// 拆成 ConsumerWidget 是为了「只切样式」时也能刷新预览——弹层只在拖动取色时
+/// 重建，切样式不会让它重建。
+class _DialogueHighlightPreviewSlot extends ConsumerWidget {
+  const _DialogueHighlightPreviewSlot({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return DialogueHighlightPreview(
+      color: color,
+      style: ref.watch(readerSettingsProvider).dialogueHighlightStyle,
     );
   }
 }
