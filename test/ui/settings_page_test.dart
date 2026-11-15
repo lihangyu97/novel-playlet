@@ -7,6 +7,7 @@ import 'package:novel_playlet/app/theme/app_font_weight.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
 import 'package:novel_playlet/features/settings/widgets/dialogue_highlight_preview.dart';
+import 'package:novel_playlet/features/cache/download_quality.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/reader/reader_settings.dart';
 import 'package:novel_playlet/features/settings/settings_page.dart';
@@ -14,7 +15,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 
-/// 设置页预览：主题色（3 个预设 + 自定义）、深浅色模式、推荐流布局、存储与视频区块。
+/// 设置页预览：主题色（3 个预设 + 自定义）、深浅色模式、推荐流布局、全局字重、
+/// 存储区块（占用清理 + 下载清晰度）。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/settings_page_test.dart`。
 void main() {
@@ -91,33 +93,90 @@ void main() {
     }
   });
 
-  /// 离线下载清晰度：默认 720P，可切换并落盘。
-  testWidgets('设置页-离线下载清晰度默认 720P，可切换', (tester) async {
-    await pumpPreview(
-      tester,
-      const SettingsPage(),
-      platform: TargetPlatform.iOS,
+  /// 下载清晰度（已并进「存储」区块）：默认 720P，可切换并落盘。
+  testWidgets('设置页-下载清晰度默认 720P，可切换', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(SettingsPage)),
     );
 
-    expect(find.text('离线下载清晰度'), findsOneWidget);
+    expect(find.text('下载清晰度'), findsOneWidget);
+    expect(find.text('离线下载清晰度'), findsNothing, reason: '标题精简为「下载清晰度」');
     expect(
-      tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '720P'))
-          .selected,
-      isTrue,
-      reason: '离线下载默认 720P',
+      container.read(videoDownloadQualityProvider),
+      VideoDownloadQuality.p720,
     );
+    expect(_qualitySegments(tester).selected, {
+      VideoDownloadQuality.p720,
+    }, reason: '离线下载默认 720P');
 
     await tester.ensureVisible(find.text('1080P'));
     await tester.pump();
     await tester.tap(find.text('1080P'));
     await tester.pump();
     expect(
-      tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '1080P'))
-          .selected,
-      isTrue,
+      container.read(videoDownloadQualityProvider),
+      VideoDownloadQuality.p1080,
     );
+    expect(_qualitySegments(tester).selected, {VideoDownloadQuality.p1080});
+  });
+
+  /// 四档清晰度收在一个按钮组里，不再是一排独立 chip。
+  testWidgets('设置页-下载清晰度用 M3 按钮组（SegmentedButton）', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+
+    final segmented = _qualitySegments(tester);
+    expect(
+      find.byType(ChoiceChip),
+      findsNothing,
+      reason: '清晰度与双列/三列都换成按钮组，页面上不应再有 ChoiceChip',
+    );
+    expect(
+      segmented.segments.map((segment) => segment.value),
+      VideoDownloadQuality.values,
+      reason: '四档顺序与枚举一致：最高 / 1080P / 720P / 480P',
+    );
+    expect(segmented.showSelectedIcon, isFalse, reason: '段内文案短，打勾会撑宽');
+
+    // 不要 M3 默认的描边：整组是一条浅色底轨 + 一个实心选中段。
+    final side = segmented.style?.side?.resolve(<WidgetState>{});
+    expect(
+      side?.style ?? BorderStyle.none,
+      BorderStyle.none,
+      reason: '按钮组不再画外框和段间竖线',
+    );
+  });
+
+  /// 两块设置卡都是「标题左 / 按钮组右 / 同一条水平线」的 flex 两端对齐：
+  /// 不是标题独占一行、按钮另起一行，也不要求两边各占 50%。
+  testWidgets('设置页-标题和按钮组两端对齐、同一行', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+    const inset = 32.0; // 卡片 16 外边距 + 16 内边距
+    const rightEdge = 390 - inset;
+
+    for (final (title, group) in [
+      ('推荐流布局', find.byType(SegmentedButton<RecommendLayout>)),
+      ('下载清晰度', find.byType(SegmentedButton<VideoDownloadQuality>)),
+    ]) {
+      final titleRect = tester.getRect(find.text(title));
+      final groupRect = tester.getRect(group);
+      expect(
+        groupRect.center.dy,
+        closeTo(titleRect.center.dy, 2),
+        reason: '$title 与按钮组应在同一条水平中线上（同一行）',
+      );
+      expect(titleRect.left, inset, reason: '$title 贴内容左边界');
+      expect(
+        groupRect.right,
+        closeTo(rightEdge, 0.5),
+        reason: '$title 的按钮组贴内容右边界（两端对齐）',
+      );
+      expect(
+        groupRect.left,
+        greaterThan(titleRect.right + 8),
+        reason: '$title 与按钮组之间留出间隔，不是各占一半',
+      );
+    }
   });
 
   testWidgets('设置页-只有三个预设色 + 一个自定义入口', (tester) async {
@@ -289,15 +348,40 @@ void main() {
     expect(tester.getRect(find.text('339 MB')).right, 390 - inset);
   });
 
-  testWidgets('设置页-存储提示只剩离线缓存一条', (tester) async {
-    await pumpPreview(
-      tester,
-      const SettingsPage(),
-      platform: TargetPlatform.iOS,
+  testWidgets('设置页-范围说明收在存储卡片最下方', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+
+    final hint = find.text('不包括主动缓存的小说、短剧');
+    expect(hint, findsOneWidget);
+    expect(
+      find.ancestor(of: hint, matching: find.byType(Card)),
+      findsOneWidget,
+      reason: '说明是卡片内部最后一行，不再单挂在页面下方',
+    );
+    expect(find.textContaining('离线缓存不在此列'), findsNothing);
+    expect(find.textContaining('请到「我的 → 缓存」页清理'), findsNothing);
+  });
+
+  /// 清理入口只留图标（与详情页「复制 ID」同款小图标按钮），不再占一整行。
+  testWidgets('设置页-清理缓存只留图标按钮', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+
+    final clear = find.byTooltip('清理缓存');
+    expect(clear, findsOneWidget);
+    expect(find.text('清理缓存'), findsNothing, reason: '按钮不再带文案');
+    expect(find.byIcon(Icons.cleaning_services_outlined), findsOneWidget);
+    expect(
+      tester.getSize(clear),
+      const Size(24, 24),
+      reason: '与详情页复制 ID 同档的小图标按钮（原来是一整个 44pt 胶囊）',
     );
 
-    expect(find.textContaining('离线缓存不在此列'), findsOneWidget);
-    expect(find.textContaining('书架与阅读进度不会动'), findsNothing);
+    // 仍然可点：点开确认框。
+    await tester.ensureVisible(clear);
+    await tester.pump();
+    await tester.tap(clear);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('清理缓存？'), findsOneWidget);
   });
 
   testWidgets('设置页-跟随时隐藏深色模式，关闭跟随后可手动切换', (tester) async {
@@ -368,10 +452,10 @@ void main() {
 
     expect(find.text('推荐流布局'), findsOneWidget);
     expect(container.read(recommendLayoutProvider), RecommendLayout.two);
-    expect(
-      tester.widget<ChoiceChip>(find.byKey(recommendLayoutTwoKey)).selected,
-      isTrue,
+    final segmented = tester.widget<SegmentedButton<RecommendLayout>>(
+      find.byType(SegmentedButton<RecommendLayout>),
     );
+    expect(segmented.selected, {RecommendLayout.two});
 
     // ListView 懒加载：先滚到选项再点，避免以后上面再加一张卡就点不到。
     await tester.ensureVisible(find.byKey(recommendLayoutThreeKey));
@@ -379,8 +463,12 @@ void main() {
     await tester.pump();
     expect(container.read(recommendLayoutProvider), RecommendLayout.three);
     expect(
-      tester.widget<ChoiceChip>(find.byKey(recommendLayoutThreeKey)).selected,
-      isTrue,
+      tester
+          .widget<SegmentedButton<RecommendLayout>>(
+            find.byType(SegmentedButton<RecommendLayout>),
+          )
+          .selected,
+      {RecommendLayout.three},
     );
     expect(find.textContaining('封面更大'), findsNothing, reason: '布局说明提示已去掉');
     // 落盘由 test/recommend_layout_test.dart 覆盖（页面测试只验证交互与联动）。
@@ -501,3 +589,9 @@ void main() {
     );
   });
 }
+
+/// 「下载清晰度」那一组按钮（M3 SegmentedButton）。
+SegmentedButton<VideoDownloadQuality> _qualitySegments(WidgetTester tester) =>
+    tester.widget<SegmentedButton<VideoDownloadQuality>>(
+      find.byType(SegmentedButton<VideoDownloadQuality>),
+    );
