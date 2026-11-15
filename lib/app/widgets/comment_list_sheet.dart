@@ -10,6 +10,7 @@ import '../providers.dart';
 import '../theme/app_theme.dart';
 import 'app_bottom_sheet.dart';
 import 'comment_emoji_text.dart';
+import 'comment_row.dart';
 import 'comment_image_strip.dart';
 import 'states.dart';
 
@@ -375,9 +376,8 @@ class _CommentListSheetState extends ConsumerState<CommentListSheet> {
         }
         final comment = _comments[index];
         final replyState = _replies[_commentKey(comment)];
-        return _CommentTile(
+        return CommentRow(
           comment: comment,
-          scheme: scheme,
           foreground: foreground,
           score: _feed.buildScore(comment),
           onToggleReplies: _feed.replyLoader == null
@@ -510,7 +510,7 @@ class _CommentListSheetState extends ConsumerState<CommentListSheet> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _InitialAvatar(name: reply.userName, scheme: scheme, radius: 11),
+          CommentAvatar(name: reply.userName, scheme: scheme, radius: 11),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -583,203 +583,6 @@ class _ReplyState {
   bool loaded = false;
   bool? error;
   List<CommentReply> replies = const <CommentReply>[];
-}
-
-/// 评论行：四套评论列表共用同一套排版，特殊项（星级）由 Feed 注入。
-class _CommentTile extends StatelessWidget {
-  const _CommentTile({
-    required this.comment,
-    required this.scheme,
-    required this.foreground,
-    required this.score,
-    required this.onToggleReplies,
-    required this.repliesExpanded,
-    required this.replies,
-  });
-
-  final BookComment comment;
-  final ColorScheme scheme;
-  final Color foreground;
-  final Widget? score;
-  final VoidCallback? onToggleReplies;
-  final bool repliesExpanded;
-  final Widget? replies;
-
-  @override
-  Widget build(BuildContext context) {
-    final name = comment.userName.trim().isEmpty
-        ? '匿名读者'
-        : comment.userName.trim();
-    final text = comment.text.trim();
-    final time = comment.timeLabel();
-    final muted = foreground.withValues(alpha: 0.5);
-    final metaStyle = TextStyle(fontSize: 11, color: muted);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _InitialAvatar(name: name, scheme: scheme, radius: 17),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            name,
-                            key: ValueKey('comment-name-${comment.id}'),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: context.appWeight(FontWeight.w600),
-                              color: foreground,
-                            ),
-                          ),
-                        ),
-                        if (comment.isAuthor) ...[
-                          const SizedBox(width: 4),
-                          _AuthorBadge(scheme: scheme),
-                        ],
-                        if (score != null) ...[
-                          const SizedBox(width: 6),
-                          score!,
-                        ],
-                        if (time.isNotEmpty) ...[
-                          const SizedBox(width: 6),
-                          Text(
-                            time,
-                            key: ValueKey('comment-time-${comment.id}'),
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: foreground.withValues(alpha: 0.45),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    if (text.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      CommentEmojiText(
-                        text: comment.text,
-                        style: TextStyle(
-                          fontSize: 14,
-                          height: 1.5,
-                          color: foreground,
-                        ),
-                      ),
-                    ],
-                    if (comment.imageUrls.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      CommentImageStrip(
-                        imageRefs: comment.imageRefsOrFallback,
-                        placeholderColor: foreground.withValues(alpha: 0.06),
-                      ),
-                    ],
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.thumb_up_alt_outlined,
-                          size: 13,
-                          color: muted,
-                        ),
-                        const SizedBox(width: 3),
-                        Text('${comment.diggCount}', style: metaStyle),
-                        if (onToggleReplies != null &&
-                            comment.replyCount > 0) ...[
-                          const Spacer(),
-                          InkWell(
-                            onTap: onToggleReplies,
-                            borderRadius: BorderRadius.circular(4),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
-                              ),
-                              child: Text(
-                                repliesExpanded
-                                    ? '收起回复'
-                                    : '${comment.replyCount} 条回复',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: scheme.primary,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          ?replies,
-        ],
-      ),
-    );
-  }
-}
-
-class _InitialAvatar extends StatelessWidget {
-  const _InitialAvatar({
-    required this.name,
-    required this.scheme,
-    required this.radius,
-  });
-
-  final String name;
-  final ColorScheme scheme;
-  final double radius;
-
-  @override
-  Widget build(BuildContext context) {
-    final trimmed = name.trim();
-    final initial = trimmed.isEmpty
-        ? '匿'
-        : String.fromCharCode(trimmed.runes.first);
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: scheme.primary.withValues(alpha: 0.12),
-      child: Text(
-        initial,
-        style: TextStyle(
-          fontSize: radius * 0.8,
-          fontWeight: context.appWeight(FontWeight.w600),
-          color: scheme.primary,
-        ),
-      ),
-    );
-  }
-}
-
-class _AuthorBadge extends StatelessWidget {
-  const _AuthorBadge({required this.scheme});
-
-  final ColorScheme scheme;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        color: scheme.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        '作者',
-        style: TextStyle(fontSize: 10, height: 1.2, color: scheme.primary),
-      ),
-    );
-  }
 }
 
 /// [CommentReply] 没带 `BookComment.timeLabel`，但时间戳语义完全一致。

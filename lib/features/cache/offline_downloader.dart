@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/cache/app_cache.dart' show formatBytes;
 import '../../core/storage/offline/offline_book.dart';
 import '../../core/storage/offline/offline_book_store.dart';
 import '../../core/storage/offline/offline_series.dart';
@@ -801,9 +802,9 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       // 到了上限就暂停并提示去清理，而不是在开始时就按估算拒绝整部剧。
       if (bytes >= seriesStore.capBytes) {
         control.pauseMessage ??=
-            '离线区空间不足（已用 ${_formatBytesShort(bytes)} / 上限 '
-            '${_formatBytesShort(seriesStore.capBytes)}），任务已暂停，'
-            '请先在「我的 → 缓存」页删除不需要的缓存';
+            '离线缓存已满（已用 ${formatBytes(bytes)} / 上限 '
+            '${formatBytes(seriesStore.capBytes)}），任务已暂停，'
+            '请先删除不需要的缓存';
         control.pauseRequested = true;
         break;
       }
@@ -1341,17 +1342,6 @@ Future<void> _closeStreamQuietly(OfflineVideoStream? stream) async {
   } catch (_) {
     // 同上。
   }
-}
-
-/// 下载器内部提示用的字节格式（不依赖 UI 层）。
-String _formatBytesShort(int bytes) {
-  final gb = 1024 * 1024 * 1024;
-  final mb = 1024 * 1024;
-  final kb = 1024;
-  if (bytes >= gb) return '${(bytes / gb).toStringAsFixed(1)} GB';
-  if (bytes >= mb) return '${(bytes / mb).toStringAsFixed(1)} MB';
-  if (bytes >= kb) return '${(bytes / kb).toStringAsFixed(1)} KB';
-  return '$bytes B';
 }
 
 /// 把任务的用户可读文案 + 第一条失败原因拼在一起（诊断/继续时能看到具体原因）。

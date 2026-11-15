@@ -6,8 +6,10 @@ import '../../app/router.dart';
 import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
+import '../../data/models/json_utils.dart' show isRetryableError;
 import '../../data/models/rank.dart';
 import '../feed/feed_state.dart';
+import '../feed/feed_view.dart';
 import 'rank_providers.dart';
 
 /// 榜单目录加载器（测试可注入）。
@@ -205,15 +207,13 @@ class _RankTabPage extends ConsumerStatefulWidget {
 
 class _RankTabPageState extends ConsumerState<_RankTabPage>
     with AutomaticKeepAliveClientMixin {
-  final _entries = <RankEntry>[];
+  /// 列表状态复用首页流那一套：加载更多/翻页失败/是否还有下一页都由它描述。
+  FeedState<RankEntry> _state = const FeedState<RankEntry>(items: []);
+
   final _scrollController = ScrollController();
 
   bool _loading = true;
-  bool _loadingMore = false;
   String? _error;
-  String? _loadMoreError;
-  bool _hasMore = false;
-  int _nextOffset = 0;
   int _generation = 0;
 
   @override
@@ -252,25 +252,27 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
         );
   }
 
+  /// 榜单接口的「还有没有下一页」：`has_more` 为准，游标缺失时按本页条数兜底。
+  int? _nextOffsetOf(RankBoard board) {
+    if (!board.hasMore) return null;
+    return board.nextOffset ?? board.entries.length;
+  }
+
   Future<void> _loadFirst() async {
     final token = ++_generation;
     setState(() {
       _loading = true;
       _error = null;
-      _loadMoreError = null;
-      _entries.clear();
-      _hasMore = false;
-      _nextOffset = 0;
+      _state = const FeedState<RankEntry>(items: []);
     });
     try {
       final board = await _loadBoard(offset: 0, startAt: 1);
       if (!mounted || token != _generation) return;
       setState(() {
-        _entries
-          ..clear()
-          ..addAll(board.entries);
-        _hasMore = board.hasMore;
-        _nextOffset = board.nextOffset ?? board.entries.length;
+        _state = FeedState<RankEntry>(
+          items: board.entries,
+          nextOffset: _nextOffsetOf(board),
+        );
         _loading = false;
         _error = null;
       });
@@ -283,50 +285,43 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
     }
   }
 
+  /// 触底/重试都走这里；并发守卫与「到底了不再发」由 [_state] 决定。
   Future<void> _loadMore() async {
-    if (_loading || _loadingMore || !_hasMore) return;
-    if (_entries.isEmpty) return;
+    if (_loading || _state.loadingMore || !_state.hasMore) return;
+    if (!_state.loadMoreRetryable) return;
     final token = _generation;
-    setState(() {
-      _loadingMore = true;
-      _loadMoreError = null;
-    });
+    final offset = _state.nextOffset;
+    if (offset == null) return;
+    setState(
+      () => _state = _state.withLoadingMore(true).withLoadMoreError(null),
+    );
     try {
       final board = await _loadBoard(
-        offset: _nextOffset,
-        startAt: _entries.length + 1,
+        offset: offset,
+        startAt: _state.items.length + 1,
       );
       if (!mounted || token != _generation) return;
-      final seen = {for (final entry in _entries) entry.id};
       setState(() {
-        for (final entry in board.entries) {
-          if (entry.id.isEmpty || seen.add(entry.id)) {
-            _entries.add(entry);
-          }
-        }
-        _hasMore = board.hasMore;
-        _nextOffset = board.nextOffset ?? _entries.length;
-        _loadingMore = false;
-        _loadMoreError = null;
+        _state = _state
+            .appendPage(
+              newItems: board.entries,
+              idOf: (entry) => entry.id,
+              nextOffset: _nextOffsetOf(board),
+            )
+            .withLoadingMore(false)
+            .withLoadMoreError(null);
       });
     } catch (error) {
       if (!mounted || token != _generation) return;
       setState(() {
-        _loadingMore = false;
-        _loadMoreError = describeFeedError(error);
+        _state = _state
+            .withLoadingMore(false)
+            .withLoadMoreError(
+              describeFeedError(error),
+              retryable: isRetryableError(error),
+            );
       });
     }
-  }
-
-  bool _handleScroll(ScrollNotification notification) {
-    if (notification.metrics.axis != Axis.vertical) return false;
-    if (notification is! ScrollUpdateNotification &&
-        notification is! ScrollEndNotification) {
-      return false;
-    }
-    if (notification.metrics.extentAfter > 280) return false;
-    _loadMore();
-    return false;
   }
 
   void _openEntry(RankEntry entry) {
@@ -349,49 +344,29 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-
     if (_loading) {
       return const LoadingView(label: '正在加载榜单…');
     }
-    if (_error != null && _entries.isEmpty) {
+    if (_error != null && _state.items.isEmpty) {
       return ErrorView(message: _error!, onRetry: _loadFirst);
     }
-    if (_entries.isEmpty) {
-      return EmptyView(message: '该榜单暂无内容', icon: Icons.leaderboard_outlined);
-    }
-    return NotificationListener<ScrollNotification>(
-      onNotification: _handleScroll,
-      child: RefreshIndicator(
-        onRefresh: _loadFirst,
-        child: ListView.builder(
-          key: ValueKey('rank_content_${widget.tab.algo}'),
-          controller: _scrollController,
-          physics: const AlwaysScrollableScrollPhysics(
-            parent: ClampingScrollPhysics(),
-          ),
-          padding: const EdgeInsets.only(bottom: 24),
-          itemCount: _entries.length + 1,
-          itemBuilder: (context, index) {
-            if (index == _entries.length) {
-              return _RankFooter(
-                loading: _loadingMore,
-                error: _loadMoreError,
-                hasMore: _hasMore,
-                onRetry: _loadMore,
-                theme: theme,
-                scheme: scheme,
-              );
-            }
-            final entry = _entries[index];
-            return _RankRow(
-              entry: entry,
-              tab: widget.tab,
-              onTap: () => _openEntry(entry),
-            );
-          },
-        ),
+    return FeedView<RankEntry>(
+      state: _state,
+      controller: _scrollController,
+      onRefresh: _loadFirst,
+      onLoadMore: _loadMore,
+      onRetryLoadMore: _loadMore,
+      emptyMessage: '该榜单暂无内容',
+      emptyIcon: Icons.leaderboard_outlined,
+      sliverBuilder: (context, state) => SliverList(
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final entry = state.items[index];
+          return _RankRow(
+            entry: entry,
+            tab: widget.tab,
+            onTap: () => _openEntry(entry),
+          );
+        }, childCount: state.items.length),
       ),
     );
   }
@@ -619,75 +594,5 @@ class _RankTag extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _RankFooter extends StatelessWidget {
-  const _RankFooter({
-    required this.loading,
-    required this.error,
-    required this.hasMore,
-    required this.onRetry,
-    required this.theme,
-    required this.scheme,
-  });
-
-  final bool loading;
-  final String? error;
-  final bool hasMore;
-  final VoidCallback onRetry;
-  final ThemeData theme;
-  final ColorScheme scheme;
-
-  @override
-  Widget build(BuildContext context) {
-    if (loading) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 18),
-        child: Center(
-          child: SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        ),
-      );
-    }
-    if (error != null) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Flexible(
-              child: Text(
-                error!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            TextButton(onPressed: onRetry, child: const Text('重试')),
-          ],
-        ),
-      );
-    }
-    if (!hasMore) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        child: Center(
-          child: Text(
-            '已经到底了',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-              fontSize: 11,
-            ),
-          ),
-        ),
-      );
-    }
-    return const SizedBox(height: 36);
   }
 }

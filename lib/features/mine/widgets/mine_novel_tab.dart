@@ -11,7 +11,7 @@ import '../../../data/models/novel_item.dart';
 import '../mine_providers.dart';
 import 'media_manage_sheet.dart';
 import 'mine_grid_metrics.dart';
-import 'mine_header.dart';
+import '../../../app/widgets/app_section_header.dart';
 import 'mine_recent_reading.dart';
 import 'mine_shelf_grid.dart';
 import 'mine_tab_body.dart';
@@ -46,9 +46,10 @@ class MineNovelTab extends ConsumerWidget {
           ? null
           : Column(
               children: [
-                MineSectionHeader(
+                AppSectionHeader(
                   title: '我的书架',
                   hint: shelf.isEmpty ? null : '长按管理',
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
                 ),
                 MineShelfGrid(
                   shelf: shelf,
@@ -105,7 +106,10 @@ class _MineRecentReadingSection extends ConsumerWidget {
       padding: const EdgeInsets.only(top: 8),
       child: Column(
         children: [
-          const MineSectionHeader(title: '最近阅读'),
+          const AppSectionHeader(
+            title: '最近阅读',
+            padding: EdgeInsets.fromLTRB(8, 8, 8, 8),
+          ),
           MineRecentReading(
             items: recent,
             onOpen: (item) => _openReader(context, item),

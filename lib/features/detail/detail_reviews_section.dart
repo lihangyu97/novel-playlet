@@ -4,8 +4,8 @@ import '../../app/theme/app_theme.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/widgets/comment_emoji_text.dart';
-import '../../app/widgets/comment_image_strip.dart';
+import '../../app/widgets/comment_row.dart';
+import '../../app/widgets/app_section_header.dart';
 import '../../app/widgets/detail/detail_common.dart';
 import '../../data/models/book_comment.dart';
 
@@ -59,7 +59,7 @@ class DetailReviewsSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              DetailSectionHeader(
+              AppSectionHeader(
                 title: title,
                 // 卡片自己已经有 gutter 内边距，标题行不再重复留白。
                 padding: EdgeInsets.zero,
@@ -145,7 +145,14 @@ class _LoadedReviews extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        DetailReviewRow(comment: page.comments.first, showStars: showStars),
+        CommentRow(
+          comment: page.comments.first,
+          padding: EdgeInsets.zero,
+          showAuthorBadge: false,
+          score: showStars
+              ? DetailReviewStars(stars: page.comments.first.stars)
+              : null,
+        ),
         const SizedBox(height: 8),
         // 右下角只做视觉提示：整张卡都可点，所以这里不再套第二层按钮，
         // 避免出现两个互相竞争的点击热区。
@@ -170,120 +177,6 @@ class _LoadedReviews extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// 一条书评的通用行：头像（昵称首字，不拉网络图）+ 昵称 + 5 星 + 正文 +
-/// 点赞/时间。详情页卡片与书评弹层共用，保证两处排版完全一致。
-class DetailReviewRow extends StatelessWidget {
-  const DetailReviewRow({
-    super.key,
-    required this.comment,
-    this.maxLines,
-    this.padding = EdgeInsets.zero,
-    this.showStars = true,
-  });
-
-  final BookComment comment;
-
-  /// 是否画 5 星评分；短剧评论没有评分，传 false。
-  final bool showStars;
-
-  /// 正文行数上限；null = 不限制（弹层里完整展示）。
-  final int? maxLines;
-
-  /// 行内边距：详情页卡片由外层控制，弹层里用来和分隔线对齐。
-  final EdgeInsetsGeometry padding;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final name = comment.userName.trim();
-    // 头像不拉网络图（详情页不需要为几条书评再开图片请求），用昵称首字；
-    // 昵称缺失时给一个占位字，避免出现空白圆。
-    final initial = name.isEmpty ? '读' : String.fromCharCode(name.runes.first);
-    final text = comment.text.trim();
-    final time = comment.timeLabel();
-    final metaStyle = theme.textTheme.bodySmall?.copyWith(
-      color: scheme.onSurfaceVariant,
-    );
-    return Padding(
-      padding: padding,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            radius: 17,
-            backgroundColor: scheme.primaryContainer,
-            child: Text(
-              initial,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: scheme.onPrimaryContainer,
-                fontWeight: context.appWeight(FontWeight.w600),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        name.isEmpty ? '匿名读者' : name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: context.appWeight(FontWeight.w600),
-                        ),
-                      ),
-                    ),
-                    if (showStars) ...[
-                      const SizedBox(width: 8),
-                      DetailReviewStars(stars: comment.stars),
-                    ],
-                  ],
-                ),
-                if (text.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  CommentEmojiText(
-                    text: text,
-                    maxLines: maxLines,
-                    overflow: maxLines == null
-                        ? TextOverflow.visible
-                        : TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
-                  ),
-                ],
-                if (comment.imageUrls.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  CommentImageStrip(imageRefs: comment.imageRefsOrFallback),
-                ],
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.thumb_up_alt_outlined,
-                      size: 13,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 3),
-                    Text('${comment.diggCount}', style: metaStyle),
-                    if (time.isNotEmpty) ...[
-                      const SizedBox(width: 12),
-                      Text(time, style: metaStyle),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
