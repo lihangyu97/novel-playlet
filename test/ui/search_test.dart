@@ -309,18 +309,6 @@ void main() {
     );
   });
 
-  testWidgets('搜索页-占位从带进来的热词开始', (tester) async {
-    final fake = FakePreviewTransport()..cueWords = ['热词甲', '热词乙'];
-    await pumpPreview(
-      tester,
-      const SearchPage(initialCueWord: '热词乙'),
-      transport: fake,
-    );
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('热词乙'), findsOneWidget);
-    expect(find.text('热词甲'), findsNothing, reason: '从带进来的那条开始，不跳回第一条');
-  });
-
   testWidgets('搜索页-空输入提交直接搜当前占位热词', (tester) async {
     final fake = FakePreviewTransport()
       ..cueWords = ['热词甲', '热词乙']

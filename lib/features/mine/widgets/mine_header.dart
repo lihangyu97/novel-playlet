@@ -2,16 +2,18 @@ import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
 
-/// 我的页页头：图标 + 主标题 + 一行合并统计 + 设置入口。
+/// 我的页页头：图标 + 主标题 + 一行合并统计 + 缓存 / 设置入口。
 ///
 /// 小说/短剧两个 tab 共用**同一个**页头（固定贴顶、不随内容滚动），不再按
-/// 内容类型做镜像版式；设置入口只有右上角这一枚。
+/// 内容类型做镜像版式；右上角固定两枚图标按钮：缓存中心（离线下载的书 /
+/// 短剧）在左、设置在右，两者同一套线性图标、同尺寸、同颜色。
 class MineHeader extends StatelessWidget {
   const MineHeader({
     super.key,
     required this.title,
     required this.icon,
     required this.stats,
+    required this.onCache,
     required this.onSettings,
   });
 
@@ -23,6 +25,9 @@ class MineHeader extends StatelessWidget {
   /// 传 Widget 而不是 String：统计只订阅本数的叶子组件自己 watch provider，
   /// [MinePage] 根节点不再因为数据变化重建（CODE_REVIEW P1-5）。
   final Widget stats;
+
+  /// 缓存中心入口（与设置同一套线性图标，位置在设置左边）。
+  final VoidCallback onCache;
   final VoidCallback onSettings;
 
   @override
@@ -55,6 +60,16 @@ class MineHeader extends StatelessWidget {
                 ),
               ),
               const Spacer(),
+              // 缓存中心入口挪到这里：推荐页顶栏收成「tabs + 搜索图标」后，
+              // 缓存不再有顶部入口，跟设置并排最容易被找到。
+              IconButton(
+                onPressed: onCache,
+                tooltip: '缓存',
+                visualDensity: VisualDensity.compact,
+                iconSize: 22,
+                color: scheme.onSurfaceVariant,
+                icon: const Icon(Icons.download_outlined),
+              ),
               IconButton(
                 onPressed: onSettings,
                 tooltip: '设置',

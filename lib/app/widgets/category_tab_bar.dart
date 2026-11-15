@@ -8,13 +8,18 @@ import '../theme/app_theme.dart';
 /// 漫剧」共用）。
 ///
 /// 视觉约定：
-/// - 默认左对齐，**无下划线/指示条**；当前 tab 用主题色高亮、字号比未选中略大；
+/// - 默认左对齐；当前 tab 用主题色高亮、字号比未选中略大，并在文字正下方
+///   画一条**等宽的主色下划线**（小红书式短下划线，不是整行分割线）；
 /// - 默认首个 tab 的文字左边缘与内容留白（8pt）对齐，**按选中字号（最大字号）
 ///   预留宽度**：字号在 15/17 间切换时左边缘和相邻 tab 都不挪位；
 /// - [center] 为 true 时整组 tabs 在可用宽度内居中（推荐页用），居中只影响
 ///   整行落点，tab 之间的间距/字号规则完全不变；内容超宽时照旧可横向滚动；
 /// - 每个 tab 宽度固定、整行高度固定、文字**贴同一条底线**：选中/未选中只
 ///   有"字号 15 / 17"两种确定状态，变大的字只向上长，不会推挤邻居；
+/// - 下划线**贴在整行底边**：文字底边与行底边之间只隔 [underlineGap] +
+///   [underlineHeight]，行内不再留额外下边距，这样「tabs 上边距」与「下划线
+///   到下方内容」的两段留白都由调用方（页头 / 内容区）统一决定，两段能做成
+///   一样宽；
 /// - 高亮跟随 [TabController.animation] 的**过半阈值**切换（拖动时一过中线
 ///   就切，不等翻页结束），但字号/颜色都**不做逐帧插值**——两种状态各自
 ///   像素稳定，避免字号连续变化导致文字每帧重排、重栅格化带来的"抖动"。
@@ -27,12 +32,19 @@ class CategoryTabBar extends StatefulWidget {
     this.center = false,
   }) : assert(labels.length == controller.length);
 
-  /// 整行固定高度（含上下触控留白）：比搜索框 40 略矮，顶栏更紧凑。
-  static const double height = 34;
+  /// 整行固定高度（含文字上方的触控留白和下划线）：比旧的 34 略高，因为
+  /// 行内多了下划线的 5pt；下划线贴在行底边，行内不再留额外下边距。
+  static const double height = 35;
 
   /// 未选中 / 选中字号，两者差值就是高亮时的"放大"幅度。
   static const double fontSize = 15;
   static const double selectedFontSize = 17;
+
+  /// 文字底边到下划线的间距 + 下划线自身高度。
+  ///
+  /// 两段一起贴在行底：文字底边 → [underlineGap] → 下划线 → 行底边结束。
+  static const double underlineGap = 2;
+  static const double underlineHeight = 3;
 
   /// 每个 tab 文字右侧的间距（同时作为该 tab 的尾部可点区域）。
   ///
@@ -117,25 +129,17 @@ class _CategoryTabBarState extends State<CategoryTabBar> {
     );
 
     // 宽度按选中态预留（两种状态里更宽的那个），切换时不会推挤相邻 tab；
-    // 行高按选中态量出来，把两类文字固定贴在同一条底线上。
-    final labelMetrics = [
+    // 文字与下划线一起贴行底边，两类文字因此固定在同一条底线上。
+    final textWidths = [
       for (final label in widget.labels)
-        _measureLabel(context, label, activeStyle),
+        _measureTextWidth(context, label, activeStyle),
     ];
-    final slotWidths = [for (final metric in labelMetrics) metric.width];
-    final lineHeight = labelMetrics.first.lineHeight;
-    final labelBottomInset = lineHeight >= CategoryTabBar.height
-        ? 0.0
-        : (CategoryTabBar.height - lineHeight) / 2;
-
-    // 撑满一行：默认按起始端左对齐（不要被外层 Column 居中），超宽时才滚动；
-    // [CategoryTabBar.center] 时用 ConstrainedBox 把行撑到可用宽度再居中。
     final tabs = [
       for (var i = 0; i < widget.labels.length; i++)
         _CategoryTab(
           label: widget.labels[i],
-          width: slotWidths[i],
-          bottomInset: labelBottomInset,
+          width: textWidths[i] + CategoryTabBar.tabGap,
+          underlineWidth: textWidths[i],
           selected: i == _selectedIndex,
           inactiveStyle: inactiveStyle,
           activeStyle: activeStyle,
@@ -181,8 +185,9 @@ class _CategoryTabBarState extends State<CategoryTabBar> {
     );
   }
 
-  /// 用选中态字型量出宽度（含左右可点区域）和单行行高。
-  ({double width, double lineHeight}) _measureLabel(
+  /// 用选中态字型量出文字宽度：既用于 tab 槽位宽度（再加 [tabGap]），
+  /// 也用于下划线宽度（与文字等宽，不随选中态变化而伸缩）。
+  double _measureTextWidth(
     BuildContext context,
     String label,
     TextStyle style,
@@ -193,12 +198,9 @@ class _CategoryTabBarState extends State<CategoryTabBar> {
       textScaler: MediaQuery.textScalerOf(context),
       maxLines: 1,
     )..layout();
-    final metric = (
-      width: painter.width + CategoryTabBar.tabGap,
-      lineHeight: painter.height,
-    );
+    final width = painter.width;
     painter.dispose();
-    return metric;
+    return width;
   }
 }
 
@@ -206,7 +208,7 @@ class _CategoryTab extends StatelessWidget {
   const _CategoryTab({
     required this.label,
     required this.width,
-    required this.bottomInset,
+    required this.underlineWidth,
     required this.selected,
     required this.inactiveStyle,
     required this.activeStyle,
@@ -214,10 +216,12 @@ class _CategoryTab extends StatelessWidget {
   });
 
   final String label;
+
+  /// 整格宽度（文字宽度 + [CategoryTabBar.tabGap] 的尾部可点区域）。
   final double width;
 
-  /// 文字底边距格子底边的距离：选中/未选中都贴在这条线上，字号变化只向上长。
-  final double bottomInset;
+  /// 下划线宽度：与文字等宽，选中/未选中都用同一个值，切换时不跳。
+  final double underlineWidth;
   final bool selected;
   final TextStyle inactiveStyle;
   final TextStyle activeStyle;
@@ -225,6 +229,7 @@ class _CategoryTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
     return Semantics(
       button: true,
       selected: selected,
@@ -235,15 +240,31 @@ class _CategoryTab extends StatelessWidget {
           width: width,
           height: CategoryTabBar.height,
           child: Align(
-            // 左下对齐：左边缘始终贴内容留白，字号变化只向右/向上长。
+            // 左下对齐：左边缘始终贴内容留白；字与下划线一起贴行底边，
+            // 字号变化只向上长，底边与下划线位置都不动。
             alignment: Alignment.bottomLeft,
-            child: Padding(
-              padding: EdgeInsets.only(bottom: bottomInset),
-              child: Text(
-                label,
-                maxLines: 1,
-                style: selected ? activeStyle : inactiveStyle,
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  style: selected ? activeStyle : inactiveStyle,
+                ),
+                const SizedBox(height: CategoryTabBar.underlineGap),
+                // 未选中也占同样高度（透明），两种状态的行高完全一致。
+                Container(
+                  width: underlineWidth,
+                  height: CategoryTabBar.underlineHeight,
+                  decoration: BoxDecoration(
+                    color: selected ? color : Colors.transparent,
+                    borderRadius: BorderRadius.circular(
+                      CategoryTabBar.underlineHeight / 2,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),

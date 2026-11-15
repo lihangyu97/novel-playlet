@@ -22,9 +22,13 @@ enum _MineTab {
 
 /// 我的：统一页头 + 小说 / 短剧两个 tab。
 ///
-/// 页头（图标 + 「我的」 + 合并统计 + 设置）与分类 tabs 固定贴顶、不随内容
-/// 滚动；两个 tab 各自一条独立的 [CustomScrollView]（[TabBarView] 保活），
-/// 点击 tab 或左右滑动都能切换。顶部氛围渐变整页共用一套，不随 tab 变化。
+/// 页头（图标 + 「我的」 + 合并统计 + 缓存 / 设置）与分类 tabs 固定贴顶、
+/// 不随内容滚动；两个 tab 各自一条独立的 [CustomScrollView]（[TabBarView]
+/// 保活），点击 tab 或左右滑动都能切换。顶部氛围渐变整页共用一套，不随 tab
+/// 变化。
+///
+/// 页头下沿到 tabs、tabs 下划线到第一个区块标题都是 8pt（页头 4pt + tabs
+/// 行内 4pt；下划线贴行底再 + 区块标题 8pt），上下两段一样宽。
 ///
 /// 两个 tab 的内容完全隔离：小说侧 = 书架 + 最近阅读；短剧侧 = 收藏 +
 /// 最近观看（点击直接续播对应集）。两边共用 [MineTabBody] 骨架与页头，
@@ -69,6 +73,10 @@ class _MinePageState extends State<MinePage>
     context.pushAppRoute(const SettingsRoute());
   }
 
+  void _openCacheCenter() {
+    context.pushAppRoute(const CacheCenterRoute());
+  }
+
   @override
   Widget build(BuildContext context) {
     // 渐变要盖到状态栏那一条（安全区不参与布局），否则顶部会留一条纯白。
@@ -92,6 +100,7 @@ class _MinePageState extends State<MinePage>
                   title: '我的',
                   icon: Icons.person_rounded,
                   stats: const _MineStats(),
+                  onCache: _openCacheCenter,
                   onSettings: _openSettings,
                 ),
                 CategoryTabBar(

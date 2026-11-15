@@ -29,19 +29,15 @@ import 'search_providers.dart';
 /// 同一部剧出现两次、还把同一个请求打两遍。现在短剧行直接展示这份混排结果
 /// （漫剧卡片混在其中，但卡面不再显示「漫剧」标签）。
 ///
-/// 从推荐页顶部搜索框点进来（推荐页的搜索框是只读入口）。搜索词只属于这个
-/// 页面（autoDispose），返回后推荐页仍停在原来的推荐流，不会被搜索改写。
+/// 从推荐页顶栏右侧的搜索图标点进来。搜索词只属于这个页面（autoDispose），
+/// 返回后推荐页仍停在原来的推荐流，不会被搜索改写。
 ///
 /// 卡片直接复用首页推荐流的两张卡（[NovelGridCard] / [VideoCard]，白底卡 +
 /// 原生封面比例），只按屏宽算一个更窄的卡宽、字号整体缩一档：观感是「首页
 /// 同款卡片的小号版」，而不是另做一套搜索条目。一屏露出 3.5 张卡，第 4 张只
 /// 露半边，暗示这一行可以往右滑。
 class SearchPage extends ConsumerStatefulWidget {
-  const SearchPage({super.key, this.initialCueWord = ''});
-
-  /// 推荐页搜索框当前轮播到的热词：占位从同一条接着显示，空输入提交时直接
-  /// 搜它（没有热词时占位回退静态提示）。
-  final String initialCueWord;
+  const SearchPage({super.key});
 
   /// 卡片行左右留白与卡片间距：与首页推荐流一致（8）。
   static const double rowPadding = 8;
@@ -79,12 +75,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   /// 搜索框当前轮播到的热词（子组件上报，普通字段，不触发重建）。
   String _currentCueWord = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _currentCueWord = widget.initialCueWord;
-  }
 
   @override
   void dispose() {
@@ -171,8 +161,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             child: Column(
               children: [
                 Padding(
-                  // 顶部不留内边距：搜索框上沿贴住安全区，与推荐页入口同位置，
-                  // 从推荐页点进来时搜索框不会往下跳 8pt。
+                  // 顶部不留内边距：搜索框上沿贴住安全区，进页面时不会先
+                  // 空一段再落位。
                   padding: const EdgeInsets.fromLTRB(
                     SearchPage.rowPadding,
                     0,
@@ -185,7 +175,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     hintText: '搜索小说 / 短剧',
                     hint: SearchCueHint(
                       fallback: '搜索小说 / 短剧',
-                      initialWord: widget.initialCueWord,
                       onWordChanged: (word) => _currentCueWord = word,
                     ),
                     autofocus: true,

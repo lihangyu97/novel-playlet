@@ -9,19 +9,12 @@ import 'search_providers.dart';
 /// 搜索框的占位热词：按 cue 接口给的间隔逐条淡入淡出轮播。
 ///
 /// 只做**占位（hint）**，不写进输入框；[fallback] 是接口没给词/失败时的静态
-/// 提示语。[initialWord] 是从推荐页带进来的当前热词——搜索页打开时占位从同一条
-/// 接着看，不会跳回第一条。[onWordChanged] 把当前显示的词报给页面，空输入提交
-/// 时用它直接发起搜索。
+/// 提示语。[onWordChanged] 把当前显示的词报给页面，空输入提交时用它直接发起
+/// 搜索。
 class SearchCueHint extends ConsumerWidget {
-  const SearchCueHint({
-    super.key,
-    required this.fallback,
-    this.initialWord = '',
-    this.onWordChanged,
-  });
+  const SearchCueHint({super.key, required this.fallback, this.onWordChanged});
 
   final String fallback;
-  final String initialWord;
   final ValueChanged<String>? onWordChanged;
 
   @override
@@ -44,7 +37,6 @@ class SearchCueHint extends ConsumerWidget {
       key: ObjectKey(cue.words),
       words: cue.words,
       intervalMs: cue.rotateIntervalMs,
-      initialWord: initialWord,
       onWordChanged: onWordChanged,
       style: style,
     );
@@ -57,14 +49,12 @@ class _CueRotator extends StatefulWidget {
     required this.words,
     required this.intervalMs,
     required this.style,
-    this.initialWord = '',
     this.onWordChanged,
   });
 
   final List<String> words;
   final int intervalMs;
   final TextStyle? style;
-  final String initialWord;
   final ValueChanged<String>? onWordChanged;
 
   @override
@@ -72,16 +62,10 @@ class _CueRotator extends StatefulWidget {
 }
 
 class _CueRotatorState extends State<_CueRotator> {
-  /// 从带进来的那条开始（找不到就从第一条开始）。
-  late int _index = _startIndex();
+  int _index = 0;
   Timer? _timer;
 
   String get _word => widget.words[_index];
-
-  int _startIndex() {
-    final index = widget.words.indexOf(widget.initialWord);
-    return index < 0 ? 0 : index;
-  }
 
   @override
   void initState() {

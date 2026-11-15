@@ -6,8 +6,6 @@ import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/top_glow.dart';
-import 'package:novel_playlet/features/cache/cache_center_page.dart';
-import 'package:novel_playlet/features/feed/feed_search_field.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/features/search/search_page.dart';
@@ -146,13 +144,25 @@ void main() {
     );
   });
 
-  testWidgets('推荐页-分类 tabs 居中、可与搜索框等距', (tester) async {
+  /// 小红书式顶栏：分类 tabs 是唯一主元素，搜索收成右侧一个图标入口，
+  /// 整行不再有输入框，也没有缓存入口。
+  testWidgets('推荐页-顶栏：tabs 居中 + 右侧搜索入口', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     expect(
       find.byType(CategoryTabBar),
       findsOneWidget,
       reason: '与我的页共用同一套 tabs',
     );
+    expect(find.byType(TextField), findsNothing, reason: '顶栏不再有整行搜索框');
+    expect(find.byTooltip('已缓存'), findsNothing, reason: '缓存入口已挪到「我的」页头');
+
+    final entry = find.byTooltip('搜索');
+    expect(entry, findsOneWidget, reason: '搜索入口收成顶栏右侧一个图标');
+    expect(
+      find.descendant(of: entry, matching: find.byIcon(Icons.search_rounded)),
+      findsOneWidget,
+    );
+
     // 一组 tabs 在整行里居中：按 tab 槽位（而不是文字宽度）量，左右两侧
     // 空白只差居中时补的那段尾部留白，字号大小不影响结论。
     final bar = tester.getRect(find.byType(CategoryTabBar));
@@ -167,18 +177,18 @@ void main() {
       closeTo(CategoryTabBar.tabGap, 0.5),
       reason: 'tabs 应居中（左侧多出的正是居中时补的前导留白）',
     );
-    // 文字到搜索框、到下方内容的两段空白一样宽（以前下方贴着卡片）。
-    final first = tester.getRect(find.text('小说'));
-    final searchBottom = tester.getRect(find.byType(FeedSearchField)).bottom;
-    final contentTop = tester.getRect(find.byType(TabBarView)).top;
-    final above = first.top - searchBottom;
-    final below = contentTop - first.bottom;
-    expect(above, greaterThan(0));
+    // 左右两侧预留同宽的镜像空白（搜索入口 40 + 右留白 8），所以 tabs 行
+    // 落在屏幕正中；未选中 tab 的文字比槽位窄，文字块本身会偏 2pt 左右。
     expect(
-      above,
-      closeTo(below, 0.5),
-      reason: 'tabs 上方/下方留白应等距，实际 above=$above below=$below',
+      bar.left,
+      closeTo(390 - bar.right, 0.5),
+      reason: '搜索入口一侧的留白要有左侧镜像，tabs 才在屏幕中间',
     );
+    // 搜索入口与 tabs 同一行：方块底边与下划线同一条线，右侧留白 8。
+    final entryRect = tester.getRect(entry);
+    expect(entryRect.bottom, closeTo(bar.bottom, 0.5));
+    expect(entryRect.right, closeTo(390 - 8, 0.5));
+
     final scrollView = tester.widget<SingleChildScrollView>(
       find.descendant(
         of: find.byType(CategoryTabBar),
@@ -195,45 +205,93 @@ void main() {
     }
   });
 
-  /// A：顶部尺寸收紧——搜索框 40pt、tabs 36pt，搜索+tabs+间距压到 100pt 内。
-  testWidgets('推荐页-顶部高度收紧', (tester) async {
+  /// 当前分类的下划线：宽度跟文字一致、贴在整行底边；未选中的 tab 不画。
+  testWidgets('推荐页-tabs 下划线跟当前分类且贴行底', (tester) async {
     await pumpPreview(tester, const RecommendPage());
+    final scheme = Theme.of(tester.element(find.byType(RecommendPage)))
+        .colorScheme;
+    final bar = tester.getRect(find.byType(CategoryTabBar));
+
+    Finder underlineFinder(String label) => find
+        .descendant(
+          of: find
+              .ancestor(of: find.text(label), matching: find.byType(InkWell))
+              .first,
+          matching: find.byType(Container),
+        )
+        .first;
+
+    Color underlineColor(String label) =>
+        (tester.widget<Container>(underlineFinder(label)).decoration!
+                as BoxDecoration)
+            .color!;
+
+    final novelText = tester.getRect(find.text('小说'));
+    final novelUnderline = tester.getRect(underlineFinder('小说'));
+    expect(novelUnderline.width, closeTo(novelText.width, 0.5));
     expect(
-      tester.getSize(find.byType(FeedSearchField)).height,
-      FeedSearchField.height,
+      novelUnderline.bottom,
+      closeTo(bar.bottom, 0.5),
+      reason: '下划线贴整行底边，下面就是内容区',
     );
-    expect(FeedSearchField.height, 40, reason: '搜索框高度应为 40');
-    final tabsBottom = tester.getBottomLeft(find.byType(CategoryTabBar)).dy;
     expect(
-      tabsBottom,
-      lessThanOrEqualTo(100),
-      reason: '搜索框 + tabs + 间距应压到 100pt 以内，实际 $tabsBottom',
+      novelUnderline.top - novelText.bottom,
+      closeTo(CategoryTabBar.underlineGap, 0.5),
+    );
+    expect(underlineColor('小说'), scheme.primary);
+    expect(underlineColor('短剧'), Colors.transparent, reason: '未选中不画下划线');
+
+    // 未选中的 tab 也占着同样一块（透明）下划线，切换时行高与文字底线不跳。
+    final dramaUnderline = tester.getRect(underlineFinder('短剧'));
+    expect(dramaUnderline.height, novelUnderline.height);
+    expect(dramaUnderline.bottom, closeTo(novelUnderline.bottom, 0.5));
+
+    await tester.tap(find.text('短剧'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(underlineColor('短剧'), scheme.primary);
+    expect(underlineColor('小说'), Colors.transparent);
+    expect(
+      tester.getRect(underlineFinder('短剧')).bottom,
+      closeTo(bar.bottom, 0.5),
+      reason: '切分类后下划线位置不动',
     );
   });
 
-  /// 搜索框常驻顶部：上滑多深都不收起、位置不挪，tabs 照旧在。
-  testWidgets('推荐页-搜索框常驻顶部不随滚动收起', (tester) async {
+  /// 顶栏收紧：整行 40（与搜索入口同高），tabs 行内居中；下划线贴行底后
+  /// 再留 8pt 给榜单卡片 / 首屏卡片。
+  testWidgets('推荐页-顶栏收紧且给内容留出间距', (tester) async {
+    await pumpPreview(tester, const RecommendPage());
+    final bar = tester.getRect(find.byType(CategoryTabBar));
+    expect(bar.height, CategoryTabBar.height);
+    expect(
+      bar.bottom,
+      closeTo(40, 0.5),
+      reason: '顶栏整行 40，tabs 行贴行底，下划线正好在整行底边',
+    );
+    expect(
+      tester.getRect(find.byType(TabBarView)).top,
+      closeTo(40 + 8, 0.5),
+      reason: '下划线到内容区留 8pt',
+    );
+  });
+
+  /// 顶栏常驻：上滑多深都不收起、位置不挪（tabs 与搜索入口都在）。
+  testWidgets('推荐页-顶栏常驻不随滚动收起', (tester) async {
     final fake = FakePreviewTransport()..novelItemCount = 30;
     await pumpPreview(tester, const RecommendPage(), transport: fake);
-    final before = tester.getTopLeft(find.byType(FeedSearchField));
+    final barBefore = tester.getRect(find.byType(CategoryTabBar));
+    final entryBefore = tester.getRect(find.byTooltip('搜索'));
 
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(
-      find.byType(FeedSearchField),
-      findsOneWidget,
-      reason: '搜索框必须常驻，不能随上滑收起',
-    );
-    expect(find.text('小说'), findsOneWidget, reason: 'tabs 必须一起保留');
-    expect(
-      tester.getTopLeft(find.byType(FeedSearchField)),
-      before,
-      reason: '常驻时搜索框位置不应变化',
-    );
+    expect(find.byType(CategoryTabBar), findsOneWidget, reason: 'tabs 必须常驻');
+    expect(find.byTooltip('搜索'), findsOneWidget, reason: '搜索入口必须常驻');
+    expect(tester.getRect(find.byType(CategoryTabBar)), barBefore);
+    expect(tester.getRect(find.byTooltip('搜索')), entryBefore);
 
     await tester.drag(find.byType(CustomScrollView), const Offset(0, 600));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(FeedSearchField), findsOneWidget);
+    expect(tester.getRect(find.byType(CategoryTabBar)), barBefore);
   });
 
   /// 顶部渐变必须盖住状态栏（安全区）那一条，不能从状态栏下方才开始。
@@ -249,12 +307,10 @@ void main() {
     );
   });
 
-  /// 顶部搜索框是只读入口：点一下（输入区或左图标都算）进独立搜索页，
-  /// 推荐页本身不再做内联搜索。
-  testWidgets('推荐页-点搜索框进独立搜索页', (tester) async {
+  /// 顶栏右侧的搜索入口：点一下进独立搜索页，推荐页本身不做内联搜索。
+  testWidgets('推荐页-点搜索入口进独立搜索页', (tester) async {
     await pumpPreview(tester, const RecommendPage());
-    expect(find.byType(FeedSearchField), findsOneWidget);
-    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.tap(find.byTooltip('搜索'));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.byType(SearchPage), findsOneWidget);
     expect(find.text('搜索小说 / 短剧'), findsWidgets);
@@ -269,7 +325,7 @@ void main() {
         .length;
     final before = feedCalls();
 
-    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.tap(find.byTooltip('搜索'));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     await tester.enterText(find.byType(TextField), '剑来');
     await tester.testTextInput.receiveAction(TextInputAction.search);
@@ -281,61 +337,11 @@ void main() {
     expect(feedCalls(), before, reason: '搜索/返回不应重拉推荐流');
 
     // 再进搜索页：上一次的搜索词已清掉（不显示结果），但关键词进了搜索历史。
-    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.tap(find.byTooltip('搜索'));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.text('搜索历史'), findsOneWidget);
     expect(find.text('剑来'), findsOneWidget);
     expect(find.byType(NovelGridCard), findsNothing, reason: '搜索词应已清空');
-  });
-
-  /// 搜索框轮播热词：热词只做 placeholder，不写进输入框；点进搜索页时把
-  /// 当前轮播到的那条带过去，搜索页从同一条接着显示。
-  testWidgets('推荐页-搜索框轮播热词，点进搜索页带过去', (tester) async {
-    final fake = FakePreviewTransport()
-      ..cueWords = ['热词一', '热词二']
-      ..cueRotateIntervalMs = 500;
-    await pumpPreview(
-      tester,
-      const RecommendPage(),
-      transport: fake,
-      settle: false,
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(find.text('热词一'), findsOneWidget);
-
-    // 到一个轮播间隔：淡入淡出后换成下一条。
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.pump(const Duration(milliseconds: 250));
-    expect(find.text('热词二'), findsOneWidget);
-
-    await tester.tap(find.byIcon(Icons.search_rounded));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.byType(SearchPage), findsOneWidget);
-    expect(
-      find.descendant(of: find.byType(SearchPage), matching: find.text('热词二')),
-      findsOneWidget,
-      reason: '搜索页占位应从推荐页当前那条热词接着显示',
-    );
-  });
-
-  /// 搜索框右侧的下载图标入口直接进缓存中心（不再是一段文字）。
-  testWidgets('推荐页-下载图标入口打开缓存中心', (tester) async {
-    await pumpPreview(tester, const RecommendPage());
-    expect(find.text('已缓存'), findsNothing, reason: '入口只放图标，不占文字');
-    final entry = find.byTooltip('已缓存');
-    expect(entry, findsOneWidget);
-    expect(
-      find.descendant(
-        of: entry,
-        matching: find.byIcon(Icons.download_outlined),
-      ),
-      findsOneWidget,
-    );
-    await tester.tap(entry);
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(CacheCenterPage), findsOneWidget);
   });
 
   /// 封面尺寸回归：推荐流按内容域原生比例出封面（小说 240×320、短剧/漫剧 400×571，都是高/宽）。
@@ -466,23 +472,6 @@ void main() {
     });
   });
 
-  testWidgets('推荐页-搜索框内容垂直居中', (tester) async {
-    await pumpPreview(tester, const RecommendPage());
-    final hint = tester.getRect(find.text('搜索小说 / 短剧'));
-    final icon = tester.getRect(find.byIcon(Icons.search_rounded));
-    final field = tester.getRect(find.byType(TextField));
-    expect(
-      (hint.center.dy - icon.center.dy).abs(),
-      lessThan(1.2),
-      reason: '提示文字与放大镜必须同一条水平中线',
-    );
-    expect(
-      (hint.center.dy - field.center.dy).abs(),
-      lessThan(1.2),
-      reason: '提示文字必须在输入区垂直居中',
-    );
-  });
-
   testWidgets('推荐页-内容区左右滑动切分类', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     await tester.drag(find.byType(TabBarView), const Offset(-320, 0));
@@ -491,7 +480,7 @@ void main() {
 
     await tester.drag(find.byType(TabBarView), const Offset(320, 0));
     await tester.pumpAndSettle();
-    expect(find.text('搜索小说 / 短剧'), findsOneWidget);
+    expect(find.byType(NovelGridCard), findsWidgets, reason: '滑回小说分类');
   });
 
   testWidgets('推荐页-切分类回来保留滚动位置', (tester) async {

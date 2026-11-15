@@ -5,6 +5,7 @@ import 'package:novel_playlet/features/rank/rank_page.dart';
 import 'package:novel_playlet/features/rank/rank_providers.dart';
 import 'package:novel_playlet/features/rank/widgets/rank_preview_card.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
+import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/features/recommend/recommend_category.dart';
 
@@ -318,6 +319,14 @@ void main() {
       tester.getTopLeft(find.text('推荐榜')).dy,
       lessThan(tester.getTopLeft(find.byType(NovelGridCard).first).dy),
       reason: '榜单卡片应在瀑布流上方',
+    );
+    // tabs 的下划线贴行底：下划线到榜单卡片留 8pt，不贴着卡片。
+    final bar = tester.getRect(find.byType(CategoryTabBar));
+    final card = tester.getRect(find.byType(RankPreviewCardView));
+    expect(
+      card.top - bar.bottom,
+      closeTo(8, 0.5),
+      reason: '下划线到榜单卡片留 8pt，实际 ${card.top - bar.bottom}',
     );
 
     await tester.tap(find.text('更多'));

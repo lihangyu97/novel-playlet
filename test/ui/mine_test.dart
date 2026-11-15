@@ -9,6 +9,7 @@ import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
+import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
 import 'package:novel_playlet/features/mine/widgets/mine_novel_tab.dart';
@@ -464,5 +465,63 @@ void main() {
 
     await gesture.up();
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
+  });
+
+  /// 缓存中心入口在页头右上角、设置按钮左边（推荐页顶栏收掉缓存入口后
+  /// 挪过来的）；两枚图标同一套线性图标、同尺寸。
+  testWidgets('我的页-缓存入口在设置左边并进缓存中心', (tester) async {
+    await pumpPreview(tester, const MinePage());
+    final cache = find.byTooltip('缓存');
+    final settings = find.byTooltip('设置');
+    expect(cache, findsOneWidget);
+    expect(settings, findsOneWidget);
+    expect(
+      tester.getCenter(cache).dx,
+      lessThan(tester.getCenter(settings).dx),
+      reason: '缓存入口在设置左边',
+    );
+    expect(
+      tester.getCenter(cache).dy,
+      closeTo(tester.getCenter(settings).dy, 0.5),
+      reason: '两枚图标在同一行',
+    );
+    expect(
+      find.descendant(
+        of: cache,
+        matching: find.byIcon(Icons.download_outlined),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(cache);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(CacheCenterPage), findsOneWidget);
+  });
+
+  /// tabs 上下留白一致：页头统计 → tab 文字、下划线 → 第一个区块标题，
+  /// 两段都是 8pt（以前下面是 12pt，看着比上面空）。
+  testWidgets('我的页-tabs 上下留白一致且收紧', (tester) async {
+    await pumpPreview(tester, const MinePage());
+    final bar = tester.getRect(find.byType(CategoryTabBar));
+    final stats = tester.getRect(find.textContaining('本 · 收藏'));
+    final tabText = tester.getRect(find.text('小说'));
+    final section = tester.getRect(find.text('我的书架'));
+
+    const gap = 8.0;
+    expect(
+      tabText.top - stats.bottom,
+      closeTo(gap, 0.5),
+      reason: '统计到 tab 文字留 8pt',
+    );
+    expect(
+      section.top - bar.bottom,
+      closeTo(gap, 0.5),
+      reason: '下划线（贴行底）到第一个区块标题留 8pt',
+    );
+    expect(
+      (tabText.top - stats.bottom) - (section.top - bar.bottom),
+      closeTo(0, 0.5),
+      reason: '上下两段留白必须一样宽',
+    );
   });
 }
