@@ -91,6 +91,38 @@ void main() {
     expect(find.text('2 条评论'), findsNothing);
   });
 
+  testWidgets('评论和回复里的方括号表情渲染成官方图片', (tester) async {
+    final api = _FakeApi(
+      pagesByCursor: {
+        '': _page(
+          comments: [
+            _comment(id: 'c1', name: '读者甲', text: '这段[微笑]太真实了', replyCount: 1),
+          ],
+          totalCount: 1,
+        ),
+      },
+      repliesByCommentId: {
+        'c1': _replyPage([_reply(id: 'r1', name: '回复者乙', text: '确实[赞]')]),
+      },
+    );
+    await _openSheet(tester, api: api);
+
+    expect(find.textContaining('[微笑]'), findsNothing);
+    expect(_emojiAssetNames(tester), ['assets/images/emoji/emoji_01.webp']);
+
+    await tester.tap(find.text('1 条回复'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('[赞]'), findsNothing);
+    expect(
+      _emojiAssetNames(tester),
+      containsAll(<String>[
+        'assets/images/emoji/emoji_01.webp',
+        'assets/images/emoji/emoji_32.webp',
+      ]),
+    );
+  });
+
   testWidgets('点评论配图打开全屏查看器，可翻页并关闭', (tester) async {
     final api = _FakeApi(
       pagesByCursor: {
@@ -418,6 +450,11 @@ void main() {
     expect(find.byType(ListView), findsNothing);
   });
 }
+
+List<String> _emojiAssetNames(WidgetTester tester) => tester
+    .widgetList<Image>(find.byType(Image))
+    .map((image) => (image.image as AssetImage).assetName)
+    .toList();
 
 Future<void> _openSheet(
   WidgetTester tester, {

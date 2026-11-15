@@ -308,6 +308,9 @@ loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（
   `parseCommentImages` 归一成 http(s) 绝对 URL（兼容协议相对地址 / `&amp;` / 去重），
   评论与回复都渲染缩略图；点开全屏查看器可左右切图、双指缩放，单击画面任意处（或右上角 x）立即关闭。图片走
   `AppImageCache`（与封面共用磁盘缓存），只做展示，不参与任何写操作。
+- **表情内联渲染**：正文里的 `[微笑]` 等 53 个官方 token 由 `CommentEmojiText`
+  换成包内 120×120 webp（字号 1.4 倍、与文字垂直居中）；未知 token 保留原文，
+  无 token 的评论仍走普通 `Text`。素材合计约 126 KB，离线可用，不发额外请求。
 - **装饰失败静默**：`chapterIdeasProvider` 失败一律 `ChapterIdeas.empty`，阅读页不进入错误态。
 - **锚点缺失不瞎猜**：没有 `paraIndices` 的段不画气泡；升级前写入的老缓存/老离线正文
   会在后台补取一次带锚点的正文（见 §4.3），纯文本回退源补取后仍无锚点、不替换正文。
@@ -764,6 +767,8 @@ flutter drive --profile -d <iPhone UDID> \
 | `lib/data/models/{chapter_ideas,book_comment,comment_reply}.dart` | 段评/书评/回复模型与解析 |
 | `lib/data/models/comment_image.dart` | 评论配图 URL 解析与归一（协议相对地址 / `&amp;` / 去重） |
 | `lib/app/widgets/comment_image_{loader,strip,viewer}.dart` | 评论配图加载（AppImageCache）/ 缩略图 / 全屏查看器 |
+| `lib/app/widgets/comment_emoji_text.dart` | 评论/回复方括号表情：token 解析、包内 webp 内联渲染 |
+| `assets/images/emoji/` | 官方 53 个表情 token 对应的 120×120 webp（约 126 KB） |
 | `lib/features/settings/widgets/dialogue_highlight_preview.dart` | 对话高亮取色弹层里的阅读页示例预览 |
 | `lib/features/sync/{webdav_config,webdav_client,sync_service,sync_status}.dart` | WebDAV 云同步：配置安全存储、HTTP 客户端、合并上传、状态机 |
 | `lib/features/sync/widgets/webdav_{sync_card,config_sheet}.dart` | 设置页云同步卡片与配置/测试连接表单 |
