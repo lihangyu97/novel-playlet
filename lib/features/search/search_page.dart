@@ -5,10 +5,14 @@ import '../../app/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/router.dart';
+import '../../app/widgets/app_pill.dart';
+import '../../app/widgets/app_section_header.dart';
 import '../../app/widgets/cover_hero.dart';
+import '../../app/widgets/inline_error_row.dart';
 import '../../app/widgets/media_card.dart';
 import '../../app/widgets/novel_card.dart';
 import '../../app/widgets/novel_cover.dart';
+import '../../app/widgets/skeleton.dart';
 import '../../app/widgets/states.dart';
 import '../../app/widgets/surface_card.dart';
 import '../../app/widgets/top_glow.dart';
@@ -295,45 +299,11 @@ class _SearchHistorySection extends ConsumerWidget {
             runSpacing: 8,
             children: [
               for (final keyword in history)
-                _SearchHistoryChip(
-                  keyword: keyword,
-                  onTap: () => onSearch(keyword),
-                ),
+                AppPill(label: keyword, onTap: () => onSearch(keyword)),
             ],
           ),
         ),
       ],
-    );
-  }
-}
-
-/// 单个历史关键词：可点的小圆角 pill（与详情页标签同一套观感）。
-class _SearchHistoryChip extends StatelessWidget {
-  const _SearchHistoryChip({required this.keyword, required this.onTap});
-
-  final String keyword;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Material(
-      color: scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(99),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          child: Text(
-            keyword,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurface),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -598,17 +568,13 @@ class _SearchSection extends ConsumerWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
+            AppSectionHeader(
+              title: category.label,
               padding: const EdgeInsets.fromLTRB(
                 SearchPage.rowPadding,
                 16,
                 SearchPage.rowPadding,
                 8,
-              ),
-              child: Text(
-                category.label,
-                style: Theme.of(context).textTheme.titleMedium
-                    ?.copyWith(fontWeight: context.appWeight(FontWeight.w600)),
               ),
             ),
             if (items.isNotEmpty)
@@ -820,20 +786,6 @@ class _SkeletonCard extends StatelessWidget {
     final metaLineHeight =
         textScaler.scale(compactTextTheme.bodySmall?.fontSize ?? 12) *
         (compactTextTheme.bodySmall?.height ?? 1.0);
-    // 浅色卡上用很浅的灰；深色卡上用略亮一档，和卡片底色区分开。
-    final blockColor = theme.colorScheme.onSurface.withValues(
-      alpha: theme.brightness == Brightness.dark ? 0.14 : 0.07,
-    );
-
-    Widget bar(double barWidth, double barHeight) => Container(
-      width: barWidth,
-      height: barHeight,
-      decoration: BoxDecoration(
-        color: blockColor,
-        borderRadius: BorderRadius.circular(barHeight / 2),
-      ),
-    );
-
     return SizedBox(
       width: width,
       child: AppSurfaceCard(
@@ -841,11 +793,7 @@ class _SkeletonCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: width,
-              height: width * coverAspect,
-              color: blockColor,
-            ),
+            SkeletonBox(width: width, height: width * coverAspect),
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
               child: Column(
@@ -857,14 +805,23 @@ class _SkeletonCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        bar(width * 0.5, titleLineHeight * 0.58),
+                        SkeletonBar(
+                          width: width * 0.5,
+                          height: titleLineHeight * 0.58,
+                        ),
                         const SizedBox(height: 6),
-                        bar(width * 0.35, titleLineHeight * 0.58),
+                        SkeletonBar(
+                          width: width * 0.35,
+                          height: titleLineHeight * 0.58,
+                        ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 3),
-                  bar(width * 0.28, metaLineHeight * 0.6),
+                  SkeletonBar(
+                    width: width * 0.28,
+                    height: metaLineHeight * 0.6,
+                  ),
                 ],
               ),
             ),
@@ -885,44 +842,15 @@ class _SectionStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Padding(
+    return InlineErrorRow(
+      message: message,
+      icon: icon ?? Icons.error_outline_rounded,
+      onRetry: onRetry,
       padding: const EdgeInsets.fromLTRB(
         SearchPage.rowPadding,
         2,
         SearchPage.rowPadding,
         2,
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 16,
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              message,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          if (onRetry != null)
-            TextButton(
-              onPressed: onRetry,
-              style: TextButton.styleFrom(
-                minimumSize: const Size(0, 32),
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text('重试'),
-            ),
-        ],
       ),
     );
   }

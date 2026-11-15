@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/router.dart';
-import '../../../app/widgets/cover_hero.dart';
 import '../../../app/widgets/novel_cover.dart';
+import '../../../app/widgets/skeleton.dart';
 import '../../../app/widgets/surface_card.dart';
 import '../../../data/models/rank.dart';
 import '../../recommend/recommend_category.dart';
+import '../rank_entry_route.dart';
 import '../rank_providers.dart';
+import 'rank_entry_row.dart';
 
 /// 首页瀑布流上方的榜单预览卡片。
 ///
@@ -49,18 +51,6 @@ class _RankPreviewSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final block = scheme.onSurface.withValues(
-      alpha: theme.brightness == Brightness.dark ? 0.14 : 0.07,
-    );
-    Widget bar(double width, double height) => Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: block,
-        borderRadius: BorderRadius.circular(height / 2),
-      ),
-    );
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
       child: AppSurfaceCard(
@@ -87,31 +77,28 @@ class _RankPreviewSkeleton extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 5),
                   child: Row(
                     children: [
-                      Container(
+                      SkeletonBox(
                         width: 46,
                         height:
                             46 *
                             (category == RecommendCategory.novel
                                 ? kNovelCoverAspect
                                 : kVideoCoverAspect),
-                        decoration: BoxDecoration(
-                          color: block,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
+                        radius: 6,
                       ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            bar(150, 12),
+                            SkeletonBar(width: 150, height: 12),
                             const SizedBox(height: 7),
-                            bar(210, 9),
+                            SkeletonBar(width: 210, height: 9),
                           ],
                         ),
                       ),
                       const SizedBox(width: 8),
-                      bar(34, 10),
+                      SkeletonBar(width: 34, height: 10),
                     ],
                   ),
                 ),
@@ -139,20 +126,7 @@ class RankPreviewCardView extends StatelessWidget {
   }
 
   void _openEntry(BuildContext context, RankEntry entry) {
-    if (entry.isEmpty) return;
-    final source = 'rank-preview-${category.name}';
-    final route = entry.isVideo
-        ? VideoDetailRoute(
-            seriesId: entry.id,
-            preview: entry.toVideoSeries(),
-            heroTag: CoverHeroTag.video(source, entry.id),
-          )
-        : DetailRoute(
-            bookId: entry.id,
-            preview: entry.toNovelItem(),
-            heroTag: CoverHeroTag.novel(source, entry.id),
-          );
-    context.pushAppRoute(route);
+    openRankEntry(context, entry, source: 'rank-preview-${category.name}');
   }
 
   @override
@@ -209,98 +183,14 @@ class RankPreviewCardView extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               for (var index = 0; index < entries.length; index++)
-                _PreviewRow(
+                RankEntryRow(
                   entry: entries[index],
+                  dense: true,
                   source: 'rank-preview-${category.name}',
                   onTap: () => _openEntry(context, entries[index]),
                 ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PreviewRow extends StatelessWidget {
-  const _PreviewRow({
-    required this.entry,
-    required this.source,
-    required this.onTap,
-  });
-
-  final RankEntry entry;
-  final String source;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final coverAspect = entry.isVideo ? kVideoCoverAspect : kNovelCoverAspect;
-    final heroTag = entry.isVideo
-        ? CoverHeroTag.video(source, entry.id)
-        : CoverHeroTag.novel(source, entry.id);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          children: [
-            CoverHero(
-              tag: heroTag,
-              child: NovelCover(
-                url: entry.cover,
-                width: 46,
-                height: 46 * coverAspect,
-                radius: 6,
-                placeholderColor: coverPlaceholderColorOf(entry.colorDominate),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurface,
-                      fontSize: 14,
-                      height: 1.25,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    entry.metaLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      fontSize: 11.5,
-                      height: 1.25,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (entry.scoreLabel.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              Text(
-                entry.scoreLabel,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.primary,
-                  fontSize: 12,
-                  height: 1.2,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ],
         ),
       ),
     );

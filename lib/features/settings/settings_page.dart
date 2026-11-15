@@ -5,6 +5,7 @@ import '../../app/app_version.dart';
 import '../../app/theme/app_font_weight.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_section_header.dart';
+import '../../app/widgets/color_swatch_dot.dart';
 import '../../app/widgets/setting_switch_row.dart';
 import '../../app/theme/theme_settings.dart';
 import '../../app/widgets/app_snack_bar.dart';
@@ -169,17 +170,20 @@ class _ThemeColorCard extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               for (final option in themeColorOptions)
-                _PresetDot(
-                  option: option,
+                ColorSwatchDot(
+                  color: option.color,
+                  tooltip: option.name,
                   selected: option.color == seed,
                   onTap: () => controller.setSeed(option.color),
                 ),
-              _ColorDot(
+              ColorSwatchDot(
                 key: themeCustomColorKey,
                 color: customSeed,
                 selected: customSelected,
+                showCheck: false,
+                icon: Icons.palette_outlined,
                 tooltip: '自定义主题色',
-                semanticsLabel: '自定义',
+                semanticLabel: '自定义',
                 onTap: () async {
                   final picked = await showThemeColorPicker(
                     context,
@@ -260,9 +264,11 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
             ),
           ),
           const SizedBox(width: 12),
-          _ColorDot(
+          ColorSwatchDot(
             key: dialogueHighlightColorKey,
             color: settings.dialogueHighlightColor,
+            showCheck: false,
+            icon: Icons.palette_outlined,
             tooltip: '自定义对话高亮样式与颜色',
             onTap: () async {
               final picked = await showThemeColorPicker(
@@ -324,118 +330,6 @@ class _DialogueHighlightPreviewSlot extends ConsumerWidget {
     return DialogueHighlightPreview(
       color: color,
       style: ref.watch(readerSettingsProvider).dialogueHighlightStyle,
-    );
-  }
-}
-
-/// 圆形色块：实心显示当前颜色，点开取色；[selected] 时描一圈 onSurface 边。
-///
-/// 主题卡第 4 个「自定义」圆点与「对话高亮」色块共用（两者只差选中态和
-/// 语义文案，视觉必须一致，不要再各写一份）。
-class _ColorDot extends StatelessWidget {
-  const _ColorDot({
-    super.key,
-    required this.color,
-    required this.tooltip,
-    required this.onTap,
-    this.selected = false,
-    this.semanticsLabel,
-  });
-
-  final Color color;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  /// 当前颜色是否正在生效（描选中边）。
-  final bool selected;
-
-  /// 读屏文案；null = 用 [tooltip]。主题卡的自定义圆点用「自定义」而不是
-  /// 完整 tooltip，避免读屏把「自定义主题色」和预设色混在一起播报。
-  final String? semanticsLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final iconColor =
-        ThemeData.estimateBrightnessForColor(color) == Brightness.light
-        ? Colors.black54
-        : Colors.white70;
-    return Tooltip(
-      message: tooltip,
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: semanticsLabel ?? tooltip,
-        child: InkResponse(
-          onTap: onTap,
-          radius: 30,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              border: selected
-                  ? Border.all(color: scheme.onSurface, width: 2)
-                  : null,
-            ),
-            child: Icon(Icons.palette_outlined, size: 17, color: iconColor),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 预设色圆点。选中时外圈用 onSurface 描一圈 + 打勾，避免浅色格子看不见。
-class _PresetDot extends StatelessWidget {
-  const _PresetDot({
-    required this.option,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final ThemeColorOption option;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    // 勾的颜色按背景亮暗选：早期用亮度阈值 0.55，天蓝/草绿这类中间色会配上
-    // 对比度不足的白勾。estimateBrightnessForColor 是 Material 自己的判定。
-    final checkColor =
-        ThemeData.estimateBrightnessForColor(option.color) == Brightness.light
-        ? Colors.black87
-        : Colors.white;
-    return Tooltip(
-      message: option.name,
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: option.name,
-        child: InkResponse(
-          onTap: onTap,
-          radius: 30,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: option.color,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: selected ? scheme.onSurface : Colors.transparent,
-                width: 2,
-              ),
-            ),
-            child: selected
-                ? Icon(Icons.check_rounded, size: 20, color: checkColor)
-                : null,
-          ),
-        ),
-      ),
     );
   }
 }

@@ -1,3 +1,4 @@
+import '../app_pill.dart';
 import '../app_snack_bar.dart';
 
 import 'dart:async';
@@ -430,35 +431,6 @@ class _ExpandableIntroState extends State<ExpandableIntro> {
   }
 }
 
-/// 标签小圆角 pill。Material 的 [Chip] 自带 48dp 点击区，一屏标签会撑出
-/// 一大块空白，这里只画视觉（标签本身不可点）。
-class DetailTagChip extends StatelessWidget {
-  const DetailTagChip({super.key, required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: scheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
-}
-
 /// 一组标签：自动换行。
 class DetailTagWrap extends StatelessWidget {
   const DetailTagWrap({super.key, required this.tags});
@@ -470,7 +442,7 @@ class DetailTagWrap extends StatelessWidget {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: [for (final tag in tags) DetailTagChip(label: tag)],
+      children: [for (final tag in tags) AppPill(label: tag)],
     );
   }
 }
