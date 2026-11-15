@@ -5,8 +5,8 @@
 - Flutter 工程（iOS 优先，Android 打包链路已通；不要改 `ios/`；`pubspec.yaml` 依赖受控新增，见硬性规则 2，视频域专项例外见 [docs/implementation.md](docs/implementation.md) 与 `third_party/README.md`）
 - Rust 内核 `rust/` 已完整拷入，FRB 绑定在 `lib/src/rust/`（**自动生成，不要手改**）
 - 启动链：`lib/main.dart → BootstrapGate → BackendService.start() → Rust init`
-- 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / videoFeed / searchVideos / bookDetail / videoDetail / videoEpisodes / videoSource / cachedVideoUrl / directory / chapter / chaptersBatch）
-- 模型：`lib/data/models/`（`NovelItem`、`BookDetail`、`Chapter`、`ChapterContent`、`FeedPage`、`VideoSeries`、`VideoDetail`、`VideoSource`、`SearchCue`（搜索框轮播热词）、`json_utils`（含 `ApiErrorKind`））。卡片解析不在 model 层：统一在 `lib/data/parsers/`（`card_walker.dart` 的 `walkCards` / `CardAdapter` 骨架 + `novel_parsers.dart` / `video_parsers.dart`）
+- 业务接口：`lib/data/api/api_client.dart`（已封装 recommend / search / hotSearch / rankCatalog / rankBoard / videoFeed / searchVideos / bookDetail / videoDetail / videoEpisodes / videoSource / cachedVideoUrl / directory / chapter / chaptersBatch）
+- 模型：`lib/data/models/`（`NovelItem`、`BookDetail`、`Chapter`、`ChapterContent`、`FeedPage`、`VideoSeries`、`VideoDetail`、`VideoSource`、`SearchCue`（搜索框轮播热词）、`HotSearch`（空搜索页热搜榜；`HotSearchEntry.hotPrefix` 保留接口前缀，`hotLabel` 输出 `热门讨论·3905w+` 这种整数 w+；`HotSearchBadge` 保留 `display_tag` 的文字和明暗颜色）、`RankCatalog` / `RankTab` / `RankBoard` / `RankEntry`（排行榜目录与条目，小说 `book_data` / 短剧漫剧 `video_data` 统一成 `RankEntry`）、`json_utils`（含 `ApiErrorKind`））。卡片解析不在 model 层：统一在 `lib/data/parsers/`（`card_walker.dart` 的 `walkCards` / `CardAdapter` 骨架 + `novel_parsers.dart` / `video_parsers.dart`）
 - 分类策略：`lib/features/recommend/content_source.dart` 的 `ContentSource`（`NovelSource` / `DramaSource` / `ManjuSource`）。上游 `tab_type`、搜索 tab、漫剧搜索兜底都在策略对象里；`lib/features/recommend/recommend_category.dart` 只留 label / emptyIcon / source，页面不再按分类写 if
 - 本地存储：`lib/core/storage/reading_store.dart`（书架、阅读进度、最近阅读、短剧收藏/观看进度）；阅读进度表按最近 200 本做 LRU 上限（`progressLimit`）。缓存：`lib/core/cache/`（封面缓存 `AppImageCache`、占用统计与清理 `AppCache`，入口在「我的 → 设置 → 存储」）
 - 离线缓存：`lib/core/storage/offline/`（小说/短剧两个 pinned 区的 manifest 与原子读写）+ `lib/features/cache/`（单任务下载器、等待队列、任务持久化、providers、详情底栏三态按钮、缓存中心）。缓存中心同时负责浏览、暂停/继续/重试、删除/清空；设置页不再有离线入口。与自动缓存物理隔离、只手动清理，见下文「离线缓存」
@@ -17,8 +17,8 @@
 - 详情页通用组件：`lib/app/widgets/detail/detail_common.dart`（`DetailCoverHeader` 封面头、`DetailIntroCard` 简介+标签、`ExpandableIntro`、`DetailSectionHeader`、`DetailTagChip`）。小说/短剧详情共用，特殊模块（目录/选集）各自在 feature 内实现
 - 详情状态：小说走 `lib/features/detail/detail_providers.dart`（`detailBundleProvider` / `detailShelfProvider`，autoDispose + 乐观更新）；短剧走 `lib/features/video/video_detail_providers.dart`（`videoDetailBundleProvider`；收藏态在 `lib/features/video/video_library_providers.dart` 的 `VideoShelfController`，同样乐观更新），两侧对称
 - 我的页：统一页头 + 小说/短剧两个 tab（`CategoryTabBar` + `TabBarView`，内容保活、可左右滑）；两个 tab 共用 `lib/features/mine/widgets/mine_tab_body.dart` 的 `MineTabBody<TData>`（数据未就绪时只渲染占位）；小说数据在 `lib/features/mine/mine_providers.dart`，短剧在 `lib/features/mine/mine_drama_providers.dart`
-- 路由：`lib/app/router.dart` 的 `sealed class AppRoute<T>` + 每个路由一个 `final class`（`DetailRoute` / `VideoDetailRoute` / `ReaderRoute` / `VideoPlayRoute` / `SettingsRoute` / `CacheCenterRoute` / `SearchRoute`），各自实现 `toRoute()`；页面用 `context.pushAppRoute(route)`。`MaterialApp` 不再注册路由表（没有 `AppRoutes` / `onGenerateRoute`）；`ReaderArgs` / `VideoPlayArgs` 仍是阅读页 / 播放页自己的入参
-- providers：`lib/app/providers.dart`（`apiClientProvider`、`readingStoreProvider`、`bootstrapProvider`）；主题色 / 深浅色模式见上面的 `themeSeedProvider` / `themeModeProvider`；推荐流布局见 `lib/features/recommend/recommend_layout.dart` 的 `recommendLayoutProvider`（同样持久化，启动时由 `main.dart` 预读，避免首页先按双列渲染再跳）；搜索页见 `lib/features/search/search_providers.dart` 的 `searchQueryProvider`（autoDispose，页面关闭即清空）+ `searchResultsProvider`（按「分类 + 关键词」family 并行请求，换词即换 provider 实例）+ `searchCueProvider`（搜索框轮播热词，非 autoDispose：推荐页/搜索页共享同一组词）；热词占位组件 `lib/features/search/search_cue_hint.dart`
+- 路由：`lib/app/router.dart` 的 `sealed class AppRoute<T>` + 每个路由一个 `final class`（`DetailRoute` / `VideoDetailRoute` / `ReaderRoute` / `VideoPlayRoute` / `SettingsRoute` / `CacheCenterRoute` / `SearchRoute` / `RankRoute`），各自实现 `toRoute()`；页面用 `context.pushAppRoute(route)`。`MaterialApp` 不再注册路由表（没有 `AppRoutes` / `onGenerateRoute`）；`ReaderArgs` / `VideoPlayArgs` 仍是阅读页 / 播放页自己的入参
+- providers：`lib/app/providers.dart`（`apiClientProvider`、`readingStoreProvider`、`bootstrapProvider`）；主题色 / 深浅色模式见上面的 `themeSeedProvider` / `themeModeProvider`；推荐流布局见 `lib/features/recommend/recommend_layout.dart` 的 `recommendLayoutProvider`（同样持久化，启动时由 `main.dart` 预读，避免首页先按双列渲染再跳）；搜索页见 `lib/features/search/search_providers.dart` 的 `searchQueryProvider`（autoDispose，页面关闭即清空）+ `searchResultsProvider`（按「分类 + 关键词」family 并行请求，换词即换 provider 实例）+ `searchCueProvider`（搜索框轮播热词，非 autoDispose：推荐页/搜索页共享同一组词）+ `hotSearchProvider`（空搜索页热搜榜，autoDispose、失败回退空榜：搜索历史仍可用）；排行榜见 `lib/features/rank/rank_providers.dart` 的 `rankCatalogProvider` / `rankPreviewProvider`（首页三个分类的榜单预览，失败/空榜返回 null，不影响推荐流）；热词占位组件 `lib/features/search/search_cue_hint.dart`
 - ProviderScope 已在 `lib/main.dart` 里，页面直接用 `ConsumerWidget` / `ConsumerStatefulWidget`
 
 **`lib/features/*/` 的页面已按下文清单实现；新增/改动页面时仍按本文件的约定。**
@@ -54,6 +54,17 @@ Future<FeedPage<VideoSeries>> searchVideos(String query,
 // 搜索框轮播热词（cue）：一次返回整组词 + 轮播间隔 rotateIntervalMs，UI 自己轮播；
 // 解析失败由调用方静默回退静态提示（`SearchCue.empty`）。
 Future<SearchCue> searchCue({int tabType = 2, String tabName = '', int cueType = 0});
+
+// 空搜索页热搜榜（官方 472 热搜榜 `/api/v1/search/hot`，最多 50 条、页面最多取前 30）：
+// `tag_attached` 线上形如 `热门讨论·39054552热搜值`；去掉「热搜值」后保留前缀，
+// 数字换算成整数 w+（`热门讨论·3905w+`）；失败回退空榜。
+Future<HotSearch> hotSearch();
+
+// 排行榜：目录藏在小说首页的排行榜 cell 里；条目走 /api/v1/rank/{rankId}。
+// genreTab：小说 2 / 短剧 4 / 漫剧 5（不带时短剧/漫剧会被上游按小说榜回答）。
+Future<RankCatalog> rankCatalog();
+Future<RankBoard> rankBoard({required String rankId, required int algo,
+  required int genreTab, int categoryId = 0, int offset = 0, int startAt = 1});
 
 Future<BookDetail> bookDetail(String bookId);
 Future<VideoDetail> videoDetail(String seriesId);
@@ -250,7 +261,7 @@ context.pushAppRoute(const SearchRoute());         // 推荐页搜索框 → 独
 
 ## 测试与工程质量
 
-- UI 测试在 `test/ui/`（按页面拆：recommend / search / home / detail / video / reader / mine / settings / 缓存中心，共享 `test/ui/preview_harness.dart`），共 31 张 golden；搜索页另有用例锁「小说/短剧两行顺序 / 卡宽 = 一屏 3.5 张 / 骨架加载 / 失败重试 / 换词不串结果 / 热词占位从带进来的那条开始 / 空输入提交搜占位热词」（`test/ui/search_test.dart`）；瀑布流布局本身另有 `test/ui/feed_staggered_grid_test.dart`（不定高卡片按列排 + 双列/三列基线），推荐布局偏好见 `test/recommend_layout_test.dart`；根目录 `test/*_test.dart` 是解析 / 缓存 / 并发 / 存储 / 主题测试。
+- UI 测试在 `test/ui/`（按页面拆：recommend / search / home / detail / video / reader / mine / settings / 缓存中心，共享 `test/ui/preview_harness.dart`），共 31 张 golden；排行榜另有 `test/rank_test.dart`（目录/book/video 解析、分页、分类映射）与 `test/ui/rank_page_test.dart`（二级 tab、initialAlgo 自动定位、左右滑、已请求 tab 数据保留、列表字段、首页卡片）；搜索页另有用例锁「小说/短剧两行顺序 / 卡宽 = 一屏 3.5 张 / 骨架加载 / 失败重试 / 换词不串结果 / 热词占位从带进来的那条开始 / 空输入提交搜占位热词 / 热搜榜前三十（超出 30 条截断）与前三标红、无历史时仍展示」（`test/ui/search_test.dart`）；热搜解析与 `w+` 格式另有 `test/hot_search_test.dart`；瀑布流布局本身另有 `test/ui/feed_staggered_grid_test.dart`（不定高卡片按列排 + 双列/三列基线），推荐布局偏好见 `test/recommend_layout_test.dart`；根目录 `test/*_test.dart` 是解析 / 缓存 / 并发 / 存储 / 主题测试。
 - 评论/段评：`test/comment_models_test.dart`（响应形状 + 段落锚点）、`test/reader_comments_sheet_test.dart`（面板分页/回复/失败态）、`test/reader_pagination_bubble_test.dart`（气泡占位与重排）、`test/ui/detail_reviews_test.dart`（书评卡片/弹窗）。
 - 真机性能 harness：`integration_test/reader_pagination_perf_test.dart`（`flutter drive --profile`，不进 `flutter test` / CI；结论见 `docs/implementation.md` §8）。
 - CI 在 `.github/workflows/ci.yml`：Dart format / analyze / test、Rust fmt / clippy / test、FRB 绑定漂移校验、iOS 无签名构建。本地等价命令 `make check`（只做格式化用 `make format`）。
@@ -258,7 +269,7 @@ context.pushAppRoute(const SearchRoute());         // 推荐页搜索框 → 独
 
 ## 页面清单（已实现）
 
-1. 推荐页：顶部**常驻**搜索框（40pt、圆角 10，是**只读入口**：点一下进入独立搜索页，不弹键盘、不随列表滚动收起；占位轮播 cue 热词（`/api/v1/search/cue`，按 `rotate_interval_ms` 淡入淡出，无词/失败回退「搜索小说 / 短剧」），点进搜索页时把当前这条带过去；右侧固定下载图标按钮（`download_outlined`，Tooltip/无障碍文案为「已缓存」） → 缓存中心）；顶部固定模块（搜索框 + tabs）带很淡的蓝粉氛围渐变（左→右、向下淡出，`TopGlow`）+ 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧，与我的页共用 `CategoryTabBar`）+ 各分类推荐流（白底卡片 + 不定高瀑布流，默认双列、设置里可切三列；左右留白与行/列间距都 8；封面按内容域原生比例出图；底部导航只剩「推荐 / 我的」）
+1. 推荐页：顶部**常驻**搜索框（40pt、圆角 10，是**只读入口**：点一下进入独立搜索页，不弹键盘、不随列表滚动收起；占位轮播 cue 热词（`/api/v1/search/cue`，按 `rotate_interval_ms` 淡入淡出，无词/失败回退「搜索小说 / 短剧」），点进搜索页时把当前这条带过去；右侧固定下载图标按钮（`download_outlined`，Tooltip/无障碍文案为「已缓存」） → 缓存中心）；顶部固定模块（搜索框 + tabs）带很淡的蓝粉氛围渐变（左→右、向下淡出，`TopGlow`）+ 可左右滑动的分类 tabs（小说 / 短剧 / 漫剧，与我的页共用 `CategoryTabBar`）+ 各分类推荐流（白底卡片 + 不定高瀑布流，默认双列、设置里可切三列；左右留白与行/列间距都 8；封面按内容域原生比例出图；底部导航只剩「推荐 / 我的」）；瀑布流上方是榜单预览卡片（小说「推荐榜」/ 短剧「短剧榜」/ 漫剧「漫剧榜」，前 3 条、无 1/2/3 标号、右上「更多」进排行榜页；首次加载先铺同高骨架，卡片顶部贴住 tabs）
 2. 详情页：封面/书名/作者/分类/状态/字数/简介/标签 + 书评卡片（首条 + 弹窗查看全部）+ 目录 + 底部「开始阅读」；短剧详情是同一套版式，只是把书评/目录换成剧评卡片（首条 + 弹窗查看全部）与选集
 3. 阅读页：分页正文 + 段评气泡 + 工具栏「评论」/评论面板（分页/回复只读）+ 点击呼出工具栏 + 顶部左侧书名（与右侧动作同字号，占剩余宽度、超宽省略）+ 书架状态（加入书架→已在书架，只读，只加不移）/整本缓存状态（缓存小说/缓存中/已缓存，缓存中与已缓存点击进缓存中心）文本动作 + 底部日间/夜间切换（夜间黑色纸，日间回上次选的浅色纸）+ 三章预取窗口（当前 ±1 章：正文/章评/分页；窗口外淘汰，边界 sentinel 页复用 PageView 动画）+ 详情弹层（目录右边入口，无标题、无关闭按钮、不重复目录，只有收藏/缓存）+ 字号/行距/字重（300–800）/底色（色块与标题同行）/段评气泡开关 + 进度保存；上一章/下一章不占工具栏按钮（空章兜底仍保留），点正文左右分区/章边界滑动/目录跳章都能切章
 4. 短剧播放页：控制条底排左侧「选集 + 详情 + 本集评论」、中间播放/暂停、右侧「清晰度（仅展示）+ 倍速」；倍速点开是贴着 chip 的小浮窗（M3 MenuAnchor 竖排档位，选完即关，打开时控制条不自动隐藏），不是底部弹层；收藏/缓存收进「详情」底部弹层（历史「最近观看」直进播放页时也从这里操作；弹层不重复选集、无关闭按钮）；进度条两侧显示当前时间/总时长；上下滑切集、播完自动续播、横屏全屏
@@ -267,6 +278,8 @@ context.pushAppRoute(const SearchRoute());         // 推荐页搜索框 → 独
 5. 我的页：**统一页头**（图标 + 「我的」 + 合并统计「书架 N 本 · 收藏 M 部」 + 右上角唯一设置入口，固定贴顶、不随内容滚动；缓存入口在推荐页搜索框右侧）+ 小说 / 短剧两个 tab（与推荐页共用 `CategoryTabBar`：左对齐、**无下划线**、整行高度固定 34，首个 tab 文字与内容留白左对齐（按最大字号预留宽度），当前 tab 主题色高亮、字号 17 / 未选中 15；文字贴同一条底线（变大只向上长），字号/颜色/字重都在过半时直接切换（不做逐帧插值，拖动时一过中线新 tab 就亮）；点击或左右滑动切换，tab 内容各自独立滚动并保活）；整页共用一套蓝粉氛围渐变（方向与推荐页略有差异），不随 tab 变化。小说 tab = 最近阅读 + 我的书架；短剧 tab = 最近观看 + 我的收藏（点击直接续播对应集）；两个 tab 共用 `MineTabBody` 骨架与页头，数据/空态/长按管理各自独立
 6. 设置页：主题色（3 个预设 + HSV 自定义取色，全站生效并持久化）+ 对话高亮（圆形色块打开弹层：荧光笔 / 下划线 / 波浪线按钮组 + HSV 取色，示例正文按当前样式与颜色实时预览）+ 深浅色模式（跟随系统 / 手动深色，持久化）+ 推荐流布局（双列 / 三列按钮组 `SegmentedButton`，默认双列，持久化）+ 全局字重（仅 Android，阅读器默认跟随并可覆盖）+ WebDAV 云同步（书架/收藏/进度，凭据进 Keychain/Keystore，release/beta/dev 分目录）+ 存储（占用明细 + 右下角图标式清理 + 卡片内小字「不包括主动缓存的小说、短剧」）+ 下载清晰度（最高 / 1080P / 720P / 480P 按钮组，并进存储区块）
 7. 缓存中心：推荐页搜索框右侧的下载图标按钮进入（不再是「我的」页悬浮按钮）；小说/短剧分区列出下载中/排队中/已下载，进度条 + 实时网速，暂停/继续/重试/取消排队，M3 删除与按区清空（确认框），点条目 Hero 进详情
-8. 搜索页（独立页，推荐页搜索框点进来）：顶部搜索框（自动聚焦，右侧「取消」返回；占位从推荐页带过来的热词接着轮播，**空输入提交时直接搜当前占位热词**并把它填回输入框）+ 一次提交**搜小说 / 短剧**，从上到下依次是 小说 / 短剧 两行；每行横向可滑、一屏露出约 3.5 张卡；卡片复用首页推荐流同款（白底卡 + 原生封面比例），卡宽按屏宽算（`SearchPage.cardWidthFor`）、字号整体缩一档（`SearchPage.cardFontScale` = 0.88）；每行独立 加载骨架（与真卡同宽同高的色块占位）/ 失败重试 / 空态；**不单列漫剧行**——漫剧没有独立搜索 tab，是借短剧搜索 tab 再按 `genre=205` 过滤的，和短剧行本质是同一份响应；单列会把同一份数据请求两遍并在两行重复出现，所以短剧行直接展示上游混排结果（漫剧卡片混在其中）；视频卡不展示推荐理由（`recommend_reason_list` 第一条：或为分类名「漫剧」、或为「上新」角标，都隐藏），只留「全 N 集 + 热度」；点卡片按内容域进详情（Hero tag 带 `search-<分类>` 来源）。v1 每个分类只取首屏一页（暂不接 `next_offset`，没有「查看更多」）；输入为空时展示搜索历史（最多 10 条、去重置顶、点击直接重搜）
+8. 搜索页（独立页，推荐页搜索框点进来）：顶部搜索框（自动聚焦，右侧「取消」返回；占位从推荐页带过来的热词接着轮播，**空输入提交时直接搜当前占位热词**并把它填回输入框）+ 一次提交**搜小说 / 短剧**，从上到下依次是 小说 / 短剧 两行；每行横向可滑、一屏露出约 3.5 张卡；卡片复用首页推荐流同款（白底卡 + 原生封面比例），卡宽按屏宽算（`SearchPage.cardWidthFor`）、字号整体缩一档（`SearchPage.cardFontScale` = 0.88）；每行独立 加载骨架（与真卡同宽同高的色块占位）/ 失败重试 / 空态；**不单列漫剧行**——漫剧没有独立搜索 tab，是借短剧搜索 tab 再按 `genre=205` 过滤的，和短剧行本质是同一份响应；单列会把同一份数据请求两遍并在两行重复出现，所以短剧行直接展示上游混排结果（漫剧卡片混在其中）；视频卡不展示推荐理由（`recommend_reason_list` 第一条：或为分类名「漫剧」、或为「上新」角标，都隐藏），只留「全 N 集 + 热度」；点卡片按内容域进详情（Hero tag 带 `search-<分类>` 来源）。v1 每个分类只取首屏一页（暂不接 `next_offset`，没有「查看更多」）；输入为空时展示搜索历史（最多 10 条、去重置顶、点击直接重搜）+ 下方热搜榜（`/api/v1/search/hot`，最多 30 条（接口一次 50 条，超出截断）；名次 1–3 用 `colorScheme.error` 标红，标题后展示 `display_tag` 彩色角标，右侧保留接口前缀并把热度数字换算成整数 `3905w+`，点一条直接按该词搜索；没有历史时热搜榜仍展示，两者都空才显示引导空态）
+
+9. 排行榜页（独立页，首页榜单卡片「更多」进入，带 `initialAlgo` 自动定位）：AppBar「排行榜」+ 横滑二级 tab（推荐榜 / 完本榜 / 巅峰榜 / 新书榜 / 短剧榜 / 漫剧榜，按小说→短剧→漫剧排序；无下划线，内容区用 TabBarView 左右滑切榜，每个 tab 独立请求并 keep-alive，切回不重拉、滚动位置保留）；列表条目含名次（前三红）、封面、标题、评分、`作者 · 分类 · 热度`（短剧/漫剧为 `分类 · 全N集 · 热度`）、两行简介、题材标签，行间不画分割线；点条目按内容域进详情；触底翻页、下拉刷新、空榜/失败重试。短剧/漫剧榜请求必须带 `genre_tab=4/5`，否则上游会回小说榜。
 
 不在本期范围：听书、漫画、登录；评论/段评只做**只读**（不发评论、不点赞、不回复）。

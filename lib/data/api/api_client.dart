@@ -9,8 +9,10 @@ import '../models/chapter_content.dart';
 import '../models/chapter_ideas.dart';
 import '../models/comment_reply.dart';
 import '../models/feed_page.dart';
+import '../models/hot_search.dart';
 import '../models/json_utils.dart';
 import '../models/novel_item.dart';
+import '../models/rank.dart';
 import '../models/search_cue.dart';
 import '../models/video_detail.dart';
 import '../models/video_series.dart';
@@ -83,6 +85,55 @@ class ApiClient {
       if (tabName.isNotEmpty) 'tab_name': tabName,
     });
     return SearchCue.fromPayload(payload);
+  }
+
+  /// 空搜索页的热搜榜（`/api/v1/search/hot`）。
+  ///
+  /// 内核把官方 472 热搜榜（`/reading/bookapi/search/rank_list/v:version/`）
+  /// 原样透传；解析只取词、热搜值和角标，失败由调用方静默回退空榜。
+  Future<HotSearch> hotSearch() async {
+    final payload = await _getJson('/api/v1/search/hot', const {});
+    return HotSearch.fromPayload(payload);
+  }
+
+  /// 首页榜单目录（藏在小说首页 payload 的排行榜 cell 里）。
+  Future<RankCatalog> rankCatalog() async {
+    final payload = await _getJson('/api/v1/recommend/homepage', {
+      'tab_type': '2',
+      'offset': '0',
+      'tab_index': '0',
+    });
+    return RankCatalog.fromHomepagePayload(payload);
+  }
+
+  /// 一页榜单。
+  ///
+  /// [genreTab] 是上游同级的「小说 2 / 短剧 4 / 漫剧 5」分组：不带它时短剧/
+  /// 漫剧榜会被上游按小说榜回答。小说榜 [categoryId] 才是分类 id；短剧/漫剧
+  /// 没有分类，固定 0（全部）。
+  Future<RankBoard> rankBoard({
+    required String rankId,
+    required int algo,
+    required int genreTab,
+    int categoryId = 0,
+    int offset = 0,
+    int startAt = 1,
+  }) async {
+    final payload = await _getJson(
+      '/api/v1/rank/${Uri.encodeComponent(rankId)}',
+      {
+        'algo_type': '$algo',
+        'rank_sub_info_id': '$categoryId',
+        'genre_tab': '$genreTab',
+        if (offset > 0) 'offset': '$offset',
+      },
+    );
+    return RankBoard.fromPayload(
+      payload,
+      genreTab: genreTab,
+      offset: offset,
+      startAt: startAt,
+    );
   }
 
   /// 视频类分类（短剧 / 漫剧）的推荐流。

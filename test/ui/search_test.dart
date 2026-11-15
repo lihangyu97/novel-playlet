@@ -89,6 +89,121 @@ void main() {
     expect(find.byType(EmptyView), findsOneWidget);
   });
 
+  testWidgets('搜索页-历史下方是热搜榜：前三十、前三名标红、热度显示 w+', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'search_history_v1': <String>['剑来'],
+    });
+    final fake = FakePreviewTransport()
+      ..hotSearchPayload = {
+        'code': 0,
+        'data': [
+          {
+            'search_tag_data': [
+              for (var i = 0; i < 32; i++)
+                {
+                  'tag_title': '热搜词$i',
+                  'tag_attached': i == 0
+                      ? '热门讨论·1200000热搜值'
+                      : '${120 - i}.0万热搜值',
+                  'display_tag': [
+                    {'text': i.isEven ? '巅峰榜' : '热聊'},
+                  ],
+                },
+            ],
+          },
+        ],
+      };
+    await pumpPreview(tester, const SearchPage(), transport: fake);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    // 历史在上、热搜榜在下。
+    expect(find.text('搜索历史'), findsOneWidget);
+    expect(find.text('热搜榜'), findsOneWidget);
+    expect(
+      find.byIcon(Icons.local_fire_department_rounded),
+      findsNothing,
+      reason: '热搜榜标题不再带火焰图标',
+    );
+    expect(
+      tester.getTopLeft(find.text('搜索历史')).dy,
+      lessThan(tester.getTopLeft(find.text('热搜榜')).dy),
+    );
+
+    // 只铺前三十：第 31 条不渲染（skipOffstage: false 也算上）。
+    expect(find.byKey(const ValueKey('search_hot_热搜词0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('search_hot_热搜词29')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('search_hot_热搜词30'), skipOffstage: false),
+      findsNothing,
+    );
+
+    // 保留接口给的前缀，只把数字换算成整数 w+（热搜值 3 个字去掉）。
+    expect(find.text('热门讨论·120w+'), findsOneWidget);
+    expect(find.text('111w+'), findsOneWidget);
+
+    // display_tag 的角标紧跟标题，只留 4pt 间距，而不是被推到热度列旁边。
+    final row0 = find.byKey(const ValueKey('search_hot_热搜词0'));
+    final badge = find.byKey(const ValueKey('search_hot_badge_热搜词0'));
+    expect(
+      find.descendant(of: row0, matching: find.text('巅峰榜')),
+      findsOneWidget,
+    );
+    final titleRect = tester.getRect(find.text('热搜词0'));
+    final badgeRect = tester.getRect(badge);
+    final hotRect = tester.getRect(find.text('热门讨论·120w+'));
+    expect(badgeRect.left - titleRect.right, lessThanOrEqualTo(6));
+    expect(badgeRect.right, lessThan(hotRect.left));
+
+    // 前三名红，第四名回到次级色。
+    final scheme = Theme.of(tester.element(find.byType(SearchPage)))
+        .colorScheme;
+    Color? rankColor(int rank, int index) => tester
+        .widget<Text>(
+          find.descendant(
+            of: find.byKey(ValueKey('search_hot_热搜词$index')),
+            matching: find.text('$rank'),
+          ),
+        )
+        .style
+        ?.color;
+    expect(rankColor(1, 0), scheme.error);
+    expect(rankColor(2, 1), scheme.error);
+    expect(rankColor(3, 2), scheme.error);
+    expect(rankColor(4, 3), isNot(scheme.error));
+  });
+
+  testWidgets('搜索页-没有历史时也展示热搜榜，点一条直接搜', (tester) async {
+    final fake = FakePreviewTransport()
+      ..hotSearchPayload = {
+        'code': 0,
+        'data': [
+          {
+            'search_tag_data': [
+              {'tag_title': '第一条热搜', 'tag_attached': '88.8万热搜值'},
+              {'tag_title': '第二条热搜', 'tag_attached': '66.6万热搜值'},
+            ],
+          },
+        ],
+      };
+    await pumpPreview(tester, const SearchPage(), transport: fake);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(find.byType(EmptyView), findsNothing, reason: '有热搜时不再显示引导空态');
+    expect(find.text('搜索历史'), findsNothing);
+    expect(find.text('热搜榜'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('search_hot_第一条热搜')));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(find.text('热搜榜'), findsNothing, reason: '提交后换成搜索结果');
+    expect(
+      fake.calls.any(
+        (call) => call.contains(Uri.encodeQueryComponent('第一条热搜')),
+      ),
+      isTrue,
+    );
+  });
+
   testWidgets('搜索页-小说 / 短剧两行从上到下各一行横向卡片', (tester) async {
     await pumpPreview(tester, const SearchPage());
     await _submit(tester, '剑来');
