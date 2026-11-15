@@ -60,8 +60,9 @@ class DetailHeroInfo extends StatelessWidget {
 
     // 评分 / 在读 同一行；「更新至 …」单独起一行：章节名往往很长，和评分/
     // 在读挤一行时会被 Flexible 提前截断，单独一行可以用满卡片宽度，只有真
-    // 的超出宽度才省略。
-    final infoStyle = theme.textTheme.bodySmall?.copyWith(
+    // 的超出宽度才省略。字号与上面「作者 · 状态 · 字数」那行一致（bodyMedium），
+    // 不再用更小的 bodySmall，避免同一块信息区出现两种正文字号。
+    final infoStyle = theme.textTheme.bodyMedium?.copyWith(
       color: scheme.onSurfaceVariant,
     );
     final segments = <Widget>[];
@@ -70,7 +71,7 @@ class DetailHeroInfo extends StatelessWidget {
     }
 
     if (score.isNotEmpty) {
-      segments.add(Icon(Icons.star_rounded, size: 16, color: scheme.primary));
+      segments.add(Icon(Icons.star_rounded, size: 17, color: scheme.primary));
       segments.add(const SizedBox(width: 3));
       segments.add(
         Text(

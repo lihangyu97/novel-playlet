@@ -206,6 +206,20 @@ void main() {
       final text = tester.widget<Text>(updatedFinder);
       expect(text.maxLines, 1);
       expect(text.overflow, TextOverflow.ellipsis, reason: '只有超出卡片宽度才省略');
+
+      // 评分 / 在读 / 更新至与「作者 · 状态 · 字数」同一字号，信息区不出现
+      // 两套正文字号。
+      final subtitleSize = tester
+          .widget<Text>(find.text('烽火戏诸侯 · 连载中 · 132.8万字'))
+          .style!
+          .fontSize;
+      for (final value in ['9.3', '1.2万人在读', '更新至 第一千零二十四章 开天']) {
+        expect(
+          tester.widget<Text>(find.text(value)).style!.fontSize,
+          subtitleSize,
+          reason: '「$value」字号应与作者行一致',
+        );
+      }
     });
 
     testWidgets('小说详情-超长章节名用满整行后才省略', (tester) async {
