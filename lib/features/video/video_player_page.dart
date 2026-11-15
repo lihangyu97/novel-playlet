@@ -26,7 +26,7 @@ import 'playback_failure.dart';
 import 'playback_speed.dart';
 import 'video_detail_page.dart';
 import 'widgets/episode_picker_sheet.dart';
-import 'widgets/playback_speed_sheet.dart';
+import 'widgets/playback_speed_menu.dart';
 import 'widgets/player_option_chip.dart';
 import 'widgets/video_comments_sheet.dart';
 
@@ -1055,18 +1055,20 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     );
   }
 
-  /// 打开倍速弹层：只写 provider，由 build 里的 listener 统一下发给 controller。
-  Future<void> _openPlaybackSpeedSheet() async {
+  /// 打开倍速小浮窗期间不自动隐藏控制条：浮窗贴着 chip 展开，控制条一淡出
+  /// 用户就看不出自己在哪一档上改速。关掉浮窗后照常续上隐藏计时。
+  void _handleSpeedMenuToggled(bool open) {
     _hideTimer?.cancel();
-    final picked = await showPlaybackSpeedSheet(
-      context,
-      current: ref.read(playbackSpeedProvider),
-    );
+    // 浮窗关闭可能发生在页面被 pop 之后（overlay 随路由一起收），此时不能再
+    // 起新的隐藏计时。
+    if (!mounted || open) return;
+    _scheduleHide();
+  }
+
+  /// 改倍速：只写 provider，由 build 里的 listener 统一下发给 controller。
+  void _setPlaybackSpeed(double speed) {
     if (!mounted) return;
-    if (picked != null) {
-      ref.read(playbackSpeedProvider.notifier).setSpeed(picked);
-    }
-    // 弹层关掉后恢复自动隐藏；暂停态由 _scheduleHide 自己判断不隐藏。
+    ref.read(playbackSpeedProvider.notifier).setSpeed(speed);
     _scheduleHide();
   }
 
@@ -1758,79 +1760,64 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                 ],
               ),
               const SizedBox(height: 2),
-              // 操作行：左侧「选集 + 详情 + 本集评论」，中间播放/暂停，右侧
-              // 「清晰度（有才展示）+ 倍速」。用 Stack 而不是等宽 Row：两侧按
-              // 自身宽度靠边，暂停键始终居中，窄屏也不会互相压到。
-              SizedBox(
-                width: double.infinity,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    IconButton.filled(
-                      onPressed: _togglePlay,
-                      icon: Icon(
-                        value.isPlaying
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                      ),
-                      iconSize: 30,
-                    ),
-                    Positioned(
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _barIconButton(
-                              icon: Icons.video_library_outlined,
-                              tooltip: '选集',
-                              onTap: () => unawaited(_openEpisodePicker()),
-                            ),
-                            if (widget.args.seriesId.isNotEmpty) ...[
-                              _barIconButton(
-                                icon: Icons.info_outline_rounded,
-                                tooltip: '详情',
-                                onTap: () => unawaited(_openDetailSheet()),
-                              ),
-                              _barIconButton(
-                                icon: Icons.chat_bubble_outline_rounded,
-                                tooltip: '本集评论',
-                                onTap: () => unawaited(_openEpisodeComments()),
-                              ),
-                            ],
-                          ],
+              // 操作行三段等分：中间是播放/暂停（左右两个 Expanded 等宽，
+              // 所以它永远在屏幕正中）；左边三颗按钮在左半区均分，不再全挤
+              // 在左边缘留出一大块空白；右边「清晰度 + 倍速」贴右端。
+              Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _barIconButton(
+                          icon: Icons.video_library_outlined,
+                          tooltip: '选集',
+                          onTap: () => unawaited(_openEpisodePicker()),
                         ),
-                      ),
+                        if (widget.args.seriesId.isNotEmpty) ...[
+                          _barIconButton(
+                            icon: Icons.info_outline_rounded,
+                            tooltip: '详情',
+                            onTap: () => unawaited(_openDetailSheet()),
+                          ),
+                          _barIconButton(
+                            icon: Icons.chat_bubble_outline_rounded,
+                            tooltip: '本集评论',
+                            onTap: () => unawaited(_openEpisodeComments()),
+                          ),
+                        ],
+                      ],
                     ),
-                    Positioned(
-                      right: 0,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (quality.isNotEmpty) ...[
-                              PlayerOptionChip(
-                                label: quality,
-                                tooltip: '当前清晰度（暂不支持切换）',
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            PlayerOptionChip(
-                              label: playbackSpeedLabel(speed),
-                              active: speed != 1.0,
-                              tooltip: '播放速度',
-                              onTap: () => unawaited(_openPlaybackSpeedSheet()),
-                            ),
-                          ],
+                  ),
+                  IconButton.filled(
+                    onPressed: _togglePlay,
+                    icon: Icon(
+                      value.isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                    ),
+                    iconSize: 30,
+                  ),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (quality.isNotEmpty) ...[
+                          PlayerOptionChip(
+                            label: quality,
+                            tooltip: '当前清晰度（暂不支持切换）',
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        PlaybackSpeedButton(
+                          current: speed,
+                          onOpenChanged: _handleSpeedMenuToggled,
+                          onSelected: _setPlaybackSpeed,
                         ),
-                      ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
           );

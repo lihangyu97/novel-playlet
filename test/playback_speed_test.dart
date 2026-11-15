@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/features/video/playback_speed.dart';
-import 'package:novel_playlet/features/video/widgets/playback_speed_sheet.dart';
+import 'package:novel_playlet/features/video/widgets/playback_speed_menu.dart';
 import 'package:novel_playlet/features/video/widgets/player_option_chip.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -87,39 +87,80 @@ void main() {
       expect(taps, 1);
     });
 
-    testWidgets('弹层列出 1.0–3.0x，点选返回新倍速', (tester) async {
+    testWidgets('点 chip 弹出倍速小浮窗：竖排列全档位，点一档回调并自动关闭', (tester) async {
       double? picked;
+      final openStates = <bool>[];
       await tester.pumpWidget(
         MaterialApp(
-          home: Builder(
-            builder: (context) => Scaffold(
-              body: Center(
-                child: ElevatedButton(
-                  onPressed: () async {
-                    picked = await showPlaybackSpeedSheet(
-                      context,
-                      current: 1.0,
-                    );
-                  },
-                  child: const Text('打开'),
-                ),
+          home: Scaffold(
+            backgroundColor: Colors.black,
+            body: Center(
+              child: PlaybackSpeedButton(
+                current: 1.0,
+                onSelected: (speed) => picked = speed,
+                onOpenChanged: openStates.add,
               ),
             ),
           ),
         ),
       );
-      await tester.tap(find.text('打开'));
+
+      // 收起时只有 chip 自己那一个 1.0x，没有浮窗。
+      expect(find.text('1.0x'), findsOneWidget);
+      expect(find.byKey(speedOptionKey(1.5)), findsNothing);
+
+      await tester.tap(find.byTooltip('播放速度'));
       await tester.pumpAndSettle();
 
-      expect(find.text('播放速度'), findsOneWidget);
+      // 浮窗里是竖排的一列倍速（不再有底部弹层的标题和说明文案）。
       for (final speed in playbackSpeeds) {
-        expect(find.text(playbackSpeedLabel(speed)), findsOneWidget);
+        expect(find.byKey(speedOptionKey(speed)), findsOneWidget);
       }
+      expect(find.textContaining('更耗电'), findsNothing, reason: '浮窗里不放说明文案');
+      expect(openStates, [true], reason: '打开要通知页面冻结自动隐藏');
 
-      await tester.tap(find.text('1.5x'));
+      await tester.tap(find.byKey(speedOptionKey(1.5)));
       await tester.pumpAndSettle();
       expect(picked, 1.5);
-      expect(find.text('播放速度'), findsNothing);
+      expect(find.byKey(speedOptionKey(1.5)), findsNothing, reason: '选完即关');
+      expect(openStates, [true, false]);
+    });
+
+    testWidgets('浮窗够小：贴着 chip 右沿，控制条贴底时自动翻到上方', (tester) async {
+      // 还原播放页的真实位置：chip 在屏幕右下角。
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            backgroundColor: Colors.black,
+            body: Align(
+              alignment: Alignment.bottomRight,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: PlaybackSpeedButton(current: 1.0, onSelected: (_) {}),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byTooltip('播放速度'));
+      await tester.pumpAndSettle();
+
+      final chip = tester.getRect(find.byTooltip('播放速度'));
+      final first = tester.getRect(
+        find.byKey(speedOptionKey(playbackSpeeds.first)),
+      );
+      final last = tester.getRect(
+        find.byKey(speedOptionKey(playbackSpeeds.last)),
+      );
+
+      expect(
+        last.bottom,
+        lessThanOrEqualTo(chip.top),
+        reason: '下面放不下就翻到 chip 上方',
+      );
+      expect(last.bottom - first.top, lessThan(200), reason: '五档排下来仍是一块小浮窗');
+      expect(first.height, lessThan(40), reason: '行高比 M3 默认 48 矮');
+      expect(first.width, lessThan(160), reason: '只放短文案，横向不该拉满屏');
     });
   });
 }

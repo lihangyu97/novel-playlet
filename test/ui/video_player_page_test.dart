@@ -24,6 +24,7 @@ import 'package:novel_playlet/features/video/video_library_providers.dart';
 import 'package:novel_playlet/features/video/playback_speed.dart';
 import 'package:novel_playlet/features/video/video_detail_page.dart';
 import 'package:novel_playlet/features/video/widgets/episode_picker.dart';
+import 'package:novel_playlet/features/video/widgets/playback_speed_menu.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
@@ -78,6 +79,19 @@ void main() {
     expect(controller.speeds.last, 2.0);
     expect(find.text('2.0x'), findsOneWidget);
 
+    // 点 chip 打开的是小浮窗（不再遮大半屏的底部弹层），选一档直接下发。
+    await tester.tap(find.byTooltip('播放速度'));
+    await tester.pumpAndSettle();
+    expect(find.text('播放速度'), findsNothing, reason: '浮窗不再有弹层标题');
+    expect(find.byKey(speedOptionKey(1.5)), findsOneWidget);
+
+    await tester.tap(find.byKey(speedOptionKey(1.5)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(controller.speeds.last, 1.5);
+    expect(find.text('1.5x'), findsOneWidget);
+    expect(find.byKey(speedOptionKey(1.5)), findsNothing, reason: '选完即关');
+
     await _disposePlayer(tester);
   });
 
@@ -99,6 +113,34 @@ void main() {
     expect(find.byTooltip('剧集详情'), findsNothing);
     expect(find.byTooltip('收藏'), findsNothing);
     expect(find.byTooltip('缓存'), findsNothing);
+
+    // 操作行三段：三颗按钮在左半区等距铺开（不再黏成一坨贴左边缘），
+    // 暂停键严格居中，倍速 chip 贴右端。
+    final iconCenters = [
+      tester.getCenter(find.byTooltip('选集')),
+      tester.getCenter(find.byTooltip('详情')),
+      tester.getCenter(find.byTooltip('本集评论')),
+    ];
+    final pitch = iconCenters[1].dx - iconCenters[0].dx;
+    expect(
+      pitch,
+      closeTo(iconCenters[2].dx - iconCenters[1].dx, 1),
+      reason: '三颗按钮等距',
+    );
+    expect(pitch, greaterThan(40), reason: '相邻按钮之间留了空隙，不再首尾相接');
+    expect(
+      iconCenters[0].dx,
+      greaterThan(40),
+      reason: '第一颗不贴屏幕左边缘（原来是 0 内边距紧贴左边）',
+    );
+    final screenWidth =
+        tester.view.physicalSize.width / tester.view.devicePixelRatio;
+    final pauseCenter = tester.getCenter(find.byIcon(Icons.pause_rounded));
+    expect(
+      pauseCenter.dx,
+      closeTo(screenWidth / 2, 1),
+      reason: '左右两个 Expanded 等宽，暂停键永远在屏幕正中',
+    );
 
     await tester.tap(find.byTooltip('详情'));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));

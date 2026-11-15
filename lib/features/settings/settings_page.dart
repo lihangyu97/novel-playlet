@@ -16,7 +16,7 @@ import 'settings_providers.dart';
 import 'widgets/dialogue_highlight_preview.dart';
 import 'widgets/theme_color_picker.dart';
 
-/// 设置页：主题（主题色 / 深浅色 / 推荐流布局 / 全局字重）+ 存储 + 视频。
+/// 设置页：主题（主题色 / 深浅色 / 推荐流布局 / 全局字重）+ 存储（占用清理 + 下载清晰度）。
 ///
 /// 从「我的」右上角进。这里只放全局偏好与可重建缓存，书架/阅读进度属于用户
 /// 数据，不给清理入口（那些在「我的」页里操作）。
@@ -44,8 +44,9 @@ class SettingsPage extends StatelessWidget {
             _FeedLayoutCard(),
             _SectionTitle('存储'),
             _StorageCard(),
-            _StorageHint(),
-            _SectionTitle('视频'),
+            SizedBox(height: 12),
+            // 下载清晰度是「存多少」的一部分：和占用/清理同区，不再单开一
+            // 个「视频」区块（一页里为一个开关单开一节太重）。
             _VideoDownloadQualityCard(),
             _AppVersionFooter(),
           ],
@@ -71,6 +72,25 @@ class _SectionTitle extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 设置页里两个按钮组（推荐流布局 / 下载清晰度）共用的外观。
+///
+/// 不要 M3 默认的描边：一圈外框加段间竖线在卡片上很吵，选中态靠底色已经
+/// 够清楚；去掉后整组是一条浅色底轨 + 一个实心选中段。段的左右内边距也收
+/// 到 8（默认 12），四档清晰度才放得进同一行、不换行。
+ButtonStyle _segmentedStyle(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return SegmentedButton.styleFrom(
+    side: BorderSide.none,
+    backgroundColor: scheme.onSurface.withValues(alpha: 0.05),
+    foregroundColor: scheme.onSurfaceVariant,
+    selectedBackgroundColor: scheme.secondaryContainer,
+    selectedForegroundColor: scheme.onSecondaryContainer,
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    visualDensity: VisualDensity.compact,
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  );
 }
 
 /// 卡片外边距。
@@ -559,9 +579,10 @@ const Key recommendLayoutThreeKey = ValueKey('recommend-layout-three');
 
 /// 推荐流布局：双列 / 三列瀑布流。
 ///
-/// 标题和选项收在同一行。选项不参与 Row 的 flex：标题再短、字体再大，两个
-/// chip 也按自身宽度占位，不会因为标题先分走一半宽度而折成两行；标题自身
-/// 超宽时省略。
+/// 与「下载清晰度」同一种控件（M3 SegmentedButton，按钮组）：两个互斥选项
+/// 就是按钮组最直接的表达，比一排独立 chip 更省地方、选中态也连成一体。
+/// 标题和选项收在同一行，不写「封面更大 / 一屏更多」这类说明文案；标题自身
+/// 超宽时省略，不挤压按钮组。
 /// 默认双列，改完立即生效（推荐页 watch 同一个 provider）。
 class _FeedLayoutCard extends ConsumerWidget {
   const _FeedLayoutCard();
@@ -575,6 +596,8 @@ class _FeedLayoutCard extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Row(
         children: [
+          // 标题占剩余宽度（长标题省略），按钮组按内容宽贴右端：就是
+          // CSS `justify-content: space-between` 的效果。
           Expanded(
             child: Text(
               '推荐流布局',
@@ -586,20 +609,23 @@ class _FeedLayoutCard extends ConsumerWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final option in RecommendLayout.values) ...[
-                if (option != RecommendLayout.values.first)
-                  const SizedBox(width: 8),
-                ChoiceChip(
-                  key: recommendLayoutOptionKey(option),
-                  label: Text(option.label),
-                  selected: option == layout,
-                  onSelected: (_) => controller.setLayout(option),
+          SegmentedButton<RecommendLayout>(
+            style: _segmentedStyle(theme),
+            segments: [
+              for (final option in RecommendLayout.values)
+                ButtonSegment(
+                  value: option,
+                  label: Text(
+                    option.label,
+                    key: recommendLayoutOptionKey(option),
+                  ),
                 ),
-              ],
             ],
+            selected: {layout},
+            // 段里只有两个字，打勾会把控件撑宽一倍；选中态靠底色区分。
+            showSelectedIcon: false,
+            onSelectionChanged: (selected) =>
+                controller.setLayout(selected.single),
           ),
         ],
       ),
@@ -608,13 +634,14 @@ class _FeedLayoutCard extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 视频
+// 存储：下载清晰度
 // ---------------------------------------------------------------------------
 
 /// 离线整剧下载的清晰度上限（默认 720P）。
 ///
 /// 只影响「下一部开始下载」的剧：已下完的内容不自动重下，需要用户删掉重新
 /// 缓存；在线播放不受这里影响（默认档由内核选流，后续清晰度面板再开）。
+/// 标题精简成「下载清晰度」：区块标题已经是「存储」，这里不必再重复「离线」。
 class _VideoDownloadQualityCard extends ConsumerWidget {
   const _VideoDownloadQualityCard();
 
@@ -622,33 +649,34 @@ class _VideoDownloadQualityCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final quality = ref.watch(videoDownloadQualityProvider);
-    // 这张卡只有「小标题 + 一排 chip」：上下用 12pt，去掉说明文字，
-    // 避免小标题上下各空一块 16pt 显得又高又散。
     return _Card(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      // 和「推荐流布局」同一套排版：标题左、四档按钮组右，两端对齐（不再
+      // 标题独占一行、按钮另起一行）。
+      child: Row(
         children: [
-          Text(
-            '离线下载清晰度',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: context.appWeight(FontWeight.w600),
+          Expanded(
+            child: Text(
+              '下载清晰度',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: context.appWeight(FontWeight.w600),
+              ),
             ),
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
+          const SizedBox(width: 12),
+          SegmentedButton<VideoDownloadQuality>(
+            style: _segmentedStyle(theme),
+            segments: [
               for (final option in VideoDownloadQuality.values)
-                ChoiceChip(
-                  label: Text(option.label),
-                  selected: option == quality,
-                  onSelected: (_) => ref
-                      .read(videoDownloadQualityProvider.notifier)
-                      .setQuality(option),
-                ),
+                ButtonSegment(value: option, label: Text(option.label)),
             ],
+            selected: {quality},
+            showSelectedIcon: false,
+            onSelectionChanged: (selected) => ref
+                .read(videoDownloadQualityProvider.notifier)
+                .setQuality(selected.single),
           ),
         ],
       ),
@@ -659,6 +687,9 @@ class _VideoDownloadQualityCard extends ConsumerWidget {
 // ---------------------------------------------------------------------------
 // 存储
 // ---------------------------------------------------------------------------
+
+/// 存储卡右下角的清理入口：测试用它点，不依赖图标/文案。
+const Key clearCacheButtonKey = Key('settings-clear-cache');
 
 class _StorageCard extends ConsumerStatefulWidget {
   const _StorageCard();
@@ -806,7 +837,11 @@ class _StorageCardState extends ConsumerState<_StorageCard> {
                 ),
               ),
             ),
-            FilledButton.icon(
+            // 清理只留图标（与详情页「复制 ID」同一档尺寸）：带文案的
+            // 胶囊按钮会把这一行撑满，而「共 xx MB」才是这里的信息主体。
+            IconButton(
+              key: clearCacheButtonKey,
+              tooltip: '清理缓存',
               onPressed: usage.isEmpty || _clearing
                   ? null
                   : () => _clear(usage),
@@ -817,10 +852,22 @@ class _StorageCardState extends ConsumerState<_StorageCard> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.cleaning_services_outlined, size: 18),
-              label: Text(_clearing ? '清理中…' : '清理缓存'),
-              style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+              color: scheme.onSurfaceVariant,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              visualDensity: VisualDensity.compact,
             ),
           ],
+        ),
+        const SizedBox(height: 4),
+        // 范围说明只对「这里清什么」负责：主动缓存的小说/短剧在缓存中心，
+        // 位置写进文案比在页面下方单独挂一行提示更近。
+        Text(
+          '不包括主动缓存的小说、短剧',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+            height: 1.3,
+          ),
         ),
       ],
     );
@@ -857,25 +904,6 @@ class _UsageRow extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _StorageHint extends StatelessWidget {
-  const _StorageHint();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(_contentInset, 12, _contentInset, 0),
-      child: Text(
-        '离线缓存不在此列，请到「我的 → 缓存」页清理。',
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-          height: 1.5,
-        ),
       ),
     );
   }

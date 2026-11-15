@@ -67,16 +67,23 @@ Widget _wrap(Widget child, {List<Override> overrides = const []}) {
   );
 }
 
+/// 清理入口现在是存储卡片右下角的图标按钮（tooltip 仍为「清理缓存」）。
+final _clearCacheButton = find.byKey(clearCacheButtonKey);
+
 /// 设置页新增「推荐流布局」卡片后内容变长，「清理缓存」会落到 800×600 的
 /// 测试首屏外：点击前先把它滚到可见，否则 tap 会因命中不到而静默失败。
 Future<void> _scrollToClearCache(WidgetTester tester) async {
   await tester.scrollUntilVisible(
-    find.text('清理缓存'),
+    _clearCacheButton,
     200,
     scrollable: find.byType(Scrollable).first,
   );
   await tester.pumpAndSettle();
 }
+
+/// 清理入口的 IconButton（禁用态/进行中态都靠它断言）。
+IconButton _clearCacheIconButton(WidgetTester tester) =>
+    tester.widget<IconButton>(_clearCacheButton);
 
 final _hexFinder = find.byWidgetPredicate(
   (widget) =>
@@ -338,7 +345,7 @@ void main() {
 
     expect(find.textContaining('12 MB'), findsOneWidget);
     await _scrollToClearCache(tester);
-    await tester.tap(find.text('清理缓存'));
+    await tester.tap(_clearCacheButton);
     await tester.pumpAndSettle();
     expect(find.text('清理缓存？'), findsOneWidget);
 
@@ -347,7 +354,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(cache.clearCount, 0);
 
-    await tester.tap(find.text('清理缓存'));
+    await tester.tap(_clearCacheButton);
     await tester.pumpAndSettle();
     await tester.tap(find.text('清理'));
     await tester.pumpAndSettle();
@@ -356,10 +363,7 @@ void main() {
     expect(find.textContaining('已清理 12 MB 缓存'), findsOneWidget);
     // 清理后重新统计，页面上的占用必须真的变成 0。
     expect(find.textContaining('共 0 B'), findsOneWidget);
-    final button = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, '清理缓存'),
-    );
-    expect(button.onPressed, isNull);
+    expect(_clearCacheIconButton(tester).onPressed, isNull);
   });
 
   testWidgets('清理失败不会卡在「清理中…」', (tester) async {
@@ -374,17 +378,17 @@ void main() {
     await tester.pumpAndSettle();
 
     await _scrollToClearCache(tester);
-    await tester.tap(find.text('清理缓存'));
+    await tester.tap(_clearCacheButton);
     await tester.pumpAndSettle();
     await tester.tap(find.text('清理'));
     await tester.pumpAndSettle();
 
     expect(find.text('清理失败，请重试'), findsOneWidget);
-    expect(find.text('清理缓存'), findsOneWidget, reason: '失败后按钮要恢复可点');
-    final button = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, '清理缓存'),
+    expect(
+      _clearCacheIconButton(tester).onPressed,
+      isNotNull,
+      reason: '失败后按钮要恢复可点',
     );
-    expect(button.onPressed, isNotNull);
   });
 
   testWidgets('清理进行中按钮禁用（不会并发清理）', (tester) async {
@@ -400,20 +404,31 @@ void main() {
     await tester.pumpAndSettle();
 
     await _scrollToClearCache(tester);
-    await tester.tap(find.text('清理缓存'));
+    await tester.tap(_clearCacheButton);
     await tester.pumpAndSettle();
     await tester.tap(find.text('清理'));
     await tester.pump();
 
-    expect(find.text('清理中…'), findsOneWidget);
-    final button = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, '清理中…'),
+    // 进行中：图标换成小转圈，按钮禁用。
+    expect(
+      find.descendant(
+        of: _clearCacheButton,
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+      reason: '清理中把小图标换成转圈（不再有「清理中…」文案）',
     );
-    expect(button.onPressed, isNull);
+    expect(_clearCacheIconButton(tester).onPressed, isNull);
 
     gate.complete();
     await tester.pumpAndSettle();
-    expect(find.text('清理缓存'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: _clearCacheButton,
+        matching: find.byIcon(Icons.cleaning_services_outlined),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('无缓存时清理按钮禁用', (tester) async {
@@ -426,10 +441,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('0 B'), findsWidgets);
-    final button = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, '清理缓存'),
-    );
-    expect(button.onPressed, isNull);
+    expect(_clearCacheIconButton(tester).onPressed, isNull);
   });
 
   testWidgets('我的页右上角入口能打开设置页', (tester) async {
