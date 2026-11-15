@@ -429,9 +429,9 @@ void main() {
     expect(tester.getBottomLeft(find.text('短剧')).dy, dramaBottomBefore);
   });
 
-  /// 拖动 TabBarView 时：未过半仍由原 tab 高亮；一过中线高亮/字号立刻切给
-  /// 新 tab（不等松手）。两种状态都是确定的字号，不做逐帧插值。
-  testWidgets('我的页-滑动过半才切换 tab 状态', (tester) async {
+  /// 拖动 TabBarView 时：字号/颜色/下划线都跟着动画连续走（不再到中点突然
+  /// 切换），只有无障碍语义在过半时切到新 tab。
+  testWidgets('我的页-拖动时高亮与下划线连续跟随', (tester) async {
     await pumpPreview(tester, const MinePage());
     final scheme = Theme.of(tester.element(find.byType(MinePage))).colorScheme;
     TextStyle styleOf(String label) {
@@ -442,29 +442,63 @@ void main() {
       return tester.widget<Text>(finder).style!;
     }
 
+    bool semanticSelected(String label) {
+      final ancestors = find.ancestor(
+        of: find.descendant(
+          of: find.byType(CategoryTabBar),
+          matching: find.text(label),
+        ),
+        matching: find.byType(Semantics),
+      );
+      // 取最近一个显式声明了 selected 的 Semantics（InkWell 自带的那个
+      // 不声明 selected，跳过）。
+      for (final element in ancestors.evaluate()) {
+        final selected = (element.widget as Semantics).properties.selected;
+        if (selected != null) return selected;
+      }
+      return false;
+    }
+
+    final underline = find.byKey(const Key('category_tab_underline'));
+    final underlineStart = tester.getRect(underline).left;
+
     final gesture = await tester.startGesture(
       tester.getCenter(find.byType(TabBarView)),
     );
-    // 拖动约 24%：不过半，小说仍然是唯一的选中态。
-    await gesture.moveBy(const Offset(-20, 0));
+    // 拖动约 10%：还远没过半，但字号/颜色已经朝短剧方向插值。
+    await gesture.moveBy(const Offset(-40, 0));
     await tester.pump();
-    await gesture.moveBy(const Offset(-90, 0));
-    await tester.pump();
-    expect(styleOf('小说').color, scheme.primary);
-    expect(styleOf('小说').fontSize, CategoryTabBar.selectedFontSize);
-    expect(styleOf('短剧').color, scheme.onSurfaceVariant);
-    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
+    expect(styleOf('小说').fontSize, lessThan(CategoryTabBar.selectedFontSize));
+    expect(
+      styleOf('小说').fontSize,
+      greaterThan(CategoryTabBar.fontSize),
+      reason: '字号是连续插值，不是到中点才跳',
+    );
+    expect(styleOf('短剧').fontSize, greaterThan(CategoryTabBar.fontSize));
+    expect(styleOf('小说').color, isNot(scheme.primary));
+    expect(styleOf('短剧').color, isNot(scheme.onSurfaceVariant));
+    expect(
+      tester.getRect(underline).left,
+      greaterThan(underlineStart + 0.5),
+      reason: '下划线跟着手指滑',
+    );
+    expect(semanticSelected('小说'), isTrue, reason: '未过半语义仍是小说');
 
-    // 再拖到约 57%：一过中线，高亮和字号一起切给短剧，不等松手。
-    await gesture.moveBy(const Offset(-130, 0));
+    // 拖到约 51%：一过中线，无障碍语义切到短剧（视觉仍在插值）。
+    await gesture.moveBy(const Offset(-160, 0));
     await tester.pump();
-    expect(styleOf('短剧').color, scheme.primary, reason: '过半立即高亮新 tab');
-    expect(styleOf('短剧').fontSize, CategoryTabBar.selectedFontSize);
-    expect(styleOf('小说').color, scheme.onSurfaceVariant);
-    expect(styleOf('小说').fontSize, CategoryTabBar.fontSize);
+    expect(semanticSelected('短剧'), isTrue);
+    expect(semanticSelected('小说'), isFalse);
 
     await gesture.up();
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(styleOf('短剧').color, scheme.primary);
+    expect(styleOf('短剧').fontSize, CategoryTabBar.selectedFontSize);
+    expect(styleOf('小说').fontSize, CategoryTabBar.fontSize);
+    expect(
+      tester.getRect(underline).left,
+      closeTo(tester.getRect(find.text('短剧')).left, 0.5),
+    );
   });
 
   /// 缓存中心入口在页头右上角、设置按钮左边（推荐页顶栏收掉缓存入口后

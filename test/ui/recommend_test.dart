@@ -213,56 +213,52 @@ void main() {
     }
   });
 
-  /// 当前分类的下划线：宽度跟文字一致、贴在整行底边；未选中的 tab 不画。
-  testWidgets('推荐页-tabs 下划线跟当前分类且贴行底', (tester) async {
+  /// 当前分类的下划线：与选中文字等宽、贴在整行底边；切换时**滑过去**
+  /// （跟 [TabController.animation] 走，不是到中点直接跳）。
+  testWidgets('推荐页-tabs 下划线跟当前分类、贴行底且滑动过渡', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     final scheme = Theme.of(tester.element(find.byType(RecommendPage)))
         .colorScheme;
     final bar = tester.getRect(find.byType(CategoryTabBar));
+    final underline = find.byKey(const Key('category_tab_underline'));
+    expect(underline, findsOneWidget);
 
-    Finder underlineFinder(String label) => find
-        .descendant(
-          of: find
-              .ancestor(of: find.text(label), matching: find.byType(InkWell))
-              .first,
-          matching: find.byType(Container),
-        )
-        .first;
-
-    Color underlineColor(String label) =>
-        (tester.widget<Container>(underlineFinder(label)).decoration!
-                as BoxDecoration)
+    Rect underlineRect() => tester.getRect(underline);
+    Color underlineColor() =>
+        (tester.widget<Container>(underline).decoration! as BoxDecoration)
             .color!;
 
     final novelText = tester.getRect(find.text('小说'));
-    final novelUnderline = tester.getRect(underlineFinder('小说'));
-    expect(novelUnderline.width, closeTo(novelText.width, 0.5));
+    final settled = underlineRect();
+    expect(settled.left, closeTo(novelText.left, 0.5));
+    expect(settled.width, closeTo(novelText.width, 0.5), reason: '与文字等宽');
     expect(
-      novelUnderline.bottom,
+      settled.bottom,
       closeTo(bar.bottom, 0.5),
       reason: '下划线贴整行底边，下面就是内容区',
     );
-    expect(
-      novelUnderline.top - novelText.bottom,
-      closeTo(CategoryTabBar.underlineGap, 0.5),
-    );
-    expect(underlineColor('小说'), scheme.primary);
-    expect(underlineColor('短剧'), Colors.transparent, reason: '未选中不画下划线');
+    expect(underlineColor(), scheme.primary);
 
-    // 未选中的 tab 也占着同样一块（透明）下划线，切换时行高与文字底线不跳。
-    final dramaUnderline = tester.getRect(underlineFinder('短剧'));
-    expect(dramaUnderline.height, novelUnderline.height);
-    expect(dramaUnderline.bottom, closeTo(novelUnderline.bottom, 0.5));
-
+    // 点「短剧」：动画中途下划线还在这两个位置之间（滑过去），不是瞬移。
     await tester.tap(find.text('短剧'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(underlineColor('短剧'), scheme.primary);
-    expect(underlineColor('小说'), Colors.transparent);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    final mid = underlineRect();
+    expect(mid.left, greaterThan(settled.left + 0.5), reason: '已经开始滑动');
     expect(
-      tester.getRect(underlineFinder('短剧')).bottom,
-      closeTo(bar.bottom, 0.5),
-      reason: '切分类后下划线位置不动',
+      mid.left,
+      lessThan(tester.getRect(find.text('短剧')).left),
+      reason: '中途还没到目标位置',
     );
+    expect(mid.bottom, closeTo(bar.bottom, 0.5));
+
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    final dramaText = tester.getRect(find.text('短剧'));
+    final ended = underlineRect();
+    expect(ended.left, closeTo(dramaText.left, 0.5));
+    expect(ended.width, closeTo(dramaText.width, 0.5));
+    expect(ended.bottom, closeTo(bar.bottom, 0.5));
+    expect(underlineColor(), scheme.primary);
   });
 
   /// 顶栏收紧：整行与 tabs 同高，搜索图标与 tab 文字同一条中线；下划线
