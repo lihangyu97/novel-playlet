@@ -501,27 +501,14 @@ class _GlobalFontWeightCardState extends ConsumerState<_GlobalFontWeightCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '全局字重',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: context.appWeight(FontWeight.w600),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '仅 Android；阅读器默认跟随，可在阅读器内覆盖',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    '全局字重',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: context.appWeight(FontWeight.w600),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
