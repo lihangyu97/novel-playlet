@@ -297,6 +297,52 @@ void main() {
     );
   });
 
+  /// 对话高亮样式：三选一，默认荧光笔；换样式后取色弹层里的预览同步换画法。
+  testWidgets('设置页-对话高亮样式可切换，取色预览跟着样式走', (tester) async {
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(SettingsPage)),
+    );
+
+    final group = tester.widget<SegmentedButton<DialogueHighlightStyle>>(
+      find.byKey(dialogueHighlightStyleKey),
+    );
+    expect(
+      group.segments.map((segment) => segment.value),
+      DialogueHighlightStyle.values,
+      reason: '荧光笔 / 下划线 / 波浪线三种画法',
+    );
+    expect(group.selected, {
+      DialogueHighlightStyle.marker,
+    }, reason: '默认荧光笔，老用户观感不变');
+
+    await tester.ensureVisible(find.text('波浪线'));
+    await tester.pump();
+    await tester.tap(find.text('波浪线'));
+    await tester.pump();
+    expect(
+      container.read(readerSettingsProvider).dialogueHighlightStyle,
+      DialogueHighlightStyle.wavy,
+    );
+
+    // 取色弹层里的示例正文按当前样式渲染：选色时就该看到最终效果。
+    await tester.ensureVisible(find.byKey(dialogueHighlightColorKey));
+    await tester.tap(find.byKey(dialogueHighlightColorKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(
+      tester
+          .widget<DialogueHighlightPreview>(
+            find.byType(DialogueHighlightPreview),
+          )
+          .style,
+      DialogueHighlightStyle.wavy,
+    );
+  });
+
   testWidgets('设置页-对话高亮色块无边框且与主题圆点同尺寸', (tester) async {
     await pumpPreview(
       tester,

@@ -154,6 +154,46 @@ void main() {
     );
   });
 
+  test('对话高亮样式可改、落盘并在新容器恢复', () async {
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    expect(
+      container.read(readerSettingsProvider).dialogueHighlightStyle,
+      DialogueHighlightStyle.marker,
+      reason: '默认还是荧光笔（老用户升级后观感不变）',
+    );
+
+    container
+        .read(readerSettingsProvider.notifier)
+        .setDialogueHighlightStyle(DialogueHighlightStyle.wavy);
+    await pumpEventQueue();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('reader_dialogue_highlight_style_v1'), 'wavy');
+
+    final restored = ProviderContainer();
+    addTearDown(restored.dispose);
+    await restored.read(readerSettingsProvider.notifier).restoreFuture;
+    expect(
+      restored.read(readerSettingsProvider).dialogueHighlightStyle,
+      DialogueHighlightStyle.wavy,
+    );
+  });
+
+  test('落盘的样式名不认识时回退荧光笔，不抛异常', () async {
+    SharedPreferences.setMockInitialValues({
+      'reader_dialogue_highlight_style_v1': 'some_future_style',
+    });
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    await container.read(readerSettingsProvider.notifier).restoreFuture;
+    expect(
+      container.read(readerSettingsProvider).dialogueHighlightStyle,
+      DialogueHighlightStyle.marker,
+    );
+  });
+
   test('落盘的关闭值优先于默认值', () async {
     SharedPreferences.setMockInitialValues({
       'reader_show_dialogue_highlight_v1': false,

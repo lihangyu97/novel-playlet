@@ -201,11 +201,14 @@ class _ThemeColorCard extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 对话高亮颜色
+// 对话高亮（样式 + 颜色）
 // ---------------------------------------------------------------------------
 
 /// 「对话高亮」色块的 key：测试用它点开取色弹层。
 const Key dialogueHighlightColorKey = Key('settings-dialogue-highlight-color');
+
+/// 「对话高亮」样式按钮组的 key：测试用它点选荧光笔 / 下划线 / 波浪线。
+const Key dialogueHighlightStyleKey = Key('settings-dialogue-highlight-style');
 
 /// 阅读页人物对话荧光笔的颜色。和主题色分开：主题色决定全站配色，对话高亮
 /// 只是阅读页的一层标记色，用户可以单独挑一个顺眼的荧光笔颜色。
@@ -220,45 +223,67 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
     final scheme = theme.colorScheme;
     return _Card(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '对话高亮',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: context.appWeight(FontWeight.w600),
-                  ),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '对话高亮',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: context.appWeight(FontWeight.w600),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '阅读页人物对话的标记样式与颜色',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '阅读页人物对话的荧光笔颜色',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 12),
+              _ColorDot(
+                key: dialogueHighlightColorKey,
+                color: settings.dialogueHighlightColor,
+                tooltip: '自定义对话高亮颜色',
+                onTap: () async {
+                  final picked = await showThemeColorPicker(
+                    context,
+                    initial: settings.dialogueHighlightColor,
+                    title: '自定义对话高亮颜色',
+                    // 取色时就按当前样式预览，选完即所见。
+                    previewBuilder: (color) => DialogueHighlightPreview(
+                      color: color,
+                      style: settings.dialogueHighlightStyle,
+                    ),
+                  );
+                  if (picked == null) return;
+                  controller.setDialogueHighlightColor(picked);
+                },
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          _ColorDot(
-            key: dialogueHighlightColorKey,
-            color: settings.dialogueHighlightColor,
-            tooltip: '自定义对话高亮颜色',
-            onTap: () async {
-              final picked = await showThemeColorPicker(
-                context,
-                initial: settings.dialogueHighlightColor,
-                title: '自定义对话高亮颜色',
-                previewBuilder: (color) =>
-                    DialogueHighlightPreview(color: color),
-              );
-              if (picked == null) return;
-              controller.setDialogueHighlightColor(picked);
-            },
+          const SizedBox(height: 8),
+          // 三种画法互斥，用按钮组一次摆平；换样式只重绘、不重排正文。
+          SegmentedButton<DialogueHighlightStyle>(
+            key: dialogueHighlightStyleKey,
+            style: _segmentedStyle(theme),
+            segments: [
+              for (final style in DialogueHighlightStyle.values)
+                ButtonSegment(value: style, label: Text(style.label)),
+            ],
+            selected: {settings.dialogueHighlightStyle},
+            showSelectedIcon: false,
+            onSelectionChanged: (selected) =>
+                controller.setDialogueHighlightStyle(selected.single),
           ),
         ],
       ),

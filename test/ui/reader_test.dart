@@ -1107,6 +1107,52 @@ void main() {
       findsWidgets,
     );
   });
+
+  /// 换样式只重绘，不进分页 key：正文不重排、阅读位置不动，画笔上的 style 跟着换。
+  testWidgets('阅读页-切对话高亮样式不重排正文，只换画笔', (tester) async {
+    reader_pagination.ReaderPagination.debugResetCounters();
+    addTearDown(reader_pagination.ReaderPagination.debugResetCounters);
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: _DialogueTextTransport(),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    final buildsBefore = reader_pagination.ReaderPagination.debugBuildCount;
+    expect(
+      container.read(readerSettingsProvider).dialogueHighlightStyle,
+      DialogueHighlightStyle.marker,
+    );
+
+    dynamic painterOf() =>
+        tester
+                .widget<CustomPaint>(
+                  find.byKey(const ValueKey('reader-dialogue-highlight')).first,
+                )
+                .painter
+            as dynamic;
+    expect(painterOf().style, DialogueHighlightStyle.marker);
+
+    for (final style in [
+      DialogueHighlightStyle.underline,
+      DialogueHighlightStyle.wavy,
+    ]) {
+      container
+          .read(readerSettingsProvider.notifier)
+          .setDialogueHighlightStyle(style);
+      await tester.pumpAndSettle(const Duration(milliseconds: 300));
+      expect(
+        reader_pagination.ReaderPagination.debugBuildCount,
+        buildsBefore,
+        reason: '样式只影响绘制，不该触发重新分页',
+      );
+      expect(painterOf().style, style);
+    }
+  });
 }
 
 /// 底部常驻信息条里的页码文案（`n/m`）。

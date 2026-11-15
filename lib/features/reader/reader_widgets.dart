@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -22,6 +24,7 @@ class ReaderPageContent extends StatelessWidget {
     required this.horizontalPadding,
     this.showDialogueHighlight = true,
     this.dialogueHighlightColor = ReaderSettings.defaultDialogueHighlightColor,
+    this.dialogueHighlightStyle = DialogueHighlightStyle.marker,
     this.onBubbleTap,
   });
 
@@ -36,31 +39,39 @@ class ReaderPageContent extends StatelessWidget {
   /// 是否画人物对话荧光笔（阅读设置里的开关）。
   final bool showDialogueHighlight;
 
-  /// 荧光笔基色（设置页可自定义）；透明度按纸色明暗在渲染时叠。
+  /// 对话标记的基色（设置页可自定义）；透明度按纸色明暗与样式在渲染时叠。
   final Color dialogueHighlightColor;
+
+  /// 对话标记的画法：荧光笔底纹 / 下划线 / 波浪线（设置页可切换）。
+  final DialogueHighlightStyle dialogueHighlightStyle;
 
   /// 点段评气泡：回调段落 id，由阅读页打开该段的评论面板。
   final void Function(int paraIndex)? onBubbleTap;
 
   @override
   Widget build(BuildContext context) {
-    // 对话荧光笔底色：用用户配置的基色，浅色纸/夜间纸叠不同透明度。
+    // 对话标记色：荧光笔是「面」，浅色纸/夜间纸叠不同透明度；下划线与波浪线
+    // 是「线」，要实一些才看得清（线的透明度太低会糊成纸色）。
     final isDark = Theme.of(context).colorScheme.brightness == Brightness.dark;
-    final markerColor = dialogueHighlightColor.withValues(
-      alpha: isDark ? 0.22 : 0.34,
+    final highlightColor = dialogueHighlightColor.withValues(
+      alpha: switch (dialogueHighlightStyle) {
+        DialogueHighlightStyle.marker => isDark ? 0.22 : 0.34,
+        DialogueHighlightStyle.underline ||
+        DialogueHighlightStyle.wavy => isDark ? 0.90 : 0.85,
+      },
     );
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
       child: Stack(
         children: [
           for (final fragment in page.fragments)
-            _buildFragment(fragment, markerColor),
+            _buildFragment(fragment, highlightColor),
         ],
       ),
     );
   }
 
-  Widget _buildFragment(ReaderFragment fragment, Color markerColor) {
+  Widget _buildFragment(ReaderFragment fragment, Color highlightColor) {
     // 与分页测量共用同一个 span 构建函数：首行缩进 / 段评气泡的占位度量
     // 在测量与渲染两侧完全一致，不能各自实现一套。
     final block = fragment.block;
@@ -99,7 +110,8 @@ class ReaderPageContent extends StatelessWidget {
                     key: const ValueKey('reader-dialogue-highlight'),
                     painter: _DialogueHighlightPainter(
                       rects: fragment.block.dialogueRects,
-                      color: markerColor,
+                      color: highlightColor,
+                      style: dialogueHighlightStyle,
                     ),
                   ),
                 Text.rich(
@@ -884,20 +896,40 @@ class _ReaderDirectorySheetState extends State<ReaderDirectorySheet> {
   }
 }
 
-/// 给人物对话画「荧光笔」色带：只覆盖文字框的下半部分，圆角收边。
+/// 给人物对话画标记：荧光笔色带 / 下划线 / 波浪线。
 ///
 /// 矩形来自分页测量时的 `getBoxesForSelection`，和正文共用同一份排版结果，
-/// 所以不需要在渲染阶段再跑一次 TextPainter；色带画在文字下面，只影响观感，
-/// 不改变任何度量。
+/// 所以不需要在渲染阶段再跑一次 TextPainter；标记都画在文字下面（荧光笔是
+/// 底纹，下划线与波浪线贴文字底部），只影响观感，不改变任何度量。
 class _DialogueHighlightPainter extends CustomPainter {
-  const _DialogueHighlightPainter({required this.rects, required this.color});
+  const _DialogueHighlightPainter({
+    required this.rects,
+    required this.color,
+    required this.style,
+  });
 
   final List<Rect> rects;
   final Color color;
+  final DialogueHighlightStyle style;
+
+  /// 下划线 / 波浪线相对行盒高度的位置：略低于基线，不压笔画。
+  static const double _lineTopRatio = 0.88;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (rects.isEmpty) return;
+    switch (style) {
+      case DialogueHighlightStyle.marker:
+        _paintMarker(canvas);
+      case DialogueHighlightStyle.underline:
+        _paintLine(canvas, wavy: false);
+      case DialogueHighlightStyle.wavy:
+        _paintLine(canvas, wavy: true);
+    }
+  }
+
+  /// 荧光笔：只覆盖文字框的下半部分，圆角收边。
+  void _paintMarker(Canvas canvas) {
     final paint = Paint()..color = color;
     for (final rect in rects) {
       if (rect.height <= 0 || rect.width <= 0) continue;
@@ -912,7 +944,49 @@ class _DialogueHighlightPainter extends CustomPainter {
     }
   }
 
+  /// 下划线 / 波浪线：贴着文字底部画一条线，跨行时每行各画一段。
+  void _paintLine(Canvas canvas, {required bool wavy}) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = wavy ? 1.6 : 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    for (final rect in rects) {
+      if (rect.height <= 0 || rect.width <= 0) continue;
+      final y = rect.top + rect.height * _lineTopRatio;
+      if (!wavy) {
+        canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), paint);
+        continue;
+      }
+      canvas.drawPath(_wavePath(rect.left, rect.right, y), paint);
+    }
+  }
+
+  /// 半个波长为一段的二次贝塞尔波浪：控制点交替在上下，拼出连续的波纹。
+  static Path _wavePath(double left, double right, double y) {
+    const amplitude = 1.5;
+    const halfWave = 2.5;
+    final path = Path()..moveTo(left, y);
+    var x = left;
+    var up = true;
+    while (x < right) {
+      final next = math.min(x + halfWave, right);
+      path.quadraticBezierTo(
+        (x + next) / 2,
+        up ? y - amplitude * 2 : y + amplitude * 2,
+        next,
+        y,
+      );
+      up = !up;
+      x = next;
+    }
+    return path;
+  }
+
   @override
   bool shouldRepaint(_DialogueHighlightPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.rects != rects;
+      oldDelegate.color != color ||
+      oldDelegate.style != style ||
+      oldDelegate.rects != rects;
 }

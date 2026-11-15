@@ -5,6 +5,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/theme/app_font_weight.dart';
 import '../../app/theme/app_theme.dart';
 
+/// 对话高亮的画法：荧光笔底纹 / 下划线 / 波浪线。
+///
+/// 三种都只画在正文之上、不参与排版：换样式只触发一次重绘，不重排、不丢阅读
+/// 位置（分页缓存 key 里没有它）。
+enum DialogueHighlightStyle {
+  marker('荧光笔'),
+  underline('下划线'),
+  wavy('波浪线');
+
+  const DialogueHighlightStyle(this.label);
+
+  /// 设置页按钮组上的文案。
+  final String label;
+}
+
 /// 阅读排版偏好。
 ///
 /// 字号/行距参与分页测量，底色只影响配色，所以分页缓存的 key 里不含底色：
@@ -21,6 +36,7 @@ class ReaderSettings {
     this.showBubbles = true,
     this.showDialogueHighlight = true,
     this.dialogueHighlightColor = defaultDialogueHighlightColor,
+    this.dialogueHighlightStyle = DialogueHighlightStyle.marker,
   }) : assert(dayPaper != ReaderPaper.night, '日间底色必须是浅色纸');
 
   /// 对话荧光笔默认颜色（琥珀黄，浅色纸/夜间纸都会按底色调整透明度）。
@@ -65,8 +81,11 @@ class ReaderSettings {
   /// 重排，段落测量缓存命中后代价很小。
   final bool showDialogueHighlight;
 
-  /// 对话荧光笔颜色（不透明基色，渲染时按纸色明暗叠透明度）。
+  /// 对话标记颜色（不透明基色，渲染时按纸色明暗与样式叠透明度）。
   final Color dialogueHighlightColor;
+
+  /// 对话标记的画法（默认荧光笔）。只影响渲染，不参与分页测量。
+  final DialogueHighlightStyle dialogueHighlightStyle;
 
   ReaderSettings copyWith({
     double? fontSize,
@@ -78,6 +97,7 @@ class ReaderSettings {
     bool? showBubbles,
     bool? showDialogueHighlight,
     Color? dialogueHighlightColor,
+    DialogueHighlightStyle? dialogueHighlightStyle,
   }) => ReaderSettings(
     fontSize: fontSize ?? this.fontSize,
     lineHeight: lineHeight ?? this.lineHeight,
@@ -90,6 +110,8 @@ class ReaderSettings {
     showDialogueHighlight: showDialogueHighlight ?? this.showDialogueHighlight,
     dialogueHighlightColor:
         dialogueHighlightColor ?? this.dialogueHighlightColor,
+    dialogueHighlightStyle:
+        dialogueHighlightStyle ?? this.dialogueHighlightStyle,
   );
 
   @override
@@ -103,7 +125,8 @@ class ReaderSettings {
       other.dayPaper == dayPaper &&
       other.showBubbles == showBubbles &&
       other.showDialogueHighlight == showDialogueHighlight &&
-      other.dialogueHighlightColor == dialogueHighlightColor;
+      other.dialogueHighlightColor == dialogueHighlightColor &&
+      other.dialogueHighlightStyle == dialogueHighlightStyle;
 
   @override
   int get hashCode => Object.hash(
@@ -116,6 +139,7 @@ class ReaderSettings {
     showBubbles,
     showDialogueHighlight,
     dialogueHighlightColor,
+    dialogueHighlightStyle,
   );
 }
 
@@ -137,6 +161,8 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
   static const _dialogueHighlightKey = 'reader_show_dialogue_highlight_v1';
   static const _dialogueHighlightColorKey =
       'reader_dialogue_highlight_color_v1';
+  static const _dialogueHighlightStyleKey =
+      'reader_dialogue_highlight_style_v1';
 
   static const double minFontSize = 15;
   static const double maxFontSize = 30;
@@ -250,6 +276,13 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
     _persist();
   }
 
+  void setDialogueHighlightStyle(DialogueHighlightStyle style) {
+    if (style == state.dialogueHighlightStyle) return;
+    _userChanged = true;
+    state = state.copyWith(dialogueHighlightStyle: style);
+    _persist();
+  }
+
   Future<void> _restore() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -297,6 +330,12 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
           prefs.getInt(_dialogueHighlightColorKey) ??
               fallback.dialogueHighlightColor.toARGB32(),
         ),
+        // 存名字而不是下标：以后插入新样式不会把老用户的选择错位。
+        dialogueHighlightStyle: DialogueHighlightStyle.values.firstWhere(
+          (candidate) =>
+              candidate.name == prefs.getString(_dialogueHighlightStyleKey),
+          orElse: () => fallback.dialogueHighlightStyle,
+        ),
       );
       if (restored != state) state = restored;
     } catch (_) {
@@ -328,6 +367,10 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
       await prefs.setInt(
         _dialogueHighlightColorKey,
         snapshot.dialogueHighlightColor.toARGB32(),
+      );
+      await prefs.setString(
+        _dialogueHighlightStyleKey,
+        snapshot.dialogueHighlightStyle.name,
       );
     } catch (_) {
       // 偏好落盘失败只影响下次启动的默认值，不打扰当前阅读。

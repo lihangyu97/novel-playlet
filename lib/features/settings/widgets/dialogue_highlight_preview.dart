@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../reader/reader_pagination.dart';
+import '../../reader/reader_settings.dart';
 import '../../reader/reader_widgets.dart';
 
 /// 取色弹层里的「对话高亮」示例：直接用阅读页的真实正文渲染（含段落缩进、
@@ -16,9 +17,16 @@ import '../../reader/reader_widgets.dart';
 /// 所以在 State 里按这四项 memo：取色器拖动时每帧都会重建本组件，颜色变化
 /// 只应重画色带，不能每帧重跑一遍 ReaderPagination.build。
 class DialogueHighlightPreview extends StatefulWidget {
-  const DialogueHighlightPreview({super.key, required this.color});
+  const DialogueHighlightPreview({
+    super.key,
+    required this.color,
+    this.style = DialogueHighlightStyle.marker,
+  });
 
   final Color color;
+
+  /// 当前选中的标记样式：预览要跟着样式一起变（选色时就该看到最终效果）。
+  final DialogueHighlightStyle style;
 
   /// 真正执行 `ReaderPagination.build` 的次数。
   ///
@@ -118,8 +126,9 @@ class _DialogueHighlightPreviewState extends State<DialogueHighlightPreview> {
                     textScaler: cache.textScaler,
                     contentWidth: cache.contentWidth,
                     horizontalPadding: 0,
-                    // 只有它每帧在变：重画色带即可，分页已缓存。
+                    // 只有这两项每帧在变：重画标记即可，分页已缓存。
                     dialogueHighlightColor: widget.color,
+                    dialogueHighlightStyle: widget.style,
                   ),
                 ),
         );

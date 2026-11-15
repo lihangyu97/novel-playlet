@@ -566,6 +566,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                     settings.showDialogueHighlight,
                                 dialogueHighlightColor:
                                     settings.dialogueHighlightColor,
+                                dialogueHighlightStyle:
+                                    settings.dialogueHighlightStyle,
                                 // sentinel 页不属于当前章，气泡不接点击。
                                 onBubbleTap: inCurrent
                                     ? _openParagraphComments
@@ -595,6 +597,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                   settings.showDialogueHighlight,
                               dialogueHighlightColor:
                                   settings.dialogueHighlightColor,
+                              dialogueHighlightStyle:
+                                  settings.dialogueHighlightStyle,
                               onBubbleTap: null,
                             ),
                           ),
