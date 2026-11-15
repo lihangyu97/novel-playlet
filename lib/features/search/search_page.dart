@@ -12,6 +12,7 @@ import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../../app/widgets/surface_card.dart';
 import '../../app/widgets/top_glow.dart';
+import '../../data/models/hot_search.dart';
 import '../feed/feed_search_field.dart';
 import '../feed/feed_state.dart';
 import '../recommend/recommend_category.dart';
@@ -149,6 +150,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final query = ref.watch(searchQueryProvider);
+    // 热搜榜在这里也保持订阅：搜索结果页仍让它在后台加载完，清空输入回到
+    // 引导页时立即有榜单，不会先闪一下「输入关键词」空态再跳出来。页面临时
+    // 关闭时随 autoDispose 释放，下次进来重新拉一份。
+    ref.watch(hotSearchProvider);
     // 渐变要盖到状态栏那一条（安全区不参与布局），与推荐页同一套观感。
     final topInset = MediaQuery.paddingOf(context).top;
     return Scaffold(
@@ -192,7 +197,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 ),
                 Expanded(
                   child: query == null
-                      ? _SearchHistoryView(onSearch: _searchKeyword)
+                      ? _SearchLandingView(onSearch: _searchKeyword)
                       : _SearchResults(query: query),
                 ),
               ],
@@ -204,28 +209,53 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   }
 }
 
-/// 搜索历史：首次进入 / 清空输入后展示最近搜过的关键词。
+/// 搜索引导页：搜索历史在上，热搜榜在下。
 ///
-/// 没有历史时退回原来的引导空态；点关键词直接重新搜索。
-class _SearchHistoryView extends ConsumerWidget {
-  const _SearchHistoryView({required this.onSearch});
+/// 只展示引导内容（历史 / 热搜），提交关键词后整页换成结果。两者都为空时
+/// 才退回引导空态——第一次进来还没有历史，但热搜榜仍然值得展示。
+class _SearchLandingView extends ConsumerWidget {
+  const _SearchLandingView({required this.onSearch});
 
   final ValueChanged<String> onSearch;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(searchHistoryProvider);
-    if (history.isEmpty) {
+    final hot = ref.watch(hotSearchProvider).value ?? HotSearch.empty;
+    if (history.isEmpty && hot.isEmpty) {
       return const EmptyView(
         message: '输入关键词，一次搜小说 / 短剧',
         icon: Icons.search_rounded,
       );
     }
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     return ListView(
       padding: EdgeInsets.fromLTRB(8, 12, 8, 24 + bottomInset),
+      children: [
+        if (history.isNotEmpty)
+          _SearchHistorySection(history: history, onSearch: onSearch),
+        if (hot.isNotEmpty) ...[
+          if (history.isNotEmpty) const SizedBox(height: 24),
+          _HotSearchSection(hot: hot, onSearch: onSearch),
+        ],
+      ],
+    );
+  }
+}
+
+/// 搜索历史：标题 + 清空按钮 + 关键词 pill。
+class _SearchHistorySection extends ConsumerWidget {
+  const _SearchHistorySection({required this.history, required this.onSearch});
+
+  final List<String> history;
+  final ValueChanged<String> onSearch;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -302,6 +332,222 @@ class _SearchHistoryChip extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurface),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 热搜榜：标题 + 最多三十条（名次 / 词 / 角标 / 热搜值）。
+///
+/// 上游一次回 50 条，超过 30 条时只铺前 30：名次 1–3 标红，其余用次级色；
+/// 标题后紧跟 `display_tag` 彩色角标（热聊 / 飙升 / 霸榜 …）；右侧保留接口
+/// 给的热度前缀（热门讨论 / 热度飙升 / 巅峰榜NO.3 …），只把数字换算成整数
+/// `3905w+`。点一条直接按这个词搜索。
+class _HotSearchSection extends StatelessWidget {
+  const _HotSearchSection({required this.hot, required this.onSearch});
+
+  /// 一次最多渲染的条数：上游一次回 50 条（2026-11-15 实测），超过 30 条
+  /// 会明显把搜索历史埋掉，所以只铺前 30；不超过 30 条时全部渲染。
+  static const maxRows = 30;
+
+  final HotSearch hot;
+  final ValueChanged<String> onSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = hot.entries.take(maxRows).toList(growable: false);
+    if (entries.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+          child: Text(
+            '热搜榜',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: context.appWeight(FontWeight.w600),
+            ),
+          ),
+        ),
+        Column(
+          key: const Key('search_hot_words'),
+          children: [
+            for (var index = 0; index < entries.length; index++)
+              _HotSearchRow(
+                entry: entries[index],
+                rank: index + 1,
+                onTap: () => onSearch(entries[index].title),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// 热搜榜一行：名次（前三红）+ 词 + 右侧热搜值。
+class _HotSearchRow extends StatelessWidget {
+  const _HotSearchRow({
+    required this.entry,
+    required this.rank,
+    required this.onTap,
+  });
+
+  final HotSearchEntry entry;
+  final int rank;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final top = rank <= 3;
+    final hotLabel = entry.hotLabel;
+    final badge = entry.badge;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: ValueKey('search_hot_${entry.title}'),
+        onTap: onTap,
+        child: SizedBox(
+          height: 44,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 24,
+                  child: Text(
+                    '$rank',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: top ? scheme.error : scheme.onSurfaceVariant,
+                      fontSize: top ? 15 : 13,
+                      height: 1.2,
+                      fontWeight: top
+                          ? context.appWeight(FontWeight.w700)
+                          : context.appWeight(FontWeight.w500),
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  // 标题和角标放同一个 Row：标题按自身宽度收缩，角标紧跟标题，
+                  // 不用 Expanded 把角标推到右边；剩余空白留在角标之后，右侧
+                  // 热度列仍然贴边对齐。
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          entry.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: scheme.onSurface,
+                            fontSize: 14,
+                            height: 1.3,
+                            fontWeight: top
+                                ? context.appWeight(FontWeight.w600)
+                                : context.appWeight(FontWeight.w400),
+                          ),
+                        ),
+                      ),
+                      if (badge != null) ...[
+                        const SizedBox(width: 4),
+                        _HotBadge(
+                          key: ValueKey('search_hot_badge_${entry.title}'),
+                          badge: badge,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (hotLabel.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    hotLabel,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 11,
+                      height: 1.2,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 热搜角标：文字 + 上游给的明暗两套颜色（`display_tag`）。
+///
+/// 位置紧跟标题文字（4pt 间距）：角标是「热聊 / 飙升 / 霸榜」这类短标签，
+/// 贴着标题读起来像一个整体，比放到最左边更不抢名次，也不会和右侧热度列
+/// 混成一片。上游没给颜色时用主题的浅色底兜底，深色模式取 dark 一套。
+class _HotBadge extends StatelessWidget {
+  const _HotBadge({super.key, required this.badge});
+
+  final HotSearchBadge badge;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final dark = theme.brightness == Brightness.dark;
+    // 上游的 light/dark 文本色是「亮橙 / 暗橙」：浅色底上用暗的一档、深色底上
+    // 用亮的一档才有对比度，所以文本色取背景色的相反一套；背景色仍按明暗取。
+    final preferredText = dark ? badge.lightTextColors : badge.darkTextColors;
+    final fallbackText = dark ? badge.darkTextColors : badge.lightTextColors;
+    final textColors = preferredText.isNotEmpty ? preferredText : fallbackText;
+    final backgroundColors = dark
+        ? badge.darkBackgroundColors
+        : badge.lightBackgroundColors;
+    final textColor = textColors.isEmpty
+        ? scheme.onSurfaceVariant
+        : Color(textColors.first);
+
+    final BoxDecoration decoration;
+    if (backgroundColors.isEmpty) {
+      decoration = BoxDecoration(
+        color: scheme.onSurface.withValues(alpha: dark ? 0.10 : 0.06),
+        borderRadius: BorderRadius.circular(4),
+      );
+    } else if (backgroundColors.length == 1) {
+      decoration = BoxDecoration(
+        color: Color(backgroundColors.first),
+        borderRadius: BorderRadius.circular(4),
+      );
+    } else {
+      decoration = BoxDecoration(
+        gradient: LinearGradient(
+          colors: [for (final color in backgroundColors) Color(color)],
+        ),
+        borderRadius: BorderRadius.circular(4),
+      );
+    }
+
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 48),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: decoration,
+      child: Text(
+        badge.text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 10,
+          height: 1.2,
+          fontWeight: context.appWeight(FontWeight.w600),
         ),
       ),
     );

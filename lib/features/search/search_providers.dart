@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/models/feed_page.dart';
+import '../../data/models/hot_search.dart';
 import '../../data/models/search_cue.dart';
 import '../recommend/recommend_category.dart';
 import '../recommend/recommend_item.dart';
@@ -78,5 +79,17 @@ final searchCueProvider = FutureProvider<SearchCue>((ref) async {
     return await ref.read(apiClientProvider).searchCue();
   } catch (_) {
     return SearchCue.empty;
+  }
+});
+
+/// 空搜索页的热搜榜（官方 472 热搜榜，最多 50 条，页面最多铺前 30）。
+///
+/// autoDispose：每次打开搜索页拿一份新的榜单，关页后释放；失败一律返回空榜，
+/// 搜索历史仍然可用，热搜只是引导内容，不能把搜索页卡在错误态。
+final hotSearchProvider = FutureProvider.autoDispose<HotSearch>((ref) async {
+  try {
+    return await ref.read(apiClientProvider).hotSearch();
+  } catch (_) {
+    return HotSearch.empty;
   }
 });

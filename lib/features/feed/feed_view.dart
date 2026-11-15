@@ -23,12 +23,19 @@ class FeedView<T> extends StatefulWidget {
     this.onRefresh,
     this.bottomInset = 0,
     this.controller,
+    this.header,
   });
 
   final FeedState<T> state;
 
   /// 区块标题；null = 不画标题（合并推荐页的分类本身已经是标题）。
   final String? title;
+
+  /// 列表上方随内容一起滚动的头部（推荐页的榜单预览卡片）。
+  ///
+  /// 放在标题之后、列表 sliver 之前：它会跟着页面滚走，不占固定视口；空态/
+  /// 错误态不渲染它（首屏没有内容时榜单卡片也没有意义）。
+  final Widget? header;
 
   /// 列表主体（网格 / 列表），由页面按内容域决定。
   final Widget Function(BuildContext context, FeedState<T> state) sliverBuilder;
@@ -150,6 +157,7 @@ class _FeedViewState<T> extends State<FeedView<T>> {
         slivers: [
           if (widget.title != null)
             SliverToBoxAdapter(child: FeedSectionTitle(title: widget.title!)),
+          if (widget.header != null) SliverToBoxAdapter(child: widget.header!),
           widget.sliverBuilder(context, data),
           SliverToBoxAdapter(
             child: FeedFooter(

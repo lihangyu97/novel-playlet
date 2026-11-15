@@ -22,6 +22,8 @@ import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
 import 'package:novel_playlet/features/cache/cache_providers.dart';
+import 'package:novel_playlet/data/models/rank.dart';
+import 'package:novel_playlet/features/rank/rank_providers.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/settings/settings_providers.dart';
 
@@ -93,6 +95,15 @@ class FakePreviewTransport extends BackendTransport {
   /// 搜索框轮播热词（cue）；默认空 = 接口没给词，搜索框回退静态提示语。
   List<String> cueWords = const [];
 
+  /// 空搜索页热搜榜（`/api/v1/search/hot`）的回包；null = 空榜。
+  Map<String, dynamic>? hotSearchPayload;
+
+  /// 榜单接口（`/api/v1/rank/...`）的回包；null = 空榜。
+  Map<String, dynamic>? rankBoardPayload;
+
+  /// 榜单接口单独的延迟（验证首次进 tab 的骨架卡）。
+  Duration rankBoardDelay = Duration.zero;
+
   /// cue 的轮播间隔；测试里调小可以在几帧内看到翻页。
   int cueRotateIntervalMs = 5000;
 
@@ -108,6 +119,9 @@ class FakePreviewTransport extends BackendTransport {
     calls.add('$path?${query ?? ''}');
     if (responseDelay > Duration.zero) {
       await Future<void>.delayed(responseDelay);
+    }
+    if (path.startsWith('/api/v1/rank/') && rankBoardDelay > Duration.zero) {
+      await Future<void>.delayed(rankBoardDelay);
     }
     final keyword = params['query'] ?? '';
     final failed =
@@ -296,6 +310,12 @@ class FakePreviewTransport extends BackendTransport {
         ],
         if (cueWords.isNotEmpty) 'rotate_interval_ms': cueRotateIntervalMs,
       };
+    }
+    if (path == '/api/v1/search/hot') {
+      return hotSearchPayload ?? {'code': 0, 'data': <dynamic>[]};
+    }
+    if (path.startsWith('/api/v1/rank/')) {
+      return rankBoardPayload ?? {'code': 0, 'data': <dynamic>{}};
     }
     if (path.startsWith('/api/v1/search')) {
       // 关键词写进卡片标题：搜索页的「换词后旧结果不能回来」这类用例要能从
@@ -835,6 +855,9 @@ Future<void> pumpPreview(
   /// 离线区 store：默认空实现，观察缓存状态的用例传内存版。
   OfflineBookStore? offlineBookStore,
   OfflineSeriesStore? offlineSeriesStore,
+
+  /// 首页榜单预览的目录；null = 空目录（不额外打榜单请求）。
+  RankCatalog? rankCatalog,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
@@ -844,6 +867,14 @@ Future<void> pumpPreview(
     ProviderScope(
       overrides: [
         apiClientProvider.overrideWithValue(api),
+        // 首页榜单预览默认不出：现有推荐页 golden / 请求计数只关心推荐流；
+        // 榜单卡片另有单独的视图测试。需要真实卡片时用专属 ProviderScope。
+        if (rankCatalog == null)
+          rankCatalogProvider.overrideWithValue(
+            AsyncValue.data(RankCatalog.empty),
+          )
+        else
+          rankCatalogProvider.overrideWithValue(AsyncValue.data(rankCatalog)),
         readerChapterCacheProvider.overrideWithValue(PreviewChapterCache()),
         ...previewOfflineOverrides(
           bookStore: offlineBookStore,

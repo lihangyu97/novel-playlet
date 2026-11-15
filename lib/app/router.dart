@@ -5,6 +5,7 @@ import '../data/models/novel_item.dart';
 import '../data/models/video_series.dart';
 import '../features/cache/cache_center_page.dart';
 import '../features/detail/detail_page.dart';
+import '../features/rank/rank_page.dart';
 import '../features/reader/reader_page.dart';
 import '../features/search/search_page.dart';
 import '../features/settings/settings_page.dart';
@@ -156,6 +157,18 @@ final class SettingsRoute extends AppRoute<void> {
   @override
   Route<void> toRoute() =>
       MaterialPageRoute<void>(builder: (_) => const SettingsPage());
+}
+
+/// 排行榜页路由。[initialAlgo] 是首页榜单卡片带过去的榜；null = 默认第一档。
+final class RankRoute extends AppRoute<void> {
+  const RankRoute({this.initialAlgo});
+
+  final int? initialAlgo;
+
+  @override
+  Route<void> toRoute() => MaterialPageRoute<void>(
+    builder: (_) => RankPage(initialAlgo: initialAlgo),
+  );
 }
 
 /// 独立搜索页路由。

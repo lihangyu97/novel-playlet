@@ -5,6 +5,8 @@ import '../../app/widgets/app_snack_bar.dart';
 import '../feed/feed_search_field.dart';
 import '../feed/feed_staggered_grid.dart';
 import '../feed/feed_view.dart';
+import '../rank/rank_providers.dart';
+import '../rank/widgets/rank_preview_card.dart';
 import '../../app/router.dart';
 import '../../app/widgets/category_tab_bar.dart';
 import '../../app/widgets/cover_hero.dart';
@@ -156,14 +158,12 @@ class RecommendPageState extends ConsumerState<RecommendPage>
                   ],
                 ),
               ),
-              // tabs 与列表之间留呼吸空间；样式与我的页共用 CategoryTabBar。
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: CategoryTabBar(
-                  controller: _tabController,
-                  labels: const ['小说', '短剧', '漫剧'],
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
+              // 榜单卡片直接贴住 tabs（卡片顶部不再留白）；样式与我的页共用
+              // CategoryTabBar。
+              CategoryTabBar(
+                controller: _tabController,
+                labels: const ['小说', '短剧', '漫剧'],
+                padding: const EdgeInsets.symmetric(horizontal: 8),
               ),
               Expanded(
                 child: TabBarView(
@@ -215,6 +215,14 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
 
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    // 榜单预览和推荐流并行拉：第一次进 tab 时不用等推荐流回来才发榜单请求，
+    // 卡片骨架也会更早换成真数据。
+    ref.read(rankPreviewProvider(_category));
+  }
 
   RecommendFeedController get _controller =>
       ref.read(recommendFeedProvider(_category).notifier);
@@ -305,6 +313,7 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
       onRetryLoadMore: _retryLoadMore,
       emptyMessage: '暂时没有${_category.label}推荐\n下拉刷新试试',
       emptyIcon: _category.emptyIcon,
+      header: RankPreviewCard(category: _category),
       sliverBuilder: (context, state) {
         return FeedStaggeredGrid<RecommendItem>(
           items: state.items,
