@@ -2,8 +2,14 @@ import 'dart:convert';
 
 /// 云同步文件的外层结构。
 ///
-/// 数据本身仍按现有 SharedPreferences 的字段组织，外层只加版本、渠道、
-/// 设备号和 revision，方便旧版本识别/迁移。
+/// `data` 的结构随 [currentSchema] 演进：
+/// - 1：`novelShelf` / `novelShelfMeta` / `novelProgress` / `videoShelf` /
+///   `videoShelfMeta` / `videoProgress`（shared_preferences 时代的形状）；
+/// - 2：`novel` / `video` 两个记录数组，一条记录同时带上游快照与用户状态
+///   （见 `docs/storage-model-proposal.md`）。
+///
+/// 读到低版本不用报错：`ReadingStore.applySyncData` 会把 v1 载荷转成记录再
+/// 合并，升级后第一次同步不会卡在"格式不正确"。
 class SyncSnapshot {
   const SyncSnapshot({
     required this.schemaVersion,
@@ -14,7 +20,7 @@ class SyncSnapshot {
     required this.data,
   });
 
-  static const currentSchema = 1;
+  static const currentSchema = 2;
 
   final int schemaVersion;
   final String profile;

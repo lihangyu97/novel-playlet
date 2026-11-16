@@ -1,12 +1,11 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/data/models/novel_item.dart';
+import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/app/shell/floating_navigation_bar.dart';
 import 'package:novel_playlet/app/shell/home_shell.dart';
 import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 
@@ -18,16 +17,10 @@ void main() {
     await loadPreviewFont();
   });
 
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
-  });
-
   testWidgets('推荐页与书架同书共存时 Hero tag 不冲突', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'shelf_books_v1': jsonEncode([
-        {'id': '1', 'title': '剑来', 'cover': '', 'author': '作者1'},
-      ]),
-    });
+    await ReadingStore().addToShelf(
+      const NovelItem(id: '1', title: '剑来', author: '作者1'),
+    );
     await pumpPreview(tester, const HomeShell());
     await tester.tap(find.text('我的'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));

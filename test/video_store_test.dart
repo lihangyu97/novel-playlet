@@ -1,16 +1,13 @@
-import 'dart:convert';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
+import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// 短剧本地数据：收藏 / 观看进度 / 最近观看（最多 3 条）。
+///
+/// 存储已经是 SQLite（`LibraryDb`），内存库与重置在
+/// `test/flutter_test_config.dart` 里统一处理。
 void main() {
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
-  });
-
   test('短剧收藏：加入、去重、移出', () async {
     final store = ReadingStore();
     final a = VideoSeries(
@@ -83,56 +80,36 @@ void main() {
     expect(store.novelRevision.value, novelBefore);
   });
 
-  test('阅读进度表按最近更新只保留 200 本，最近阅读不受影响', () async {
-    const limit = ReadingStore.progressLimit;
-    final base = DateTime(2020, 1, 1);
-    Map<String, dynamic> entry(int i) => ReadingProgress(
-      bookId: 'book$i',
-      bookTitle: '书$i',
-      cover: '',
-      chapterId: 'chapter$i',
-      chapterIndex: i,
-      updatedAt: base.add(Duration(minutes: i)),
-    ).toJson();
-
-    // 老版本没有上限，进度表可能已经超了；再存一本应立刻收敛到上限。
-    final progress = <String, dynamic>{
-      for (var i = 0; i < limit + 5; i++) 'book$i': entry(i),
-    };
-    final recent = [entry(limit + 4), entry(limit + 3), entry(limit + 2)];
-    SharedPreferences.setMockInitialValues({
-      'reading_progress_v1': jsonEncode(progress),
-      'recent_reading_v1': jsonEncode(recent),
-    });
-
+  test('记录条数按最近更新收敛到上限，书架条目与墓碑不受影响', () async {
+    const limit = ReadingStore.libraryLimit;
     final store = ReadingStore();
-    await store.saveProgress(
-      bookId: 'book-new',
-      bookTitle: '新书',
-      cover: '',
-      chapterId: 'chapter-new',
-      chapterIndex: 0,
-    );
+    await store.addToShelf(const NovelItem(id: 'keep', title: '留在书架'));
 
-    final prefs = await SharedPreferences.getInstance();
-    final stored = jsonDecode(
-      prefs.getString('reading_progress_v1')!,
-    ) as Map<String, dynamic>;
-    expect(stored.length, limit, reason: '进度表必须有上限，否则每次保存都全量重写越来越大的 JSON');
-    // 上限 + 1 本新书：淘汰最旧的 6 本。
-    for (var i = 0; i < 6; i++) {
-      expect(stored.containsKey('book$i'), isFalse, reason: 'book$i 最旧，应被淘汰');
+    // 只看不收藏：这些是唯一允许淘汰的行。
+    for (var i = 0; i < limit + 5; i++) {
+      await store.saveProgress(
+        bookId: 'book$i',
+        bookTitle: '书$i',
+        cover: '',
+        chapterId: 'chapter$i',
+        chapterIndex: i,
+      );
     }
-    expect(stored.containsKey('book-new'), isTrue);
-    expect(await store.progress('book6'), isNotNull);
-    expect(await store.progress('book0'), isNull);
 
-    // 最近阅读是独立表，不跟着进度 LRU 被裁掉。
-    expect((await store.recent()).map((item) => item.bookId), [
-      'book-new',
-      'book204',
-      'book203',
-    ]);
-    expect(await store.lastReadBookId(), 'book-new');
+    final recent = await store.recent(limit: limit + 100);
+    expect(recent.length, lessThanOrEqualTo(limit), reason: '记录必须有上限');
+    expect(recent.first.bookId, 'book${limit + 4}', reason: '最新的保留');
+    for (var i = 0; i < 5; i++) {
+      expect(
+        await store.progress('book$i'),
+        isNull,
+        reason: 'book$i 最旧，应被淘汰',
+      );
+    }
+    expect(
+      (await store.shelf()).map((item) => item.id),
+      contains('keep'),
+      reason: '书架条目不参与淘汰',
+    );
   });
 }

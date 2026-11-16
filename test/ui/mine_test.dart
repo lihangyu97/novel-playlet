@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,6 +8,7 @@ import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
+import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
@@ -17,7 +16,6 @@ import 'package:novel_playlet/features/mine/widgets/mine_novel_tab.dart';
 import 'package:novel_playlet/features/mine/widgets/mine_recent_tile.dart';
 import 'package:novel_playlet/features/mine/widgets/mine_shelf_grid.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 
@@ -66,26 +64,55 @@ Future<void> _openTab(WidgetTester tester, String label) async {
   await tester.pumpAndSettle(const Duration(milliseconds: 400));
 }
 
-Map<String, Object> _videoHistoryPrefs() {
-  final progress = VideoWatchProgress(
+/// 预置书架：按列表顺序展示，所以从后往前加（新的排在最前）。
+Future<void> _seedNovelShelf(List<NovelItem> items) async {
+  final store = ReadingStore();
+  for (final item in items) {
+    await store.addToShelf(item);
+  }
+}
+
+Future<void> _seedNovelProgress({
+  required String bookId,
+  required String bookTitle,
+  required String chapterId,
+  int chapterIndex = 0,
+}) async {
+  await ReadingStore().saveProgress(
+    bookId: bookId,
+    bookTitle: bookTitle,
+    cover: '',
+    chapterId: chapterId,
+    chapterIndex: chapterIndex,
+  );
+}
+
+Future<void> _seedVideoProgress({
+  required String seriesId,
+  required String title,
+  required int episodeIndex,
+}) async {
+  await ReadingStore().saveVideoProgress(
+    seriesId: seriesId,
+    title: title,
+    episodeIndex: episodeIndex,
+  );
+}
+
+/// 预置「收藏 2 部 + 看完 v1 第 5 集」。
+Future<void> _seedVideoHistory() async {
+  final store = ReadingStore();
+  await store.addVideoToShelf(
+    const VideoSeries(id: 'v2', title: '另一部短剧', episodeCount: 12),
+  );
+  await store.addVideoToShelf(
+    const VideoSeries(id: 'v1', title: '太奶奶的短剧', episodeCount: 40),
+  );
+  await store.saveVideoProgress(
     seriesId: 'v1',
     title: '太奶奶的短剧',
-    cover: '',
     episodeIndex: 4,
-    updatedAt: DateTime.now(),
   );
-  return {
-    'video_shelf_v1': jsonEncode([
-      VideoSeries(id: 'v1', title: '太奶奶的短剧', episodeCount: 40).toStorageJson(),
-      const VideoSeries(
-        id: 'v2',
-        title: '另一部短剧',
-        episodeCount: 12,
-      ).toStorageJson(),
-    ]),
-    'video_progress_v1': jsonEncode({'v1': progress.toJson()}),
-    'video_history_v1': jsonEncode([progress.toJson()]),
-  };
 }
 
 void main() {
@@ -93,21 +120,12 @@ void main() {
     await loadPreviewFont();
   });
 
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
-  });
-
   testWidgets('我的页-短剧最近观看点击后进播放页', (tester) async {
-    final progress = VideoWatchProgress(
+    await _seedVideoProgress(
       seriesId: 'v1',
       title: '太奶奶的短剧',
       episodeIndex: 4,
-      updatedAt: DateTime.now(),
     );
-    SharedPreferences.setMockInitialValues({
-      'video_progress_v1': jsonEncode({'v1': progress.toJson()}),
-      'video_history_v1': jsonEncode([progress.toJson()]),
-    });
     await pumpPreview(tester, const MinePage());
     await _openTab(tester, '短剧');
 
@@ -117,7 +135,7 @@ void main() {
   });
 
   testWidgets('我的页（短剧收藏与历史）', (tester) async {
-    SharedPreferences.setMockInitialValues(_videoHistoryPrefs());
+    await _seedVideoHistory();
     await pumpPreview(tester, const MinePage());
 
     // 页头统计是两边合并的，切 tab 前后都不变。
@@ -155,12 +173,10 @@ void main() {
   });
 
   testWidgets('我的页-书架卡片只展示书名与作者，不退回分类', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'shelf_books_v1': jsonEncode([
-        {'id': '1', 'title': '剑来', 'cover': '', 'author': '烽火戏诸侯'},
-        {'id': '2', 'title': '无作者书', 'cover': '', 'category': '玄幻'},
-      ]),
-    });
+    await _seedNovelShelf([
+      const NovelItem(id: '2', title: '无作者书'),
+      const NovelItem(id: '1', title: '剑来', author: '烽火戏诸侯'),
+    ]);
     await pumpPreview(tester, const MinePage());
 
     expect(find.byType(AppSurfaceCard), findsNWidgets(2));
@@ -170,27 +186,20 @@ void main() {
   });
 
   testWidgets('我的页（有书架与进度）', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'shelf_books_v1': jsonEncode([
-        for (var i = 1; i <= 4; i++)
-          {
-            'id': '$i',
-            'title': FakePreviewTransport.titles[i - 1],
-            'cover': '',
-            'author': '作者$i',
-          },
-      ]),
-      'reading_progress_v1': jsonEncode({
-        '1': {
-          'bookId': '1',
-          'bookTitle': '剑来',
-          'cover': '',
-          'chapterId': 'c3',
-          'chapterIndex': 2,
-          'updatedAt': DateTime.now().millisecondsSinceEpoch,
-        },
-      }),
-    });
+    await _seedNovelShelf([
+      for (var i = 4; i >= 1; i--)
+        NovelItem(
+          id: '$i',
+          title: FakePreviewTransport.titles[i - 1],
+          author: '作者$i',
+        ),
+    ]);
+    await _seedNovelProgress(
+      bookId: '1',
+      bookTitle: '剑来',
+      chapterId: 'c3',
+      chapterIndex: 2,
+    );
     await pumpPreview(tester, const MinePage());
     expect(find.text('书架 4 本 · 收藏 0 部'), findsOneWidget);
     expect(find.text('最近阅读'), findsOneWidget);
@@ -209,21 +218,10 @@ void main() {
   /// 回归（CODE_REVIEW P1-5）：阅读页每 400ms 落一次进度，保活的「我的」页
   /// 不能因此整页/书架网格重建——只有最近阅读那一块跟着刷新。
   testWidgets('我的页-保存阅读进度只刷新最近阅读，不重建书架网格', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'shelf_books_v1': jsonEncode([
-        {'id': '1', 'title': '剑来', 'cover': '', 'author': '烽火戏诸侯'},
-      ]),
-      'reading_progress_v1': jsonEncode({
-        '1': {
-          'bookId': '1',
-          'bookTitle': '剑来',
-          'cover': '',
-          'chapterId': 'c1',
-          'chapterIndex': 0,
-          'updatedAt': DateTime.now().millisecondsSinceEpoch,
-        },
-      }),
-    });
+    await _seedNovelShelf([
+      const NovelItem(id: '1', title: '剑来', author: '烽火戏诸侯'),
+    ]);
+    await _seedNovelProgress(bookId: '1', bookTitle: '剑来', chapterId: 'c1');
     await pumpPreview(tester, const MinePage());
 
     final tabBefore = tester.widget<MineNovelTab>(find.byType(MineNovelTab));
@@ -288,12 +286,10 @@ void main() {
 
   /// 切走再切回来：保活让每个 tab 的滚动位置各自保留。
   testWidgets('我的页-两个 tab 各自保留滚动位置', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'shelf_books_v1': jsonEncode([
-        for (var i = 1; i <= 12; i++)
-          {'id': '$i', 'title': '书$i', 'cover': '', 'author': '作者$i'},
-      ]),
-    });
+    await _seedNovelShelf([
+      for (var i = 12; i >= 1; i--)
+        NovelItem(id: '$i', title: '书$i', author: '作者$i'),
+    ]);
     await pumpPreview(tester, const MinePage());
     await tester.drag(
       find.byType(CustomScrollView).first,
@@ -314,12 +310,10 @@ void main() {
 
   /// 页头（我的 + 统计 + 设置）与 tabs 固定贴顶，只有 tab 内容滚动。
   testWidgets('我的页-页头固定贴顶不随列表滚动', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'shelf_books_v1': jsonEncode([
-        for (var i = 1; i <= 12; i++)
-          {'id': '$i', 'title': '书$i', 'cover': '', 'author': '作者$i'},
-      ]),
-    });
+    await _seedNovelShelf([
+      for (var i = 12; i >= 1; i--)
+        NovelItem(id: '$i', title: '书$i', author: '作者$i'),
+    ]);
     await pumpPreview(tester, const MinePage());
     final header = find.text('我的');
     final headerBefore = tester.getTopLeft(header);

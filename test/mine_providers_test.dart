@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
@@ -7,29 +5,22 @@ import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_drama_providers.dart';
 import 'package:novel_playlet/features/mine/mine_providers.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// 「我的」页数据通道拆分（CODE_REVIEW P1-5 回归）。
 ///
 /// 阅读页每 400ms 落一次进度：如果它让书架 provider 失效，保活的「我的」页
-/// 就要重新解码 shared_preferences 的书架表并重建整片书架网格。这里用订阅
-/// 计数锁住窗口边界——
+/// 就要重新查库并把整片书架网格重建一遍。这里用订阅计数锁住窗口边界——
 /// - 写阅读进度：只能刷新「最近阅读」通道；
 /// - 加/移书架：只能刷新「书架」通道；
 /// - 短剧侧同理（观看进度 vs 收藏）。
 void main() {
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
-  });
-
   test('保存阅读进度只刷新最近阅读，不重读书架', () async {
-    SharedPreferences.setMockInitialValues({
-      'shelf_books_v1': jsonEncode([
-        {'id': '1', 'title': '剑来', 'cover': '', 'author': '烽火戏诸侯'},
-      ]),
-    });
     final container = ProviderContainer();
     addTearDown(container.dispose);
+
+    await container
+        .read(readingStoreProvider)
+        .addToShelf(const NovelItem(id: '1', title: '剑来', author: '烽火戏诸侯'));
 
     var shelfRebuilds = 0;
     var recentRebuilds = 0;

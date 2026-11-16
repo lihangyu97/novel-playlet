@@ -12,17 +12,16 @@
 - Android 系统字体对中间字重可能做合成，滑杆档位观感不一定完全线性；若要更稳定，可评估打包带完整字重的字体（注意授权和包体）。
 - iOS 若要换成统一的跨平台字体，需要另行处理字体文件与授权，不在本次范围内。
 
-## 存储与云同步（评审 2026-11-16，暂不动代码）
+## 存储与云同步（评审 2026-11-16）
 
-现状：书架 / 收藏 / 进度 / 最近列表共 8 个 `SharedPreferences` key（4 张真表 + 2 张 tombstone + 2 张派生缓存），
-云同步走 `<dir>/sync.json` 整包 PUT。以下待办按优先级排列，设计层面的评估见
-[docs/storage-model-proposal.md](docs/storage-model-proposal.md)。
+现状：书架 / 收藏 / 进度已迁到 SQLite（`<AppSupport>/library.db`，四张表：状态/快照 × 小说/短剧），
+最近列表由记录派生；云同步走 `<dir>/sync.json` 整包 PUT，载荷 `schemaVersion = 2`。
+以下待办按优先级排列，设计层面的评估见 [docs/storage-model-proposal.md](docs/storage-model-proposal.md)。
 
 ### P0 数据与正确性
 
-- [ ] `video_progress_v1` 无上限：没有对应小说 `progressLimit = 200` 的淘汰，看过的每部剧永久保留（单条约 213 字节，1000 部 ≈ 231 KB）。
-  - 影响：主 isolate 每次 `saveVideoProgress` 全量 `jsonDecode`/`jsonEncode`（P1-7 同类问题）；云同步载荷随"看过的剧数"单调增长，小说侧却封顶。
-  - 建议：加 `videoProgressLimit`，在 `saveVideoProgress` 与 `applySyncData` 短剧分支复用 `_pruneProgress`；可选「收藏内的 id 不淘汰」。
+- [x] ~~短剧进度无上限~~（2026-11-16 已随统一记录解决）：小说/短剧共用 `ReadingStore.libraryLimit = 500`，
+  只淘汰「未上架且无墓碑」的纯进度行；书架条目与墓碑不参与淘汰。
 - [ ] 上传缺 `If-Match`：两台设备同时同步时都读到 rev N、都写 rev N+1，后写覆盖先写。逐条合并能让数据最终收敛，但中间窗口会丢改动且 revision 退化。
   - 建议：`PUT` 带 `If-Match: <etag>`，412/409 时重读 → 重合并 → 重写。
 - [ ] tombstone 只增不减：`novel_shelf_meta_v1` / `video_shelf_meta_v1` 每次「加入再移出」都永久留一条（约 50 B，1000 条约 50 KB），且会进同步载荷。书架与短剧收藏本身也没有条数上限。
@@ -38,20 +37,28 @@
 ### P2 载荷与遗留清理
 
 - [ ] 同步载荷未压缩：实测 gzip 可压 4.6~5.5 倍（20.4 KB → 4.4 KB）。
-- [ ] 未按域拆文件：书架 / 进度 / 短剧各自 PUT，可避免无关重传。
-- [ ] `last_read_book_v1` 只写不读（`lastReadBookId()` 在 lib 内无调用方），可从本地存储与同步载荷中移除。
+- [ ] 未按域拆文件：现在仍是一个 `sync.json`。拆成 `<kind>-state.json` / `<kind>-meta.json`
+  后，一次翻页只传状态文件；推荐与 P1 的 `PROPFIND Depth:1` 一起做。
+- [x] ~~`last_read_book_v1` 只写不读~~：迁移后已移除，`lastReadBookId()` 一并删除。
 - [ ] `webdav_client.dart` 的 `PROPFIND` 分支是死代码（lib 无调用方，仅 test mock 保留）。
 
-### 待决策：是否统一为 library 记录
+### 已完成：统一 library 记录 + SQLite（2026-11-16）
 
-设想「小说 / 短剧各一张表，一条记录聚合元信息 + 书架状态 + 进度 + 缓存状态」。关键前提：内容全部来自上游、
+已落地：`novel_state` / `novel_meta` / `video_state` / `video_meta` 四张表，
+`ReadingStore` 公开 API 与 revision 计数保持不变，同步载荷 `schemaVersion` 升到 2 并兼容 v1 旧载荷。
+方案与合并规则见 [docs/storage-model-proposal.md](docs/storage-model-proposal.md)。
+
+原设想「小说 / 短剧各一张表，一条记录聚合元信息 + 书架状态 + 进度 + 缓存状态」。关键前提：内容全部来自上游、
 本机没有登录态也没有编辑入口，所以**元信息是"加入书架那一刻的冻结快照"**（`addToShelf` 已存在即早退，
 `_writeShelf` 只有 add/remove 两个调用方）。这条前提把记录切成"用户状态（要合并）"和"上游快照（只取值）"两半，
 合并规则因此只剩一条线。
 
-收益：同步载荷 -32%（同书 543 → 371 字节）、key 数减半（8 → 4）、两张派生缓存归零。
-按生命周期拆成状态表（164 B/行）+ 快照表（207 B/行）后，进度落盘只重写状态表，
-写放大 32 KB/次 **低于现状的 41.6 KB**，因此**不需要引入 SQLite**。
+收益：同步载荷 -32%（同书 543 → 371 字节）、key 数 8 → 4、两张派生缓存归零。
+
+落地时选了 SQLite 而不是继续用 prefs：状态表（164 B/行）+ 快照表（207 B/行）拆开后，
+虽然单次进度落盘只需重写状态表（32 KB，低于原来的 41.6 KB），但 prefs 没有索引、
+没有单行 UPDATE，最近列表与书架都要全表解码；SQLite 让 `ORDER BY last_read_at`
+走索引，且换机/扩容时不用再重做一次存储迁移。
 
 仍必须保留的复杂度只有两处：`shelf_at` / `shelf_removed_at` 这对时间戳（布尔状态同步必须能表达"删除"），
 以及合并函数的收敛性（"本地优先"这类规则会让两台设备永久抖动）。详见
