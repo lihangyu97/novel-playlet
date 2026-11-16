@@ -115,17 +115,23 @@ class NovelRecord {
     shelfRemovedAt: shelfRemovedAt ?? this.shelfRemovedAt,
   );
 
-  /// 快照 / 进度 / 书架任何一部分是否不同（决定要不要落盘、要不要 bump revision）。
+  /// 任何一个参与合并的字段是否不同（决定要不要落盘、要不要 bump revision）。
+  ///
+  /// 必须逐字段比，不能退化成只比 `onShelf`：`shelfAt` / `shelfRemovedAt` 取
+  /// max 后"是否在架"可能没变但时间戳变了；这类改动不落盘的话，本地导出会和
+  /// 远端始终差一个值，两端各自上传自己的版本 → 每次同步都白传一遍。
   bool diffFrom(NovelRecord other) =>
       title != other.title ||
       author != other.author ||
       cover != other.cover ||
       colorDominate != other.colorDominate ||
+      metaFetchedAt != other.metaFetchedAt ||
       lastReadAt != other.lastReadAt ||
       chapterId != other.chapterId ||
       chapterIndex != other.chapterIndex ||
       blockIndex != other.blockIndex ||
-      onShelf != other.onShelf;
+      shelfAt != other.shelfAt ||
+      shelfRemovedAt != other.shelfRemovedAt;
 }
 
 /// 一条短剧库记录；与 [NovelRecord] 同构，进度换成"第几集"。
@@ -224,15 +230,19 @@ class VideoRecord {
     shelfRemovedAt: shelfRemovedAt ?? this.shelfRemovedAt,
   );
 
+  /// 规则同 [NovelRecord.diffFrom]：逐字段比，避免"取 max 后时间戳变了但
+  /// 是否在架没变"这种改动不落盘、导致两端反复互传。
   bool diffFrom(VideoRecord other) =>
       title != other.title ||
       cover != other.cover ||
       intro != other.intro ||
       episodeCount != other.episodeCount ||
       colorDominate != other.colorDominate ||
+      metaFetchedAt != other.metaFetchedAt ||
       lastReadAt != other.lastReadAt ||
       episodeIndex != other.episodeIndex ||
-      onShelf != other.onShelf;
+      shelfAt != other.shelfAt ||
+      shelfRemovedAt != other.shelfRemovedAt;
 }
 
 /// 快照整组该取哪一侧：时间戳大的；相等时优先非空，再相等取远端（两端看到

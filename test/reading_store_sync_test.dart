@@ -137,6 +137,30 @@ void main() {
     expect((await store.videoProgress('v1'))?.episodeIndex, 8);
   });
 
+  test('远端墓碑时间戳更新后要落盘，导出与远端一致（否则每次同步都互传）', () async {
+    final store = ReadingStore();
+    await store.addToShelf(const NovelItem(id: 'a', title: 'A'));
+    await store.removeFromShelf('a');
+
+    final before = ((await store.exportSyncData())['novel'] as List).single as Map;
+    final localRemovedAt = before['shelfRemovedAt'] as int;
+    final remoteRemovedAt = localRemovedAt + 1000;
+
+    await store.applySyncData({
+      'novel': [
+        {'id': 'a', 'shelfRemovedAt': remoteRemovedAt},
+      ],
+      'video': <Object>[],
+    });
+
+    final after = ((await store.exportSyncData())['novel'] as List).single as Map;
+    expect(
+      after['shelfRemovedAt'],
+      remoteRemovedAt,
+      reason: '取 max 之后的墓碑时间戳必须落盘，否则本地导出和远端永远差一个值',
+    );
+  });
+
   test('v1 旧载荷（novelShelf / novelProgress）也能合并，升级不丢数据', () async {
     final store = ReadingStore();
     const book = NovelItem(id: 'old', title: '旧书', author: '某作者');
