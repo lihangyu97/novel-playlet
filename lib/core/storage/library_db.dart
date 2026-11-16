@@ -245,13 +245,11 @@ class LibraryDb {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  static Future<void> deleteNovel(DatabaseExecutor db, String id) async {
-    await db.delete(novelStateTable, where: 'id = ?', whereArgs: [id]);
-    await db.delete(novelMetaTable, where: 'id = ?', whereArgs: [id]);
-  }
-
-  /// 收敛记录条数：只淘汰"没上架过、也没有墓碑"的纯进度行，最旧的先走；
-  /// 书架条目与墓碑永远不参与淘汰（墓碑是删除同步的唯一依据）。
+  /// 收敛记录条数：只淘汰"没上架过、也没有墓碑"的纯进度行，最旧的先走。
+  ///
+  /// 书架条目与墓碑**永远不删行**：移出书架只是把 [NovelRecord.shelfAt] 留着、
+  /// 写一个新的 [NovelRecord.shelfRemovedAt]（墓碑），删行会丢掉"删除"这个事实，
+  /// 远端旧值随即把条目复活。所以这个上限只约束"读过但没上架"的行。
   static Future<void> pruneNovel(DatabaseExecutor db, int limit) async {
     await _prune(
       db,
@@ -355,11 +353,6 @@ class LibraryDb {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  static Future<void> deleteVideo(DatabaseExecutor db, String id) async {
-    await db.delete(videoStateTable, where: 'id = ?', whereArgs: [id]);
-    await db.delete(videoMetaTable, where: 'id = ?', whereArgs: [id]);
-  }
-
   static Future<void> pruneVideo(DatabaseExecutor db, int limit) async {
     await _prune(
       db,
@@ -375,8 +368,12 @@ class LibraryDb {
     required String metaTable,
     required int limit,
   }) async {
+    // 只数"可淘汰"的行。否则书架上有 500 本时，任何一条新进度都会被立刻挤掉。
     final count = Sqflite.firstIntValue(
-      await db.rawQuery('SELECT COUNT(*) FROM $stateTable'),
+      await db.rawQuery(
+        'SELECT COUNT(*) FROM $stateTable '
+        'WHERE shelf_at = 0 AND shelf_removed_at = 0',
+      ),
     );
     if (count == null || count <= limit) return;
     final excess = count - limit;

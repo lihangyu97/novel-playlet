@@ -132,11 +132,11 @@ class ReadingStore {
   static const int recentLimit = 3;
   static const int videoHistoryLimit = 3;
 
-  /// 每条内容链最多保留的记录数。
+  /// 每条内容链最多保留的**纯进度行**数量（读过但没上过架的书 / 剧）。
   ///
-  /// 只淘汰"没上架过、也没有墓碑"的纯进度行（最旧的先走）；书架条目与墓碑
-  /// 永远不淘汰——墓碑是删除能同步出去的唯一依据，删早了远端旧值会把条目
-  /// 复活。小说侧原来在进度表上封顶 200，短剧侧没有上限，这里统一收敛。
+  /// 书架条目与墓碑不计入、也不淘汰：墓碑是删除能同步出去的唯一依据，删早了
+  /// 远端旧值会把条目复活。小说侧原来在进度表上封顶 200，短剧侧没有上限，
+  /// 这里统一收敛。
   static const int libraryLimit = 500;
 
   Future<Database> get _db => LibraryDb.instance();
