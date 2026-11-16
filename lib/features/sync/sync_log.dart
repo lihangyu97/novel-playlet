@@ -126,6 +126,7 @@ class SyncLogRun {
     this.error,
     this.via,
     this.etag,
+    this.statEtag,
   });
 
   final int at;
@@ -152,6 +153,9 @@ class SyncLogRun {
   /// 本次使用的云端 ETag（排障用；不是凭据）。
   final String? etag;
 
+  /// PROPFIND 返回的 ETag；为空说明 stat 不可用。
+  final String? statEtag;
+
   DateTime get atTime => DateTime.fromMillisecondsSinceEpoch(at);
 
   bool get ok => outcome == SyncOutcome.success;
@@ -175,6 +179,7 @@ class SyncLogRun {
     if (error != null) 'err': error,
     if (via != null) 'via': via,
     if (etag != null) 'et': etag,
+    if (statEtag != null) 'st': statEtag,
   };
 
   static SyncLogRun? tryFromJson(Object? raw) {
@@ -205,6 +210,7 @@ class SyncLogRun {
       error: asString(json['err']).isEmpty ? null : asString(json['err']),
       via: asString(json['via']).isEmpty ? null : asString(json['via']),
       etag: asString(json['et']).isEmpty ? null : asString(json['et']),
+      statEtag: asString(json['st']).isEmpty ? null : asString(json['st']),
     );
   }
 }

@@ -122,6 +122,7 @@ class WebDavSyncService {
         remoteUpdatedAt: 0,
         via: 'stat',
         etag: remoteMeta.etag,
+        statEtag: remoteMeta.etag,
       );
     }
 
@@ -155,6 +156,7 @@ class WebDavSyncService {
             ),
             via: '304',
             etag: read.etag,
+            statEtag: fileMeta?.etag,
           );
         }
         read = await client.readFile(config, uri);
@@ -224,6 +226,7 @@ class WebDavSyncService {
           remoteUpdatedAt: remote.updatedAt,
           via: 'get',
           etag: etag,
+          statEtag: fileMeta?.etag,
         );
       }
 
@@ -266,6 +269,7 @@ class WebDavSyncService {
         remoteUpdatedAt: remote?.updatedAt ?? 0,
         via: 'put',
         etag: putEtag ?? after?.etag ?? etag,
+        statEtag: fileMeta?.etag,
       );
     }
   }
@@ -305,6 +309,7 @@ class WebDavSyncService {
           error: failed ? error : null,
           via: run?.via,
           etag: run?.etag,
+          statEtag: run?.statEtag,
         ),
       );
     } catch (_) {
@@ -330,6 +335,7 @@ class _RunResult {
     this.remoteUpdatedAt = 0,
     this.via,
     this.etag,
+    this.statEtag,
   });
 
   final SyncResult result;
@@ -339,6 +345,7 @@ class _RunResult {
   final int remoteUpdatedAt;
   final String? via;
   final String? etag;
+  final String? statEtag;
 }
 
 /// 本地载荷指纹（FNV-1a 64）。只用来判断"和上次同步时是否一模一样"。
