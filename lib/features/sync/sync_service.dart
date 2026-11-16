@@ -120,6 +120,8 @@ class WebDavSyncService {
           revision: meta.lastRevision,
         ),
         remoteUpdatedAt: 0,
+        via: 'stat',
+        etag: remoteMeta.etag,
       );
     }
 
@@ -151,6 +153,8 @@ class WebDavSyncService {
               skipped: true,
               revision: meta.lastRevision,
             ),
+            via: '304',
+            etag: read.etag,
           );
         }
         read = await client.readFile(config, uri);
@@ -218,6 +222,8 @@ class WebDavSyncService {
           pushed: pushed,
           remoteDeviceId: remote.deviceId,
           remoteUpdatedAt: remote.updatedAt,
+          via: 'get',
+          etag: etag,
         );
       }
 
@@ -258,6 +264,8 @@ class WebDavSyncService {
         pushed: pushed,
         remoteDeviceId: remote?.deviceId ?? '',
         remoteUpdatedAt: remote?.updatedAt ?? 0,
+        via: 'put',
+        etag: putEtag ?? after?.etag ?? etag,
       );
     }
   }
@@ -295,6 +303,8 @@ class WebDavSyncService {
           pulled: _take(run?.pulled ?? const []),
           pushed: _take(run?.pushed ?? const []),
           error: failed ? error : null,
+          via: run?.via,
+          etag: run?.etag,
         ),
       );
     } catch (_) {
@@ -318,6 +328,8 @@ class _RunResult {
     this.pushed = const [],
     this.remoteDeviceId = '',
     this.remoteUpdatedAt = 0,
+    this.via,
+    this.etag,
   });
 
   final SyncResult result;
@@ -325,6 +337,8 @@ class _RunResult {
   final List<SyncLogChange> pushed;
   final String remoteDeviceId;
   final int remoteUpdatedAt;
+  final String? via;
+  final String? etag;
 }
 
 /// 本地载荷指纹（FNV-1a 64）。只用来判断"和上次同步时是否一模一样"。

@@ -124,6 +124,8 @@ class SyncLogRun {
     this.pulled = const [],
     this.pushed = const [],
     this.error,
+    this.via,
+    this.etag,
   });
 
   final int at;
@@ -143,6 +145,12 @@ class SyncLogRun {
   final List<SyncLogChange> pulled;
   final List<SyncLogChange> pushed;
   final String? error;
+
+  /// 这次走的网络路径：stat（PROPFIND 命中）/ 304（条件 GET）/ get / put。
+  final String? via;
+
+  /// 本次使用的云端 ETag（排障用；不是凭据）。
+  final String? etag;
 
   DateTime get atTime => DateTime.fromMillisecondsSinceEpoch(at);
 
@@ -165,6 +173,8 @@ class SyncLogRun {
     if (pushed.isNotEmpty)
       'push': [for (final change in pushed) change.toJson()],
     if (error != null) 'err': error,
+    if (via != null) 'via': via,
+    if (etag != null) 'et': etag,
   };
 
   static SyncLogRun? tryFromJson(Object? raw) {
@@ -193,6 +203,8 @@ class SyncLogRun {
           ?SyncLogChange.tryFromJson(change),
       ],
       error: asString(json['err']).isEmpty ? null : asString(json['err']),
+      via: asString(json['via']).isEmpty ? null : asString(json['via']),
+      etag: asString(json['et']).isEmpty ? null : asString(json['et']),
     );
   }
 }
