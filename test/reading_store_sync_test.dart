@@ -231,4 +231,31 @@ void main() {
     final history = await store.history(type: LibraryType.novel);
     expect(history.map((r) => r.sourceId), ['loose', 'kept']);
   });
+
+  test('移出书架后继续读：回到历史并保留标题，但不加回书架', () async {
+    final store = ReadingStore();
+    await store.addToShelf(const NovelItem(id: 'b', title: '追更中'));
+    await store.saveProgress(
+      bookId: 'b',
+      bookTitle: '追更中',
+      cover: '',
+      chapterId: 'c1',
+      chapterIndex: 0,
+    );
+    await store.removeFromShelf('b');
+    expect(await store.history(type: LibraryType.novel), isEmpty);
+
+    await store.saveProgress(
+      bookId: 'b',
+      bookTitle: '追更中',
+      cover: '',
+      chapterId: 'c2',
+      chapterIndex: 1,
+    );
+
+    final history = await store.history(type: LibraryType.novel);
+    expect(history.map((r) => r.sourceId), ['b']);
+    expect(history.single.title, '追更中', reason: '重新开始读的书要能显示书名，不能被墓碑瘦身清空');
+    expect(await store.isOnShelf('b'), isFalse, reason: '继续读不等于加回收藏');
+  });
 }

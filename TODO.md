@@ -71,6 +71,7 @@
 
 - **统一 library 记录**：8 个 `shared_preferences` key → 单表 `library`；书架 / 历史 / 收藏全部由查询派生，`recent_reading_v1` / `video_history_v1` 与两张 tombstone 表都不再存在。
 - **墓碑瘦身**：移出书架只写 `shelf_removed_at`，同时清掉快照列，行不删。
+- **历史语义**：移出书架后**没再读** → 不进历史并清快照（瘦身成立的前提）；移出后**继续读**（`last_read_at > shelf_removed_at`）→ 回到历史、保留书名封面，但不加回收藏。
 - **删除语义**：`shelf_at` / `shelf_removed_at` 两个时间戳取 max，`shelf_at > shelf_removed_at` 才算在架；合并函数逐字段判等，保证两端收敛。
 - **上限**：小说与短剧共享 500 条**纯进度行**额度，书架条目与墓碑不参与淘汰。
 - **「我的」页**：小说 / 短剧 tab 合并为「历史 / 收藏」，条目挂绿（小说）/ 橙（短剧）标签，收藏封面统一 3:4。

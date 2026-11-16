@@ -12,7 +12,8 @@ import 'library_records.dart';
 /// （`'$type/$id'`），因为两类内容的上游 id 来自不同域、裸 id 可能撞号。
 ///
 /// 字段按生命周期分组：快照（加入书架时写一次）、进度（翻页就写）、书架
-/// 两列时间戳。墓碑行由 [LibraryRecord.normalized] 清掉快照，行本身永不删。
+/// 两列时间戳。移出书架且之后没再读的墓碑行由 [LibraryRecord.normalized]
+/// 清掉快照；移出后继续读的保留快照（还在历史里），行本身永不删。
 ///
 /// 测试用 [overridePath] 注入 `inMemoryDatabasePath`（见
 /// `test/support/library_test_db.dart`）；生产路径是
@@ -24,6 +25,12 @@ class LibraryDb {
 
   static const String table = 'library';
   static const String kvTable = 'kv';
+
+  /// 「历史」的取行条件：读过，且不是"移出书架后没再读"的墓碑。
+  static const String _historyWhere =
+      'last_read_at > 0 AND ('
+      'shelf_removed_at = 0 OR shelf_at > shelf_removed_at '
+      'OR last_read_at > shelf_removed_at)';
 
   /// 测试注入用；为 null 时落到 `<AppSupport>/library.db`。
   static String? overridePath;
@@ -66,6 +73,9 @@ class LibraryDb {
       version: schemaVersion,
       onCreate: (db, _) => _createSchema(db),
       onUpgrade: (db, from, _) async {
+        // **已经 ≥2 的库绝不能走重建**：那等于每次升版本都清空用户书架。
+        // 以后加 v3（比如 `progress_pruned_at`）时在这里逐条写增量迁移。
+        if (from >= 2) return;
         // v1 是"状态/快照拆两张表"的版本，从未正式发布过；直接重建。
         for (final name in [
           'novel_state',
@@ -182,15 +192,16 @@ class LibraryDb {
   }
 
   /// 「历史」：读过且当前不是墓碑（移出书架的不再出现在历史里）。
+  ///
+  /// 例外是"移出后又读过"的行：`last_read_at > shelf_removed_at` 说明用户还在
+  /// 追这本书，要留在历史里（[LibraryRecord.normalized] 也会为它保留快照）。
   static Future<List<LibraryRecord>> readHistory(
     DatabaseExecutor db, {
     required int limit,
     LibraryType? type,
   }) async {
     if (limit <= 0) return const [];
-    final where = StringBuffer(
-      'last_read_at > 0 AND (shelf_removed_at = 0 OR shelf_at > shelf_removed_at)',
-    );
+    final where = StringBuffer(_historyWhere);
     final args = <Object?>[];
     if (type != null) {
       where.write(' AND type = ?');
@@ -209,11 +220,7 @@ class LibraryDb {
   /// 历史条数（不含墓碑）。页头统计用，只算个数、不取行。
   static Future<int> countHistory(DatabaseExecutor db) async {
     final count = Sqflite.firstIntValue(
-      await db.rawQuery(
-        'SELECT COUNT(*) FROM $table '
-        'WHERE last_read_at > 0 '
-        'AND (shelf_removed_at = 0 OR shelf_at > shelf_removed_at)',
-      ),
+      await db.rawQuery('SELECT COUNT(*) FROM $table WHERE $_historyWhere'),
     );
     return count ?? 0;
   }

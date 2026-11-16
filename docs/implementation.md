@@ -565,6 +565,12 @@ cached miss 时第一次取流仍会按内核重试预算耗一段时间，失�
 | `library.db` | 书架/收藏/进度（单表 `library`，`type` 区分小说/短剧） | **不是缓存**，删了等于清空书架 |
 | `backend/rust.log`、`offline/diag.log` | 排障日志 | 轮转；可随时删 |
 
+> **升级不迁移（1.0.1 → 本版本）**：`shared_preferences` 里的 `shelf_books_v1` /
+> `reading_progress_v1` / `video_*` 不会被导入 `library.db`。覆盖升级后书架与历史
+> 从空开始，旧 key 仍留在原处；要保留数据需手工转成 `library` 行或重新同步。
+> 云同步同样**只认 `schemaVersion = 3`**：旧的 `sync.json` 会报「云端同步文件格式
+> 不正确，已停止覆盖」，不会用空数据覆盖远端。
+
 ### 6.2 隔离不变式
 
 1. 离线区不参与任何自动淘汰 / TTL / 体积裁剪；`AppCache.clear()` 只清自动层，**永不碰 `offline/`**（有回归用例）。

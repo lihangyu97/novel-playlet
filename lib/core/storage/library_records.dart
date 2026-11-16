@@ -90,20 +90,30 @@ class LibraryRecord {
 
   bool get onShelf => shelfAt > 0 && shelfAt > shelfRemovedAt;
 
-  /// 移出过书架且没再加回来 = 墓碑行。墓碑行的快照会被清掉（见 [normalized]）。
+  /// 移出过书架且没再加回来 = 墓碑行。
+  ///
+  /// 墓碑只表示"不在书架/收藏里"，不等于"从历史里消失"：移出后继续读的书
+  /// 仍有 `lastReadAt > shelfRemovedAt`，会重新出现在「历史」并保留快照。
   bool get isTombstone => shelfRemovedAt > 0 && shelfRemovedAt >= shelfAt;
 
   bool get hasProgress => lastReadAt > 0;
 
   bool get hasMeta => title.isNotEmpty || cover.isNotEmpty;
 
+  /// 移出书架后是否又读过：这种行要留在「历史」里，快照不能清。
+  ///
+  /// 注意是严格大于：删书架时 `shelfRemovedAt` 一定大于当时的 `lastReadAt`，
+  /// 所以"移出后没再读"的墓碑仍然是可瘦身的。
+  bool get hasProgressAfterRemoval =>
+      isTombstone && lastReadAt > shelfRemovedAt;
+
   /// 墓碑瘦身：只留 id / 时间戳 / 进度，快照列全清。
   ///
-  /// 移出书架后这条内容不再出现在「历史 / 收藏」里，书名封面用不上了；
+  /// 移出书架且之后没再读的内容不再出现在「历史 / 收藏」里，书名封面用不上了；
   /// 清掉之后单行从约 370 B 降到约 90 B，同步载荷同步变小。
   /// 真正需要"删掉"这个事实时仍然靠 `shelfRemovedAt`，行本身不删。
   LibraryRecord normalized() {
-    if (!isTombstone) return this;
+    if (!isTombstone || hasProgressAfterRemoval) return this;
     return copyWith(
       title: '',
       author: '',
