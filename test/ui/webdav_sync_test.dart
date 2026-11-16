@@ -114,14 +114,18 @@ class _FakeWebDavClient implements WebDavClient {
   String _etagOf(String text) => '"${text.hashCode}"';
 
   @override
-  Future<String?> readText(
+  Future<WebDavRead> readFile(
     WebDavConfig config,
     Uri uri, {
-    void Function(String? etag)? onEtag,
+    String? ifNoneMatch,
   }) async {
     final text = files[uri];
-    onEtag?.call(text == null ? null : _etagOf(text));
-    return text;
+    if (text == null) return const WebDavRead.absent();
+    final etag = _etagOf(text);
+    if (ifNoneMatch != null && ifNoneMatch == etag) {
+      return WebDavRead.notModified(etag);
+    }
+    return WebDavRead.content(text, etag);
   }
 
   @override
@@ -131,7 +135,7 @@ class _FakeWebDavClient implements WebDavClient {
   }
 
   @override
-  Future<void> writeText(
+  Future<String?> writeText(
     WebDavConfig config,
     Uri uri,
     String text, {
@@ -142,6 +146,7 @@ class _FakeWebDavClient implements WebDavClient {
       throw WebDavPreconditionFailed('conflict', statusCode: 412);
     }
     files[uri] = text;
+    return _etagOf(text);
   }
 
   @override

@@ -108,9 +108,9 @@ void main() {
   test('读写文本和 404 语义', () async {
     final client = HttpWebDavClient(timeout: const Duration(seconds: 5));
     final uri = config.resolve('novel-playlet/release/sync.json');
-    expect(await client.readText(config, uri), isNull);
+    expect((await client.readFile(config, uri)).text, isNull);
     await client.writeText(config, uri, '{"ok":true}');
-    expect(await client.readText(config, uri), '{"ok":true}');
+    expect((await client.readFile(config, uri)).text, '{"ok":true}');
   });
 
   test('stat 解析 ETag；If-Match 不匹配返回 412，匹配才写入', () async {

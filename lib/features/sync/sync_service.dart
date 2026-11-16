@@ -128,14 +128,35 @@ class WebDavSyncService {
       final fileMeta = attempt == 0
           ? remoteMeta
           : await client.stat(config, uri);
-      String? getEtag;
-      final raw = await client.readText(
+      // 只有 PROPFIND 拿不到 ETag 时才用条件 GET。能 stat 时不能把当前远端
+      // ETag 当 If-None-Match：那样永远 304，会漏掉"远端已变"。
+      final conditionalEtag = fileMeta == null ? meta.remoteEtag : null;
+      var read = await client.readFile(
         config,
         uri,
-        onEtag: (etag) => getEtag = etag,
+        ifNoneMatch: attempt == 0 ? conditionalEtag : null,
       );
-      // PROPFIND 拿不到 ETag 时（服务器不支持/拒绝），退而用 GET 响应头的。
-      final etag = fileMeta?.etag ?? getEtag;
+      if (read.notModified) {
+        // 云端没变。本地也没变就整轮跳过；本地有改动才重新取全文算 diff。
+        if (_fingerprint(localJson) == meta.localHash) {
+          final syncedAt = DateTime.now();
+          await metaStore.write(
+            meta.copyWith(lastSyncAt: syncedAt, remoteEtag: read.etag),
+          );
+          return _RunResult(
+            result: SyncResult(
+              uploaded: false,
+              pulled: false,
+              syncedAt: syncedAt,
+              skipped: true,
+              revision: meta.lastRevision,
+            ),
+          );
+        }
+        read = await client.readFile(config, uri);
+      }
+      final raw = read.text;
+      final etag = read.etag ?? conditionalEtag;
       SyncSnapshot? remote;
       phase.value = 'parse';
       if (raw != null && raw.trim().isNotEmpty) {
@@ -201,8 +222,14 @@ class WebDavSyncService {
       }
 
       phase.value = 'put';
+      String? putEtag;
       try {
-        await client.writeText(config, uri, snapshot.encode(), ifMatch: etag);
+        putEtag = await client.writeText(
+          config,
+          uri,
+          snapshot.encode(),
+          ifMatch: etag,
+        );
       } on WebDavPreconditionFailed {
         if (attempt >= 1) rethrow;
         continue;
@@ -210,13 +237,13 @@ class WebDavSyncService {
 
       phase.value = 'meta';
       final syncedAt = DateTime.now();
-      // 写完再取一次 ETag：不是所有服务端都会在 PUT 响应里回 ETag。
-      final after = await client.stat(config, uri);
+      // 优先用 PUT 响应的 ETag；服务端没回时才再 stat 一次。
+      final after = putEtag == null ? await client.stat(config, uri) : null;
       await metaStore.write(
         meta.copyWith(
           lastRevision: revision,
           lastSyncAt: syncedAt,
-          remoteEtag: after?.etag,
+          remoteEtag: putEtag ?? after?.etag,
           localHash: _fingerprint(mergedJson),
         ),
       );

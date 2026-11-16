@@ -22,6 +22,22 @@ class WebDavPreconditionFailed extends WebDavException {
   WebDavPreconditionFailed(super.message, {super.statusCode});
 }
 
+/// 一次 GET 的结果：正常内容 / 文件不存在 / 304 未修改。
+class WebDavRead {
+  const WebDavRead._({this.text, this.etag, this.notModified = false});
+
+  const WebDavRead.absent() : this._();
+
+  const WebDavRead.notModified(String? etag)
+    : this._(etag: etag, notModified: true);
+
+  const WebDavRead.content(String this.text, this.etag) : notModified = false;
+
+  final String? text;
+  final String? etag;
+  final bool notModified;
+}
+
 /// 云端文件元信息（条件请求用）；字段取不到时为 null。
 class WebDavFileMeta {
   const WebDavFileMeta({this.etag, this.length});
@@ -43,14 +59,14 @@ abstract interface class WebDavClient {
   /// 逐级创建目录；已存在视为成功。
   Future<void> ensureDirectory(WebDavConfig config, String relativePath);
 
-  /// 读文件内容；不存在返回 null。
+  /// 读文件；[ifNoneMatch] 命中时服务端返回 304，结果里 `notModified = true`。
   ///
-  /// [onEtag] 会拿到 GET 响应的 ETag：服务器不支持 PROPFIND 时，这是
-  /// `If-Match` 唯一能用的 etag 来源。
-  Future<String?> readText(
+  /// 结果里的 `etag` 来自 GET 响应头：服务器不支持 PROPFIND 时，这是
+  /// `If-Match` / 下次 `If-None-Match` 唯一能用的 etag 来源。
+  Future<WebDavRead> readFile(
     WebDavConfig config,
     Uri uri, {
-    void Function(String? etag)? onEtag,
+    String? ifNoneMatch,
   });
 
   /// 读文件元信息（PROPFIND Depth:0）。
@@ -59,9 +75,11 @@ abstract interface class WebDavClient {
   /// 无条件 GET 的旧路径，不能因此让同步失败。
   Future<WebDavFileMeta?> stat(WebDavConfig config, Uri uri);
 
-  /// 写文件。[ifMatch] 非空时带 `If-Match`，命中 412/409 抛
+  /// 写文件，返回响应里的 ETag（服务端没回就是 null）。
+  ///
+  /// [ifMatch] 非空时带 `If-Match`，命中 412/409 抛
   /// [WebDavPreconditionFailed]，由同步层重读重合并。
-  Future<void> writeText(
+  Future<String?> writeText(
     WebDavConfig config,
     Uri uri,
     String text, {
@@ -105,18 +123,20 @@ class HttpWebDavClient implements WebDavClient {
   }
 
   @override
-  Future<String?> readText(
+  Future<WebDavRead> readFile(
     WebDavConfig config,
     Uri uri, {
-    void Function(String? etag)? onEtag,
+    String? ifNoneMatch,
   }) async {
-    final response = await _send(config, 'GET', uri);
-    onEtag?.call(response.etag);
-    if (response.statusCode == 404) return null;
+    final response = await _send(config, 'GET', uri, ifNoneMatch: ifNoneMatch);
+    if (response.statusCode == 304) {
+      return WebDavRead.notModified(response.etag ?? ifNoneMatch);
+    }
+    if (response.statusCode == 404) return const WebDavRead.absent();
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw _statusError(response.statusCode, '下载同步文件失败');
     }
-    return response.body;
+    return WebDavRead.content(response.body, response.etag);
   }
 
   @override
@@ -148,7 +168,7 @@ class HttpWebDavClient implements WebDavClient {
   }
 
   @override
-  Future<void> writeText(
+  Future<String?> writeText(
     WebDavConfig config,
     Uri uri,
     String text, {
@@ -173,6 +193,7 @@ class HttpWebDavClient implements WebDavClient {
         response.statusCode != 204) {
       throw _statusError(response.statusCode, '上传同步文件失败');
     }
+    return response.etag;
   }
 
   @override
@@ -185,7 +206,7 @@ class HttpWebDavClient implements WebDavClient {
     try {
       await ensureDirectory(config, 'novel-playlet');
       await writeText(config, probe, 'novel-playlet-webdav-probe');
-      final echoed = await readText(config, probe);
+      final echoed = (await readFile(config, probe)).text;
       if (echoed != 'novel-playlet-webdav-probe') {
         return const WebDavTestResult.failure('写入成功但读回内容不一致');
       }
@@ -213,6 +234,7 @@ class HttpWebDavClient implements WebDavClient {
     Uri uri, {
     String? body,
     String? ifMatch,
+    String? ifNoneMatch,
     String? contentType,
   }) async {
     final client = HttpClient()
@@ -230,6 +252,9 @@ class HttpWebDavClient implements WebDavClient {
       }
       if (ifMatch != null) {
         request.headers.set('If-Match', ifMatch);
+      }
+      if (ifNoneMatch != null) {
+        request.headers.set('If-None-Match', ifNoneMatch);
       }
       if (body != null) {
         final bytes = utf8.encode(body);

@@ -228,6 +228,25 @@ void main() {
     expect(runs.single.phase, 'parse');
     expect(runs.single.error, contains('格式不正确'));
   });
+
+  test('服务器不支持 PROPFIND 时用条件 GET 命中 304 跳过', () async {
+    client.supportsStat = false;
+    await store.addToShelf(const NovelItem(id: 'a', title: 'A'));
+    final service = WebDavSyncService(
+      store: store,
+      client: client,
+      metaStore: SyncMetaStore(),
+      profile: 'release',
+    );
+    await service.sync(config);
+    final readsAfterFirst = client.reads;
+    final writesAfterFirst = client.writes;
+
+    final second = await service.sync(config);
+    expect(second.skipped, isTrue);
+    expect(client.reads, readsAfterFirst + 1, reason: '只发一次条件 GET');
+    expect(client.writes, writesAfterFirst, reason: '304 之后不该再 PUT');
+  });
 }
 
 class _FakeWebDavClient implements WebDavClient {
@@ -246,29 +265,37 @@ class _FakeWebDavClient implements WebDavClient {
   int reads = 0;
   int writes = 0;
 
+  /// 模拟不支持 PROPFIND 的服务器：stat 一律返回 null。
+  bool supportsStat = true;
+
   /// 在下一次 PUT 真正执行前插一刀，用来模拟"另一台设备抢先写入"。
   void Function(Uri uri)? beforeNextWrite;
 
   @override
-  Future<String?> readText(
+  Future<WebDavRead> readFile(
     WebDavConfig config,
     Uri uri, {
-    void Function(String? etag)? onEtag,
+    String? ifNoneMatch,
   }) async {
     reads++;
     final text = files[uri];
-    onEtag?.call(text == null ? null : _etagOf(text));
-    return text;
+    if (text == null) return const WebDavRead.absent();
+    final etag = _etagOf(text);
+    if (ifNoneMatch != null && ifNoneMatch == etag) {
+      return WebDavRead.notModified(etag);
+    }
+    return WebDavRead.content(text, etag);
   }
 
   @override
   Future<WebDavFileMeta?> stat(WebDavConfig config, Uri uri) async {
+    if (!supportsStat) return null;
     final text = files[uri];
     return text == null ? null : WebDavFileMeta(etag: _etagOf(text));
   }
 
   @override
-  Future<void> writeText(
+  Future<String?> writeText(
     WebDavConfig config,
     Uri uri,
     String text, {
@@ -285,6 +312,7 @@ class _FakeWebDavClient implements WebDavClient {
       throw WebDavPreconditionFailed('conflict', statusCode: 412);
     }
     files[uri] = text;
+    return _etagOf(text);
   }
 
   @override
