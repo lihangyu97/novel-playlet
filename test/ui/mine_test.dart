@@ -1,323 +1,139 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:novel_playlet/app/providers.dart';
-import 'package:novel_playlet/app/widgets/app_section_header.dart';
-import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
-import 'package:novel_playlet/app/widgets/surface_card.dart';
-import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
-import 'package:novel_playlet/features/cache/cache_center_page.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
-import 'package:novel_playlet/features/mine/widgets/mine_novel_tab.dart';
-import 'package:novel_playlet/features/mine/widgets/mine_recent_tile.dart';
-import 'package:novel_playlet/features/mine/widgets/mine_shelf_grid.dart';
+import 'package:novel_playlet/features/mine/widgets/library_type_badge.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 
 import 'preview_harness.dart';
 
-/// 我的页预览：统一页头（我的 + 统计 + 设置）+ 小说/短剧两个 tab。
+/// 我的页：历史 + 收藏（小说与短剧混排）。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/mine_test.dart`。
-/// 最近阅读/观看的封面是正方形；书架/收藏卡仍用各自内容类型的原生比例
-/// （小说 3:4、短剧 7:10）。
-void _expectCoverAspect(WidgetTester tester, String label) {
-  final recentCovers = tester
-      .widgetList<NovelCover>(
-        find.descendant(
-          of: find.byType(MineRecentTile),
-          matching: find.byType(NovelCover),
-        ),
-      )
-      .toList();
-  for (final cover in recentCovers) {
-    expect(
-      cover.width,
-      closeTo(cover.height, 0.01),
-      reason: '$label 最近记录的封面应为正方形',
-    );
-  }
-
-  final bad = tester
-      .widgetList<NovelCover>(find.byType(NovelCover))
-      .where((cover) => !recentCovers.contains(cover))
-      .where((cover) {
-        final ratio = cover.height / cover.width;
-        return (ratio - kNovelCoverAspect).abs() > 0.002 &&
-            (ratio - kVideoCoverAspect).abs() > 0.002;
-      })
-      .map(
-        (cover) =>
-            '${cover.width.toStringAsFixed(1)}×${cover.height.toStringAsFixed(1)}'
-            '(h/w=${(cover.height / cover.width).toStringAsFixed(3)})',
-      )
-      .toSet();
-  expect(bad, isEmpty, reason: '$label 有卡片封面既不是小说 3:4 也不是短剧 7:10：$bad');
-}
-
-/// 点 tab 栏里的「小说 / 短剧」切 tab（标签在页头下方的 tabs 行里）。
-Future<void> _openTab(WidgetTester tester, String label) async {
-  await tester.tap(find.text(label));
-  await tester.pumpAndSettle(const Duration(milliseconds: 400));
-}
-
-/// 预置书架：按列表顺序展示，所以从后往前加（新的排在最前）。
-Future<void> _seedNovelShelf(List<NovelItem> items) async {
-  final store = ReadingStore();
-  for (final item in items) {
-    await store.addToShelf(item);
-  }
-}
-
-Future<void> _seedNovelProgress({
-  required String bookId,
-  required String bookTitle,
-  required String chapterId,
-  int chapterIndex = 0,
-}) async {
-  await ReadingStore().saveProgress(
-    bookId: bookId,
-    bookTitle: bookTitle,
-    cover: '',
-    chapterId: chapterId,
-    chapterIndex: chapterIndex,
-  );
-}
-
-Future<void> _seedVideoProgress({
-  required String seriesId,
-  required String title,
-  required int episodeIndex,
-}) async {
-  await ReadingStore().saveVideoProgress(
-    seriesId: seriesId,
-    title: title,
-    episodeIndex: episodeIndex,
-  );
-}
-
-/// 预置「收藏 2 部 + 看完 v1 第 5 集」。
-Future<void> _seedVideoHistory() async {
-  final store = ReadingStore();
-  await store.addVideoToShelf(
-    const VideoSeries(id: 'v2', title: '另一部短剧', episodeCount: 12),
-  );
-  await store.addVideoToShelf(
-    const VideoSeries(id: 'v1', title: '太奶奶的短剧', episodeCount: 40),
-  );
-  await store.saveVideoProgress(
-    seriesId: 'v1',
-    title: '太奶奶的短剧',
-    episodeIndex: 4,
-  );
-}
-
 void main() {
   setUpAll(() async {
     await loadPreviewFont();
   });
 
-  testWidgets('我的页-短剧最近观看点击后进播放页', (tester) async {
-    await _seedVideoProgress(
-      seriesId: 'v1',
-      title: '太奶奶的短剧',
-      episodeIndex: 4,
-    );
-    await pumpPreview(tester, const MinePage());
-    await _openTab(tester, '短剧');
+  /// 收藏网格覆盖统一按小说 3:4 出图（短剧封面裁切），同一行高度一致。
+  void expectUnifiedCoverAspect(WidgetTester tester) {
+    final covers = tester.widgetList<NovelCover>(find.byType(NovelCover));
+    final bad = covers
+        .where(
+          (cover) =>
+              (cover.height / cover.width - kNovelCoverAspect).abs() > 0.002,
+        )
+        .map((c) => '${c.width}×${c.height}')
+        .toSet();
+    expect(bad, isEmpty, reason: '收藏混排必须统一 3:4：$bad');
+  }
 
-    await tester.tap(find.text('看到第 5 集'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    expect(find.byType(VideoPlayerPage), findsOneWidget);
-  });
-
-  testWidgets('我的页（短剧收藏与历史）', (tester) async {
-    await _seedVideoHistory();
+  testWidgets('我的页-空态', (tester) async {
     await pumpPreview(tester, const MinePage());
 
-    // 页头统计是两边合并的，切 tab 前后都不变。
-    expect(find.text('书架 0 本 · 收藏 2 部'), findsOneWidget);
-
-    await _openTab(tester, '短剧');
-    expect(find.text('最近观看'), findsOneWidget);
-    expect(find.text('我的收藏'), findsOneWidget);
-    expect(find.text('太奶奶的短剧'), findsWidgets);
-    expect(find.text('看到第 5 集'), findsOneWidget);
-    expect(find.text('另一部短剧'), findsOneWidget);
-    // 收藏换成和首页一样的白底卡片：只展示剧名 + 全 N 集。
-    expect(find.byType(AppSurfaceCard), findsNWidgets(2));
-    expect(find.text('全 40 集'), findsWidgets);
-    expect(find.text('全 12 集'), findsWidgets);
-    // 最近观看和最近阅读同一版式：封面在左、箭头在右。
-    expect(find.byIcon(Icons.chevron_left_rounded), findsNothing);
-    expect(find.byIcon(Icons.chevron_right_rounded), findsWidgets);
-    await expectLater(
-      find.byType(MinePage),
-      matchesGoldenFile('../goldens/mine_drama.png'),
-    );
-  });
-
-  testWidgets('我的页（空书架）', (tester) async {
-    await pumpPreview(tester, const MinePage());
     expect(find.text('我的'), findsOneWidget, reason: '统一页头标题');
-    expect(find.text('书架 0 本 · 收藏 0 部'), findsOneWidget);
-    expect(find.text('我的书架'), findsOneWidget);
-    expect(find.text('书架还是空的，去推荐页看看'), findsOneWidget);
+    expect(find.text('历史 0 · 收藏 0'), findsOneWidget);
+    expect(find.text('历史'), findsOneWidget);
+    expect(find.text('收藏'), findsOneWidget);
+    expect(find.text('还没有阅读记录，去推荐页逛逛'), findsOneWidget);
+    expect(find.text('收藏夹还是空的，去推荐页看看'), findsOneWidget);
+
     await expectLater(
       find.byType(MinePage),
       matchesGoldenFile('../goldens/mine_empty.png'),
     );
   });
 
-  testWidgets('我的页-书架卡片只展示书名与作者，不退回分类', (tester) async {
-    await _seedNovelShelf([
-      const NovelItem(id: '2', title: '无作者书'),
-      const NovelItem(id: '1', title: '剑来', author: '烽火戏诸侯'),
-    ]);
-    await pumpPreview(tester, const MinePage());
-
-    expect(find.byType(AppSurfaceCard), findsNWidgets(2));
-    expect(find.text('剑来'), findsWidgets);
-    expect(find.text('烽火戏诸侯'), findsOneWidget);
-    expect(find.text('玄幻'), findsNothing, reason: '书架只要求书名+作者，作者缺失时不拿分类顶替');
-  });
-
-  testWidgets('我的页（有书架与进度）', (tester) async {
-    await _seedNovelShelf([
-      for (var i = 4; i >= 1; i--)
-        NovelItem(
-          id: '$i',
-          title: FakePreviewTransport.titles[i - 1],
-          author: '作者$i',
-        ),
-    ]);
-    await _seedNovelProgress(
-      bookId: '1',
+  testWidgets('我的页-历史混排：标签区分类型，短剧点击直接续播', (tester) async {
+    final store = ReadingStore();
+    await store.saveProgress(
+      bookId: 'n1',
       bookTitle: '剑来',
+      cover: '',
       chapterId: 'c3',
       chapterIndex: 2,
     );
-    await pumpPreview(tester, const MinePage());
-    expect(find.text('书架 4 本 · 收藏 0 部'), findsOneWidget);
-    expect(find.text('最近阅读'), findsOneWidget);
-    // 书架换成和首页一样的白底卡片：书名 + 作者，不带分类/推荐元信息。
-    expect(find.byType(AppSurfaceCard), findsNWidgets(4));
-    expect(find.text('作者1'), findsWidgets);
-    expect(find.text('作者4'), findsWidgets);
-    // 最近阅读封面为正方形，书架卡仍按小说 3:4。
-    _expectCoverAspect(tester, '我的页');
+    await store.saveVideoProgress(
+      seriesId: 'p1',
+      title: '太奶奶的短剧',
+      episodeIndex: 4,
+    );
+
+    await pumpPreview(tester, const MinePage(), store: store);
+
+    // 一条时间线：后看的短剧排在前面，两种类型都在。
+    expect(find.text('剑来'), findsOneWidget);
+    expect(find.text('太奶奶的短剧'), findsOneWidget);
+    expect(find.text('读到第 3 章'), findsOneWidget);
+    expect(find.text('看到第 5 集'), findsOneWidget);
+
+    // 副标题前的彩色标签。
+    final badges = tester.widgetList<LibraryTypeBadge>(
+      find.byType(LibraryTypeBadge),
+    );
+    expect(badges, hasLength(2));
+    expect(badges.where((b) => b.type.isPlaylet), hasLength(1));
+
+    // 短剧条目点进去直接进播放页（续播到第 5 集）。
+    await tester.tap(find.text('看到第 5 集'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.byType(VideoPlayerPage), findsOneWidget);
+  });
+
+  testWidgets('我的页-收藏混排：统一 3:4 封面 + 标签 + 长按移出', (tester) async {
+    final store = ReadingStore();
+    await store.addToShelf(
+      const NovelItem(id: 'n1', title: '剑来', author: '烽火戏诸侯'),
+    );
+    await store.addVideoToShelf(
+      const VideoSeries(id: 'p1', title: '太奶奶的短剧', episodeCount: 40),
+    );
+
+    await pumpPreview(tester, const MinePage(), store: store);
+
+    expect(find.text('剑来'), findsOneWidget);
+    expect(find.text('烽火戏诸侯'), findsOneWidget);
+    expect(find.text('太奶奶的短剧'), findsOneWidget);
+    expect(find.text('全 40 集'), findsOneWidget);
+    expectUnifiedCoverAspect(tester);
+
+    // 收藏卡的左上角标签。
+    expect(
+      find.descendant(
+        of: find.byType(MinePage),
+        matching: find.byType(LibraryTypeBadge),
+      ),
+      findsNWidgets(2),
+    );
+
     await expectLater(
       find.byType(MinePage),
       matchesGoldenFile('../goldens/mine_shelf.png'),
     );
+
+    await tester.longPress(find.text('剑来'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    await tester.tap(find.text('移出书架'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+
+    expect(find.text('剑来'), findsNothing, reason: '移出后收藏里不该再有它');
+    expect(find.text('太奶奶的短剧'), findsOneWidget);
   });
 
-  /// 回归（CODE_REVIEW P1-5）：阅读页每 400ms 落一次进度，保活的「我的」页
-  /// 不能因此整页/书架网格重建——只有最近阅读那一块跟着刷新。
-  testWidgets('我的页-保存阅读进度只刷新最近阅读，不重建书架网格', (tester) async {
-    await _seedNovelShelf([
-      const NovelItem(id: '1', title: '剑来', author: '烽火戏诸侯'),
-    ]);
-    await _seedNovelProgress(bookId: '1', bookTitle: '剑来', chapterId: 'c1');
-    await pumpPreview(tester, const MinePage());
-
-    final tabBefore = tester.widget<MineNovelTab>(find.byType(MineNovelTab));
-    final gridBefore = tester.widget<MineShelfGrid>(find.byType(MineShelfGrid));
-    expect(find.text('读到第 1 章'), findsOneWidget);
-
-    // 等价于阅读页的一次进度落盘。
-    final container = ProviderScope.containerOf(
-      tester.element(find.byType(MinePage)),
-    );
-    await container
-        .read(readingStoreProvider)
-        .saveProgress(
-          bookId: '1',
-          bookTitle: '剑来',
-          cover: '',
-          chapterId: 'c2',
-          chapterIndex: 1,
-        );
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-
-    expect(
-      tester.widget<MineNovelTab>(find.byType(MineNovelTab)),
-      same(tabBefore),
-      reason: '阅读进度落盘不应让 tab（乃至整页）重建',
-    );
-    expect(
-      tester.widget<MineShelfGrid>(find.byType(MineShelfGrid)),
-      same(gridBefore),
-      reason: '书架网格不应因阅读进度落盘重建',
-    );
-    expect(find.text('读到第 2 章'), findsOneWidget, reason: '最近阅读必须跟着更新');
-    expect(find.text('书架 1 本 · 收藏 0 部'), findsOneWidget);
-  });
-
-  testWidgets('我的页（短剧空态）', (tester) async {
-    await pumpPreview(tester, const MinePage());
-    await _openTab(tester, '短剧');
-    expect(find.text('还没有观看记录，去推荐页看看短剧'), findsOneWidget);
-    expect(find.text('还没有收藏的短剧，去推荐页看看'), findsOneWidget);
-    await expectLater(
-      find.byType(MinePage),
-      matchesGoldenFile('../goldens/mine_drama_empty.png'),
-    );
-  });
-
-  /// tab 之间左右滑动切换（内容完全隔离，各自留着滚动位置）。
-  testWidgets('我的页-左右滑动切换 tab', (tester) async {
-    await pumpPreview(tester, const MinePage());
-    expect(find.text('我的书架'), findsOneWidget);
-
-    await tester.drag(find.byType(TabBarView), const Offset(-300, 0));
-    await tester.pumpAndSettle(const Duration(milliseconds: 400));
-    expect(find.text('我的收藏'), findsOneWidget);
-    expect(find.text('我的书架'), findsNothing);
-
-    await tester.drag(find.byType(TabBarView), const Offset(300, 0));
-    await tester.pumpAndSettle(const Duration(milliseconds: 400));
-    expect(find.text('我的书架'), findsOneWidget);
-    expect(find.text('我的收藏'), findsNothing);
-  });
-
-  /// 切走再切回来：保活让每个 tab 的滚动位置各自保留。
-  testWidgets('我的页-两个 tab 各自保留滚动位置', (tester) async {
-    await _seedNovelShelf([
-      for (var i = 12; i >= 1; i--)
-        NovelItem(id: '$i', title: '书$i', author: '作者$i'),
-    ]);
-    await pumpPreview(tester, const MinePage());
-    await tester.drag(
-      find.byType(CustomScrollView).first,
-      const Offset(0, -300),
-    );
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    final scrolled = verticalOffset(tester);
-    expect(scrolled, greaterThan(100), reason: '前置：书架 tab 已滚离顶部');
-
-    await _openTab(tester, '短剧');
-    await _openTab(tester, '小说');
-    expect(
-      verticalOffset(tester),
-      closeTo(scrolled, 0.5),
-      reason: '切走再回来滚动位置应保留',
-    );
-  });
-
-  /// 页头（我的 + 统计 + 设置）与 tabs 固定贴顶，只有 tab 内容滚动。
   testWidgets('我的页-页头固定贴顶不随列表滚动', (tester) async {
-    await _seedNovelShelf([
-      for (var i = 12; i >= 1; i--)
-        NovelItem(id: '$i', title: '书$i', author: '作者$i'),
-    ]);
-    await pumpPreview(tester, const MinePage());
+    final store = ReadingStore();
+    for (var i = 12; i >= 1; i--) {
+      await store.addToShelf(NovelItem(id: 'b$i', title: '书$i', author: '作者$i'));
+    }
+
+    await pumpPreview(tester, const MinePage(), store: store);
+
     final header = find.text('我的');
     final headerBefore = tester.getTopLeft(header);
-    final shelfBefore = tester.getTopLeft(find.text('我的书架'));
+    final sectionBefore = tester.getTopLeft(find.text('收藏'));
 
     await tester.drag(
       find.byType(CustomScrollView).first,
@@ -326,238 +142,11 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
 
     expect(find.text('我的'), findsOneWidget, reason: '页头必须始终可见');
-    expect(tester.getTopLeft(header), headerBefore, reason: '页头固定贴顶，不随列表滚动');
+    expect(tester.getTopLeft(header), headerBefore, reason: '页头固定贴顶');
     expect(
-      tester.getTopLeft(find.text('我的书架')).dy,
-      lessThan(shelfBefore.dy),
-      reason: '页头下面的书架内容应该正常滚动',
-    );
-  });
-
-  /// 顶部渐变必须盖住状态栏（安全区）那一条。
-  testWidgets('我的页-顶部渐变盖住状态栏', (tester) async {
-    tester.view.padding = const FakeViewPadding(top: 44);
-    await pumpPreview(tester, const MinePage());
-    final glow = tester.getRect(find.byType(TopGlow));
-    expect(glow.top, 0, reason: '渐变必须从屏幕最顶端开始');
-    expect(
-      glow.height,
-      greaterThanOrEqualTo(150 + 44),
-      reason: '高度要包含状态栏安全区，否则顶部会留一条纯白',
-    );
-  });
-
-  /// 顶部渐变整页统一：小说/短剧 tab 共用同一套，切 tab 不换色带。
-  testWidgets('我的页-顶部渐变整页统一', (tester) async {
-    await pumpPreview(tester, const MinePage());
-    TopGlow glow() => tester.widget<TopGlow>(find.byType(TopGlow));
-    expect(glow().spec, same(kMineTopGlow));
-
-    await _openTab(tester, '短剧');
-    expect(glow().spec, same(kMineTopGlow), reason: '切到短剧 tab 后渐变不应变化');
-  });
-
-  /// tab 样式：当前 tab 主题色 + 加粗高亮，字号与未选中一致（只换颜色/字重）。
-  testWidgets('我的页-当前 tab 高亮且布局稳定', (tester) async {
-    await pumpPreview(tester, const MinePage());
-    final scheme = Theme.of(tester.element(find.byType(MinePage))).colorScheme;
-
-    TextStyle styleOf(String label) {
-      final finder = find.descendant(
-        of: find.byType(CategoryTabBar),
-        matching: find.text(label),
-      );
-      return tester.widget<Text>(finder).style!;
-    }
-
-    expect(find.byType(TabBar), findsNothing, reason: '不用带下划线的 TabBar');
-    expect(styleOf('小说').color, scheme.primary, reason: '当前 tab 用主题色高亮');
-    expect(styleOf('短剧').color, scheme.onSurfaceVariant);
-    expect(styleOf('小说').fontSize, CategoryTabBar.fontSize);
-    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
-    expect(
-      styleOf('小说').fontWeight,
-      isNot(styleOf('短剧').fontWeight),
-      reason: '字号不变，靠字重 + 颜色区分选中',
-    );
-
-    // 两个 tab 字号相同、文字贴在同一条底线上。
-    expect(
-      tester.getBottomLeft(find.text('小说')).dy,
-      tester.getBottomLeft(find.text('短剧')).dy,
-      reason: '选中/未选中的文字必须贴同一条底线',
-    );
-
-    // 首个 tab 文字左边缘与内容留白（8）对齐，按选中态字重预留宽度。
-    expect(
-      tester.getTopLeft(find.text('小说')).dx,
-      closeTo(8, 0.5),
-      reason: 'tab 文字应与页头/区块标题左对齐',
-    );
-
-    // 固定高度 + 固定占位：切换中/切换后 tab 栏、文字左边缘/底线、内容区
-    // 都不挪位置。
-    expect(
-      tester.getSize(find.byType(CategoryTabBar)).height,
-      CategoryTabBar.height,
-    );
-    final barBefore = tester.getRect(find.byType(CategoryTabBar));
-    final novelLeftBefore = tester.getTopLeft(find.text('小说')).dx;
-    final dramaLeftBefore = tester.getTopLeft(find.text('短剧')).dx;
-    final novelBottomBefore = tester.getBottomLeft(find.text('小说')).dy;
-    final dramaBottomBefore = tester.getBottomLeft(find.text('短剧')).dy;
-    final bodyBefore = tester.getRect(find.byType(TabBarView));
-
-    await tester.tap(find.text('短剧'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(tester.getRect(find.byType(CategoryTabBar)), barBefore);
-    expect(tester.getTopLeft(find.text('小说')).dx, novelLeftBefore);
-    expect(tester.getTopLeft(find.text('短剧')).dx, dramaLeftBefore);
-    expect(tester.getBottomLeft(find.text('小说')).dy, novelBottomBefore);
-    expect(tester.getBottomLeft(find.text('短剧')).dy, dramaBottomBefore);
-    expect(tester.getRect(find.byType(TabBarView)), bodyBefore);
-
-    await tester.pumpAndSettle(const Duration(milliseconds: 400));
-    expect(styleOf('短剧').color, scheme.primary);
-    expect(styleOf('小说').color, scheme.onSurfaceVariant);
-    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
-    expect(tester.getRect(find.byType(CategoryTabBar)), barBefore);
-    expect(tester.getTopLeft(find.text('小说')).dx, novelLeftBefore);
-    expect(tester.getTopLeft(find.text('短剧')).dx, dramaLeftBefore);
-    expect(tester.getBottomLeft(find.text('小说')).dy, novelBottomBefore);
-    expect(tester.getBottomLeft(find.text('短剧')).dy, dramaBottomBefore);
-  });
-
-  /// 拖动 TabBarView 时：字号/颜色/下划线都跟着动画连续走（不再到中点突然
-  /// 切换），只有无障碍语义在过半时切到新 tab。
-  testWidgets('我的页-拖动时高亮与下划线连续跟随', (tester) async {
-    await pumpPreview(tester, const MinePage());
-    final scheme = Theme.of(tester.element(find.byType(MinePage))).colorScheme;
-    TextStyle styleOf(String label) {
-      final finder = find.descendant(
-        of: find.byType(CategoryTabBar),
-        matching: find.text(label),
-      );
-      return tester.widget<Text>(finder).style!;
-    }
-
-    bool semanticSelected(String label) {
-      final ancestors = find.ancestor(
-        of: find.descendant(
-          of: find.byType(CategoryTabBar),
-          matching: find.text(label),
-        ),
-        matching: find.byType(Semantics),
-      );
-      // 取最近一个显式声明了 selected 的 Semantics（InkWell 自带的那个
-      // 不声明 selected，跳过）。
-      for (final element in ancestors.evaluate()) {
-        final selected = (element.widget as Semantics).properties.selected;
-        if (selected != null) return selected;
-      }
-      return false;
-    }
-
-    final underline = find.byKey(const Key('category_tab_underline'));
-    final underlineStart = tester.getRect(underline).left;
-
-    final gesture = await tester.startGesture(
-      tester.getCenter(find.byType(TabBarView)),
-    );
-    // 拖动约 10%：还远没过半，但颜色已经朝短剧方向插值；字号始终保持一致。
-    await gesture.moveBy(const Offset(-40, 0));
-    await tester.pump();
-    expect(styleOf('小说').fontSize, CategoryTabBar.fontSize);
-    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
-    expect(styleOf('小说').color, isNot(scheme.primary));
-    expect(styleOf('短剧').color, isNot(scheme.onSurfaceVariant));
-    expect(
-      tester.getRect(underline).left,
-      greaterThan(underlineStart + 0.5),
-      reason: '下划线跟着手指滑',
-    );
-    expect(semanticSelected('小说'), isTrue, reason: '未过半语义仍是小说');
-
-    // 拖到约 51%：一过中线，无障碍语义切到短剧（视觉仍在插值）。
-    await gesture.moveBy(const Offset(-160, 0));
-    await tester.pump();
-    expect(semanticSelected('短剧'), isTrue);
-    expect(semanticSelected('小说'), isFalse);
-
-    await gesture.up();
-    await tester.pumpAndSettle(const Duration(milliseconds: 400));
-    expect(styleOf('短剧').color, scheme.primary);
-    expect(styleOf('短剧').fontSize, CategoryTabBar.fontSize);
-    expect(
-      tester.getRect(underline).left,
-      closeTo(tester.getRect(find.text('短剧')).left, 0.5),
-    );
-  });
-
-  /// 缓存中心入口在页头右上角、设置按钮左边（推荐页顶栏收掉缓存入口后
-  /// 挪过来的）；两枚图标同一套线性图标、同尺寸。
-  testWidgets('我的页-缓存入口在设置左边并进缓存中心', (tester) async {
-    await pumpPreview(tester, const MinePage());
-    final cache = find.byTooltip('缓存');
-    final settings = find.byTooltip('设置');
-    expect(cache, findsOneWidget);
-    expect(settings, findsOneWidget);
-    expect(
-      tester.getCenter(cache).dx,
-      lessThan(tester.getCenter(settings).dx),
-      reason: '缓存入口在设置左边',
-    );
-    expect(
-      tester.getCenter(cache).dy,
-      closeTo(tester.getCenter(settings).dy, 0.5),
-      reason: '两枚图标在同一行',
-    );
-    expect(
-      find.descendant(
-        of: cache,
-        matching: find.byIcon(Icons.download_outlined),
-      ),
-      findsOneWidget,
-    );
-
-    await tester.tap(cache);
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.byType(CacheCenterPage), findsOneWidget);
-  });
-
-  /// tabs 上下留白一致：页头统计 → tab 文字、下划线 → 第一个区块标题，
-  /// 两段都是 8pt（以前下面是 12pt，看着比上面空）。
-  testWidgets('我的页-tabs 上下留白一致且收紧', (tester) async {
-    await pumpPreview(tester, const MinePage());
-    final bar = tester.getRect(find.byType(CategoryTabBar));
-    final stats = tester.getRect(find.textContaining('本 · 收藏'));
-    final tabText = tester.getRect(find.text('小说'));
-    // 第一个区块标题的文字（有最近阅读时是「最近阅读」、没有时是「我的书架」）。
-    final section = tester.getRect(
-      find
-          .descendant(
-            of: find.byType(AppSectionHeader).first,
-            matching: find.byType(Text),
-          )
-          .first,
-    );
-
-    const gap = 8.0;
-    expect(
-      tabText.top - stats.bottom,
-      closeTo(gap, 0.5),
-      reason: '统计到 tab 文字留 8pt',
-    );
-    expect(
-      section.top - bar.bottom,
-      closeTo(gap, 0.5),
-      reason: '下划线（贴行底）到第一个区块标题留 8pt',
-    );
-    expect(
-      (tabText.top - stats.bottom) - (section.top - bar.bottom),
-      closeTo(0, 0.5),
-      reason: '上下两段留白必须一样宽',
+      tester.getTopLeft(find.text('收藏')).dy,
+      lessThan(sectionBefore.dy),
+      reason: '页头下面的内容应该正常滚动',
     );
   });
 }

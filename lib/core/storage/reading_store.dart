@@ -165,6 +165,9 @@ class ReadingStore {
     return LibraryDb.readShelf(await _db, type: type);
   }
 
+  /// 历史条数（不含墓碑），页头统计用。
+  Future<int> historyCount() async => LibraryDb.countHistory(await _db);
+
   // ---------------------------------------------------------------------
   // 小说
   // ---------------------------------------------------------------------

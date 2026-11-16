@@ -4,9 +4,8 @@ import '../../../app/theme/app_theme.dart';
 
 /// 我的页页头：图标 + 主标题 + 一行合并统计 + 缓存 / 设置入口。
 ///
-/// 小说/短剧两个 tab 共用**同一个**页头（固定贴顶、不随内容滚动），不再按
-/// 内容类型做镜像版式；右上角固定两枚图标按钮：缓存中心（离线下载的书 /
-/// 短剧）在左、设置在右，两者同一套线性图标、同尺寸、同颜色。
+/// 页头固定贴顶、不随内容滚动；右上角固定两枚图标按钮：缓存中心（离线下载
+/// 的书 / 短剧）在左、设置在右，两者同一套线性图标、同尺寸、同颜色。
 class MineHeader extends StatelessWidget {
   const MineHeader({
     super.key,
@@ -20,7 +19,7 @@ class MineHeader extends StatelessWidget {
   final String title;
   final IconData icon;
 
-  /// 两个 tab 合并后的一行统计，例如「书架 12 本 · 收藏 4 部」。
+  /// 小说/短剧合并后的一行统计，例如「历史 12 · 收藏 4」。
   ///
   /// 传 Widget 而不是 String：统计只订阅本数的叶子组件自己 watch provider，
   /// [MinePage] 根节点不再因为数据变化重建（CODE_REVIEW P1-5）。

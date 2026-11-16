@@ -201,6 +201,18 @@ class LibraryDb {
     return rows.map(_fromRow).toList();
   }
 
+  /// 历史条数（不含墓碑）。页头统计用，只算个数、不取行。
+  static Future<int> countHistory(DatabaseExecutor db) async {
+    final count = Sqflite.firstIntValue(
+      await db.rawQuery(
+        'SELECT COUNT(*) FROM $table '
+        'WHERE last_read_at > 0 '
+        'AND (shelf_removed_at = 0 OR shelf_at > shelf_removed_at)',
+      ),
+    );
+    return count ?? 0;
+  }
+
   /// 整条写回；墓碑行会先经过 [LibraryRecord.normalized] 清掉快照。
   static Future<void> write(DatabaseExecutor db, LibraryRecord record) async {
     final row = record.normalized();
