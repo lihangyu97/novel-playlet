@@ -13,7 +13,7 @@ const mineHistoryLimit = 3;
 
 /// 把 [ReadingStore.shelfRevision] 桥接成 Riverpod 可以 watch 的计数。
 ///
-/// 只监听「书架内容」变更（加入 / 移出）：阅读页每 400ms 的进度落盘走
+/// 只监听「书架内容」变更（加入 / 移出）：阅读页的进度落盘走
 /// [recentRevisionProvider]，不会让收藏列表失效、进而重查库并重建整片网格
 /// （CODE_REVIEW P1-5）。
 final shelfRevisionProvider = NotifierProvider<ShelfRevision, int>(

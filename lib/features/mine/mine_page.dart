@@ -29,7 +29,7 @@ import '../../data/models/video_series.dart';
 /// 顶部氛围渐变整页一套。
 ///
 /// 页面根节点**不订阅任何数据 provider**：页头统计由 [_MineStats] 叶子自己
-/// watch，阅读页每 400ms 落一次进度时只有「历史」那一块重建（CODE_REVIEW
+/// watch，阅读页落一次进度时只有「历史」那一块重建（CODE_REVIEW
 /// P1-5）。两个区块各自订阅自己的通道，互不牵连。
 class MinePage extends ConsumerWidget {
   const MinePage({super.key, this.bottomInset = 0});

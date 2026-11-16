@@ -128,10 +128,19 @@ class ReaderController extends Notifier<ReaderSessionState> {
   bool _bootstrapping = false;
   int _requestToken = 0;
 
-  /// 页级进度防抖：翻页很频繁，没必要每一页都写一次 SharedPreferences。
+  /// 页级进度防抖：一直翻页时没必要每一页都写一次库。
+  ///
+  /// 切章、退出阅读页、App 切后台都会立即 flush（见 `reader_page.dart`），所以
+  /// 前台丢失窗口最多就是这里的时长；连续翻页时计时器会被不断重置，只有停下来才落盘。
+  @visibleForTesting
+  static Duration progressDebounce = const Duration(seconds: 5);
+
   Timer? _progressTimer;
+
+  /// 待落盘的落点。带上章 id：防抖窗口这么长，光靠「切章前一定先 flush」这个
+  /// 不变量不够稳，记错章就会把 A 章的段落下标写进 B 章。
+  String? _pendingChapterId;
   int? _pendingBlockIndex;
-  static const Duration _progressDebounce = Duration(milliseconds: 400);
 
   late ReaderChapterCache _cache;
 
@@ -709,30 +718,47 @@ class ReaderController extends Notifier<ReaderSessionState> {
     }
   }
 
-  /// 页面报告"当前页首段下标"，400ms 防抖后落盘；切章/退出时立即 flush。
+  /// 页面报告"当前页首段下标"，防抖 [progressDebounce] 后落盘；切章/退出/
+  /// 切后台时立即 flush。
   void noteReadingBlock(int blockIndex) {
     if (_disposed) return;
     final chapter = state.chapterAt(state.contentIndex);
     if (chapter == null || blockIndex < 0) return;
+    _pendingChapterId = chapter.id;
     _pendingBlockIndex = blockIndex;
     _progressTimer?.cancel();
-    _progressTimer = Timer(_progressDebounce, _flushPendingProgress);
+    _progressTimer = Timer(progressDebounce, _flushPendingProgress);
   }
 
-  /// 仅取消防抖计时器，不碰 provider state：页面 dispose 时 provider 可能
-  /// 已经在销毁流程里，不能安全读取 state。
-  void cancelProgressTimer() {
+  /// 丢弃待落盘的防抖进度（不写库）：页面已经用更准的当前页写过一次了，
+  /// 留着它会在下次切章时把旧落点覆盖回去。
+  ///
+  /// 纯字段操作，不碰 provider state：页面 dispose 时 provider 可能已经在
+  /// 销毁流程里，不能安全读取 state。
+  void discardPendingProgress() {
     _progressTimer?.cancel();
     _progressTimer = null;
+    _pendingChapterId = null;
+    _pendingBlockIndex = null;
   }
 
   void _flushPendingProgress() {
     _progressTimer?.cancel();
     _progressTimer = null;
     final blockIndex = _pendingBlockIndex;
+    final chapterId = _pendingChapterId;
+    _pendingChapterId = null;
     _pendingBlockIndex = null;
-    if (blockIndex == null || _disposed) return;
-    final chapter = state.chapterAt(state.contentIndex);
+    if (blockIndex == null || chapterId == null || _disposed) return;
+    // 按 arm 时的章 id 反查：这期间章节列表可能已经变了，不能用"当前显示的
+    // 那一章"去解释一个属于上一章的段落下标。
+    Chapter? chapter;
+    for (final item in state.chapters) {
+      if (item.id == chapterId) {
+        chapter = item;
+        break;
+      }
+    }
     if (chapter == null) return;
     _saveProgress(chapter, blockIndex: blockIndex);
   }

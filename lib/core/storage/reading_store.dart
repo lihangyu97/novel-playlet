@@ -94,6 +94,14 @@ class ReadingStore {
   /// 快速连点选集/连续翻页时会让"最近观看"顺序和后写覆盖前写都失准。
   int _stamp = 0;
 
+  /// 上一次淘汰（[LibraryDb.prune]）用的时间戳。
+  ///
+  /// 进度写是高频路径，而 500 条上限极少触顶：每次写都 `COUNT(*)` 没必要，
+  /// 两次之间至少隔 [pruneInterval]。行数是先涨后裁，短暂超出上限不影响读。
+  int _lastPruneAt = 0;
+
+  static const Duration pruneInterval = Duration(minutes: 1);
+
   int _now() {
     final now = DateTime.now().millisecondsSinceEpoch;
     _stamp = now > _stamp ? now : _stamp + 1;
@@ -331,7 +339,13 @@ class ReadingStore {
           progressSub: progressSub,
         ),
       );
-      await LibraryDb.prune(txn, libraryLimit);
+      // 新增一行（第一次读这本书）不受节流：上限要立刻生效。同一本书的反复
+      // 翻页只是 UPDATE，不必每次都数一遍表，按 [pruneInterval] 收敛即可。
+      if (existing == null ||
+          now - _lastPruneAt >= pruneInterval.inMilliseconds) {
+        _lastPruneAt = now;
+        await LibraryDb.prune(txn, libraryLimit);
+      }
     });
     if (type == LibraryType.novel) {
       recentRevision.value++;

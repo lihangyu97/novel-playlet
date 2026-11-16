@@ -272,8 +272,10 @@ ChapterContent{id,title,paragraphs}
 ### 4.6 进度与设置
 
 - 进度：`{chapterId, chapterIndex, blockIndex, updatedAt}`，`blockIndex` 是页首段落下标。
-- 写入：翻页 400ms 防抖、切章立即 flush、页面 dispose 再兜一次。
-- 表：`reading_progress_v1`（最近 200 本 LRU）+ `recent_reading_v1`（3 条）+ `last_read_book_v1`。
+- 写入：翻页 5s 防抖（`ReaderController.progressDebounce`）、切章立即 flush、退出阅读页与
+  App 切前后台（`inactive`/`paused`）再兜一次；同一本书的重复落点复用同一行 UPDATE。
+- 表：与书架/收藏同表，`library` 里一行（`type='novel'` + `source_id`），进度落
+  `progress_ref / progress_index / progress_sub`，看过的书就是「历史」的来源。
 - 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、字重 300–800（默认 **400**，整百档）、4 种底色（色块与「底色」标题同一行，不显示文字）、对话高亮开关
   （默认开）与颜色（默认 `#FFD54F`，设置页主题模块自定义）、段评气泡开关（默认开），落
   `reader_font_size_v1 / reader_line_height_v1 / reader_font_weight_v1 / reader_paper_v1 / reader_day_paper_v1 / reader_show_dialogue_highlight_v1 / reader_dialogue_highlight_color_v1 / reader_show_bubbles_v1`；
@@ -927,8 +929,8 @@ flutter drive --profile -d <iPhone UDID> \
   - 阅读/观看进度：按 `updatedAt` 取较新；
   - 最近阅读/最近观看由合并后的进度按时间重建，不再单独存一份冲突源。
 - **同步时机**：App 回前台/退后台自动同步一次；设置页可手动「立即同步」。阅读进度本身
-  400ms 防抖落盘，不能每次落盘都上传；WebDAV 免费流量足够（1 GB 上传 / 3 GB 下载每月），
-  但仍要避免高频整包上传。
+  5s 防抖落盘（切后台会在 `inactive` 先落盘，早于这里的 `paused` 同步），不能每次落盘
+  都上传；WebDAV 免费流量足够（1 GB 上传 / 3 GB 下载每月），但仍要避免高频整包上传。
 - **错误**：云端 JSON 损坏或渠道不匹配时停止同步并报错，绝不用空数据覆盖；401/403、409、
   507 分别提示账号、上级目录、网盘配额问题。
 - **测试**：`webdav_client_test.dart` 用本地 `HttpServer` 覆盖认证/探针/读写；`reading_store_sync_test.dart`
