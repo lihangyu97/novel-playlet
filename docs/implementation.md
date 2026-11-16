@@ -938,8 +938,9 @@ flutter drive --profile -d <iPhone UDID> \
     删除也能同步；
   - 进度淘汰墓碑：`progressPrunedAt` 晚于对方 `lastReadAt` 才丢弃，之后又读过会复活。
 - **条件请求**：先 `PROPFIND Depth:0` 取 ETag，与本机 `SyncMeta.remoteEtag` + 本地载荷指纹
-  （FNV-1a）比对，都命中就整轮跳过（不发 GET/PUT）。服务器不支持 PROPFIND 或没有 ETag 时，
-  回退到原来的无条件读写。
+  （FNV-1a）比对，都命中就整轮跳过（不发 GET/PUT）。PROPFIND 不可用时用上次的 ETag 发条件
+  GET（`If-None-Match`），命中 304 也直接跳过；两者都不可用（实测坚果云就是这种）就回退到
+  无条件 GET + 内容比对，只保证不会白写 PUT，省不掉下载。
 - **并发保护**：`PUT` 带 `If-Match: <etag>`；被另一台设备抢先写入（412/409）时重读 → 重合并
   → 重写，最多重试一次。写完再取一次 ETag 存回 `SyncMeta`。
 - **同步时机**：App 回前台/退后台自动同步一次；设置页可手动「立即同步」；保存配置后也会同步。

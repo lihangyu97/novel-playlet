@@ -44,7 +44,8 @@
 
 ### P1 云同步性能
 
-- [x] ~~**没有条件请求**~~：`PROPFIND Depth:0` 取 ETag，`SyncMeta.remoteEtag` + 本地载荷指纹（FNV-1a）都命中时整轮跳过（不 GET、不 PUT）；取不到 ETag 时回退到原来的无条件读写。`PROPFIND` 分支已激活。
+- [x] ~~**没有条件请求**~~：`PROPFIND Depth:0` 取 ETag，`SyncMeta.remoteEtag` + 本地载荷指纹（FNV-1a）都命中时整轮跳过（不 GET、不 PUT）；取不到 ETag 时用 `If-None-Match` 条件 GET（304 即跳过），再不行回退到无条件 GET + 内容比对。
+  - 真机实测（坚果云）：PROPFIND 返回不可用（stat 拿不到 ETag）、GET 也不回 304，所以实际走的是"全量 GET + 内容比对"兜底——不会白 PUT，但省不掉下载。换支持 ETag 的服务端时条件跳过自动生效。
 - [x] ~~**`ensureDirectory` 每次同步都重跑**~~：客户端按 `baseUrl + 账号 + 路径` 记住已建目录，首次成功后不再 MKCOL。
 - [ ] **同步文件拆分**：~~拆成 `<kind>-state.json` / `<kind>-meta.json`~~ **暂缓，动机已变**。
   - 当初的收益是"一次翻页只传状态部分"，但本地已并成一张表，写放大也已由 SQLite 单行 UPDATE 解决；拆开后一条记录的快照与状态分在两个文件，合并要跨文件 join、还要处理"key 只出现在一边"的情况。
