@@ -3,10 +3,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/features/settings/settings_page.dart';
 import 'package:novel_playlet/features/sync/webdav_client.dart';
 import 'package:novel_playlet/features/sync/webdav_config.dart';
+import 'package:novel_playlet/features/sync/sync_log.dart';
 import 'package:novel_playlet/features/sync/widgets/webdav_config_sheet.dart';
 import 'package:novel_playlet/features/sync/widgets/webdav_sync_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../support/memory_sync_log_store.dart';
 import 'preview_harness.dart';
 
 void main() {
@@ -28,6 +30,8 @@ void main() {
       extraOverrides: [
         webDavConfigStoreProvider.overrideWithValue(store),
         webDavClientProvider.overrideWithValue(client),
+        syncLogStoreProvider.overrideWithValue(MemorySyncLogStore()),
+        syncLogRunsProvider.overrideWith((ref) async => const <SyncLogRun>[]),
       ],
     );
 
@@ -70,6 +74,31 @@ void main() {
     expect(find.textContaining('上次同步'), findsOneWidget);
     expect(client.files.keys.single.path, endsWith('/sync.json'));
   });
+  testWidgets('WebDAV 弹层里有「同步记录」入口，能打开记录页', (tester) async {
+    final store = InMemoryWebDavConfigStore();
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+      extraOverrides: [
+        webDavConfigStoreProvider.overrideWithValue(store),
+        syncLogStoreProvider.overrideWithValue(MemorySyncLogStore()),
+        syncLogRunsProvider.overrideWith((ref) async => const <SyncLogRun>[]),
+      ],
+    );
+
+    await tester.ensureVisible(find.byKey(webDavConfigureKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(webDavConfigureKey));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(webDavLogKey), findsOneWidget);
+    await tester.tap(find.byKey(webDavLogKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text('同步记录'), findsWidgets);
+    expect(find.text('还没有同步记录'), findsOneWidget);
+  });
 }
 
 class _FakeWebDavClient implements WebDavClient {
@@ -82,12 +111,42 @@ class _FakeWebDavClient implements WebDavClient {
     String relativePath,
   ) async {}
 
-  @override
-  Future<String?> readText(WebDavConfig config, Uri uri) async => files[uri];
+  String _etagOf(String text) => '"${text.hashCode}"';
 
   @override
-  Future<void> writeText(WebDavConfig config, Uri uri, String text) async {
+  Future<WebDavRead> readFile(
+    WebDavConfig config,
+    Uri uri, {
+    String? ifNoneMatch,
+  }) async {
+    final text = files[uri];
+    if (text == null) return const WebDavRead.absent();
+    final etag = _etagOf(text);
+    if (ifNoneMatch != null && ifNoneMatch == etag) {
+      return WebDavRead.notModified(etag);
+    }
+    return WebDavRead.content(text, etag);
+  }
+
+  @override
+  Future<WebDavFileMeta?> stat(WebDavConfig config, Uri uri) async {
+    final text = files[uri];
+    return text == null ? null : WebDavFileMeta(etag: _etagOf(text));
+  }
+
+  @override
+  Future<String?> writeText(
+    WebDavConfig config,
+    Uri uri,
+    String text, {
+    String? ifMatch,
+  }) async {
+    final current = files[uri];
+    if (ifMatch != null && (current == null || _etagOf(current) != ifMatch)) {
+      throw WebDavPreconditionFailed('conflict', statusCode: 412);
+    }
     files[uri] = text;
+    return _etagOf(text);
   }
 
   @override

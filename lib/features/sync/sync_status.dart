@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'sync_log.dart';
 import 'sync_meta.dart';
 import 'sync_service.dart';
 import 'webdav_config.dart';
@@ -33,7 +34,9 @@ class SyncStatusController extends Notifier<SyncStatus> {
   /// 同步一次。返回 null 表示没配置或已有同步在跑。
   ///
   /// 自动/手动都只更新状态，不向上抛错；是否提示由调用方决定。
-  Future<SyncResult?> syncNow() async {
+  Future<SyncResult?> syncNow({
+    SyncTrigger trigger = SyncTrigger.manual,
+  }) async {
     if (state.isSyncing) return null;
     state = const SyncStatus(phase: SyncPhase.syncing, message: '正在同步…');
     try {
@@ -45,7 +48,9 @@ class SyncStatusController extends Notifier<SyncStatus> {
         );
         return null;
       }
-      final result = await ref.read(webDavSyncServiceProvider).sync(config);
+      final result = await ref
+          .read(webDavSyncServiceProvider)
+          .sync(config, trigger: trigger);
       state = SyncStatus(
         phase: SyncPhase.success,
         message: result.uploaded
@@ -56,6 +61,7 @@ class SyncStatusController extends Notifier<SyncStatus> {
         lastSyncAt: result.syncedAt,
       );
       ref.invalidate(syncMetaProvider);
+      ref.invalidate(syncLogRunsProvider);
       return result;
     } catch (error) {
       state = SyncStatus(

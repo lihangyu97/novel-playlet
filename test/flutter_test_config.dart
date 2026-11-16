@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/features/sync/sync_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/library_test_db.dart';
@@ -18,6 +20,17 @@ import 'support/library_test_db.dart';
 Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   SharedPreferences.setMockInitialValues(<String, Object>{});
   setupLibraryTestDb();
-  setUp(resetLibraryTestDb);
+  // 同步日志落到系统临时目录：测试里没有 path_provider 平台通道。
+  // 每个测试文件是独立进程：路径带 pid，避免并行跑时互相踩日志文件。
+  SyncLogStore.overridePath = File(
+    '${Directory.systemTemp.path}/novel-playlet-test-sync-log-$pid.json',
+  ).path;
+  setUp(() async {
+    // 每个用例都从空 prefs 开始：同步元数据（revision / ETag）不跨用例泄漏。
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    await resetLibraryTestDb();
+    final log = File(SyncLogStore.overridePath!);
+    if (await log.exists()) await log.delete();
+  });
   await testMain();
 }

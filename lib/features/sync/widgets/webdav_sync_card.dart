@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/widgets/app_snack_bar.dart';
 import '../sync_meta.dart';
+import '../sync_log.dart';
 import '../sync_status.dart';
 import '../webdav_config.dart';
 import 'webdav_config_sheet.dart';
@@ -86,7 +87,9 @@ class WebDavSyncCard extends ConsumerWidget {
     if (!context.mounted || saved != true) return;
     ref.invalidate(webDavConfigProvider);
     // 保存成功后立即试同步一次；失败只更新状态，不打扰用户。
-    await ref.read(syncStatusProvider.notifier).syncNow();
+    await ref
+        .read(syncStatusProvider.notifier)
+        .syncNow(trigger: SyncTrigger.config);
   }
 
   Future<void> _syncNow(BuildContext context, WidgetRef ref) async {
