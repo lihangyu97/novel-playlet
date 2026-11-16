@@ -114,7 +114,15 @@ class _FakeWebDavClient implements WebDavClient {
   String _etagOf(String text) => '"${text.hashCode}"';
 
   @override
-  Future<String?> readText(WebDavConfig config, Uri uri) async => files[uri];
+  Future<String?> readText(
+    WebDavConfig config,
+    Uri uri, {
+    void Function(String? etag)? onEtag,
+  }) async {
+    final text = files[uri];
+    onEtag?.call(text == null ? null : _etagOf(text));
+    return text;
+  }
 
   @override
   Future<WebDavFileMeta?> stat(WebDavConfig config, Uri uri) async {

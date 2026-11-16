@@ -250,9 +250,15 @@ class _FakeWebDavClient implements WebDavClient {
   void Function(Uri uri)? beforeNextWrite;
 
   @override
-  Future<String?> readText(WebDavConfig config, Uri uri) async {
+  Future<String?> readText(
+    WebDavConfig config,
+    Uri uri, {
+    void Function(String? etag)? onEtag,
+  }) async {
     reads++;
-    return files[uri];
+    final text = files[uri];
+    onEtag?.call(text == null ? null : _etagOf(text));
+    return text;
   }
 
   @override

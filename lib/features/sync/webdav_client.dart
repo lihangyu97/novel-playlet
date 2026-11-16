@@ -43,7 +43,15 @@ abstract interface class WebDavClient {
   /// 逐级创建目录；已存在视为成功。
   Future<void> ensureDirectory(WebDavConfig config, String relativePath);
 
-  Future<String?> readText(WebDavConfig config, Uri uri);
+  /// 读文件内容；不存在返回 null。
+  ///
+  /// [onEtag] 会拿到 GET 响应的 ETag：服务器不支持 PROPFIND 时，这是
+  /// `If-Match` 唯一能用的 etag 来源。
+  Future<String?> readText(
+    WebDavConfig config,
+    Uri uri, {
+    void Function(String? etag)? onEtag,
+  });
 
   /// 读文件元信息（PROPFIND Depth:0）。
   ///
@@ -97,8 +105,13 @@ class HttpWebDavClient implements WebDavClient {
   }
 
   @override
-  Future<String?> readText(WebDavConfig config, Uri uri) async {
+  Future<String?> readText(
+    WebDavConfig config,
+    Uri uri, {
+    void Function(String? etag)? onEtag,
+  }) async {
     final response = await _send(config, 'GET', uri);
+    onEtag?.call(response.etag);
     if (response.statusCode == 404) return null;
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw _statusError(response.statusCode, '下载同步文件失败');
@@ -108,7 +121,7 @@ class HttpWebDavClient implements WebDavClient {
 
   @override
   Future<WebDavFileMeta?> stat(WebDavConfig config, Uri uri) async {
-    final response = await _send(
+    var response = await _send(
       config,
       'PROPFIND',
       uri,
@@ -119,6 +132,11 @@ class HttpWebDavClient implements WebDavClient {
           '</d:prop></d:propfind>',
       contentType: 'application/xml; charset=utf-8',
     );
+    // 有些服务端不认带 body 的 PROPFIND；按 DAV 规范无 body = allprop，
+    // 再试一次不带 body 的。
+    if (response.statusCode != 207 && response.statusCode != 200) {
+      response = await _send(config, 'PROPFIND', uri);
+    }
     // 404 = 还没有文件；405/501 = 服务器不支持 PROPFIND；都回退到 GET。
     if (response.statusCode != 207 && response.statusCode != 200) return null;
     final etag = _xmlTag(response.body, 'getetag');
@@ -214,11 +232,15 @@ class HttpWebDavClient implements WebDavClient {
         request.headers.set('If-Match', ifMatch);
       }
       if (body != null) {
+        final bytes = utf8.encode(body);
         request.headers.set(
           HttpHeaders.contentTypeHeader,
           contentType ?? 'application/json; charset=utf-8',
         );
-        request.add(utf8.encode(body));
+        // 必须显式给长度：默认分块传输，部分 WebDAV 服务端（如坚果云）
+        // 会直接 400 拒掉带 chunked body 的 PROPFIND。
+        request.contentLength = bytes.length;
+        request.add(bytes);
       }
       final response = await request.close().timeout(timeout);
       final responseBody = await response

@@ -128,7 +128,14 @@ class WebDavSyncService {
       final fileMeta = attempt == 0
           ? remoteMeta
           : await client.stat(config, uri);
-      final raw = await client.readText(config, uri);
+      String? getEtag;
+      final raw = await client.readText(
+        config,
+        uri,
+        onEtag: (etag) => getEtag = etag,
+      );
+      // PROPFIND 拿不到 ETag 时（服务器不支持/拒绝），退而用 GET 响应头的。
+      final etag = fileMeta?.etag ?? getEtag;
       SyncSnapshot? remote;
       phase.value = 'parse';
       if (raw != null && raw.trim().isNotEmpty) {
@@ -175,7 +182,7 @@ class WebDavSyncService {
           meta.copyWith(
             lastRevision: math.max(remote.revision, meta.lastRevision),
             lastSyncAt: syncedAt,
-            remoteEtag: fileMeta?.etag,
+            remoteEtag: etag,
             localHash: _fingerprint(mergedJson),
           ),
         );
@@ -195,12 +202,7 @@ class WebDavSyncService {
 
       phase.value = 'put';
       try {
-        await client.writeText(
-          config,
-          uri,
-          snapshot.encode(),
-          ifMatch: fileMeta?.etag,
-        );
+        await client.writeText(config, uri, snapshot.encode(), ifMatch: etag);
       } on WebDavPreconditionFailed {
         if (attempt >= 1) rethrow;
         continue;

@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/features/sync/webdav_client.dart';
 import 'package:novel_playlet/features/sync/webdav_config.dart';
 
+String _etagOf(String text) => '"${text.hashCode}"';
+
 void main() {
   late HttpServer server;
   late WebDavConfig config;
@@ -33,6 +35,11 @@ void main() {
             request.response.statusCode = 405;
           }
         case 'PUT':
+          final ifMatch = request.headers.value('if-match');
+          if (ifMatch != null && ifMatch != _etagOf(files[path] ?? '')) {
+            request.response.statusCode = 412;
+            break;
+          }
           files[path] = await utf8.decoder.bind(request).join();
           request.response.statusCode = 201;
         case 'GET':
@@ -45,7 +52,22 @@ void main() {
         case 'DELETE':
           request.response.statusCode = files.remove(path) != null ? 204 : 404;
         case 'PROPFIND':
+          final content = files[path] ?? '';
           request.response.statusCode = 207;
+          request.response.headers.contentType = ContentType(
+            'application',
+            'xml',
+            charset: 'utf-8',
+          );
+          request.response.write(
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<d:multistatus xmlns:d="DAV:"><d:response>'
+            '<d:href>${request.uri.path}</d:href><d:propstat><d:prop>'
+            '<d:getetag>${_etagOf(content)}</d:getetag>'
+            '<d:getcontentlength>${utf8.encode(content).length}</d:getcontentlength>'
+            '</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>'
+            '</d:response></d:multistatus>',
+          );
         default:
           request.response.statusCode = 405;
       }
@@ -89,6 +111,24 @@ void main() {
     expect(await client.readText(config, uri), isNull);
     await client.writeText(config, uri, '{"ok":true}');
     expect(await client.readText(config, uri), '{"ok":true}');
+  });
+
+  test('stat 解析 ETag；If-Match 不匹配返回 412，匹配才写入', () async {
+    final client = HttpWebDavClient();
+    final uri = config.resolve('novel-playlet/release/sync.json');
+    await client.writeText(config, uri, '{"a":1}');
+
+    final meta = await client.stat(config, uri);
+    expect(meta, isNotNull);
+    expect(meta!.etag, _etagOf('{"a":1}'));
+    expect(meta.length, utf8.encode('{"a":1}').length);
+
+    await expectLater(
+      client.writeText(config, uri, '{}', ifMatch: '"stale"'),
+      throwsA(isA<WebDavPreconditionFailed>()),
+    );
+    await client.writeText(config, uri, '{"a":2}', ifMatch: meta.etag);
+    expect(files['/dav/novel-playlet/release/sync.json'], '{"a":2}');
   });
 
   test('只允许 HTTPS，localhost 例外用于测试', () {
