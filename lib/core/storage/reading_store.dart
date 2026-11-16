@@ -29,9 +29,6 @@ class ReadingProgress {
   /// 到读到的那一段，所以恢复比"第 N 页"稳。旧版本没有该字段，按 0 读。
   final int blockIndex;
   final DateTime updatedAt;
-
-;
-
 }
 
 /// 一部短剧的观看进度。
@@ -51,9 +48,6 @@ class VideoWatchProgress {
   /// 看到第几集（0-based）。
   final int episodeIndex;
   final DateTime updatedAt;
-
-;
-
 }
 
 /// 书架 / 收藏 / 进度的门面（SQLite，一张表）。
