@@ -27,6 +27,7 @@
 | 「我的」页合并为「历史 / 收藏」 | ✅ |
 | 短剧进度无上限 | ✅ 随 `libraryLimit = 500` 解决 |
 | 上传 `If-Match` / 条件请求 / gzip | ⬜ 未开始 |
+| 同步日志（历史 + 明细） | ⬜ 设计完成，待实现 |
 | 墓碑回收、进度裁剪墓碑 | ⬜ 需要先定方案 |
 
 ### P0 数据与正确性
@@ -51,6 +52,15 @@
 - [ ] **同步文件拆分**：~~拆成 `<kind>-state.json` / `<kind>-meta.json`~~ **暂缓，动机已变**。
   - 当初的收益是"一次翻页只传状态部分"，但本地已并成一张表，写放大也已由 SQLite 单行 UPDATE 解决；拆开后一条记录的快照与状态分在两个文件，合并要跨文件 join、还要处理"key 只出现在一边"的情况。
   - 现在拆文件只剩流量收益，而 gzip 已有 4.6~5.5 倍。**先做 P1 + gzip，拿真实流量再决定。**
+
+### 可观测性
+
+- [ ] **同步日志**：设置 → WebDAV 配置弹层 → 「同步记录」页，按时间倒序展示每次同步，
+  可展开看具体同步了哪本书、哪个字段。设计见 [docs/sync-log-design.md](docs/sync-log-design.md)。
+  - 数据来源：`sync()` 里本来就有 `localData` / `remote.data` / `mergedData` 三份快照，
+    两个方向的 diff 纯在 service 层算，不改 `applySyncData` 签名。
+  - 存储：`<appSupport>/sync-log.json` 保留最近 50 次；**不进 `library.db`、不进同步载荷**。
+  - 前置：`LibraryRecord.diffFrom` 只返回 `bool`，要明细则需加 `changedFields()` 或把比较放在日志层。
 
 ### P2 载荷与遗留
 
