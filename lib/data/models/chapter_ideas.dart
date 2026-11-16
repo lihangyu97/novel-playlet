@@ -38,9 +38,6 @@ class ParagraphIdeas {
       : userCount > 0
       ? ParagraphBubbleVariant.users
       : ParagraphBubbleVariant.plain;
-
-  /// 气泡上显示的短计数：>99 截断，和官方一致。
-  String get bubbleLabel => count > 99 ? '99+' : '$count';
 }
 
 /// 一章的段评汇总。

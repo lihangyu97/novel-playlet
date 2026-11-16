@@ -31,7 +31,7 @@ void main() {
     await store.addToShelf(const NovelItem(id: 'a', title: 'A'));
     await store.removeFromShelf('a');
 
-    expect(await store.shelf(), isEmpty);
+    expect(await store.shelfRecords(type: LibraryType.novel), isEmpty);
 
     final record = recordOf(await store.exportSyncData());
     expect(record['shelfRemovedAt'], greaterThan(0));
@@ -56,8 +56,8 @@ void main() {
       ],
     });
 
-    final shelf = await store.shelf();
-    expect(shelf.map((item) => item.id), containsAll(['local', 'remote']));
+    final shelf = await store.shelfRecords(type: LibraryType.novel);
+    expect(shelf.map((r) => r.sourceId), containsAll(['local', 'remote']));
 
     await store.applySyncData({
       'items': [
@@ -69,7 +69,7 @@ void main() {
       ],
     });
     expect(
-      (await store.shelf()).map((item) => item.id),
+      (await store.shelfRecords(type: LibraryType.novel)).map((r) => r.sourceId),
       isNot(contains('local')),
     );
   });
@@ -108,7 +108,7 @@ void main() {
       ],
     });
     expect((await store.progress('a'))?.chapterId, 'new');
-    expect((await store.recent()).first.bookId, 'a');
+    expect((await store.history(type: LibraryType.novel)).first.sourceId, 'a');
   });
 
   test('同 id 的小说与短剧互不影响（主键带类型前缀）', () async {
@@ -116,8 +116,14 @@ void main() {
     await store.addToShelf(const NovelItem(id: '42', title: '一本书'));
     await store.addVideoToShelf(const VideoSeries(id: '42', title: '一部剧'));
 
-    expect((await store.shelf()).map((item) => item.title), ['一本书']);
-    expect((await store.videoShelf()).map((item) => item.title), ['一部剧']);
+    expect(
+      (await store.shelfRecords(type: LibraryType.novel)).map((r) => r.title),
+      ['一本书'],
+    );
+    expect(
+      (await store.shelfRecords(type: LibraryType.playlet)).map((r) => r.title),
+      ['一部剧'],
+    );
     expect(await store.isOnShelf('42'), isTrue);
     expect(await store.isVideoOnShelf('42'), isTrue);
 
@@ -182,7 +188,7 @@ void main() {
       ],
     });
     expect(changed, isFalse);
-    expect(await store.shelf(), isEmpty);
+    expect(await store.shelfRecords(type: LibraryType.novel), isEmpty);
   });
 
   test('墓碑不出现在历史里，未上架但读过的会出现', () async {

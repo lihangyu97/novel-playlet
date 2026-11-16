@@ -30,29 +30,8 @@ class ReadingProgress {
   final int blockIndex;
   final DateTime updatedAt;
 
-  Map<String, dynamic> toJson() => {
-    'bookId': bookId,
-    'bookTitle': bookTitle,
-    'cover': cover,
-    'chapterId': chapterId,
-    'chapterIndex': chapterIndex,
-    'blockIndex': blockIndex,
-    'updatedAt': updatedAt.millisecondsSinceEpoch,
-  };
+;
 
-  static ReadingProgress? fromJson(Map<String, dynamic> json) {
-    final bookId = asString(json['bookId']);
-    if (bookId.isEmpty) return null;
-    return ReadingProgress(
-      bookId: bookId,
-      bookTitle: asString(json['bookTitle']),
-      cover: asString(json['cover']),
-      chapterId: asString(json['chapterId']),
-      chapterIndex: asInt(json['chapterIndex']),
-      blockIndex: asInt(json['blockIndex']),
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(asInt(json['updatedAt'])),
-    );
-  }
 }
 
 /// 一部短剧的观看进度。
@@ -73,25 +52,8 @@ class VideoWatchProgress {
   final int episodeIndex;
   final DateTime updatedAt;
 
-  Map<String, dynamic> toJson() => {
-    'seriesId': seriesId,
-    'title': title,
-    'cover': cover,
-    'episodeIndex': episodeIndex,
-    'updatedAt': updatedAt.millisecondsSinceEpoch,
-  };
+;
 
-  static VideoWatchProgress? fromJson(Map<String, dynamic> json) {
-    final seriesId = asString(json['seriesId']);
-    if (seriesId.isEmpty) return null;
-    return VideoWatchProgress(
-      seriesId: seriesId,
-      title: asString(json['title']),
-      cover: asString(json['cover']),
-      episodeIndex: asInt(json['episodeIndex']),
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(asInt(json['updatedAt'])),
-    );
-  }
 }
 
 /// 书架 / 收藏 / 进度的门面（SQLite，一张表）。
@@ -123,10 +85,6 @@ class ReadingStore {
 
   /// 最近观看变更计数。
   final ValueNotifier<int> videoHistoryRevision = ValueNotifier<int>(0);
-
-  /// 最近阅读 / 最近观看的展示与落盘条数。
-  static const int recentLimit = 3;
-  static const int videoHistoryLimit = 3;
 
   /// 小说与短剧**共用**的纯进度行上限（读过但没上过架的行）。
   ///
@@ -171,23 +129,6 @@ class ReadingStore {
   // ---------------------------------------------------------------------
   // 小说
   // ---------------------------------------------------------------------
-
-  Future<List<NovelItem>> shelf() async {
-    final records = await LibraryDb.readShelf(
-      await _db,
-      type: LibraryType.novel,
-    );
-    return [
-      for (final record in records)
-        NovelItem(
-          id: record.sourceId,
-          title: record.title,
-          cover: record.cover,
-          author: record.author,
-          colorDominate: record.colorDominate,
-        ),
-    ];
-  }
 
   Future<bool> isOnShelf(String bookId) async =>
       _isOnShelf(LibraryType.novel, bookId);
@@ -245,48 +186,9 @@ class ReadingStore {
     );
   }
 
-  /// 最近阅读（按最近一次阅读时间倒序，最多 [limit] 条）。
-  Future<List<ReadingProgress>> recent({int limit = recentLimit}) async {
-    final records = await LibraryDb.readHistory(
-      await _db,
-      limit: limit,
-      type: LibraryType.novel,
-    );
-    return [
-      for (final record in records)
-        ReadingProgress(
-          bookId: record.sourceId,
-          bookTitle: record.title,
-          cover: record.cover,
-          chapterId: record.progressRef,
-          chapterIndex: record.progressIndex,
-          blockIndex: record.progressSub,
-          updatedAt: DateTime.fromMillisecondsSinceEpoch(record.lastReadAt),
-        ),
-    ];
-  }
-
   // ---------------------------------------------------------------------
   // 短剧
   // ---------------------------------------------------------------------
-
-  Future<List<VideoSeries>> videoShelf() async {
-    final records = await LibraryDb.readShelf(
-      await _db,
-      type: LibraryType.playlet,
-    );
-    return [
-      for (final record in records)
-        VideoSeries(
-          id: record.sourceId,
-          title: record.title,
-          cover: record.cover,
-          intro: record.intro,
-          episodeCount: record.episodeCount,
-          colorDominate: record.colorDominate,
-        ),
-    ];
-  }
 
   Future<bool> isVideoOnShelf(String seriesId) async =>
       _isOnShelf(LibraryType.playlet, seriesId);
@@ -338,27 +240,6 @@ class ReadingStore {
       episodeIndex: record.progressIndex,
       updatedAt: DateTime.fromMillisecondsSinceEpoch(record.lastReadAt),
     );
-  }
-
-  /// 最近观看（按观看时间倒序，最多 [limit] 条）。
-  Future<List<VideoWatchProgress>> videoHistory({
-    int limit = videoHistoryLimit,
-  }) async {
-    final records = await LibraryDb.readHistory(
-      await _db,
-      limit: limit,
-      type: LibraryType.playlet,
-    );
-    return [
-      for (final record in records)
-        VideoWatchProgress(
-          seriesId: record.sourceId,
-          title: record.title,
-          cover: record.cover,
-          episodeIndex: record.progressIndex,
-          updatedAt: DateTime.fromMillisecondsSinceEpoch(record.lastReadAt),
-        ),
-    ];
   }
 
   // ---------------------------------------------------------------------

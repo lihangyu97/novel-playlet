@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/core/storage/library_records.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
@@ -21,16 +22,19 @@ void main() {
     await store.addVideoToShelf(a);
     await store.addVideoToShelf(b);
     await store.addVideoToShelf(a); // 已收藏不重复写入
-    final shelf = await store.videoShelf();
+    final shelf = await store.shelfRecords(type: LibraryType.playlet);
     // 与小说书架一致：新加入的排在最前。
-    expect(shelf.map((item) => item.id), ['v2', 'v1']);
-    final storedA = shelf.firstWhere((item) => item.id == 'v1');
+    expect(shelf.map((r) => r.sourceId), ['v2', 'v1']);
+    final storedA = shelf.firstWhere((r) => r.sourceId == 'v1');
     expect(storedA.episodeCount, 12);
     expect(storedA.cover, 'https://example.com/a.jpg');
     expect(await store.isVideoOnShelf('v1'), isTrue);
 
     await store.removeVideoFromShelf('v1');
-    expect((await store.videoShelf()).map((item) => item.id), ['v2']);
+    expect(
+      (await store.shelfRecords(type: LibraryType.playlet)).map((r) => r.sourceId),
+      ['v2'],
+    );
     expect(await store.isVideoOnShelf('v1'), isFalse);
   });
 
@@ -44,16 +48,16 @@ void main() {
       );
     }
 
-    var history = await store.videoHistory();
+    var history = await store.history(type: LibraryType.playlet);
     expect(history.length, 3, reason: '观看历史与小说最近阅读一样最多 3 条');
-    expect(history.map((item) => item.seriesId), ['v4', 'v3', 'v2']);
+    expect(history.map((r) => r.sourceId), ['v4', 'v3', 'v2']);
 
     // 重看旧剧：进度更新并顶到最前，不新增条目。
     await store.saveVideoProgress(seriesId: 'v3', title: '剧3', episodeIndex: 9);
-    history = await store.videoHistory();
+    history = await store.history(type: LibraryType.playlet);
     expect(history.length, 3);
-    expect(history.map((item) => item.seriesId), ['v3', 'v4', 'v2']);
-    expect(history.first.episodeIndex, 9);
+    expect(history.map((r) => r.sourceId), ['v3', 'v4', 'v2']);
+    expect(history.first.progressIndex, 9);
 
     final progress = await store.videoProgress('v3');
     expect(progress?.episodeIndex, 9);
@@ -96,9 +100,12 @@ void main() {
       );
     }
 
-    final recent = await store.recent(limit: limit + 100);
+    final recent = await store.history(
+      limit: limit + 100,
+      type: LibraryType.novel,
+    );
     expect(recent.length, lessThanOrEqualTo(limit), reason: '记录必须有上限');
-    expect(recent.first.bookId, 'book${limit + 4}', reason: '最新的保留');
+    expect(recent.first.sourceId, 'book${limit + 4}', reason: '最新的保留');
     for (var i = 0; i < 5; i++) {
       expect(
         await store.progress('book$i'),
@@ -107,7 +114,7 @@ void main() {
       );
     }
     expect(
-      (await store.shelf()).map((item) => item.id),
+      (await store.shelfRecords(type: LibraryType.novel)).map((r) => r.sourceId),
       contains('keep'),
       reason: '书架条目不参与淘汰',
     );

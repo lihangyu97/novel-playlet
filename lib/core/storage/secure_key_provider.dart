@@ -24,19 +24,6 @@ class FlutterSecureKeyStorage implements SecureKeyStorage {
       _storage.write(key: key, value: value);
 }
 
-/// 测试与无平台通道环境用的内存实现。
-class InMemorySecureKeyStorage implements SecureKeyStorage {
-  final Map<String, String> _values = {};
-
-  @override
-  Future<String?> read(String key) async => _values[key];
-
-  @override
-  Future<void> write(String key, String value) async {
-    _values[key] = value;
-  }
-}
-
 /// 只负责一件事：生成并保管 Rust 设备池文件的 32 字节加密密钥。
 ///
 /// 与旧项目一致的分工——密钥进 Keychain，设备池密文进应用目录；两者分离，

@@ -719,9 +719,6 @@ class ReaderController extends Notifier<ReaderSessionState> {
     _progressTimer = Timer(_progressDebounce, _flushPendingProgress);
   }
 
-  /// 立即把待落盘的页级进度写掉（切章、页面 dispose 前调用）。
-  void flushPendingProgress() => _flushPendingProgress();
-
   /// 仅取消防抖计时器，不碰 provider state：页面 dispose 时 provider 可能
   /// 已经在销毁流程里，不能安全读取 state。
   void cancelProgressTimer() {
