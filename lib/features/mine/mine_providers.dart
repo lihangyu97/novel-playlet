@@ -120,9 +120,7 @@ final mineHistoryCountProvider = FutureProvider<int>((ref) async {
 /// 收藏（跨小说与短剧，按加入时间倒序）。
 ///
 /// 订阅两个收藏通道：任意一侧加/移收藏都会刷新，阅读进度则不影响。
-final mineCollectionProvider = FutureProvider<List<LibraryRecord>>((
-  ref,
-) async {
+final mineCollectionProvider = FutureProvider<List<LibraryRecord>>((ref) async {
   ref.watch(shelfRevisionProvider);
   ref.watch(videoShelfRevisionProvider);
   return ref.watch(readingStoreProvider).shelfRecords();

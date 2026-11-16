@@ -32,7 +32,8 @@ void main() {
 
     await store.removeVideoFromShelf('v1');
     expect(
-      (await store.shelfRecords(type: LibraryType.playlet)).map((r) => r.sourceId),
+      (await store.shelfRecords(type: LibraryType.playlet))
+          .map((r) => r.sourceId),
       ['v2'],
     );
     expect(await store.isVideoOnShelf('v1'), isFalse);
@@ -48,13 +49,13 @@ void main() {
       );
     }
 
-    var history = await store.history(type: LibraryType.playlet);
+    var history = await store.history(limit: 3, type: LibraryType.playlet);
     expect(history.length, 3, reason: '观看历史与小说最近阅读一样最多 3 条');
     expect(history.map((r) => r.sourceId), ['v4', 'v3', 'v2']);
 
     // 重看旧剧：进度更新并顶到最前，不新增条目。
     await store.saveVideoProgress(seriesId: 'v3', title: '剧3', episodeIndex: 9);
-    history = await store.history(type: LibraryType.playlet);
+    history = await store.history(limit: 3, type: LibraryType.playlet);
     expect(history.length, 3);
     expect(history.map((r) => r.sourceId), ['v3', 'v4', 'v2']);
     expect(history.first.progressIndex, 9);
@@ -107,14 +108,11 @@ void main() {
     expect(recent.length, lessThanOrEqualTo(limit), reason: '记录必须有上限');
     expect(recent.first.sourceId, 'book${limit + 4}', reason: '最新的保留');
     for (var i = 0; i < 5; i++) {
-      expect(
-        await store.progress('book$i'),
-        isNull,
-        reason: 'book$i 最旧，应被淘汰',
-      );
+      expect(await store.progress('book$i'), isNull, reason: 'book$i 最旧，应被淘汰');
     }
     expect(
-      (await store.shelfRecords(type: LibraryType.novel)).map((r) => r.sourceId),
+      (await store.shelfRecords(type: LibraryType.novel))
+          .map((r) => r.sourceId),
       contains('keep'),
       reason: '书架条目不参与淘汰',
     );

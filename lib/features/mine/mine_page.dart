@@ -63,10 +63,8 @@ class MinePage extends ConsumerWidget {
                   title: '我的',
                   icon: Icons.person_rounded,
                   stats: const _MineStats(),
-                  onCache: () =>
-                      context.pushAppRoute(const CacheCenterRoute()),
-                  onSettings: () =>
-                      context.pushAppRoute(const SettingsRoute()),
+                  onCache: () => context.pushAppRoute(const CacheCenterRoute()),
+                  onSettings: () => context.pushAppRoute(const SettingsRoute()),
                 ),
                 Expanded(
                   child: CustomScrollView(
@@ -99,8 +97,7 @@ Widget _sectionHeader(String title) => AppSectionHeader(
 );
 
 /// 数据没就绪时的统一占位（加载中 / 读取失败）。
-Widget _sectionPlaceholder(Widget child) =>
-    SizedBox(height: 140, child: child);
+Widget _sectionPlaceholder(Widget child) => SizedBox(height: 140, child: child);
 
 const _readFailed = '读取本地数据失败，请重试';
 
@@ -111,12 +108,7 @@ class _MineHistorySection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineHistoryProvider);
-    return Column(
-      children: [
-        _sectionHeader('历史'),
-        _body(context, ref, async),
-      ],
-    );
+    return Column(children: [_sectionHeader('历史'), _body(context, ref, async)]);
   }
 
   Widget _body(
@@ -137,10 +129,7 @@ class _MineHistorySection extends ConsumerWidget {
     }
     if (items.isEmpty) {
       return _sectionPlaceholder(
-        const EmptyView(
-          message: '还没有阅读记录，去推荐页逛逛',
-          icon: Icons.history_rounded,
-        ),
+        const EmptyView(message: '还没有阅读记录，去推荐页逛逛', icon: Icons.history_rounded),
       );
     }
     return MineHistoryList(
@@ -209,12 +198,7 @@ class _MineCollectionSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineCollectionProvider);
-    return Column(
-      children: [
-        _sectionHeader('收藏'),
-        _body(context, ref, async),
-      ],
-    );
+    return Column(children: [_sectionHeader('收藏'), _body(context, ref, async)]);
   }
 
   Widget _body(

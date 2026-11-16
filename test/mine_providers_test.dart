@@ -116,7 +116,11 @@ void main() {
       chapterId: 'c1',
       chapterIndex: 2,
     );
-    await store.saveVideoProgress(seriesId: 'p1', title: '短剧一', episodeIndex: 4);
+    await store.saveVideoProgress(
+      seriesId: 'p1',
+      title: '短剧一',
+      episodeIndex: 4,
+    );
 
     final history = await container.read(mineHistoryProvider.future);
     expect(history.map((r) => r.sourceId), ['p1', 'n1']);

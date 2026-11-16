@@ -90,10 +90,7 @@ class MineRecentTile extends StatelessWidget {
                   const SizedBox(height: _titleGap),
                   Row(
                     children: [
-                      if (label != null) ...[
-                        label!,
-                        const SizedBox(width: 4),
-                      ],
+                      if (label != null) ...[label!, const SizedBox(width: 4)],
                       Expanded(
                         child: Text(
                           subtitle,

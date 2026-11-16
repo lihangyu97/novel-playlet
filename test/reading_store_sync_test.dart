@@ -69,7 +69,8 @@ void main() {
       ],
     });
     expect(
-      (await store.shelfRecords(type: LibraryType.novel)).map((r) => r.sourceId),
+      (await store.shelfRecords(type: LibraryType.novel))
+          .map((r) => r.sourceId),
       isNot(contains('local')),
     );
   });
@@ -89,7 +90,13 @@ void main() {
 
     await store.applySyncData({
       'items': [
-        {'type': 'novel', 'id': 'a', 'title': 'A', 'lastReadAt': 1, 'chapterId': 'old'},
+        {
+          'type': 'novel',
+          'id': 'a',
+          'title': 'A',
+          'lastReadAt': 1,
+          'chapterId': 'old',
+        },
       ],
     });
     expect((await store.progress('a'))?.chapterId, local!.chapterId);
@@ -129,7 +136,10 @@ void main() {
 
     final records = (await store.exportSyncData())['items'] as List;
     expect(records, hasLength(2));
-    expect(records.map((r) => (r as Map)['type']), containsAll(['novel', 'playlet']));
+    expect(
+      records.map((r) => (r as Map)['type']),
+      containsAll(['novel', 'playlet']),
+    );
   });
 
   test('短剧收藏和进度同样可合并', () async {
@@ -163,8 +173,8 @@ void main() {
     await store.addToShelf(const NovelItem(id: 'a', title: 'A'));
     await store.removeFromShelf('a');
 
-    final localRemovedAt = recordOf(await store.exportSyncData())['shelfRemovedAt']
-        as int;
+    final localRemovedAt =
+        recordOf(await store.exportSyncData())['shelfRemovedAt'] as int;
     final remoteRemovedAt = localRemovedAt + 1000;
 
     await store.applySyncData({

@@ -12,7 +12,6 @@ import 'package:novel_playlet/features/video/video_detail_page.dart';
 import 'package:novel_playlet/features/video/widgets/episode_picker.dart';
 import 'package:novel_playlet/features/video/widgets/episode_tile.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 

@@ -67,7 +67,12 @@ class LibraryDb {
       onCreate: (db, _) => _createSchema(db),
       onUpgrade: (db, from, _) async {
         // v1 是"状态/快照拆两张表"的版本，从未正式发布过；直接重建。
-        for (final name in ['novel_state', 'novel_meta', 'video_state', 'video_meta']) {
+        for (final name in [
+          'novel_state',
+          'novel_meta',
+          'video_state',
+          'video_meta',
+        ]) {
           await db.execute('DROP TABLE IF EXISTS $name');
         }
         await db.execute('DROP TABLE IF EXISTS $table');

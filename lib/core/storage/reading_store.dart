@@ -171,11 +171,7 @@ class ReadingStore {
   }
 
   Future<ReadingProgress?> progress(String bookId) async {
-    final record = await LibraryDb.read(
-      await _db,
-      LibraryType.novel,
-      bookId,
-    );
+    final record = await LibraryDb.read(await _db, LibraryType.novel, bookId);
     if (record == null || !record.hasProgress) return null;
     return ReadingProgress(
       bookId: record.sourceId,
@@ -399,7 +395,11 @@ class ReadingStore {
     await db.transaction((txn) async {
       for (final remoteRecord in incoming) {
         final local =
-            await LibraryDb.read(txn, remoteRecord.type, remoteRecord.sourceId) ??
+            await LibraryDb.read(
+              txn,
+              remoteRecord.type,
+              remoteRecord.sourceId,
+            ) ??
             LibraryRecord(
               type: remoteRecord.type,
               sourceId: remoteRecord.sourceId,

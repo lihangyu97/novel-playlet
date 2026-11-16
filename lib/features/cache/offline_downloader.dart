@@ -1238,7 +1238,6 @@ final class OfflineDownloader extends Notifier<OfflineTask?> {
       control.backgroundPauseRequested = true;
     }
   }
-
 }
 
 /// 下载速度采样器：累计字节差 / 时间差，再用 EMA 平滑。

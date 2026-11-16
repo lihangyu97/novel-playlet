@@ -119,59 +119,62 @@ class AppBottomSheet extends StatelessWidget {
           color: foreground.withValues(alpha: 0.55),
         );
 
-    final sheet = Container(
+    // 用 Material 而不是带底色的 Container：弹层里放 ListTile 时，InkWell 需要
+    // 最近的 Material 祖先来画底色/水波纹，纯 DecoratedBox 会触发框架断言
+    // （"ListTile background color or ink splashes may be invisible"）。
+    final sheet = Material(
+      color: background,
       // 顶部圆角要不被内容盖住：详情弹层直接铺封面/渐变，必须裁到圆角里。
       clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(AppTheme.sheetRadius),
-        ),
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(AppTheme.sheetRadius),
       ),
       // 弹层底色一直铺到屏幕底：把 Home 指示条的高度做成容器内部留白，
       // 而不是交给外层 SafeArea，否则最底部会露出一条弹层外的透明带。
       // 无标题弹层（详情）由内容自己的底部操作栏避让安全区，这里不再叠一次。
-      padding: EdgeInsets.only(bottom: hasTitle ? bottomInset : 0),
-      child: Column(
-        mainAxisSize: heightFactor == null
-            ? MainAxisSize.min
-            : MainAxisSize.max,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (hasTitle) ...[
-            _TitleBar(
-              title: title!,
-              subtitle: subtitle,
-              titleStyle: effectiveTitleStyle,
-              subtitleStyle: effectiveSubtitleStyle,
-              foreground: foreground,
-              showClose: showClose,
-              closeTooltip: closeTooltip,
-            ),
-            if (showDivider)
-              Divider(
-                height: 0.5,
-                thickness: 0.5,
-                color: foreground.withValues(alpha: 0.08),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: hasTitle ? bottomInset : 0),
+        child: Column(
+          mainAxisSize: heightFactor == null
+              ? MainAxisSize.min
+              : MainAxisSize.max,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (hasTitle) ...[
+              _TitleBar(
+                title: title!,
+                subtitle: subtitle,
+                titleStyle: effectiveTitleStyle,
+                subtitleStyle: effectiveSubtitleStyle,
+                foreground: foreground,
+                showClose: showClose,
+                closeTooltip: closeTooltip,
               ),
-            heightFactor == null
-                ? Flexible(child: child)
-                : Expanded(child: child),
-          ] else
-            Expanded(
-              child: Stack(
-                children: [
-                  Positioned.fill(child: child),
-                  if (showClose)
-                    Positioned(
-                      top: 10,
-                      right: 12,
-                      child: _FloatingCloseButton(tooltip: closeTooltip),
-                    ),
-                ],
+              if (showDivider)
+                Divider(
+                  height: 0.5,
+                  thickness: 0.5,
+                  color: foreground.withValues(alpha: 0.08),
+                ),
+              heightFactor == null
+                  ? Flexible(child: child)
+                  : Expanded(child: child),
+            ] else
+              Expanded(
+                child: Stack(
+                  children: [
+                    Positioned.fill(child: child),
+                    if (showClose)
+                      Positioned(
+                        top: 10,
+                        right: 12,
+                        child: _FloatingCloseButton(tooltip: closeTooltip),
+                      ),
+                  ],
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
 

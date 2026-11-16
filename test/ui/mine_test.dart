@@ -126,7 +126,9 @@ void main() {
   testWidgets('我的页-页头固定贴顶不随列表滚动', (tester) async {
     final store = ReadingStore();
     for (var i = 12; i >= 1; i--) {
-      await store.addToShelf(NovelItem(id: 'b$i', title: '书$i', author: '作者$i'));
+      await store.addToShelf(
+        NovelItem(id: 'b$i', title: '书$i', author: '作者$i'),
+      );
     }
 
     await pumpPreview(tester, const MinePage(), store: store);
