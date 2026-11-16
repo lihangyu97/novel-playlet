@@ -6,7 +6,6 @@ import 'package:novel_playlet/features/sync/sync_snapshot.dart';
 import 'package:novel_playlet/features/sync/webdav_client.dart';
 import 'package:novel_playlet/features/sync/webdav_config.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -15,7 +14,6 @@ void main() {
   late ReadingStore store;
 
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
     client = _FakeWebDavClient();
     store = ReadingStore();
   });
@@ -42,7 +40,8 @@ void main() {
     final snapshot = SyncSnapshot.tryParse(client.files[file]!);
     expect(snapshot, isNotNull);
     expect(snapshot!.profile, 'release');
-    expect(snapshot.data['novelShelf'], hasLength(1));
+    expect(snapshot.schemaVersion, SyncSnapshot.currentSchema);
+    expect(snapshot.data['items'], hasLength(1));
   });
 
   test('beta 渠道写到独立目录，不碰 release 数据', () async {
@@ -74,32 +73,33 @@ void main() {
 
     final file = client.files.keys.single;
     final snapshot = SyncSnapshot.tryParse(client.files[file]!)!;
-    final data = Map<String, dynamic>.from(snapshot.data);
-    data['novelProgress'] = {
-      'a': {
-        'bookId': 'a',
-        'bookTitle': 'A',
-        'cover': '',
-        'chapterId': 'remote',
-        'chapterIndex': 9,
-        'blockIndex': 0,
-        'updatedAt': DateTime.now().millisecondsSinceEpoch + 100000,
-      },
-    };
+    final newer = DateTime.now().millisecondsSinceEpoch + 100000;
     client.files[file] = SyncSnapshot(
-      schemaVersion: snapshot.schemaVersion,
+      schemaVersion: SyncSnapshot.currentSchema,
       profile: snapshot.profile,
       deviceId: snapshot.deviceId,
       revision: snapshot.revision,
       updatedAt: snapshot.updatedAt,
-      data: data,
+      data: {
+        'items': [
+          {
+            'type': 'novel',
+            'id': 'a',
+            'title': 'A',
+            'lastReadAt': newer,
+            'chapterId': 'remote',
+            'chapterIndex': 9,
+          },
+        ],
+      },
     ).encode();
 
     final result = await service.sync(config);
     expect(result.pulled, isTrue);
     expect((await store.progress('a'))?.chapterId, 'remote');
     final uploaded = SyncSnapshot.tryParse(client.files[file]!)!;
-    expect((uploaded.data['novelProgress'] as Map)['a']['chapterId'], 'remote');
+    final first = (uploaded.data['items'] as List).single as Map;
+    expect(first['chapterId'], 'remote');
   });
 
   test('云端 JSON 损坏时停止同步，不覆盖远端文件', () async {

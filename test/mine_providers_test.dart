@@ -1,47 +1,35 @@
-import 'dart:convert';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
-import 'package:novel_playlet/features/mine/mine_drama_providers.dart';
 import 'package:novel_playlet/features/mine/mine_providers.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// 「我的」页数据通道拆分（CODE_REVIEW P1-5 回归）。
 ///
-/// 阅读页每 400ms 落一次进度：如果它让书架 provider 失效，保活的「我的」页
-/// 就要重新解码 shared_preferences 的书架表并重建整片书架网格。这里用订阅
-/// 计数锁住窗口边界——
-/// - 写阅读进度：只能刷新「最近阅读」通道；
-/// - 加/移书架：只能刷新「书架」通道；
-/// - 短剧侧同理（观看进度 vs 收藏）。
+/// 小说与短剧合并成一条时间线 / 一个收藏夹之后，通道只剩两条：
+/// - 写进度（阅读页防抖落盘、播放页换集）→ 只刷新「历史」；
+/// - 加/移收藏 → 只刷新「收藏」。
+/// 两条互不牵连，否则保活的整页会跟着重建。
 void main() {
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
-  });
-
-  test('保存阅读进度只刷新最近阅读，不重读书架', () async {
-    SharedPreferences.setMockInitialValues({
-      'shelf_books_v1': jsonEncode([
-        {'id': '1', 'title': '剑来', 'cover': '', 'author': '烽火戏诸侯'},
-      ]),
-    });
+  test('保存阅读进度只刷新历史，不重读收藏', () async {
     final container = ProviderContainer();
     addTearDown(container.dispose);
 
-    var shelfRebuilds = 0;
-    var recentRebuilds = 0;
-    container.listen(mineShelfProvider, (_, _) => shelfRebuilds++);
-    container.listen(mineRecentProvider, (_, _) => recentRebuilds++);
+    await container
+        .read(readingStoreProvider)
+        .addToShelf(const NovelItem(id: '1', title: '剑来'));
 
-    // 先等首屏两个 provider 构建完成，再把计数清零开始断言。
-    expect(await container.read(mineShelfProvider.future), hasLength(1));
-    expect(await container.read(mineRecentProvider.future), isEmpty);
+    var collectionRebuilds = 0;
+    var historyRebuilds = 0;
+    container.listen(mineCollectionProvider, (_, _) => collectionRebuilds++);
+    container.listen(mineHistoryProvider, (_, _) => historyRebuilds++);
+
+    expect(await container.read(mineCollectionProvider.future), hasLength(1));
+    expect(await container.read(mineHistoryProvider.future), isEmpty);
     await container.pump();
-    shelfRebuilds = 0;
-    recentRebuilds = 0;
+    collectionRebuilds = 0;
+    historyRebuilds = 0;
 
     await container
         .read(readingStoreProvider)
@@ -54,90 +42,89 @@ void main() {
         );
     await container.pump();
 
-    expect(shelfRebuilds, 0, reason: '进度落盘不能让书架 provider 失效（否则书架网格整体重建）');
-    expect(recentRebuilds, greaterThan(0), reason: '最近阅读必须跟着进度刷新');
+    expect(collectionRebuilds, 0, reason: '进度落盘不能让收藏列表重查一遍库');
+    expect(historyRebuilds, greaterThan(0), reason: '历史必须跟着进度刷新');
     expect(
-      (await container.read(mineRecentProvider.future)).map((p) => p.bookId),
+      (await container.read(mineHistoryProvider.future)).map((r) => r.sourceId),
       ['1'],
     );
   });
 
-  test('加入书架只刷新书架，不重读最近阅读', () async {
+  test('加入收藏只刷新收藏，不重读历史', () async {
     final container = ProviderContainer();
     addTearDown(container.dispose);
 
-    var shelfRebuilds = 0;
-    var recentRebuilds = 0;
-    container.listen(mineShelfProvider, (_, _) => shelfRebuilds++);
-    container.listen(mineRecentProvider, (_, _) => recentRebuilds++);
+    var collectionRebuilds = 0;
+    var historyRebuilds = 0;
+    container.listen(mineCollectionProvider, (_, _) => collectionRebuilds++);
+    container.listen(mineHistoryProvider, (_, _) => historyRebuilds++);
 
-    expect(await container.read(mineShelfProvider.future), isEmpty);
-    expect(await container.read(mineRecentProvider.future), isEmpty);
+    expect(await container.read(mineCollectionProvider.future), isEmpty);
+    expect(await container.read(mineHistoryProvider.future), isEmpty);
     await container.pump();
-    shelfRebuilds = 0;
-    recentRebuilds = 0;
+    collectionRebuilds = 0;
+    historyRebuilds = 0;
 
     await container
         .read(readingStoreProvider)
         .addToShelf(const NovelItem(id: '1', title: '剑来'));
     await container.pump();
 
-    expect(recentRebuilds, 0, reason: '书架写入不该让最近阅读重读一遍本地数据');
-    expect(shelfRebuilds, greaterThan(0), reason: '书架必须刷新');
-    expect(await container.read(mineShelfProvider.future), hasLength(1));
+    expect(historyRebuilds, 0, reason: '收藏写入不该让历史重读一遍本地数据');
+    expect(collectionRebuilds, greaterThan(0), reason: '收藏必须刷新');
+    expect(await container.read(mineCollectionProvider.future), hasLength(1));
   });
 
-  test('保存观看进度只刷新最近观看，不重读收藏', () async {
+  test('短剧观看进度同样只刷新历史', () async {
     final container = ProviderContainer();
     addTearDown(container.dispose);
-
-    var shelfRebuilds = 0;
-    var historyRebuilds = 0;
-    container.listen(mineDramaShelfProvider, (_, _) => shelfRebuilds++);
-    container.listen(mineDramaHistoryProvider, (_, _) => historyRebuilds++);
-
-    expect(await container.read(mineDramaShelfProvider.future), isEmpty);
-    expect(await container.read(mineDramaHistoryProvider.future), isEmpty);
-    await container.pump();
-    shelfRebuilds = 0;
-    historyRebuilds = 0;
-
-    await container
-        .read(readingStoreProvider)
-        .saveVideoProgress(seriesId: 'v1', title: '剧A', episodeIndex: 1);
-    await container.pump();
-
-    expect(shelfRebuilds, 0, reason: '观看进度落盘不能让收藏 provider 失效（否则收藏网格整体重建）');
-    expect(historyRebuilds, greaterThan(0), reason: '最近观看必须跟着进度刷新');
-    expect(
-      (await container.read(mineDramaHistoryProvider.future))
-          .map((h) => h.seriesId),
-      ['v1'],
-    );
-  });
-
-  test('加入收藏只刷新收藏，不重读最近观看', () async {
-    final container = ProviderContainer();
-    addTearDown(container.dispose);
-
-    var shelfRebuilds = 0;
-    var historyRebuilds = 0;
-    container.listen(mineDramaShelfProvider, (_, _) => shelfRebuilds++);
-    container.listen(mineDramaHistoryProvider, (_, _) => historyRebuilds++);
-
-    expect(await container.read(mineDramaShelfProvider.future), isEmpty);
-    expect(await container.read(mineDramaHistoryProvider.future), isEmpty);
-    await container.pump();
-    shelfRebuilds = 0;
-    historyRebuilds = 0;
 
     await container
         .read(readingStoreProvider)
         .addVideoToShelf(const VideoSeries(id: 'v1', title: '剧A'));
+
+    var collectionRebuilds = 0;
+    var historyRebuilds = 0;
+    container.listen(mineCollectionProvider, (_, _) => collectionRebuilds++);
+    container.listen(mineHistoryProvider, (_, _) => historyRebuilds++);
+    expect(await container.read(mineCollectionProvider.future), hasLength(1));
+    expect(await container.read(mineHistoryProvider.future), isEmpty);
+    await container.pump();
+    collectionRebuilds = 0;
+    historyRebuilds = 0;
+
+    await container
+        .read(readingStoreProvider)
+        .saveVideoProgress(seriesId: 'v1', title: '剧A', episodeIndex: 3);
     await container.pump();
 
-    expect(historyRebuilds, 0, reason: '收藏变更不该让最近观看重读一遍本地数据');
-    expect(shelfRebuilds, greaterThan(0), reason: '收藏必须刷新');
-    expect(await container.read(mineDramaShelfProvider.future), hasLength(1));
+    expect(collectionRebuilds, 0);
+    expect(historyRebuilds, greaterThan(0));
+    final history = await container.read(mineHistoryProvider.future);
+    expect(history.single.progressIndex, 3);
+  });
+
+  test('历史按最近一次阅读/观看混排，小说与短剧都在同一条线上', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final store = container.read(readingStoreProvider);
+    await store.saveProgress(
+      bookId: 'n1',
+      bookTitle: '小说一',
+      cover: '',
+      chapterId: 'c1',
+      chapterIndex: 2,
+    );
+    await store.saveVideoProgress(
+      seriesId: 'p1',
+      title: '短剧一',
+      episodeIndex: 4,
+    );
+
+    final history = await container.read(mineHistoryProvider.future);
+    expect(history.map((r) => r.sourceId), ['p1', 'n1']);
+    expect(history.first.type.isPlaylet, isTrue);
+    expect(history.last.type.isPlaylet, isFalse);
   });
 }

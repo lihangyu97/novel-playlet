@@ -30,6 +30,7 @@ class MediaCard extends StatelessWidget {
     this.metaTrailing,
     this.extraMeta = const [],
     this.coverBadge,
+    this.coverOverlay,
     this.heroTag,
     this.cornerText,
     this.coverPlaceholderColor,
@@ -69,6 +70,11 @@ class MediaCard extends StatelessWidget {
   /// 与右上角评分角标对称：把短的运营文案放到封面上，文字区只留标题和
   /// 一行元信息，卡片更干净。三列时卡片太窄放不下，仍回文字区。
   final String? coverBadge;
+
+  /// 封面左上角的自定义覆盖件（如「小说 / 短剧」彩色标签）。
+  ///
+  /// 与 [coverBadge] 二选一：需要彩色标签这类非文字样式时用这个。
+  final Widget? coverOverlay;
 
   /// 封面 Hero tag；null = 不参与飞入动画（例如深链/无列表来源）。
   final String? heroTag;
@@ -127,7 +133,9 @@ class MediaCard extends StatelessWidget {
             radius: surface ? 0 : kCoverRadius,
             placeholderColor: coverPlaceholderColor,
           ),
-          if (coverBadge != null && coverBadge!.isNotEmpty)
+          if (coverOverlay != null)
+            Positioned(top: 6, left: 6, child: coverOverlay!)
+          else if (coverBadge != null && coverBadge!.isNotEmpty)
             Positioned(
               top: 6,
               left: 6,

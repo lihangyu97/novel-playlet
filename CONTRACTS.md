@@ -26,7 +26,7 @@
 ## 硬性规则
 
 1. **只改自己 feature 目录里的文件**（见各自任务说明）。共享文件（`lib/app/**`、`lib/data/**`、`lib/core/**`、`lib/src/rust/**`、`rust/`、`ios/`）一律不要改（新增依赖见规则 2，由 Lead 统一处理）。缺共享组件就在自己的目录里写。
-2. **依赖受控新增。** 默认只用 pubspec 里现有的包；确实要用社区实现时，先确认没有现成方案、在本文件登记白名单，并同步 `pubspec.yaml` 注释。当前白名单：`flutter_staggered_grid_view`（推荐流双列/三列瀑布流，卡片不定高；自己写 RenderSliver 的测量/回收成本更高。**钉 0.8.0-dev.3**：0.7.x 的 SDK 上界是 `<3.0.0`，Dart 3 解析不到，不要改成 `^0.7.0`）、`cached_network_image`、`flutter_cache_manager`、`html`、`shared_preferences`、`flutter_secure_storage`、`path_provider`。`video_player` 是视频域专用：只允许 `lib/features/video/` 使用，播放器细节见 `docs/implementation.md`。`video_player_avfoundation` 通过 `third_party/` 本地补丁覆盖（defaultRate 倍速修复，见 `third_party/README.md`），不要直接改 pub cache。
+2. **依赖受控新增。** 默认只用 pubspec 里现有的包；确实要用社区实现时，先确认没有现成方案、在本文件登记白名单，并同步 `pubspec.yaml` 注释。当前白名单：`flutter_staggered_grid_view`（推荐流双列/三列瀑布流，卡片不定高；自己写 RenderSliver 的测量/回收成本更高。**钉 0.8.0-dev.3**：0.7.x 的 SDK 上界是 `<3.0.0`，Dart 3 解析不到，不要改成 `^0.7.0`）、`cached_network_image`、`flutter_cache_manager`、`html`、`shared_preferences`（只剩主题/阅读器设置等偏好）、`sqflite`（书架/收藏/进度的本地库，模型见 `docs/storage-model-proposal.md`）、`flutter_secure_storage`、`path_provider`。`video_player` 是视频域专用：只允许 `lib/features/video/` 使用，播放器细节见 `docs/implementation.md`。`video_player_avfoundation` 通过 `third_party/` 本地补丁覆盖（defaultRate 倍速修复，见 `third_party/README.md`），不要直接改 pub cache。
 3. **不要跑 `flutter build` / `flutter run`**（很慢，由 Lead 统一验证）。用 `flutter analyze lib/features/<你的域>` 自检，必须 0 error 0 warning。
 4. UI 文案用中文；注释写"为什么"，不要写"做了什么"。
 5. 只用 Material 3 + `Theme.of(context).colorScheme`，不要硬编码颜色（阅读页底色用 `ReaderPaper`；推荐流卡片的纯白底 / 暗色底统一走 `AppTheme.mediaCardColor`）。
@@ -261,6 +261,7 @@ context.pushAppRoute(const SearchRoute());         // 推荐页顶栏搜索入�
 - 下拉刷新 → `ref.invalidate(provider)` 或控制器 `refresh()`。
 - 加载/错误/空态统一用 `LoadingView` / `ErrorView(message, onRetry)` / `EmptyView`。
 - 本地数据变更靠 `ReadingStore` 的 `novelRevision` / `videoRevision`：provider 里 `watch` 对应 revision 即可自动刷新，不要自己轮询。
+- 书架/收藏/进度落在 SQLite（`lib/core/storage/library_db.dart`），页面只经 `ReadingStore` 读写；测试里的内存库与逐用例重置由 `test/flutter_test_config.dart` 统一处理，不要再往 `shared_preferences` 塞这些数据。
 
 ## 测试与工程质量
 

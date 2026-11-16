@@ -56,7 +56,7 @@ class ReaderPage extends ConsumerStatefulWidget {
 enum _ChapterEntry { firstPage, lastPage }
 
 class _ReaderPageState extends ConsumerState<ReaderPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const double _horizontalPadding = 20;
 
   /// 底部常驻信息条高度。分页可用高度先扣掉它，所以必须是常量：若让它随
@@ -131,6 +131,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   ReaderController? _controller;
   ReadingStore? _readingStore;
 
+  /// 最近一次由"当前页兜底"写进库的落点，用来吸收 inactive → paused 的
+  /// 连续触发：位置没变就不再写第二遍。
+  String _flushedChapterId = '';
+  int _flushedBlockIndex = -1;
+
   /// 续读落点只恢复一次；后续重排、重进本章都不该再跳。
   bool _resumeApplied = false;
 
@@ -179,18 +184,38 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   @override
+  void initState() {
+    super.initState();
+    // 切后台时把当前页立即落盘：5s 防抖窗口内被系统挂起/杀掉就丢掉这几页。
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
-    _flushReadingPositionOnDispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _flushReadingPosition();
     _pageController.dispose();
     // 切章过渡在快速进出/真机打断时会停在半路，ticker 不释放会被框架断言。
     _chapterTransition.dispose();
     super.dispose();
   }
 
-  /// 退出阅读页时立即兜底写一次页级进度（防抖可能还没到点）。
-  void _flushReadingPositionOnDispose() {
-    // 纯字段操作，provider 已进入销毁流程也能安全调用。
-    _controller?.cancelProgressTimer();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // inactive 早于 paused：iOS 上能在进程被挂起前抢到更多时间，也保证这次
+    // 写入早于 SyncLifecycle 在 paused 触发的同步，上传的是最新进度。
+    if (state != AppLifecycleState.inactive &&
+        state != AppLifecycleState.paused) {
+      return;
+    }
+    _flushReadingPosition();
+  }
+
+  /// 立即把当前页落盘（退出阅读页、App 切后台时调用，防抖可能还没到点）。
+  ///
+  /// 落完盘顺手丢掉控制器里的防抖进度：那份只会更旧，留着会在下次切章时把
+  /// 旧落点覆盖回去。中途 return 时不动它，交给防抖自己落盘。
+  void _flushReadingPosition() {
     final session = _lastSession;
     final pagination = _pagination;
     final store = _readingStore;
@@ -201,6 +226,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final chapter = session.chapterAt(session.contentIndex);
     if (chapter == null) return;
     final pageIndex = _pageIndex.clamp(0, pagination.pages.length - 1).toInt();
+    final blockIndex = pagination.blockAtPage(pageIndex);
+    // 纯字段操作，provider 已在销毁流程里也能安全调用。
+    _controller?.discardPendingProgress();
+    // inactive → paused 会连着触发两次；位置没变就不再写第二遍。
+    if (chapter.id == _flushedChapterId && blockIndex == _flushedBlockIndex) {
+      return;
+    }
+    _flushedChapterId = chapter.id;
+    _flushedBlockIndex = blockIndex;
     unawaited(
       store.saveProgress(
         bookId: widget.args.bookId,
@@ -208,7 +242,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         cover: session.cover,
         chapterId: chapter.id,
         chapterIndex: chapter.index,
-        blockIndex: pagination.blockAtPage(pageIndex),
+        blockIndex: blockIndex,
       ),
     );
   }
@@ -696,7 +730,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     });
   }
 
-  /// 把当前页首段下标报给控制器（400ms 防抖后落盘）。
+  /// 把当前页首段下标报给控制器（防抖后落盘，见 ReaderController.progressDebounce）。
   void _rememberPosition() {
     final pagination = _pagination;
     if (pagination == null || pagination.pages.isEmpty) return;

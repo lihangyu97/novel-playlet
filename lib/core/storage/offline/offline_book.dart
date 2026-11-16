@@ -195,12 +195,6 @@ class OfflineStats {
   final int bytes;
   final int capBytes;
 
-  bool get isOverCap => bytes >= capBytes;
-
-  /// 0~1 的占用比例（cap 非法时按 0）。
-  double get usedRatio =>
-      capBytes <= 0 ? 0 : (bytes / capBytes).clamp(0, 1).toDouble();
-
   OfflineStats copyWith({int? count, int? bytes, int? capBytes}) =>
       OfflineStats(
         count: count ?? this.count,

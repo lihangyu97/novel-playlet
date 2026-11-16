@@ -71,10 +71,6 @@ Future<void> writeJsonAtomically(File file, Map<String, dynamic> json) =>
       (temp) => temp.writeAsString(jsonEncode(json), flush: true),
     );
 
-/// 原子写字节（封面等小文件）。
-Future<void> writeBytesAtomically(File file, List<int> bytes) =>
-    _writeAtomically(file, (temp) => temp.writeAsBytes(bytes, flush: true));
-
 Future<void> _writeAtomically(
   File file,
   Future<File> Function(File temp) write,
@@ -91,28 +87,6 @@ Future<void> _writeAtomically(
     await deleteQuietly(temp);
     rethrow;
   }
-}
-
-/// 递归统计目录内普通文件总字节。目录不存在 / 读失败按 0 计（统计不能抛）。
-Future<int> directoryBytes(Directory directory) async {
-  var total = 0;
-  try {
-    if (!await directory.exists()) return 0;
-    await for (final entity in directory.list(
-      recursive: true,
-      followLinks: false,
-    )) {
-      if (entity is! File) continue;
-      try {
-        total += await entity.length();
-      } catch (_) {
-        // 单个文件 stat 失败不影响整体统计。
-      }
-    }
-  } catch (_) {
-    // 目录不可读等同于空。
-  }
-  return total;
 }
 
 /// 静默删除文件（不存在/失败都不抛）。

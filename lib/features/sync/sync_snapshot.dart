@@ -2,8 +2,15 @@ import 'dart:convert';
 
 /// 云同步文件的外层结构。
 ///
-/// 数据本身仍按现有 SharedPreferences 的字段组织，外层只加版本、渠道、
-/// 设备号和 revision，方便旧版本识别/迁移。
+/// `data` 的结构随 [currentSchema] 演进：
+/// - 1：`novelShelf` / `novelShelfMeta` / `novelProgress` / …（旧 prefs 形状）
+/// - 2：`novel` / `video` 两个记录数组（状态/快照拆表的中间版本）
+/// - 3：`items` 一个记录数组，每条带 `type`（`novel` / `playlet`）。
+///   小说与短剧共用一张表，见 `docs/storage-model-proposal.md`。
+///
+/// **只认当前版本**：读到旧版本直接判为不合法，由同步层报
+/// 「云端同步文件格式不正确，已停止覆盖」——绝不按新结构去解析旧数据，
+/// 也绝不用空数据覆盖远端。旧文件需要手工转换（或清空后重新同步）。
 class SyncSnapshot {
   const SyncSnapshot({
     required this.schemaVersion,
@@ -14,7 +21,7 @@ class SyncSnapshot {
     required this.data,
   });
 
-  static const currentSchema = 1;
+  static const currentSchema = 3;
 
   final int schemaVersion;
   final String profile;
@@ -45,7 +52,7 @@ class SyncSnapshot {
       final revision = map['revision'];
       final updatedAt = map['updatedAt'];
       final data = map['data'];
-      if (schema is! int || schema > currentSchema) return null;
+      if (schema is! int || schema != currentSchema) return null;
       if (profile.isEmpty || deviceId.isEmpty) return null;
       if (revision is! int || updatedAt is! int) return null;
       if (data is! Map) return null;
