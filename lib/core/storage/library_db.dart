@@ -21,7 +21,7 @@ import 'library_records.dart';
 class LibraryDb {
   LibraryDb._();
 
-  static const int schemaVersion = 2;
+  static const int schemaVersion = 3;
 
   static const String table = 'library';
   static const String kvTable = 'kv';
@@ -73,20 +73,30 @@ class LibraryDb {
       version: schemaVersion,
       onCreate: (db, _) => _createSchema(db),
       onUpgrade: (db, from, _) async {
-        // **已经 ≥2 的库绝不能走重建**：那等于每次升版本都清空用户书架。
-        // 以后加 v3（比如 `progress_pruned_at`）时在这里逐条写增量迁移。
-        if (from >= 2) return;
-        // v1 是"状态/快照拆两张表"的版本，从未正式发布过；直接重建。
-        for (final name in [
-          'novel_state',
-          'novel_meta',
-          'video_state',
-          'video_meta',
-        ]) {
-          await db.execute('DROP TABLE IF EXISTS $name');
+        // **已经是最新的库绝不能走重建**：那等于每次升版本都清空用户书架。
+        // 以后继续升版本时，在这里按 from 逐级写增量迁移。
+        if (from >= schemaVersion) return;
+        if (from < 2) {
+          // v1 是"状态/快照拆两张表"的版本，从未正式发布过；直接重建。
+          for (final name in [
+            'novel_state',
+            'novel_meta',
+            'video_state',
+            'video_meta',
+          ]) {
+            await db.execute('DROP TABLE IF EXISTS $name');
+          }
+          await db.execute('DROP TABLE IF EXISTS $table');
+          await _createSchema(db);
+          return;
         }
-        await db.execute('DROP TABLE IF EXISTS $table');
-        await _createSchema(db);
+        if (from == 2) {
+          // v2 → v3：加进度裁剪墓碑列；已有行默认 0（没淘汰过）。
+          await db.execute(
+            'ALTER TABLE $table ADD COLUMN progress_pruned_at '
+            'INTEGER NOT NULL DEFAULT 0',
+          );
+        }
       },
     );
   }
@@ -113,6 +123,7 @@ class LibraryDb {
         progress_ref TEXT NOT NULL DEFAULT '',
         progress_index INTEGER NOT NULL DEFAULT 0,
         progress_sub INTEGER NOT NULL DEFAULT 0,
+        progress_pruned_at INTEGER NOT NULL DEFAULT 0,
         shelf_at INTEGER NOT NULL DEFAULT 0,
         shelf_removed_at INTEGER NOT NULL DEFAULT 0
       )
@@ -144,6 +155,7 @@ class LibraryDb {
     progressRef: asString(row['progress_ref']),
     progressIndex: asInt(row['progress_index']),
     progressSub: asInt(row['progress_sub']),
+    progressPrunedAt: asInt(row['progress_pruned_at']),
     shelfAt: asInt(row['shelf_at']),
     shelfRemovedAt: asInt(row['shelf_removed_at']),
   );
@@ -243,6 +255,7 @@ class LibraryDb {
       'progress_ref': row.progressRef,
       'progress_index': row.progressIndex,
       'progress_sub': row.progressSub,
+      'progress_pruned_at': row.progressPrunedAt,
       'shelf_at': row.shelfAt,
       'shelf_removed_at': row.shelfRemovedAt,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -252,21 +265,42 @@ class LibraryDb {
   ///
   /// 小说与短剧**共用一个额度**。书架条目与墓碑永远不删行：移出书架只是写
   /// `shelf_removed_at`，删行会丢掉"删除"这个事实，远端旧值随即把条目复活。
-  static Future<void> prune(DatabaseExecutor db, int limit) async {
-    // 只数"可淘汰"的行，否则书架大了会把新进度立刻挤掉。
+  ///
+  /// 淘汰也不删行，而是把进度清空、写 `progress_pruned_at`。删行的话远端那份
+  /// 旧进度会在下次同步把条目补回来；有了裁剪时间，合并时才能判断"这是被淘汰
+  /// 的旧值，还是对方真的又读了一遍"（见 [mergeLibraryRecords]）。
+  static Future<void> prune(
+    DatabaseExecutor db,
+    int limit, {
+    required int now,
+  }) async {
+    // 只数"可淘汰"的行：书架、墓碑、已经淘汰过的标记都不占额度。
     final count = Sqflite.firstIntValue(
       await db.rawQuery(
-        'SELECT COUNT(*) FROM $table WHERE shelf_at = 0 AND shelf_removed_at = 0',
+        'SELECT COUNT(*) FROM $table '
+        'WHERE shelf_at = 0 AND shelf_removed_at = 0 '
+        'AND last_read_at > 0',
       ),
     );
     if (count == null || count <= limit) return;
     final excess = count - limit;
-    await db.rawDelete(
-      'DELETE FROM $table WHERE key IN ('
+    // 先取 key 再更新：UPDATE 的子查询会边算边改，先固定一份列表更稳。
+    final rows = await db.rawQuery(
       'SELECT key FROM $table '
-      'WHERE shelf_at = 0 AND shelf_removed_at = 0 '
-      'ORDER BY last_read_at ASC, key ASC LIMIT ?)',
+      'WHERE shelf_at = 0 AND shelf_removed_at = 0 AND last_read_at > 0 '
+      'ORDER BY last_read_at ASC, key ASC LIMIT ?',
       [excess],
     );
+    for (final row in rows) {
+      await db.rawUpdate(
+        'UPDATE $table SET '
+        'last_read_at = 0, progress_ref = \'\', progress_index = 0, '
+        'progress_sub = 0, progress_pruned_at = ?, '
+        'title = \'\', author = \'\', cover = \'\', intro = \'\', '
+        'episode_count = 0, color_dominate = \'\', meta_fetched_at = 0 '
+        'WHERE key = ?',
+        [now, asString(row['key'])],
+      );
+    }
   }
 }

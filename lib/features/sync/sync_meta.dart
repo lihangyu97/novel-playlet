@@ -26,22 +26,42 @@ class SyncMeta {
     required this.deviceId,
     this.lastRevision = 0,
     this.lastSyncAt,
+    this.remoteEtag,
+    this.localHash = 0,
   });
 
   final String deviceId;
   final int lastRevision;
   final DateTime? lastSyncAt;
 
-  SyncMeta copyWith({int? lastRevision, DateTime? lastSyncAt}) => SyncMeta(
+  /// 上次成功同步时云端文件的 ETag；同一份文件再同步时可以整轮跳过。
+  final String? remoteEtag;
+
+  /// 上次成功同步后本地载荷的指纹（FNV-1a 64）。
+  ///
+  /// 只看 ETag 不够：本机可能又翻了几页，云端没变但本地有未上传的变更。
+  /// 两个都相同才是真的"没变化"。
+  final int localHash;
+
+  SyncMeta copyWith({
+    int? lastRevision,
+    DateTime? lastSyncAt,
+    String? remoteEtag,
+    int? localHash,
+  }) => SyncMeta(
     deviceId: deviceId,
     lastRevision: lastRevision ?? this.lastRevision,
     lastSyncAt: lastSyncAt ?? this.lastSyncAt,
+    remoteEtag: remoteEtag ?? this.remoteEtag,
+    localHash: localHash ?? this.localHash,
   );
 
   Map<String, dynamic> toJson() => {
     'deviceId': deviceId,
     'lastRevision': lastRevision,
     'lastSyncAt': lastSyncAt?.millisecondsSinceEpoch,
+    if (remoteEtag != null) 'remoteEtag': remoteEtag,
+    if (localHash != 0) 'localHash': localHash,
   };
 
   static SyncMeta fromJson(Map<String, dynamic> json) => SyncMeta(
@@ -50,6 +70,8 @@ class SyncMeta {
     lastSyncAt: json['lastSyncAt'] is int
         ? DateTime.fromMillisecondsSinceEpoch(json['lastSyncAt'] as int)
         : null,
+    remoteEtag: json['remoteEtag']?.toString(),
+    localHash: json['localHash'] is int ? json['localHash'] as int : 0,
   );
 }
 

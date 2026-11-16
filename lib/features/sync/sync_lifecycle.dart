@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'sync_log.dart';
 import 'sync_status.dart';
 
 /// 在 App 回到前台、退到后台时各尝试同步一次。
@@ -48,7 +49,11 @@ class _SyncLifecycleState extends ConsumerState<SyncLifecycle>
 
   void _sync() {
     // 自动同步不抛错：网络/配置问题由设置页卡片展示，不能打断启动。
-    unawaited(ref.read(syncStatusProvider.notifier).syncNow());
+    unawaited(
+      ref
+          .read(syncStatusProvider.notifier)
+          .syncNow(trigger: SyncTrigger.lifecycle),
+    );
   }
 
   @override

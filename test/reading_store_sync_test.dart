@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/core/storage/library_db.dart';
 import 'package:novel_playlet/core/storage/library_records.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
@@ -257,5 +258,64 @@ void main() {
     expect(history.map((r) => r.sourceId), ['b']);
     expect(history.single.title, '追更中', reason: '重新开始读的书要能显示书名，不能被墓碑瘦身清空');
     expect(await store.isOnShelf('b'), isFalse, reason: '继续读不等于加回收藏');
+  });
+
+  test('裁剪墓碑：远端更旧的进度不会复活被淘汰的行', () {
+    const local = LibraryRecord(
+      type: LibraryType.novel,
+      sourceId: 'x',
+      progressPrunedAt: 300,
+    );
+    const remote = LibraryRecord(
+      type: LibraryType.novel,
+      sourceId: 'x',
+      title: '被淘汰的旧书',
+      lastReadAt: 200,
+      progressRef: 'c1',
+      progressIndex: 4,
+    );
+
+    final merged = mergeLibraryRecords(local, remote);
+    expect(merged.hasProgress, isFalse, reason: '裁剪时间晚于对方进度，不能复活');
+    expect(merged.progressPrunedAt, 300, reason: '裁剪事实要保留并同步出去');
+    expect(merged.title, isEmpty, reason: '淘汰行不留快照');
+
+    // 对方在裁剪之后又读过：进度更“新”，应当复活。
+    final newer = remote.copyWith(lastReadAt: 400);
+    final revived = mergeLibraryRecords(local, newer);
+    expect(revived.progressRef, 'c1');
+    expect(revived.lastReadAt, 400);
+    expect(revived.title, '被淘汰的旧书');
+  });
+
+  test('prune 只写裁剪墓碑、不删行', () async {
+    final db = await LibraryDb.instance();
+    for (var i = 0; i < 3; i++) {
+      await LibraryDb.write(
+        db,
+        LibraryRecord(
+          type: LibraryType.novel,
+          sourceId: 'b$i',
+          title: '书$i',
+          lastReadAt: 100 + i,
+          progressRef: 'c$i',
+          progressIndex: i,
+        ),
+      );
+    }
+
+    await LibraryDb.prune(db, 1, now: 999);
+
+    final rows = await LibraryDb.readAll(db);
+    expect(rows, hasLength(3), reason: '删行会让远端旧进度把条目补回来');
+    final pruned = rows.where((r) => r.progressPrunedAt == 999).toList();
+    expect(pruned, hasLength(2), reason: '超出额度的最旧两行被淘汰');
+    expect(pruned.every((r) => !r.hasProgress), isTrue);
+    expect(pruned.every((r) => r.title.isEmpty), isTrue);
+    expect(
+      rows.firstWhere((r) => r.sourceId == 'b2').hasProgress,
+      isTrue,
+      reason: '最新一条保留进度',
+    );
   });
 }

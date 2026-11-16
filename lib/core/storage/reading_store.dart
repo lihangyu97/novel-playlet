@@ -340,7 +340,7 @@ class ReadingStore {
       if (existing == null ||
           now - _lastPruneAt >= pruneInterval.inMilliseconds) {
         _lastPruneAt = now;
-        await LibraryDb.prune(txn, libraryLimit);
+        await LibraryDb.prune(txn, libraryLimit, now: now);
       }
     });
     if (type == LibraryType.novel) {
@@ -386,6 +386,7 @@ class ReadingStore {
     var videoShelfChanged = false;
     var videoHistoryChanged = false;
 
+    final pruneAt = _now();
     final incoming = <LibraryRecord>[];
     for (final raw in asList(remote['items'])) {
       final record = LibraryRecord.tryFromJson(raw);
@@ -423,7 +424,7 @@ class ReadingStore {
         await LibraryDb.write(txn, merged);
         changed = true;
       }
-      await LibraryDb.prune(txn, libraryLimit);
+      await LibraryDb.prune(txn, libraryLimit, now: pruneAt);
     });
 
     if (changed) {

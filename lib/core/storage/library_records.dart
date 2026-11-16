@@ -46,6 +46,7 @@ class LibraryRecord {
     this.progressRef = '',
     this.progressIndex = 0,
     this.progressSub = 0,
+    this.progressPrunedAt = 0,
     this.shelfAt = 0,
     this.shelfRemovedAt = 0,
   });
@@ -82,6 +83,13 @@ class LibraryRecord {
   /// 小说章节内段落下标；短剧为 0。
   final int progressSub;
 
+  /// 进度行被本地淘汰的时间（0 = 没淘汰过）。
+  ///
+  /// 淘汰不删行：删掉之后远端那份旧进度会在下次同步把条目补回来。合并时只有
+  /// "裁剪时间晚于对方的最后阅读"才算真删除；对方后来又读过（`lastReadAt`
+  /// 更大）则照常复活。
+  final int progressPrunedAt;
+
   // ---- 书架 / 收藏 ----
   final int shelfAt;
   final int shelfRemovedAt;
@@ -113,6 +121,21 @@ class LibraryRecord {
   /// 清掉之后单行从约 370 B 降到约 90 B，同步载荷同步变小。
   /// 真正需要"删掉"这个事实时仍然靠 `shelfRemovedAt`，行本身不删。
   LibraryRecord normalized() {
+    // 被淘汰的进度行只留 id / 裁剪时间：快照与进度列都没有意义了。
+    if (progressPrunedAt > 0 && lastReadAt == 0) {
+      return copyWith(
+        title: '',
+        author: '',
+        cover: '',
+        intro: '',
+        episodeCount: 0,
+        colorDominate: '',
+        metaFetchedAt: 0,
+        progressRef: '',
+        progressIndex: 0,
+        progressSub: 0,
+      );
+    }
     if (!isTombstone || hasProgressAfterRemoval) return this;
     return copyWith(
       title: '',
@@ -144,6 +167,7 @@ class LibraryRecord {
     } else ...{
       if (progressIndex > 0) 'episodeIndex': progressIndex,
     },
+    if (progressPrunedAt > 0) 'progressPrunedAt': progressPrunedAt,
     if (shelfAt > 0) 'shelfAt': shelfAt,
     if (shelfRemovedAt > 0) 'shelfRemovedAt': shelfRemovedAt,
   };
@@ -170,6 +194,7 @@ class LibraryRecord {
           ? asInt(json['episodeIndex'])
           : asInt(json['chapterIndex']),
       progressSub: type.isPlaylet ? 0 : asInt(json['blockIndex']),
+      progressPrunedAt: asInt(json['progressPrunedAt']),
       shelfAt: asInt(json['shelfAt']),
       shelfRemovedAt: asInt(json['shelfRemovedAt']),
     );
@@ -187,6 +212,7 @@ class LibraryRecord {
     String? progressRef,
     int? progressIndex,
     int? progressSub,
+    int? progressPrunedAt,
     int? shelfAt,
     int? shelfRemovedAt,
   }) => LibraryRecord(
@@ -203,6 +229,7 @@ class LibraryRecord {
     progressRef: progressRef ?? this.progressRef,
     progressIndex: progressIndex ?? this.progressIndex,
     progressSub: progressSub ?? this.progressSub,
+    progressPrunedAt: progressPrunedAt ?? this.progressPrunedAt,
     shelfAt: shelfAt ?? this.shelfAt,
     shelfRemovedAt: shelfRemovedAt ?? this.shelfRemovedAt,
   );
@@ -223,6 +250,7 @@ class LibraryRecord {
       progressRef != other.progressRef ||
       progressIndex != other.progressIndex ||
       progressSub != other.progressSub ||
+      progressPrunedAt != other.progressPrunedAt ||
       shelfAt != other.shelfAt ||
       shelfRemovedAt != other.shelfRemovedAt;
 
@@ -232,7 +260,9 @@ class LibraryRecord {
 
   /// 进度是否变化（用于 bump historyRevision）。
   bool progressDiffersFrom(LibraryRecord other) =>
-      lastReadAt != other.lastReadAt || progressRef != other.progressRef;
+      lastReadAt != other.lastReadAt ||
+      progressRef != other.progressRef ||
+      progressPrunedAt != other.progressPrunedAt;
 }
 
 /// 快照整组该取哪一侧：时间戳大的；相等时优先非空，再相等取远端（两端看到
@@ -246,18 +276,35 @@ bool _preferRemoteMeta(LibraryRecord local, LibraryRecord remote) {
 
 /// 同一条记录的合并（[local] 与 [remote] 的 [LibraryRecord.key] 必须相同）。
 ///
+/// 进度除了按 `lastReadAt` 取新，还要让"裁剪墓碑"生效：一方在 T 淘汰了进度，
+/// 另一方 `lastReadAt <= T` 的那份就是被淘汰的旧值，不能复活；只有 T 之后又
+/// 读过（`lastReadAt > T`）才算真进度。
+///
 /// 返回结果已经过 [LibraryRecord.normalized]：墓碑行不留快照。
 LibraryRecord mergeLibraryRecords(LibraryRecord local, LibraryRecord remote) {
   final meta = _preferRemoteMeta(local, remote) ? remote : local;
+  final progressPrunedAt = math.max(
+    local.progressPrunedAt,
+    remote.progressPrunedAt,
+  );
 
-  // 进度整组取新；时间戳相等时优先"有进度"的一侧，再相等取远端。
-  final progress = remote.lastReadAt > local.lastReadAt
+  final localProgress = local.lastReadAt > remote.progressPrunedAt
+      ? local
+      : null;
+  final remoteProgress = remote.lastReadAt > local.progressPrunedAt
       ? remote
-      : remote.lastReadAt < local.lastReadAt
-      ? local
-      : (!remote.hasProgress && local.hasProgress)
-      ? local
-      : remote;
+      : null;
+  final progress = localProgress == null
+      ? remoteProgress
+      : remoteProgress == null
+      ? localProgress
+      : remoteProgress.lastReadAt > localProgress.lastReadAt
+      ? remoteProgress
+      : remoteProgress.lastReadAt < localProgress.lastReadAt
+      ? localProgress
+      : (!remoteProgress.hasProgress && localProgress.hasProgress)
+      ? localProgress
+      : remoteProgress;
 
   return LibraryRecord(
     type: local.type,
@@ -269,10 +316,11 @@ LibraryRecord mergeLibraryRecords(LibraryRecord local, LibraryRecord remote) {
     episodeCount: meta.episodeCount,
     colorDominate: meta.colorDominate,
     metaFetchedAt: math.max(local.metaFetchedAt, remote.metaFetchedAt),
-    lastReadAt: progress.lastReadAt,
-    progressRef: progress.progressRef,
-    progressIndex: progress.progressIndex,
-    progressSub: progress.progressSub,
+    lastReadAt: progress?.lastReadAt ?? 0,
+    progressRef: progress?.progressRef ?? '',
+    progressIndex: progress?.progressIndex ?? 0,
+    progressSub: progress?.progressSub ?? 0,
+    progressPrunedAt: progressPrunedAt,
     shelfAt: math.max(local.shelfAt, remote.shelfAt),
     shelfRemovedAt: math.max(local.shelfRemovedAt, remote.shelfRemovedAt),
   ).normalized();

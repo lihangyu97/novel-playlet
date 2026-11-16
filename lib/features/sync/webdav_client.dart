@@ -17,6 +17,19 @@ class WebDavException implements Exception {
   String toString() => message;
 }
 
+/// 412 / 409：云端文件在读取之后被另一台设备改过，需要重读重合并。
+class WebDavPreconditionFailed extends WebDavException {
+  WebDavPreconditionFailed(super.message, {super.statusCode});
+}
+
+/// 云端文件元信息（条件请求用）；字段取不到时为 null。
+class WebDavFileMeta {
+  const WebDavFileMeta({this.etag, this.length});
+
+  final String? etag;
+  final int? length;
+}
+
 class WebDavTestResult {
   const WebDavTestResult.success() : ok = true, message = '连接成功';
 
@@ -32,19 +45,39 @@ abstract interface class WebDavClient {
 
   Future<String?> readText(WebDavConfig config, Uri uri);
 
-  Future<void> writeText(WebDavConfig config, Uri uri, String text);
+  /// 读文件元信息（PROPFIND Depth:0）。
+  ///
+  /// 服务器不支持 PROPFIND、或返回里没有 ETag 时返回 null：调用方要走
+  /// 无条件 GET 的旧路径，不能因此让同步失败。
+  Future<WebDavFileMeta?> stat(WebDavConfig config, Uri uri);
+
+  /// 写文件。[ifMatch] 非空时带 `If-Match`，命中 412/409 抛
+  /// [WebDavPreconditionFailed]，由同步层重读重合并。
+  Future<void> writeText(
+    WebDavConfig config,
+    Uri uri,
+    String text, {
+    String? ifMatch,
+  });
 
   /// 写一个探针再读回，确认账号可写、可读、目录存在。
   Future<WebDavTestResult> testConnection(WebDavConfig config);
 }
 
 class HttpWebDavClient implements WebDavClient {
-  const HttpWebDavClient({this.timeout = const Duration(seconds: 20)});
+  HttpWebDavClient({this.timeout = const Duration(seconds: 20)});
 
   final Duration timeout;
 
+  /// 已经建好的目录。同步一次要 MKCOL 两层，失败重试 / 配置保存后再次同步
+  /// 都会重复这两次往返；建成功过就按 `baseUrl + 账号 + 路径` 记住。
+  final Set<String> _readyDirs = {};
+
   @override
   Future<void> ensureDirectory(WebDavConfig config, String relativePath) async {
+    final cacheKey = '${config.baseUrl}\n${config.username}\n$relativePath';
+    if (_readyDirs.contains(cacheKey)) return;
+
     final segments = relativePath
         .split('/')
         .where((segment) => segment.isNotEmpty);
@@ -60,6 +93,7 @@ class HttpWebDavClient implements WebDavClient {
         throw _statusError(response.statusCode, '创建同步目录失败');
       }
     }
+    _readyDirs.add(cacheKey);
   }
 
   @override
@@ -73,8 +107,49 @@ class HttpWebDavClient implements WebDavClient {
   }
 
   @override
-  Future<void> writeText(WebDavConfig config, Uri uri, String text) async {
-    final response = await _send(config, 'PUT', uri, body: text);
+  Future<WebDavFileMeta?> stat(WebDavConfig config, Uri uri) async {
+    final response = await _send(
+      config,
+      'PROPFIND',
+      uri,
+      body:
+          '<?xml version="1.0" encoding="utf-8"?>'
+          '<d:propfind xmlns:d="DAV:"><d:prop>'
+          '<d:getetag/><d:getcontentlength/>'
+          '</d:prop></d:propfind>',
+      contentType: 'application/xml; charset=utf-8',
+    );
+    // 404 = 还没有文件；405/501 = 服务器不支持 PROPFIND；都回退到 GET。
+    if (response.statusCode != 207 && response.statusCode != 200) return null;
+    final etag = _xmlTag(response.body, 'getetag');
+    final length = int.tryParse(
+      _xmlTag(response.body, 'getcontentlength') ?? '',
+    );
+    if (etag == null && length == null) return null;
+    return WebDavFileMeta(etag: etag, length: length);
+  }
+
+  @override
+  Future<void> writeText(
+    WebDavConfig config,
+    Uri uri,
+    String text, {
+    String? ifMatch,
+  }) async {
+    final response = await _send(
+      config,
+      'PUT',
+      uri,
+      body: text,
+      ifMatch: ifMatch,
+    );
+    if (ifMatch != null &&
+        (response.statusCode == 412 || response.statusCode == 409)) {
+      throw WebDavPreconditionFailed(
+        '云端同步文件已被其他设备修改，将重读后重试',
+        statusCode: response.statusCode,
+      );
+    }
     if (response.statusCode != 200 &&
         response.statusCode != 201 &&
         response.statusCode != 204) {
@@ -119,6 +194,8 @@ class HttpWebDavClient implements WebDavClient {
     String method,
     Uri uri, {
     String? body,
+    String? ifMatch,
+    String? contentType,
   }) async {
     final client = HttpClient()
       ..connectionTimeout = timeout
@@ -133,11 +210,13 @@ class HttpWebDavClient implements WebDavClient {
       if (method == 'PROPFIND') {
         request.headers.set('Depth', '0');
       }
+      if (ifMatch != null) {
+        request.headers.set('If-Match', ifMatch);
+      }
       if (body != null) {
-        request.headers.contentType = ContentType(
-          'application',
-          'json',
-          charset: 'utf-8',
+        request.headers.set(
+          HttpHeaders.contentTypeHeader,
+          contentType ?? 'application/json; charset=utf-8',
         );
         request.add(utf8.encode(body));
       }
@@ -146,7 +225,11 @@ class HttpWebDavClient implements WebDavClient {
           .transform(utf8.decoder)
           .join()
           .timeout(timeout);
-      return _WebDavResponse(response.statusCode, responseBody);
+      final headers = <String, String>{};
+      response.headers.forEach((name, values) {
+        if (values.isNotEmpty) headers[name.toLowerCase()] = values.first;
+      });
+      return _WebDavResponse(response.statusCode, responseBody, headers);
     } on WebDavException {
       rethrow;
     } on SocketException catch (error) {
@@ -176,12 +259,25 @@ class HttpWebDavClient implements WebDavClient {
 }
 
 class _WebDavResponse {
-  const _WebDavResponse(this.statusCode, this.body);
+  const _WebDavResponse(this.statusCode, this.body, [this.headers = const {}]);
 
   final int statusCode;
   final String body;
+
+  /// 小写 header 名 → 第一个值（`etag`、`content-length` 等）。
+  final Map<String, String> headers;
+
+  String? get etag => headers['etag'];
+}
+
+/// 从 WebDAV 的 XML 里抠一个标签值（不为了这点东西引 XML 依赖）。
+String? _xmlTag(String xml, String tag) {
+  final match = RegExp('<(?:[\\w-]+:)?$tag[^>]*>([^<]*)</(?:[\\w-]+:)?$tag>')
+      .firstMatch(xml);
+  final value = match?.group(1)?.trim();
+  return value == null || value.isEmpty ? null : value;
 }
 
 final webDavClientProvider = Provider<WebDavClient>(
-  (ref) => const HttpWebDavClient(),
+  (ref) => HttpWebDavClient(),
 );
