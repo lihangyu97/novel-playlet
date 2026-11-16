@@ -1,5 +1,16 @@
 # TODO
 
+## 阅读器跨章流畅度（待做，2026-11-16 记录）
+
+- 现状：一章一个 PageView + 前后各 1 页 sentinel；邻章只做正文/章评/分页准备，不渲染。
+- 问题：回上一章疑似闪回第一页再跳最后一页；怀疑点在 `_turnPage` 的 fallback 分支没有
+  `_settlePage` 覆盖层（只有 sentinel 路径有）。空章兜底「上一章」未设 `_pendingEntry`，会落首页。
+- 推荐：先修 fallback 闪帧 + 预排挪 idle + 补"回上一章落最后一页"测试；确认仍不丝滑再评估
+  单 PageView 扁平页列表（窗口 ±1 章）。
+- 已评估并**不推荐**：三章拼一个字符串后按字符切片渲染（justify / 缩进 / 气泡占位 / 高亮矩形 /
+  选区与段评锚点都会破，且放弃"测量=渲染"契约）。
+- 细节、主流做法与分阶段计划见 [`docs/reader-cross-chapter-plan.md`](docs/reader-cross-chapter-plan.md)。
+
 ## Android 全局字重（已完成 2026-11-15）
 
 - 设置页新增「全局字重」滑块，仅 Android 显示/生效，默认 400，范围 300–700，持久化 key `app_font_weight_v1`。
