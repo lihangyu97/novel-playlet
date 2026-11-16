@@ -41,7 +41,7 @@ void main() {
     expect(snapshot, isNotNull);
     expect(snapshot!.profile, 'release');
     expect(snapshot.schemaVersion, SyncSnapshot.currentSchema);
-    expect(snapshot.data['novel'], hasLength(1));
+    expect(snapshot.data['items'], hasLength(1));
   });
 
   test('beta 渠道写到独立目录，不碰 release 数据', () async {
@@ -81,8 +81,9 @@ void main() {
       revision: snapshot.revision,
       updatedAt: snapshot.updatedAt,
       data: {
-        'novel': [
+        'items': [
           {
+            'type': 'novel',
             'id': 'a',
             'title': 'A',
             'lastReadAt': newer,
@@ -90,7 +91,6 @@ void main() {
             'chapterIndex': 9,
           },
         ],
-        'video': <Object>[],
       },
     ).encode();
 
@@ -98,7 +98,7 @@ void main() {
     expect(result.pulled, isTrue);
     expect((await store.progress('a'))?.chapterId, 'remote');
     final uploaded = SyncSnapshot.tryParse(client.files[file]!)!;
-    final first = (uploaded.data['novel'] as List).single as Map;
+    final first = (uploaded.data['items'] as List).single as Map;
     expect(first['chapterId'], 'remote');
   });
 

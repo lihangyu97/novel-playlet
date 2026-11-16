@@ -3,13 +3,14 @@ import 'dart:convert';
 /// 云同步文件的外层结构。
 ///
 /// `data` 的结构随 [currentSchema] 演进：
-/// - 1：`novelShelf` / `novelShelfMeta` / `novelProgress` / `videoShelf` /
-///   `videoShelfMeta` / `videoProgress`（shared_preferences 时代的形状）；
-/// - 2：`novel` / `video` 两个记录数组，一条记录同时带上游快照与用户状态
-///   （见 `docs/storage-model-proposal.md`）。
+/// - 1：`novelShelf` / `novelShelfMeta` / `novelProgress` / …（旧 prefs 形状）
+/// - 2：`novel` / `video` 两个记录数组（状态/快照拆表的中间版本）
+/// - 3：`items` 一个记录数组，每条带 `type`（`novel` / `playlet`）。
+///   小说与短剧共用一张表，见 `docs/storage-model-proposal.md`。
 ///
-/// 读到低版本不用报错：`ReadingStore.applySyncData` 会把 v1 载荷转成记录再
-/// 合并，升级后第一次同步不会卡在"格式不正确"。
+/// **只认当前版本**：读到旧版本直接判为不合法，由同步层报
+/// 「云端同步文件格式不正确，已停止覆盖」——绝不按新结构去解析旧数据，
+/// 也绝不用空数据覆盖远端。旧文件需要手工转换（或清空后重新同步）。
 class SyncSnapshot {
   const SyncSnapshot({
     required this.schemaVersion,
@@ -20,7 +21,7 @@ class SyncSnapshot {
     required this.data,
   });
 
-  static const currentSchema = 2;
+  static const currentSchema = 3;
 
   final int schemaVersion;
   final String profile;
@@ -51,7 +52,7 @@ class SyncSnapshot {
       final revision = map['revision'];
       final updatedAt = map['updatedAt'];
       final data = map['data'];
-      if (schema is! int || schema > currentSchema) return null;
+      if (schema is! int || schema != currentSchema) return null;
       if (profile.isEmpty || deviceId.isEmpty) return null;
       if (revision is! int || updatedAt is! int) return null;
       if (data is! Map) return null;

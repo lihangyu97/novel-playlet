@@ -56,8 +56,6 @@ class ReadingProgress {
 }
 
 /// 一部短剧的观看进度。
-///
-/// 与小说 [ReadingProgress] 对齐：只记「看到第几集 + 时间」，点进去直接续播。
 class VideoWatchProgress {
   const VideoWatchProgress({
     required this.seriesId,
@@ -96,11 +94,10 @@ class VideoWatchProgress {
   }
 }
 
-/// 书架 / 收藏 / 进度的门面（SQLite 实现）。
+/// 书架 / 收藏 / 进度的门面（SQLite，一张表）。
 ///
-/// 数据模型见 `docs/storage-model-proposal.md`：每条内容一条记录，按生命周期
-/// 拆「用户状态 / 上游快照」两张表；书架、最近阅读、最近观看全部由这两张表
-/// 派生，不再单独存列表，因此不存在"最近列表和进度表不一致"的问题。
+/// 小说与短剧在同一张 `library` 表里，靠 [LibraryType] 区分；书架、历史都由
+/// 这张表派生，不再单独存列表。
 ///
 /// 页面只通过这里的 revision 计数感知变更，不要自己去读库。
 class ReadingStore {
@@ -108,35 +105,33 @@ class ReadingStore {
   /// 监听它来刷新，避免引入全局状态管理依赖。
   ///
   /// 写入会同时 bump 更细的 [shelfRevision] / [recentRevision]：只关心其中
-  /// 一块的 UI 订阅细分通道，需要"小说侧任意写入都刷新"的消费者才用这个
-  /// 聚合计数。短剧侧同理见 [videoShelfRevision] / [videoHistoryRevision]。
+  /// 一块的 UI 订阅细分通道。短剧侧同理见 [videoShelfRevision] /
+  /// [videoHistoryRevision]。
   final ValueNotifier<int> novelRevision = ValueNotifier<int>(0);
 
-  /// 小说侧「书架内容」变更计数：加入 / 移出书架。阅读进度写入不动它。
+  /// 书架内容变更计数（小说加/移书架）。阅读进度写入不动它。
   final ValueNotifier<int> shelfRevision = ValueNotifier<int>(0);
 
-  /// 小说侧「最近阅读」变更计数：保存阅读进度（含书架内外的书）。书架内容
-  /// 写入不动它。
+  /// 最近阅读变更计数：保存阅读进度（含书架内外的书）。
   final ValueNotifier<int> recentRevision = ValueNotifier<int>(0);
 
-  /// 短剧侧（收藏 / 观看进度）的聚合变更计数；拆分原因见 [novelRevision]。
+  /// 短剧侧（收藏 / 观看进度）的聚合变更计数。
   final ValueNotifier<int> videoRevision = ValueNotifier<int>(0);
 
-  /// 短剧侧「收藏」变更计数：加入 / 移出收藏。
+  /// 短剧收藏变更计数。
   final ValueNotifier<int> videoShelfRevision = ValueNotifier<int>(0);
 
-  /// 短剧侧「最近观看」变更计数：保存观看进度。
+  /// 最近观看变更计数。
   final ValueNotifier<int> videoHistoryRevision = ValueNotifier<int>(0);
 
   /// 最近阅读 / 最近观看的展示与落盘条数。
   static const int recentLimit = 3;
   static const int videoHistoryLimit = 3;
 
-  /// 每条内容链最多保留的**纯进度行**数量（读过但没上过架的书 / 剧）。
+  /// 小说与短剧**共用**的纯进度行上限（读过但没上过架的行）。
   ///
   /// 书架条目与墓碑不计入、也不淘汰：墓碑是删除能同步出去的唯一依据，删早了
-  /// 远端旧值会把条目复活。小说侧原来在进度表上封顶 200，短剧侧没有上限，
-  /// 这里统一收敛。
+  /// 远端旧值会把条目复活。
   static const int libraryLimit = 500;
 
   Future<Database> get _db => LibraryDb.instance();
@@ -145,7 +140,6 @@ class ReadingStore {
   ///
   /// LWW 全靠它排序，而 `DateTime.now()` 在同一毫秒内的连续调用会相等——
   /// 快速连点选集/连续翻页时会让"最近观看"顺序和后写覆盖前写都失准。
-  /// 这里保证严格递增。
   int _stamp = 0;
 
   int _now() {
@@ -155,15 +149,35 @@ class ReadingStore {
   }
 
   // ---------------------------------------------------------------------
-  // 小说：书架
+  // 统一查询（历史 / 收藏，跨小说与短剧）
+  // ---------------------------------------------------------------------
+
+  /// 「历史」：读过且不是墓碑，按最近阅读倒序。`type` 为空时两类混排。
+  Future<List<LibraryRecord>> history({
+    int limit = 20,
+    LibraryType? type,
+  }) async {
+    return LibraryDb.readHistory(await _db, limit: limit, type: type);
+  }
+
+  /// 「收藏」：当前在架条目，按加入时间倒序。`type` 为空时两类混排。
+  Future<List<LibraryRecord>> shelfRecords({LibraryType? type}) async {
+    return LibraryDb.readShelf(await _db, type: type);
+  }
+
+  // ---------------------------------------------------------------------
+  // 小说
   // ---------------------------------------------------------------------
 
   Future<List<NovelItem>> shelf() async {
-    final records = await LibraryDb.readNovelShelf(await _db);
+    final records = await LibraryDb.readShelf(
+      await _db,
+      type: LibraryType.novel,
+    );
     return [
       for (final record in records)
         NovelItem(
-          id: record.id,
+          id: record.sourceId,
           title: record.title,
           cover: record.cover,
           author: record.author,
@@ -172,62 +186,23 @@ class ReadingStore {
     ];
   }
 
-  Future<bool> isOnShelf(String bookId) async {
-    if (bookId.isEmpty) return false;
-    final record = await LibraryDb.readNovel(await _db, bookId);
-    return record?.onShelf ?? false;
-  }
+  Future<bool> isOnShelf(String bookId) async =>
+      _isOnShelf(LibraryType.novel, bookId);
 
   /// 加入书架；已在架上则不重复写入。
   Future<void> addToShelf(NovelItem item) async {
-    if (item.id.isEmpty) return;
-    final db = await _db;
-    final now = _now();
-    var written = false;
-    await db.transaction((txn) async {
-      final existing = await LibraryDb.readNovel(txn, item.id);
-      if (existing != null && existing.onShelf) return;
-      final base = existing ?? NovelRecord(id: item.id);
-      await LibraryDb.writeNovel(
-        txn,
-        base.copyWith(
-          title: base.title.isEmpty ? item.title : base.title,
-          author: base.author.isEmpty ? item.author : base.author,
-          cover: base.cover.isEmpty ? item.cover : base.cover,
-          colorDominate: base.colorDominate.isEmpty
-              ? item.colorDominate
-              : base.colorDominate,
-          metaFetchedAt: base.metaFetchedAt == 0 ? now : base.metaFetchedAt,
-          shelfAt: now,
-          shelfRemovedAt: 0,
-        ),
-      );
-      written = true;
-    });
-    if (!written) return;
-    shelfRevision.value++;
-    novelRevision.value++;
+    await _addToShelf(
+      LibraryType.novel,
+      item.id,
+      title: item.title,
+      author: item.author,
+      cover: item.cover,
+      colorDominate: item.colorDominate,
+    );
   }
 
-  Future<void> removeFromShelf(String bookId) async {
-    if (bookId.isEmpty) return;
-    final db = await _db;
-    final now = _now();
-    var written = false;
-    await db.transaction((txn) async {
-      final existing = await LibraryDb.readNovel(txn, bookId);
-      if (existing == null || !existing.onShelf) return;
-      await LibraryDb.writeNovel(txn, existing.copyWith(shelfRemovedAt: now));
-      written = true;
-    });
-    if (!written) return;
-    shelfRevision.value++;
-    novelRevision.value++;
-  }
-
-  // ---------------------------------------------------------------------
-  // 小说：阅读进度 / 最近阅读
-  // ---------------------------------------------------------------------
+  Future<void> removeFromShelf(String bookId) async =>
+      _removeFromShelf(LibraryType.novel, bookId);
 
   Future<void> saveProgress({
     required String bookId,
@@ -238,65 +213,69 @@ class ReadingStore {
     int blockIndex = 0,
   }) async {
     if (bookId.isEmpty || chapterId.isEmpty) return;
-    final db = await _db;
-    final now = _now();
-    await db.transaction((txn) async {
-      final existing = await LibraryDb.readNovel(txn, bookId);
-      final base = existing ?? NovelRecord(id: bookId);
-      await LibraryDb.writeNovel(
-        txn,
-        base.copyWith(
-          title: base.title.isEmpty ? bookTitle : base.title,
-          cover: base.cover.isEmpty ? cover : base.cover,
-          metaFetchedAt: base.metaFetchedAt == 0 ? now : base.metaFetchedAt,
-          lastReadAt: now,
-          chapterId: chapterId,
-          chapterIndex: chapterIndex,
-          blockIndex: blockIndex,
-        ),
-      );
-      await LibraryDb.pruneNovel(txn, libraryLimit);
-    });
-    recentRevision.value++;
-    novelRevision.value++;
+    await _saveProgress(
+      LibraryType.novel,
+      bookId,
+      title: bookTitle,
+      cover: cover,
+      progressRef: chapterId,
+      progressIndex: chapterIndex,
+      progressSub: blockIndex,
+    );
   }
 
   Future<ReadingProgress?> progress(String bookId) async {
-    if (bookId.isEmpty) return null;
-    final record = await LibraryDb.readNovel(await _db, bookId);
+    final record = await LibraryDb.read(
+      await _db,
+      LibraryType.novel,
+      bookId,
+    );
     if (record == null || !record.hasProgress) return null;
-    return _progressOf(record);
+    return ReadingProgress(
+      bookId: record.sourceId,
+      bookTitle: record.title,
+      cover: record.cover,
+      chapterId: record.progressRef,
+      chapterIndex: record.progressIndex,
+      blockIndex: record.progressSub,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(record.lastReadAt),
+    );
   }
 
   /// 最近阅读（按最近一次阅读时间倒序，最多 [limit] 条）。
   Future<List<ReadingProgress>> recent({int limit = recentLimit}) async {
-    final records = await LibraryDb.readNovelRecent(await _db, limit);
+    final records = await LibraryDb.readHistory(
+      await _db,
+      limit: limit,
+      type: LibraryType.novel,
+    );
     return [
       for (final record in records)
-        if (record.hasProgress) _progressOf(record),
+        ReadingProgress(
+          bookId: record.sourceId,
+          bookTitle: record.title,
+          cover: record.cover,
+          chapterId: record.progressRef,
+          chapterIndex: record.progressIndex,
+          blockIndex: record.progressSub,
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(record.lastReadAt),
+        ),
     ];
   }
 
-  ReadingProgress _progressOf(NovelRecord record) => ReadingProgress(
-    bookId: record.id,
-    bookTitle: record.title,
-    cover: record.cover,
-    chapterId: record.chapterId,
-    chapterIndex: record.chapterIndex,
-    blockIndex: record.blockIndex,
-    updatedAt: DateTime.fromMillisecondsSinceEpoch(record.lastReadAt),
-  );
-
   // ---------------------------------------------------------------------
-  // 短剧：收藏
+  // 短剧
   // ---------------------------------------------------------------------
 
   Future<List<VideoSeries>> videoShelf() async {
-    final records = await LibraryDb.readVideoShelf(await _db);
+    final records = await LibraryDb.readShelf(
+      await _db,
+      type: LibraryType.playlet,
+    );
     return [
       for (final record in records)
         VideoSeries(
-          id: record.id,
+          id: record.sourceId,
           title: record.title,
           cover: record.cover,
           intro: record.intro,
@@ -306,33 +285,119 @@ class ReadingStore {
     ];
   }
 
-  Future<bool> isVideoOnShelf(String seriesId) async {
-    if (seriesId.isEmpty) return false;
-    final record = await LibraryDb.readVideo(await _db, seriesId);
-    return record?.onShelf ?? false;
-  }
+  Future<bool> isVideoOnShelf(String seriesId) async =>
+      _isOnShelf(LibraryType.playlet, seriesId);
 
   /// 加入收藏；已收藏则不重复写入。
   Future<void> addVideoToShelf(VideoSeries item) async {
-    if (item.id.isEmpty) return;
+    await _addToShelf(
+      LibraryType.playlet,
+      item.id,
+      title: item.title,
+      cover: item.cover,
+      intro: item.intro,
+      episodeCount: item.episodeCount,
+      colorDominate: item.colorDominate,
+    );
+  }
+
+  Future<void> removeVideoFromShelf(String seriesId) async =>
+      _removeFromShelf(LibraryType.playlet, seriesId);
+
+  /// 记一次观看进度；最近观看由进度派生，不再单独维护列表。
+  Future<void> saveVideoProgress({
+    required String seriesId,
+    required String title,
+    String cover = '',
+    required int episodeIndex,
+  }) async {
+    if (seriesId.isEmpty) return;
+    await _saveProgress(
+      LibraryType.playlet,
+      seriesId,
+      title: title,
+      cover: cover,
+      progressIndex: episodeIndex,
+    );
+  }
+
+  Future<VideoWatchProgress?> videoProgress(String seriesId) async {
+    final record = await LibraryDb.read(
+      await _db,
+      LibraryType.playlet,
+      seriesId,
+    );
+    if (record == null || !record.hasProgress) return null;
+    return VideoWatchProgress(
+      seriesId: record.sourceId,
+      title: record.title,
+      cover: record.cover,
+      episodeIndex: record.progressIndex,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(record.lastReadAt),
+    );
+  }
+
+  /// 最近观看（按观看时间倒序，最多 [limit] 条）。
+  Future<List<VideoWatchProgress>> videoHistory({
+    int limit = videoHistoryLimit,
+  }) async {
+    final records = await LibraryDb.readHistory(
+      await _db,
+      limit: limit,
+      type: LibraryType.playlet,
+    );
+    return [
+      for (final record in records)
+        VideoWatchProgress(
+          seriesId: record.sourceId,
+          title: record.title,
+          cover: record.cover,
+          episodeIndex: record.progressIndex,
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(record.lastReadAt),
+        ),
+    ];
+  }
+
+  // ---------------------------------------------------------------------
+  // 写路径（两类内容共用）
+  // ---------------------------------------------------------------------
+
+  Future<bool> _isOnShelf(LibraryType type, String sourceId) async {
+    if (sourceId.isEmpty) return false;
+    final record = await LibraryDb.read(await _db, type, sourceId);
+    return record?.onShelf ?? false;
+  }
+
+  Future<void> _addToShelf(
+    LibraryType type,
+    String sourceId, {
+    required String title,
+    String author = '',
+    String cover = '',
+    String intro = '',
+    int episodeCount = 0,
+    String colorDominate = '',
+  }) async {
+    if (sourceId.isEmpty) return;
     final db = await _db;
     final now = _now();
     var written = false;
     await db.transaction((txn) async {
-      final existing = await LibraryDb.readVideo(txn, item.id);
+      final existing = await LibraryDb.read(txn, type, sourceId);
       if (existing != null && existing.onShelf) return;
-      final base = existing ?? VideoRecord(id: item.id);
-      await LibraryDb.writeVideo(
+      final base = existing ?? LibraryRecord(type: type, sourceId: sourceId);
+      await LibraryDb.write(
         txn,
         base.copyWith(
-          title: base.title.isEmpty ? item.title : base.title,
-          cover: base.cover.isEmpty ? item.cover : base.cover,
-          intro: base.intro.isEmpty ? item.intro : base.intro,
+          title: base.title.isEmpty ? title : base.title,
+          author: base.author.isEmpty ? author : base.author,
+          cover: base.cover.isEmpty ? cover : base.cover,
+          intro: base.intro.isEmpty ? intro : base.intro,
           episodeCount: base.episodeCount == 0
-              ? item.episodeCount
+              ? episodeCount
               : base.episodeCount,
           colorDominate: base.colorDominate.isEmpty
-              ? item.colorDominate
+              ? colorDominate
               : base.colorDominate,
           metaFetchedAt: base.metaFetchedAt == 0 ? now : base.metaFetchedAt,
           shelfAt: now,
@@ -342,185 +407,141 @@ class ReadingStore {
       written = true;
     });
     if (!written) return;
-    videoShelfRevision.value++;
-    videoRevision.value++;
+    _bumpShelf(type);
   }
 
-  Future<void> removeVideoFromShelf(String seriesId) async {
-    if (seriesId.isEmpty) return;
+  Future<void> _removeFromShelf(LibraryType type, String sourceId) async {
+    if (sourceId.isEmpty) return;
     final db = await _db;
     final now = _now();
     var written = false;
     await db.transaction((txn) async {
-      final existing = await LibraryDb.readVideo(txn, seriesId);
+      final existing = await LibraryDb.read(txn, type, sourceId);
       if (existing == null || !existing.onShelf) return;
-      await LibraryDb.writeVideo(txn, existing.copyWith(shelfRemovedAt: now));
+      await LibraryDb.write(txn, existing.copyWith(shelfRemovedAt: now));
       written = true;
     });
     if (!written) return;
-    videoShelfRevision.value++;
-    videoRevision.value++;
+    _bumpShelf(type);
   }
 
-  // ---------------------------------------------------------------------
-  // 短剧：观看进度 / 最近观看
-  // ---------------------------------------------------------------------
-
-  /// 记一次观看进度；最近观看由进度表派生，不再单独维护列表。
-  Future<void> saveVideoProgress({
-    required String seriesId,
+  Future<void> _saveProgress(
+    LibraryType type,
+    String sourceId, {
     required String title,
     String cover = '',
-    required int episodeIndex,
+    String progressRef = '',
+    required int progressIndex,
+    int progressSub = 0,
   }) async {
-    if (seriesId.isEmpty) return;
+    if (sourceId.isEmpty) return;
+    if (type == LibraryType.novel && progressRef.isEmpty) return;
     final db = await _db;
     final now = _now();
     await db.transaction((txn) async {
-      final existing = await LibraryDb.readVideo(txn, seriesId);
-      final base = existing ?? VideoRecord(id: seriesId);
-      await LibraryDb.writeVideo(
+      final existing = await LibraryDb.read(txn, type, sourceId);
+      final base = existing ?? LibraryRecord(type: type, sourceId: sourceId);
+      await LibraryDb.write(
         txn,
         base.copyWith(
           title: base.title.isEmpty ? title : base.title,
           cover: base.cover.isEmpty ? cover : base.cover,
           metaFetchedAt: base.metaFetchedAt == 0 ? now : base.metaFetchedAt,
           lastReadAt: now,
-          episodeIndex: episodeIndex,
+          progressRef: progressRef,
+          progressIndex: progressIndex,
+          progressSub: progressSub,
         ),
       );
-      await LibraryDb.pruneVideo(txn, libraryLimit);
+      await LibraryDb.prune(txn, libraryLimit);
     });
-    videoHistoryRevision.value++;
-    videoRevision.value++;
+    if (type == LibraryType.novel) {
+      recentRevision.value++;
+      novelRevision.value++;
+    } else {
+      videoHistoryRevision.value++;
+      videoRevision.value++;
+    }
   }
 
-  Future<VideoWatchProgress?> videoProgress(String seriesId) async {
-    if (seriesId.isEmpty) return null;
-    final record = await LibraryDb.readVideo(await _db, seriesId);
-    if (record == null || !record.hasProgress) return null;
-    return _videoProgressOf(record);
+  void _bumpShelf(LibraryType type) {
+    if (type == LibraryType.novel) {
+      shelfRevision.value++;
+      novelRevision.value++;
+    } else {
+      videoShelfRevision.value++;
+      videoRevision.value++;
+    }
   }
-
-  /// 最近观看（按观看时间倒序，最多 [limit] 条）。
-  Future<List<VideoWatchProgress>> videoHistory({
-    int limit = videoHistoryLimit,
-  }) async {
-    final records = await LibraryDb.readVideoRecent(await _db, limit);
-    return [
-      for (final record in records)
-        if (record.hasProgress) _videoProgressOf(record),
-    ];
-  }
-
-  VideoWatchProgress _videoProgressOf(VideoRecord record) =>
-      VideoWatchProgress(
-        seriesId: record.id,
-        title: record.title,
-        cover: record.cover,
-        episodeIndex: record.episodeIndex,
-        updatedAt: DateTime.fromMillisecondsSinceEpoch(record.lastReadAt),
-      );
 
   // ---------------------------------------------------------------------
   // 云同步：导出 / 合并
   // ---------------------------------------------------------------------
 
-  /// 导出同步所需的全部本地数据。
-  ///
-  /// 新格式（schemaVersion 2）：`{'novel': [记录...], 'video': [...]}`，
-  /// 一条记录同时带快照与状态。顺序按 id 升序，保证同一份数据每次序列化出的
-  /// 字符串完全一致——同步层靠字符串比较决定要不要上传。
+  /// 导出同步数据：`{'items': [记录...]}`，按主键升序保证序列化结果稳定。
   Future<Map<String, dynamic>> exportSyncData() async {
-    final db = await _db;
-    final novels = await LibraryDb.readAllNovel(db);
-    final videos = await LibraryDb.readAllVideo(db);
+    final records = await LibraryDb.readAll(await _db);
     return {
-      'novel': [for (final record in novels) record.toJson()],
-      'video': [for (final record in videos) record.toJson()],
+      'items': [for (final record in records) record.toJson()],
     };
   }
 
   /// 把远端快照合并进本地，返回是否有变化。
   ///
-  /// 合并规则见 [mergeNovelRecords] / [mergeVideoRecords]：快照按
-  /// `metaFetchedAt` 整组取新、进度按 `lastReadAt` 整组取新、书架两列各取
-  /// max。整段在一个事务里，不会留下半合并状态。
-  ///
-  /// 兼容 v1 载荷（`novelShelf` / `novelProgress` …）：旧版本写上去的文件
-  /// 会先转成记录再合并，避免升级后第一次同步就报"格式不正确"。
+  /// 合并规则见 [mergeLibraryRecords]；整段在一个事务里，不会留下半合并状态。
+  /// 只认当前格式（`items` 数组），旧格式由同步层直接拒绝，避免静默清空远端。
   Future<bool> applySyncData(Map<String, dynamic> remote) async {
     final db = await _db;
-    var novelChanged = false;
-    var novelShelfChanged = false;
-    var novelRecentChanged = false;
-    var videoChanged = false;
+    var changed = false;
+    var shelfChanged = false;
+    var historyChanged = false;
     var videoShelfChanged = false;
-    var videoRecentChanged = false;
+    var videoHistoryChanged = false;
 
-    final novels = _novelRecordsOf(remote);
-    final videos = _videoRecordsOf(remote);
+    final incoming = <LibraryRecord>[];
+    for (final raw in asList(remote['items'])) {
+      final record = LibraryRecord.tryFromJson(raw);
+      if (record != null) incoming.add(record);
+    }
 
     await db.transaction((txn) async {
-      for (final incoming in novels) {
+      for (final remoteRecord in incoming) {
         final local =
-            await LibraryDb.readNovel(txn, incoming.id) ??
-            NovelRecord(id: incoming.id);
-        final merged = mergeNovelRecords(local, incoming);
+            await LibraryDb.read(txn, remoteRecord.type, remoteRecord.sourceId) ??
+            LibraryRecord(
+              type: remoteRecord.type,
+              sourceId: remoteRecord.sourceId,
+            );
+        final merged = mergeLibraryRecords(local, remoteRecord);
         if (!merged.diffFrom(local)) continue;
-        if (merged.onShelf != local.onShelf) novelShelfChanged = true;
-        if (merged.lastReadAt != local.lastReadAt ||
-            merged.chapterId != local.chapterId) {
-          novelRecentChanged = true;
+        if (merged.shelfDiffersFrom(local)) {
+          if (merged.type == LibraryType.novel) {
+            shelfChanged = true;
+          } else {
+            videoShelfChanged = true;
+          }
         }
-        await LibraryDb.writeNovel(txn, merged);
-        novelChanged = true;
+        if (merged.progressDiffersFrom(local)) {
+          if (merged.type == LibraryType.novel) {
+            historyChanged = true;
+          } else {
+            videoHistoryChanged = true;
+          }
+        }
+        await LibraryDb.write(txn, merged);
+        changed = true;
       }
-      for (final incoming in videos) {
-        final local =
-            await LibraryDb.readVideo(txn, incoming.id) ??
-            VideoRecord(id: incoming.id);
-        final merged = mergeVideoRecords(local, incoming);
-        if (!merged.diffFrom(local)) continue;
-        if (merged.onShelf != local.onShelf) videoShelfChanged = true;
-        if (merged.lastReadAt != local.lastReadAt) videoRecentChanged = true;
-        await LibraryDb.writeVideo(txn, merged);
-        videoChanged = true;
-      }
-      await LibraryDb.pruneNovel(txn, libraryLimit);
-      await LibraryDb.pruneVideo(txn, libraryLimit);
+      await LibraryDb.prune(txn, libraryLimit);
     });
 
-    if (novelChanged) {
+    if (changed) {
       novelRevision.value++;
-      if (novelShelfChanged) shelfRevision.value++;
-      if (novelRecentChanged) recentRevision.value++;
-    }
-    if (videoChanged) {
       videoRevision.value++;
+      if (shelfChanged) shelfRevision.value++;
+      if (historyChanged) recentRevision.value++;
       if (videoShelfChanged) videoShelfRevision.value++;
-      if (videoRecentChanged) videoHistoryRevision.value++;
+      if (videoHistoryChanged) videoHistoryRevision.value++;
     }
-    return novelChanged || videoChanged;
-  }
-
-  List<NovelRecord> _novelRecordsOf(Map<String, dynamic> data) {
-    if (!isRecordPayload(data)) return novelRecordsFromLegacy(data);
-    final out = <NovelRecord>[];
-    for (final raw in asList(data['novel'])) {
-      final record = NovelRecord.tryFromJson(raw);
-      if (record != null) out.add(record);
-    }
-    return out;
-  }
-
-  List<VideoRecord> _videoRecordsOf(Map<String, dynamic> data) {
-    if (!isRecordPayload(data)) return videoRecordsFromLegacy(data);
-    final out = <VideoRecord>[];
-    for (final raw in asList(data['video'])) {
-      final record = VideoRecord.tryFromJson(raw);
-      if (record != null) out.add(record);
-    }
-    return out;
+    return changed;
   }
 }

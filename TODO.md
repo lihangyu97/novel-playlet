@@ -48,8 +48,9 @@
 
 ### 已完成：统一 library 记录 + SQLite（2026-11-16）
 
-已落地：`novel_state` / `novel_meta` / `video_state` / `video_meta` 四张表，
-`ReadingStore` 公开 API 与 revision 计数保持不变，同步载荷 `schemaVersion` 升到 2 并兼容 v1 旧载荷。
+已落地：**单表 `library`**（`type` = `novel` / `playlet`，主键 `'$type/$id'`），
+书架、历史、收藏全部由这张表派生；同步载荷 `schemaVersion = 3`，只认当前版本。
+墓碑行只清快照不删行；纯进度行上限 500 由两类内容共享。
 方案与合并规则见 [docs/storage-model-proposal.md](docs/storage-model-proposal.md)。
 
 原设想「小说 / 短剧各一张表，一条记录聚合元信息 + 书架状态 + 进度 + 缓存状态」。关键前提：内容全部来自上游、

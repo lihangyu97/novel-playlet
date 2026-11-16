@@ -543,7 +543,7 @@ cached miss 时第一次取流仍会按内核重试预算耗一段时间，失�
 |---|---|---|---|
 | **pinned 离线区** | `<AppSupport>/offline/novel/`、`offline/video/` | 用户主动下载的正文 / 明文 mp4 | **永不自动淘汰**，只能用户删 |
 | **自动加速层** | `<AppSupport>/reader_chapters/`、`backend/src/` | 章节 JSON、CENC 密文视频 + `.key` | 各自有上限，自动淘汰 |
-| **用户库** | `<AppSupport>/library.db`（SQLite） | 书架、收藏、阅读/观看进度 | 每条内容一行，纯进度行上限 500 |
+| **用户库** | `<AppSupport>/library.db`（SQLite） | 书架、收藏、阅读/观看进度 | 每条内容一行；纯进度行上限 500（小说+短剧共享） |
 | **偏好** | `SharedPreferences` | 主题、阅读设置、同步元数据 | 表级 LRU |
 
 ### 6.1 清单
@@ -560,7 +560,7 @@ cached miss 时第一次取流仍会按内核重试预算耗一段时间，失�
 | `backend/src/<videoId>.<ext>.variant.json` | `{name,width,height,short_edge}` | 随视频删 |
 | `Application Support/libCachedImageData.db` + `Library/Caches/libCachedImageData/` | 封面图 + sqflite 索引 | 120 对象 / 7 天；启动 >40 MB 裁到 25 MB |
 | `backend/config/` | 设备池 + 运行时 config | **不是缓存**，删了要重新注册设备 |
-| `library.db` | 书架/收藏/进度（`novel_state`/`novel_meta`/`video_state`/`video_meta`） | **不是缓存**，删了等于清空书架；首次启动从旧 `shared_preferences` 一次性迁移 |
+| `library.db` | 书架/收藏/进度（单表 `library`，`type` 区分小说/短剧） | **不是缓存**，删了等于清空书架 |
 | `backend/rust.log`、`offline/diag.log` | 排障日志 | 轮转；可随时删 |
 
 ### 6.2 隔离不变式

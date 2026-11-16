@@ -1,46 +1,43 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/core/storage/library_records.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 
-/// 本地库的导出 / 合并（同步载荷 schemaVersion 2）。
+/// 本地库的导出 / 合并（同步载荷 schemaVersion 3）。
 ///
 /// 规则见 `docs/storage-model-proposal.md` §4：快照整组按 `metaFetchedAt`、
 /// 进度整组按 `lastReadAt`、书架两列各取 max。
 void main() {
-  test('导出是 v2 记录数组，书架条目带 shelfAt', () async {
+  Map<String, dynamic> recordOf(Map<String, dynamic> data, {int index = 0}) =>
+      (data['items'] as List)[index] as Map<String, dynamic>;
+
+  test('导出是 items 数组，书架条目带 shelfAt', () async {
     final store = ReadingStore();
     await store.addToShelf(const NovelItem(id: 'a', title: 'A'));
     final data = await store.exportSyncData();
-    final novels = data['novel'] as List;
-    expect(novels, hasLength(1));
-    final record = novels.single as Map;
+    final items = data['items'] as List;
+    expect(items, hasLength(1));
+    final record = recordOf(data);
+    expect(record['type'], 'novel');
     expect(record['id'], 'a');
     expect(record['title'], 'A');
     expect(record['shelfAt'], greaterThan(0));
     expect(record.containsKey('shelfRemovedAt'), isFalse);
-    expect(data['video'], isEmpty);
   });
 
-  test('书架删除会落成 shelfRemovedAt，远端旧条目不会复活', () async {
+  test('书架删除落成墓碑并清掉快照，书架不再显示', () async {
     final store = ReadingStore();
-    const book = NovelItem(id: 'a', title: 'A');
-    await store.addToShelf(book);
+    await store.addToShelf(const NovelItem(id: 'a', title: 'A'));
     await store.removeFromShelf('a');
 
-    final local = await store.exportSyncData();
-    final record = (local['novel'] as List).single as Map;
-    expect(record['shelfRemovedAt'], greaterThan(0));
-
-    // 远端的加入时间更早：max 之后仍然是"删除态"。
-    await store.applySyncData({
-      'novel': [
-        {'id': 'a', 'title': 'A', 'shelfAt': 1, 'metaFetchedAt': 1},
-      ],
-      'video': <Object>[],
-    });
-
     expect(await store.shelf(), isEmpty);
+
+    final record = recordOf(await store.exportSyncData());
+    expect(record['shelfRemovedAt'], greaterThan(0));
+    // 墓碑瘦身：title/cover 全部清掉，行里只剩 id / 时间戳。
+    expect(record.containsKey('title'), isFalse);
+    expect(record.containsKey('cover'), isFalse);
   });
 
   test('远端新增收藏会合并进本地，远端删除也会生效', () async {
@@ -48,30 +45,33 @@ void main() {
     await store.addToShelf(const NovelItem(id: 'local', title: '本地'));
 
     await store.applySyncData({
-      'novel': [
+      'items': [
         {
+          'type': 'novel',
           'id': 'remote',
           'title': '远端',
           'shelfAt': 10,
           'metaFetchedAt': 10,
         },
       ],
-      'video': <Object>[],
     });
 
     final shelf = await store.shelf();
     expect(shelf.map((item) => item.id), containsAll(['local', 'remote']));
 
     await store.applySyncData({
-      'novel': [
+      'items': [
         {
+          'type': 'novel',
           'id': 'local',
           'shelfRemovedAt': DateTime.now().millisecondsSinceEpoch + 10000,
         },
       ],
-      'video': <Object>[],
     });
-    expect((await store.shelf()).map((item) => item.id), isNot(contains('local')));
+    expect(
+      (await store.shelf()).map((item) => item.id),
+      isNot(contains('local')),
+    );
   });
 
   test('阅读进度按 lastReadAt 取较新的一条，旧远端不会覆盖本地', () async {
@@ -88,16 +88,16 @@ void main() {
     expect(local, isNotNull);
 
     await store.applySyncData({
-      'novel': [
-        {'id': 'a', 'title': 'A', 'lastReadAt': 1, 'chapterId': 'old'},
+      'items': [
+        {'type': 'novel', 'id': 'a', 'title': 'A', 'lastReadAt': 1, 'chapterId': 'old'},
       ],
-      'video': <Object>[],
     });
     expect((await store.progress('a'))?.chapterId, local!.chapterId);
 
     await store.applySyncData({
-      'novel': [
+      'items': [
         {
+          'type': 'novel',
           'id': 'a',
           'title': 'A',
           'lastReadAt': local.updatedAt.millisecondsSinceEpoch + 10000,
@@ -106,33 +106,48 @@ void main() {
           'blockIndex': 4,
         },
       ],
-      'video': <Object>[],
     });
     expect((await store.progress('a'))?.chapterId, 'new');
     expect((await store.recent()).first.bookId, 'a');
   });
 
+  test('同 id 的小说与短剧互不影响（主键带类型前缀）', () async {
+    final store = ReadingStore();
+    await store.addToShelf(const NovelItem(id: '42', title: '一本书'));
+    await store.addVideoToShelf(const VideoSeries(id: '42', title: '一部剧'));
+
+    expect((await store.shelf()).map((item) => item.title), ['一本书']);
+    expect((await store.videoShelf()).map((item) => item.title), ['一部剧']);
+    expect(await store.isOnShelf('42'), isTrue);
+    expect(await store.isVideoOnShelf('42'), isTrue);
+
+    final records = (await store.exportSyncData())['items'] as List;
+    expect(records, hasLength(2));
+    expect(records.map((r) => (r as Map)['type']), containsAll(['novel', 'playlet']));
+  });
+
   test('短剧收藏和进度同样可合并', () async {
     final store = ReadingStore();
-    const series = VideoSeries(id: 'v1', title: '剧一', episodeCount: 12);
-    await store.addVideoToShelf(series);
+    await store.addVideoToShelf(
+      const VideoSeries(id: 'v1', title: '剧一', episodeCount: 12),
+    );
     await store.saveVideoProgress(seriesId: 'v1', title: '剧一', episodeIndex: 3);
 
-    final data = await store.exportSyncData();
-    final videos = data['video'] as List;
-    expect(videos, hasLength(1));
-    expect((videos.single as Map)['episodeIndex'], 3);
+    final record = recordOf(await store.exportSyncData());
+    expect(record['type'], 'playlet');
+    expect(record['episodeIndex'], 3);
+    expect(record['episodeCount'], 12);
 
     await store.applySyncData({
-      'video': [
+      'items': [
         {
+          'type': 'playlet',
           'id': 'v1',
           'title': '剧一',
           'lastReadAt': DateTime.now().millisecondsSinceEpoch + 10000,
           'episodeIndex': 8,
         },
       ],
-      'novel': <Object>[],
     });
     expect((await store.videoProgress('v1'))?.episodeIndex, 8);
   });
@@ -142,51 +157,62 @@ void main() {
     await store.addToShelf(const NovelItem(id: 'a', title: 'A'));
     await store.removeFromShelf('a');
 
-    final before = ((await store.exportSyncData())['novel'] as List).single as Map;
-    final localRemovedAt = before['shelfRemovedAt'] as int;
+    final localRemovedAt = recordOf(await store.exportSyncData())['shelfRemovedAt']
+        as int;
     final remoteRemovedAt = localRemovedAt + 1000;
 
     await store.applySyncData({
-      'novel': [
-        {'id': 'a', 'shelfRemovedAt': remoteRemovedAt},
+      'items': [
+        {'type': 'novel', 'id': 'a', 'shelfRemovedAt': remoteRemovedAt},
       ],
-      'video': <Object>[],
     });
 
-    final after = ((await store.exportSyncData())['novel'] as List).single as Map;
     expect(
-      after['shelfRemovedAt'],
+      recordOf(await store.exportSyncData())['shelfRemovedAt'],
       remoteRemovedAt,
       reason: '取 max 之后的墓碑时间戳必须落盘，否则本地导出和远端永远差一个值',
     );
   });
 
-  test('v1 旧载荷（novelShelf / novelProgress）也能合并，升级不丢数据', () async {
+  test('旧格式载荷（没有 items）不会被合并，避免按新结构误解旧数据', () async {
     final store = ReadingStore();
-    const book = NovelItem(id: 'old', title: '旧书', author: '某作者');
-    await store.applySyncData({
-      'novelShelf': [book.toStorageJson()],
-      'novelShelfMeta': {
-        'old': {'u': 5, 'd': false},
-      },
-      'novelProgress': {
-        'old': {
-          'bookId': 'old',
-          'bookTitle': '旧书',
-          'cover': '',
-          'chapterId': 'c9',
-          'chapterIndex': 9,
-          'blockIndex': 1,
-          'updatedAt': 7,
-        },
-      },
+    final changed = await store.applySyncData({
+      'novelShelf': [
+        {'id': 'old', 'title': '旧书'},
+      ],
     });
+    expect(changed, isFalse);
+    expect(await store.shelf(), isEmpty);
+  });
 
-    final shelf = await store.shelf();
-    expect(shelf.map((item) => item.id), ['old']);
-    expect(shelf.single.author, '某作者');
-    final progress = await store.progress('old');
-    expect(progress?.chapterId, 'c9');
-    expect(progress?.blockIndex, 1);
+  test('墓碑不出现在历史里，未上架但读过的会出现', () async {
+    final store = ReadingStore();
+    await store.addToShelf(const NovelItem(id: 'kept', title: '留下的'));
+    await store.addToShelf(const NovelItem(id: 'gone', title: '移出的'));
+    await store.saveProgress(
+      bookId: 'kept',
+      bookTitle: '留下的',
+      cover: '',
+      chapterId: 'c1',
+      chapterIndex: 0,
+    );
+    await store.saveProgress(
+      bookId: 'gone',
+      bookTitle: '移出的',
+      cover: '',
+      chapterId: 'c1',
+      chapterIndex: 0,
+    );
+    await store.saveProgress(
+      bookId: 'loose',
+      bookTitle: '没上架的',
+      cover: '',
+      chapterId: 'c1',
+      chapterIndex: 0,
+    );
+    await store.removeFromShelf('gone');
+
+    final history = await store.history(type: LibraryType.novel);
+    expect(history.map((r) => r.sourceId), ['loose', 'kept']);
   });
 }
