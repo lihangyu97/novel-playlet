@@ -14,57 +14,60 @@
 
 ## 存储与云同步（评审 2026-11-16）
 
-现状：书架 / 收藏 / 进度已迁到 SQLite（`<AppSupport>/library.db`，四张表：状态/快照 × 小说/短剧），
-最近列表由记录派生；云同步走 `<dir>/sync.json` 整包 PUT，载荷 `schemaVersion = 2`。
-以下待办按优先级排列，设计层面的评估见 [docs/storage-model-proposal.md](docs/storage-model-proposal.md)。
+**现状**：单表 `library`（`type` = `novel` / `playlet`，主键 `'$type/$id'`），书架 / 历史 / 收藏全部由它派生；
+云同步是 `<dir>/sync.json` 整包 PUT，载荷 `schemaVersion = 3`（只认当前版本，旧文件直接拒绝）。
+设计推演与合并规则见 [docs/storage-model-proposal.md](docs/storage-model-proposal.md)。
+
+### 状态速览
+
+| 项 | 状态 |
+|---|---|
+| 书架 / 收藏 / 进度迁到 SQLite | ✅ |
+| 小说 / 短剧合并单表 + 墓碑瘦身 | ✅ |
+| 「我的」页合并为「历史 / 收藏」 | ✅ |
+| 短剧进度无上限 | ✅ 随 `libraryLimit = 500` 解决 |
+| 上传 `If-Match` / 条件请求 / gzip | ⬜ 未开始 |
+| 墓碑回收、进度裁剪墓碑 | ⬜ 需要先定方案 |
 
 ### P0 数据与正确性
 
-- [x] ~~短剧进度无上限~~（2026-11-16 已随统一记录解决）：小说/短剧共用 `ReadingStore.libraryLimit = 500`，
-  只淘汰「未上架且无墓碑」的纯进度行；书架条目与墓碑不参与淘汰。
-- [ ] 上传缺 `If-Match`：两台设备同时同步时都读到 rev N、都写 rev N+1，后写覆盖先写。逐条合并能让数据最终收敛，但中间窗口会丢改动且 revision 退化。
-  - 建议：`PUT` 带 `If-Match: <etag>`，412/409 时重读 → 重合并 → 重写。
-- [ ] tombstone 只增不减：`novel_shelf_meta_v1` / `video_shelf_meta_v1` 每次「加入再移出」都永久留一条（约 50 B，1000 条约 50 KB），且会进同步载荷。书架与短剧收藏本身也没有条数上限。
-  - 清理有风险：删掉 tombstone 就丢失删除信息，远端旧值会把已删条目复活。安全做法需要因果稳定性（确认各设备都已同步过该 revision），简化近似是保留 90 天。**改造前先别动**。
-
-- [ ] 进度行裁剪没有墓碑：`libraryLimit` 是直接删行，"缺记录"在合并里不等于"删除"。
-  - 单设备没问题（删掉后导出就没有、上传即覆盖）；**双设备下会被对方的远端记录重新补回来**。
-  - 方案：状态行加 `progress_pruned_at`，合并时"裁剪时间 > 对方 last_read_at"才丢弃；或只裁剪从未参与同步的行。
+- [ ] **上传缺 `If-Match`**：两台设备同时同步时都读到 rev N、都写 rev N+1，后写覆盖先写。逐条合并能让数据最终收敛，但中间窗口会丢改动且 revision 退化。
+  - 前置：`_WebDavResponse` 目前只留 statusCode / body，要先把 headers 透出来才能拿到 ETag。
+  - 做法：`PUT` 带 `If-Match: <etag>`，412 / 409 时重读 → 重合并 → 重写。
+- [ ] **墓碑只增不减**：`library` 里 `shelf_removed_at > 0` 的行永不删除。已做的是瘦身（写库时清掉 title / author / cover / intro / episode_count / color_dominate / meta_fetched_at，单行约 370 → 90 B），回收仍是空白。
+  - 回收有风险：删掉墓碑就丢失删除信息，远端旧值会把已删条目复活；安全回收需要因果稳定性（确认所有设备都同步过该删除）。
+  - 候选方案：远端文件加设备水位 `devices: {deviceId: lastSeenAt}`；或长 TTL（180 天）近似。**动手前先定方案。**
+- [ ] **进度行裁剪没有墓碑**：`libraryLimit = 500` 是直接删行，而合并里"缺记录"不等于"删除"。
+  - 单设备没问题（删掉后导出就没有、上传即覆盖）；**双设备下会被对方的远端记录补回来**。
+  - 做法：状态行加 `progress_pruned_at`（`library.db` 升 v3），合并时"裁剪时间 > 对方 `last_read_at`"才丢弃。
+  - 优先级低：500 条上限很少触发。
 
 ### P1 云同步性能
 
-- [ ] 没有条件请求：每次同步无条件 `GET` 全文；`_WebDavResponse` 只保留 statusCode/body，headers 全丢，即使服务器回了 ETag 也拿不到。
-- [ ] `revision` / `lastRevision` 只写不读，从未用于短路。
-- [ ] `ensureDirectory` 每次同步都重跑 MKCOL（2 次往返），首次成功后可按 config 缓存。
-  - 建议：`PROPFIND Depth:0` 取 `getetag` 后比对本地 `remoteEtag`，命中则整轮跳过；取不到时回退到现有内容比对（部分 DAV 实现的 ETag 不可信，必须留 fallback）。
+- [ ] **没有条件请求**：每次同步无条件 `GET` 全文；`revision` / `lastRevision` 只写不读，从未用于短路。
+  - 做法：`PROPFIND Depth:0` 取 `getetag` + `getcontentlength`，本地 `SyncMeta` 存 `remoteEtag`，命中则整轮跳过；取不到时回退到现有内容比对（部分 DAV 实现的 ETag 不可信，兜底必须留）。
+  - 顺带：`webdav_client.dart` 里 `if (method == 'PROPFIND')` 是死代码（lib 无调用方，仅 test mock 保留），做这条时一并激活。
+- [ ] **`ensureDirectory` 每次同步都重跑**：2 次 MKCOL 往返，首次成功后可按 config 缓存。
+- [ ] **同步文件拆分**：~~拆成 `<kind>-state.json` / `<kind>-meta.json`~~ **暂缓，动机已变**。
+  - 当初的收益是"一次翻页只传状态部分"，但本地已并成一张表，写放大也已由 SQLite 单行 UPDATE 解决；拆开后一条记录的快照与状态分在两个文件，合并要跨文件 join、还要处理"key 只出现在一边"的情况。
+  - 现在拆文件只剩流量收益，而 gzip 已有 4.6~5.5 倍。**先做 P1 + gzip，拿真实流量再决定。**
 
-### P2 载荷与遗留清理
+### P2 载荷与遗留
 
-- [ ] 同步载荷未压缩：实测 gzip 可压 4.6~5.5 倍（20.4 KB → 4.4 KB）。
-- [ ] 未按域拆文件：现在仍是一个 `sync.json`。拆成 `<kind>-state.json` / `<kind>-meta.json`
-  后，一次翻页只传状态文件；推荐与 P1 的 `PROPFIND Depth:1` 一起做。
+- [ ] **载荷未压缩**：实测 gzip 可压 4.6~5.5 倍（20.4 KB → 4.4 KB）。需要先定形态：`sync.json.gz`，还是 `Content-Encoding: gzip`（后者部分 DAV 服务端会重新编码，不可靠）。
 - [x] ~~`last_read_book_v1` 只写不读~~：迁移后已移除，`lastReadBookId()` 一并删除。
-- [ ] `webdav_client.dart` 的 `PROPFIND` 分支是死代码（lib 无调用方，仅 test mock 保留）。
 
-### 已完成：统一 library 记录 + SQLite（2026-11-16）
+### 已完成（2026-11-16）
 
-已落地：**单表 `library`**（`type` = `novel` / `playlet`，主键 `'$type/$id'`），
-书架、历史、收藏全部由这张表派生；同步载荷 `schemaVersion = 3`，只认当前版本。
-墓碑行只清快照不删行；纯进度行上限 500 由两类内容共享。
-方案与合并规则见 [docs/storage-model-proposal.md](docs/storage-model-proposal.md)。
+- **统一 library 记录**：8 个 `shared_preferences` key → 单表 `library`；书架 / 历史 / 收藏全部由查询派生，`recent_reading_v1` / `video_history_v1` 与两张 tombstone 表都不再存在。
+- **墓碑瘦身**：移出书架只写 `shelf_removed_at`，同时清掉快照列，行不删。
+- **删除语义**：`shelf_at` / `shelf_removed_at` 两个时间戳取 max，`shelf_at > shelf_removed_at` 才算在架；合并函数逐字段判等，保证两端收敛。
+- **上限**：小说与短剧共享 500 条**纯进度行**额度，书架条目与墓碑不参与淘汰。
+- **「我的」页**：小说 / 短剧 tab 合并为「历史 / 收藏」，条目挂绿（小说）/ 橙（短剧）标签，收藏封面统一 3:4。
+- **同步载荷** `schemaVersion = 3`：`{'items': [...]}` 单数组，每条带 `type`；导出按主键排序，保证序列化结果稳定。
 
-原设想「小说 / 短剧各一张表，一条记录聚合元信息 + 书架状态 + 进度 + 缓存状态」。关键前提：内容全部来自上游、
-本机没有登录态也没有编辑入口，所以**元信息是"加入书架那一刻的冻结快照"**（`addToShelf` 已存在即早退，
-`_writeShelf` 只有 add/remove 两个调用方）。这条前提把记录切成"用户状态（要合并）"和"上游快照（只取值）"两半，
-合并规则因此只剩一条线。
-
-收益：同步载荷 -32%（同书 543 → 371 字节）、key 数 8 → 4、两张派生缓存归零。
-
-落地时选了 SQLite 而不是继续用 prefs：状态表（164 B/行）+ 快照表（207 B/行）拆开后，
-虽然单次进度落盘只需重写状态表（32 KB，低于原来的 41.6 KB），但 prefs 没有索引、
-没有单行 UPDATE，最近列表与书架都要全表解码；SQLite 让 `ORDER BY last_read_at`
-走索引，且换机/扩容时不用再重做一次存储迁移。
+为什么存储选 SQLite 而不是继续用 `shared_preferences`：prefs 没有索引、没有单行 UPDATE，
+最近列表与书架都要全表解码；SQLite 让 `ORDER BY last_read_at` 走索引，换机时也不用再重做一次存储迁移。
 
 仍必须保留的复杂度只有两处：`shelf_at` / `shelf_removed_at` 这对时间戳（布尔状态同步必须能表达"删除"），
-以及合并函数的收敛性（"本地优先"这类规则会让两台设备永久抖动）。详见
-[docs/storage-model-proposal.md](docs/storage-model-proposal.md)。
+以及合并函数的收敛性（"本地优先"这类规则会让两台设备永久抖动）。
