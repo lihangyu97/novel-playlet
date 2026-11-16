@@ -25,6 +25,8 @@
   - 建议：加 `videoProgressLimit`，在 `saveVideoProgress` 与 `applySyncData` 短剧分支复用 `_pruneProgress`；可选「收藏内的 id 不淘汰」。
 - [ ] 上传缺 `If-Match`：两台设备同时同步时都读到 rev N、都写 rev N+1，后写覆盖先写。逐条合并能让数据最终收敛，但中间窗口会丢改动且 revision 退化。
   - 建议：`PUT` 带 `If-Match: <etag>`，412/409 时重读 → 重合并 → 重写。
+- [ ] tombstone 只增不减：`novel_shelf_meta_v1` / `video_shelf_meta_v1` 每次「加入再移出」都永久留一条（约 50 B，1000 条约 50 KB），且会进同步载荷。书架与短剧收藏本身也没有条数上限。
+  - 清理有风险：删掉 tombstone 就丢失删除信息，远端旧值会把已删条目复活。安全做法需要因果稳定性（确认各设备都已同步过该 revision），简化近似是保留 90 天。**改造前先别动**。
 
 ### P1 云同步性能
 
