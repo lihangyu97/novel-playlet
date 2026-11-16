@@ -264,7 +264,11 @@ impl UpstreamClient {
             })?;
 
         if resp.status != 200 {
-            if is_auth_fail_status(resp.status) {
+            // A 401/403 on a signed request means the identity was rejected.
+            // Unsigned requests are CDN/media fetches: their 403 says nothing
+            // about the pooled device, so retiring one over it would rotate
+            // identities for a URL that simply expired.
+            if is_auth_fail_status(resp.status) && !req.no_sign {
                 return Err(ClientError::DeviceFailed(format!("HTTP {}", resp.status)));
             }
             if is_retryable_status(resp.status) {

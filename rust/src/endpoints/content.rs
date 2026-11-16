@@ -170,12 +170,18 @@ async fn handle_batch(ctx: &Ctx, item_ids: &str) -> ApiResult<Value> {
                     .unwrap_or("")
                     .to_string();
                 if !enc.is_empty() {
-                    if let Ok(plain) = crate::crypto::decrypt_upstream(&enc, &dev.secret_key) {
-                        m.insert(
-                            "content".to_string(),
-                            Value::from(String::from_utf8_lossy(&plain).into_owned()),
-                        );
-                    }
+                    // A chapter that cannot be decrypted is an error, never a
+                    // successful answer carrying the ciphertext: callers cache
+                    // what this returns, so silently keeping the base64 blob
+                    // would persist unreadable content to disk.
+                    let plain =
+                        crate::crypto::decrypt_upstream(&enc, &dev.secret_key).map_err(|err| {
+                            ApiError::Internal(format!("decrypt content for chapter {id}: {err}"))
+                        })?;
+                    m.insert(
+                        "content".to_string(),
+                        Value::from(String::from_utf8_lossy(&plain).into_owned()),
+                    );
                 }
                 out.insert(id, Value::Object(m));
             }

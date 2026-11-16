@@ -543,17 +543,38 @@ async fn resolve_video_source(ctx: &Ctx, parsed: &ParsedVideoResponse) -> VideoS
     extract_parsed_video_url(parsed)
 }
 
+/// `video_list` is an object keyed by variant id in every shortplay model
+/// observed so far; 2026-11 batch responses also send a plain array. Selection
+/// only cares about the entries, so both shapes feed the same ranking instead
+/// of one shape silently turning into "no playable source".
+fn video_list_values(value: Option<&Value>) -> Vec<&Value> {
+    match value {
+        Some(Value::Object(variants)) => variants.values().collect(),
+        Some(Value::Array(variants)) => variants.iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn extract_shortplay_video_model_source(model: &Map<String, Value>) -> VideoSourceResolution {
-    let Some(video_list) = model.get("video_list").and_then(|v| v.as_object()) else {
-        return VideoSourceResolution::NotFound;
-    };
+    let video_list = model.get("video_list");
     let key_seed = model
         .get("key_seed")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .and_then(|s| audio_b64_decode(s).ok());
+    // Array-shaped lists used to be resolved by the legacy extractor, which
+    // reads plain URLs. Without a seed this path cannot decode anything, and
+    // taking it would turn a legacy-playable list into a codec rejection, so
+    // hand arrays back to that extractor.
+    if key_seed.is_none() && matches!(video_list, Some(Value::Array(_))) {
+        return VideoSourceResolution::NotFound;
+    }
+    let variants = video_list_values(video_list);
+    if variants.is_empty() {
+        return VideoSourceResolution::NotFound;
+    }
 
-    select_video_source(video_list.values(), |info| {
+    select_video_source(variants.into_iter(), |info| {
         // Missing keys may prevent resolution, but must not hide a codec rejection.
         decrypt_variant_entry(info, key_seed.as_deref())
     })
@@ -571,17 +592,19 @@ fn decrypt_variant_entry(
     key_seed: Option<&[u8]>,
 ) -> Option<(String, Vec<u8>)> {
     let key_seed = key_seed?;
-    let mut raw_url = info
-        .get("main_url")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    if raw_url.is_empty() {
-        raw_url = info
-            .get("backup_url_1")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+    // Four interchangeable fields across models: older responses only carry
+    // `main_url`/`backup_url_1`, the 2026-11 batch shape also uses
+    // `backup_url` and `play_url`. First non-empty wins so the preference
+    // order stays main → backup → play.
+    let mut raw_url = String::new();
+    for field in ["main_url", "backup_url", "backup_url_1", "play_url"] {
+        if let Some(value) = info.get(field).and_then(Value::as_str) {
+            let value = value.trim();
+            if !value.is_empty() {
+                raw_url = value.to_string();
+                break;
+            }
+        }
     }
     // `main_url` 有两种形态，不能一律先解一层 base64：
     //   1) base64 包着的明文地址（解码后以 `http` 开头）；
@@ -855,7 +878,7 @@ fn extract_video_model_url(model: &Map<String, Value>) -> VideoSourceResolution 
 fn extract_video_list_source(video_list: &[Value]) -> VideoSourceResolution {
     // Preserve the legacy last-entry preference when quality metadata is absent.
     select_video_source(video_list.iter().rev(), |info| {
-        ["play_url", "main_url"]
+        ["play_url", "main_url", "backup_url", "backup_url_1"]
             .iter()
             .filter_map(|key| info.get(*key).and_then(|v| v.as_str()))
             .find(|url| !url.is_empty())
@@ -941,11 +964,12 @@ fn extract_fallback_video_source(root: &Map<String, Value>) -> VideoSourceResolu
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .and_then(|s| audio_b64_decode(s).ok());
-    let Some(video_list) = data_root.get("video_list").and_then(|v| v.as_object()) else {
+    let variants = video_list_values(data_root.get("video_list"));
+    if variants.is_empty() {
         return VideoSourceResolution::NotFound;
-    };
+    }
 
-    select_video_source(video_list.values(), |info| {
+    select_video_source(variants.into_iter(), |info| {
         // Same two URL shapes as the primary list (base64-wrapped plain URL or
         // spade ciphertext): use the shared resolver, never a copy (P1-11).
         decrypt_variant_entry(info, key_seed.as_deref())

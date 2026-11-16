@@ -139,6 +139,38 @@ async fn content_batch_decrypts_in_place_without_changing_the_json_shape() {
 }
 
 #[tokio::test]
+async fn content_batch_fails_when_a_chapter_cannot_be_decrypted() {
+    // Non-base64 content is the cheapest deterministic decrypt failure. The
+    // batch answer must surface it instead of returning the ciphertext as a
+    // successful chapter: Dart caches whatever this endpoint returns.
+    let upstream = json!({
+        "code": 0,
+        "msg": "ok",
+        "data": {
+            "10": {"title": "A", "content": "第一章正文"},
+            "11": {"title": "B", "content": ""},
+        }
+    });
+    let dir = TempDir::new("content-decrypt-failure");
+    let (server, _mock) = server_replying(&dir, upstream).await;
+
+    let (status, body) = body_string(
+        &server,
+        &request("/api/v1/chapters/batch", "item_ids=10,11"),
+    )
+    .await;
+    assert_eq!(status, 500, "body: {body}");
+    assert!(
+        body.contains("decrypt content for chapter 10"),
+        "the failing chapter must be named: {body}"
+    );
+    assert!(
+        !body.contains("第一章正文"),
+        "ciphertext must never come back as chapter content: {body}"
+    );
+}
+
+#[tokio::test]
 async fn content_batch_returns_pass_through_payloads_unchanged() {
     let cases = [
         json!({"code": 0, "data": {}, "msg": "ok"}),

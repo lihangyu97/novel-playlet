@@ -75,6 +75,38 @@ async fn auth_statuses_are_device_failures_and_500_is_not() {
     }
 }
 
+// --- Unsigned media fetches must not retire devices -------------------------
+
+#[tokio::test]
+async fn unsigned_media_auth_failures_do_not_retire_the_device() {
+    for status in [401u16, 403] {
+        let upstream = MockUpstream::start(move |_| MockReply::status(status)).await;
+        let dir = TempDir::new("unsigned-auth");
+        let origin = upstream.origin.clone();
+        let pool = fqapi_core::device::DevicePool::new(dir.join("pool.json"))
+            .await
+            .expect("pool");
+        let client =
+            UpstreamClient::with_mock_origin(pool, Manager::new(), origin.clone()).expect("client");
+
+        let err = client
+            .do_request(&UpstreamRequest {
+                method: Some("GET".to_string()),
+                url: format!("{origin}/media.mp4"),
+                no_sign: true,
+                ..Default::default()
+            })
+            .await
+            .expect_err("non-200 must fail");
+
+        assert!(
+            !err.is_device_failed(),
+            "an unsigned CDN {status} must not be classified as a device failure"
+        );
+        upstream.shutdown();
+    }
+}
+
 // --- V1.1: gzip responses are inflated by the transport ---------------------
 
 #[tokio::test]

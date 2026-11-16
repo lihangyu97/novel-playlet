@@ -351,3 +351,77 @@ async fn stream_variants_do_not_merge_bytevc2_tiers() {
     assert_eq!(names, ["1080P", "360P"], "{body}");
     assert!(!body.to_string().contains(REJECTED_URL), "{body}");
 }
+
+#[tokio::test]
+async fn backup_url_play_url_and_array_video_lists_are_selectable() {
+    // 2026-11 batch responses put the address in `backup_url`/`play_url` and
+    // may send `video_list` as an array. Either shape that only carries one of
+    // those fields used to resolve as "no playable source".
+    let object_payload = json!({"data": {"video_model": {
+        "key_seed": "AAAA",
+        "video_list": {"video_1": {"backup_url": ALLOWED_URL, "codec_type": "h264"}}
+    }}});
+    let array_payload = json!({"data": {"video_model": {
+        "video_list": [{"play_url": ALLOWED_URL, "codec_type": "h264"}]
+    }}});
+
+    for (name, payload) in [
+        ("object backup_url", object_payload),
+        ("array play_url", array_payload),
+    ] {
+        let upstream = MockUpstream::start(move |req| {
+            if req.path == "/h264.mp4" {
+                return MockReply {
+                    status: 200,
+                    headers: vec![],
+                    body: b"video fixture".to_vec(),
+                };
+            }
+            MockReply::json(payload.clone())
+        })
+        .await;
+        let dir = TempDir::new("video-url-fields");
+        let server =
+            build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
+        let (status, body) = request_video(&server, "").await;
+        assert_eq!(status, 200, "{name}: {body}");
+        assert_eq!(body["video_url"], "/src/episode.mp4", "{name}: {body}");
+        assert!(
+            upstream.requests().iter().any(|r| r.path == "/h264.mp4"),
+            "{name}: the selected source must be downloaded"
+        );
+    }
+}
+
+#[tokio::test]
+async fn fallback_video_list_array_is_selectable() {
+    // The model's own list has no usable URL, so recovery goes through
+    // `fallback_api`; that answer sends `video_list` as a plain array.
+    let upstream = MockUpstream::start(|req| {
+        if req.path == "/fallback" {
+            return MockReply::json(json!({"video_info": {"data": {
+                "key_seed": "AAAA",
+                "video_list": [{"backup_url": ALLOWED_URL, "codec_type": "h264"}]
+            }}}));
+        }
+        if req.path == "/h264.mp4" {
+            return MockReply {
+                status: 200,
+                headers: vec![],
+                body: b"video fixture".to_vec(),
+            };
+        }
+        MockReply::json(json!({"data": {"video_model": {
+            "video_list": [{"codec_type": "h264", "encrypt_info": {"encrypt": true}}],
+            "fallback_api": "https://example.invalid/fallback"
+        }}}))
+    })
+    .await;
+    let dir = TempDir::new("video-fallback-array");
+    let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
+    let (status, body) = request_video(&server, "").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["video_url"], "/src/episode.mp4", "{body}");
+    assert!(upstream.requests().iter().any(|r| r.path == "/fallback"));
+    assert!(upstream.requests().iter().any(|r| r.path == "/h264.mp4"));
+}

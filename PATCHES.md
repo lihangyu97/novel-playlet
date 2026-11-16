@@ -114,6 +114,23 @@ axum 0.8 的 accept 循环对 accept 错误无限重试、永不返回，所以�
 | `tests/loopback_reclaim.rs` | **新增**：健康监听不自行结束；监听器死亡后 `connect()` 得到 ECONNREFUSED（不是 HTTP 5xx）；同端口重绑后 `/health` 恢复 | 把 TN2277 的症状模型与恢复路径锁成契约测试 |
 
 
+### 3.8 回摘上游短剧/正文修复（2026-11-16）
+
+上游 2026-11-02 之后对 `content.rs` 与短剧取流做了几处修复，这里只回摘与本项目
+使用面相关、且不依赖 M1 流式下载的三处：
+
+| 文件 | 本地改动 | 来源与原因 |
+|---|---|---|
+| `src/endpoints/content.rs` | `/chapters/batch` 解密失败由「静默保留密文」改为返回 `Internal` 错误，错误里带章节 id | 上游 `fc03a6c3`。旧行为会把 base64 密文当 `content` 返回，而 batch 不写 `content_decrypted`，Dart 的 `content_decrypted == false` 守卫拦不住，离线缓存会把密文落盘 |
+| `src/upstream/client.rs` | 只有**已签名**请求的 401/403 才归类为 `DeviceFailed`；`no_sign` 的 CDN/媒体 401/403 不再淘汰设备 | 上游 `5a595346`。未签名请求的 403 是地址过期/防盗链，与设备池无关，误判会让设备被无谓轮换 |
+| `src/endpoints/video.rs` | `decrypt_variant_entry` 依次接受 `main_url` → `backup_url` → `backup_url_1` → `play_url`；`extract_video_list_source` 同样补上两个 backup 字段；`video_list` 为数组时，有 `key_seed` 走 `extract_shortplay_video_model_source`，无 seed 仍交回 legacy 提取器 | 上游 `3a08f824` / `0dcb34dc`。2026-11 起的批量响应把地址放在 `backup_url`/`play_url`，且 `video_list` 可能是数组；旧代码只认 `main_url`/`backup_url_1` 和对象形态，会把这些响应当成「无可播放源」 |
+| `tests/full_content_json_snapshot.rs`、`tests/mock_upstream_contract.rs`、`tests/video_codec_gate.rs` | 新增：batch 解密失败必须 500 且不回密文；未签名 401/403 不算设备失败；`backup_url`/`play_url`/数组 `video_list`（含 fallback 数组）可选中并下载 | 锁住上面三条行为 |
+
+不跟着回摘的部分：三路并发取流、Dragon Batch（aid=1967）源、静默空包 quarantine、
+播放 `iid` 签名进 Argus field 16、设备身份外置到 `config.json`。这些依赖上游
+`video.rs` 的整体重写或新的设备池版本字段，与本项目的 M1 流式下载（`mode=stream`）
+和 `short_edge` 档位键存在冲突，需要单独排期。
+
 ## 4. 不在本文件范围内的部分
 
 - `rust/` 之外的 Dart 侧改动（UI/数据层/存储）由 git 历史管理，不需要和上游对齐；
