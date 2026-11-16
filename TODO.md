@@ -11,3 +11,15 @@
 
 - Android 系统字体对中间字重可能做合成，滑杆档位观感不一定完全线性；若要更稳定，可评估打包带完整字重的字体（注意授权和包体）。
 - iOS 若要换成统一的跨平台字体，需要另行处理字体文件与授权，不在本次范围内。
+
+## 短剧在线取流停摆（2026-11-16，待决）
+
+- 上游把匿名「播放地址」接口关了：`video_model/v1`、`multi_video_model/v1`、
+  `multi_video_model/player/v1` 对所有剧集/全部镜像一律 `HTTP 200 + 0 字节`；同一设备下
+  搜索/评论/详情正常，小说不受影响，已缓存/离线集可播。
+- 已落地：内核把空/截断响应当瞬时失败重试 1 次，仍失败归 `upstream_5xx` + 人话，
+  非 JSON 不重试，`rust.log` 记录剧集 id/接口/字节数；测试
+  `rust/tests/video_model_empty_body.rs`。**不恢复播放**。
+- 待决：A 登录态（唯一已知可恢复，需评估账号风控/协议/法律风险，建议 feature flag 默认关、
+  只存 token、仅自用）；B 等匿名恢复；C 换源（网页仅前 3 集）。
+- 详见 [docs/playlet-playback-outage-2026-11.md](docs/playlet-playback-outage-2026-11.md)。

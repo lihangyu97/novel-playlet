@@ -431,6 +431,14 @@ _onTick：同页重载时新集 position>0 才释放旧帧；播到尾部自动 
 `mode=stream` 的后台下载沿用同一超时；失败时删除 `.part` 与预写的 `.key`，等待中的 Range 请求收到 502。
 若只拿到远程加密地址（未落盘），Dart 直接报「整集缓存失败」。
 
+**播放接口空响应（2026-11-16 实测）**：`/novel/player/video_model/v1/` 与
+`/novel/player/multi_video_model/v1/` 会对当前请求回 **HTTP 200 + 0 字节**（7 个镜像、
+全部剧集一致；同一台设备/同一套签名下 search、comments、`video_detail` 都正常），
+serde 报 `EOF while parsing a value at line 1 column 0`。内核现在把空/截断响应当瞬时失败
+重试 1 次，仍失败返回 `kind=upstream_5xx` + 人话，非空非 JSON 才按格式变化处理（不重试）；
+详见 PATCHES.md §3.8。这类空响应疑似上游把播放接口的签名要求升到了 mssdk 六签名
+（`X-Helios`/`X-Medusa`，现有内核只有 Argus/Ladon/Khronos），需要另行攻关才能恢复取流。
+
 ### 5.4 回环 `/src`：Range + CENC 解密
 
 ```text

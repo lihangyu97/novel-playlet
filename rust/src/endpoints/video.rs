@@ -80,17 +80,79 @@ struct ParsedVideoResponse {
     models: Vec<Map<String, Value>>,
 }
 
+/// 播放接口一次取流最多打几次上游（含首次）。空/截断响应算瞬时失败，值得再试
+/// 一次；格式变化（非空但不是 JSON）是确定性失败，不重试。
+const VIDEO_MODEL_ATTEMPTS: usize = 2;
+
+/// 两次取流之间的退避。上游的静默拒绝通常是网关抖动，250ms 足够错开同一次
+/// 故障，又不会把失败页拖慢多少。
+const VIDEO_MODEL_RETRY_DELAY: Duration = Duration::from_millis(250);
+
 impl ParsedVideoResponse {
+    #[cfg(test)]
     fn parse(raw: &[u8]) -> ApiResult<Self> {
-        let root: Value = serde_json::from_slice(raw)
-            .map_err(|e| ApiError::Internal(format!("parse upstream json: {e}")))?;
+        let root: Value = serde_json::from_slice(raw)?;
+        Ok(Self::from_value(root))
+    }
+
+    fn from_value(root: Value) -> Self {
         let models = root
             .get("data")
             .and_then(Value::as_object)
             .map(|data| video_models(data).collect())
             .unwrap_or_default();
-        Ok(Self { root, models })
+        Self { root, models }
     }
+}
+
+/// 取一次播放接口的 JSON，空响应/截断响应重试一次。
+///
+/// 2026-11 上游对 `/novel/player/video_model/v1/` 与
+/// `/novel/player/multi_video_model/v1/` 的请求会回 **HTTP 200 + 0 字节**
+/// （实测 7 个镜像、所有剧集一致），serde 于是报
+/// `EOF while parsing a value at line 1 column 0`。把它当成响应格式变化会让
+/// 一次网关抖动直接变成用户侧的失败页，还会把解析器内部文案透到错误详情里，
+/// 所以这里按瞬时失败重试一次，仍失败则归成 `upstream_5xx`（Dart 侧可重试
+/// 的 kind + 人话），技术细节只进核心日志。
+async fn fetch_video_model_value<F, Fut>(
+    video_id: &str,
+    label: &'static str,
+    fetch: F,
+) -> ApiResult<Value>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = ApiResult<Vec<u8>>>,
+{
+    let mut last_len = 0;
+    let mut last_error: Option<String> = None;
+    for attempt in 1..=VIDEO_MODEL_ATTEMPTS {
+        let raw = fetch().await?;
+        last_len = raw.len();
+        match serde_json::from_slice::<Value>(&raw) {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                let transient = raw.is_empty() || error.is_eof();
+                log::warn!(
+                    "video {video_id}: {label} unusable (attempt {attempt}/{VIDEO_MODEL_ATTEMPTS}, {} bytes): {error}",
+                    raw.len()
+                );
+                last_error = Some(error.to_string());
+                if !transient || attempt == VIDEO_MODEL_ATTEMPTS {
+                    break;
+                }
+                tokio::time::sleep(VIDEO_MODEL_RETRY_DELAY).await;
+            }
+        }
+    }
+    if last_len == 0 {
+        return Err(ApiError::upstream_5xx(
+            "上游没有返回取流数据（空响应），请稍后重试".to_string(),
+        ));
+    }
+    Err(ApiError::Internal(format!(
+        "parse upstream json: {}",
+        last_error.unwrap_or_default()
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -164,9 +226,12 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             // A primary failure cancels the auxiliary work, but auxiliary
             // failure remains non-fatal and successful tiers are never cut off.
             let primary = async {
-                let parsed = ParsedVideoResponse::parse(
-                    &fetch_shortplay_video_model(ctx, &video_id).await?,
-                )?;
+                let parsed = ParsedVideoResponse::from_value(
+                    fetch_video_model_value(&video_id, "video_model", || {
+                        fetch_shortplay_video_model(ctx, &video_id)
+                    })
+                    .await?,
+                );
                 let resolved = resolve_video_source(ctx, &parsed).await;
                 if resolved == VideoSourceResolution::CodecRejected {
                     return Err(ApiError::Internal("该视频暂不支持播放".to_string()));
@@ -174,9 +239,11 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
                 Ok((parsed, resolved))
             };
             let auxiliary = async {
-                let response = fetch_phoenix_video_model(ctx, &video_id)
-                    .await
-                    .and_then(|raw| ParsedVideoResponse::parse(&raw));
+                let response = fetch_video_model_value(&video_id, "multi_video_model", || {
+                    fetch_phoenix_video_model(ctx, &video_id)
+                })
+                .await
+                .map(ParsedVideoResponse::from_value);
                 Ok::<_, ApiError>(response)
             };
             let ((parsed, resolved), phoenix) = tokio::try_join!(primary, auxiliary)?;
@@ -199,8 +266,12 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             }
             (parsed, phoenix.ok(), resolved)
         } else {
-            let parsed =
-                ParsedVideoResponse::parse(&fetch_phoenix_video_model(ctx, &video_id).await?)?;
+            let parsed = ParsedVideoResponse::from_value(
+                fetch_video_model_value(&video_id, "multi_video_model", || {
+                    fetch_phoenix_video_model(ctx, &video_id)
+                })
+                .await?,
+            );
             let resolved = resolve_video_source(ctx, &parsed).await;
             (parsed, None, resolved)
         };

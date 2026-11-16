@@ -114,6 +114,30 @@ axum 0.8 的 accept 循环对 accept 错误无限重试、永不返回，所以�
 | `tests/loopback_reclaim.rs` | **新增**：健康监听不自行结束；监听器死亡后 `connect()` 得到 ECONNREFUSED（不是 HTTP 5xx）；同端口重绑后 `/health` 恢复 | 把 TN2277 的症状模型与恢复路径锁成契约测试 |
 
 
+### 3.8 播放接口空响应：重试一次并按 upstream_5xx 归类（2026-11-16）
+
+> 完整排查记录（上游时间线、7 镜像实测、hongguo 源码对照、登录态结论与待决方案）见
+> [docs/playlet-playback-outage-2026-11.md](docs/playlet-playback-outage-2026-11.md)。
+
+现象：短剧取流失败，错误详情是 `parse upstream json: EOF while parsing a value at line 1 column 0`。
+实测（真实注册设备 + 真实上游）：`/novel/player/video_model/v1/` 与
+`/novel/player/multi_video_model/v1/` 对**所有剧集、全部 7 个镜像**都回 `HTTP 200`、
+`content-length: 0`；同一设备同一套签名下 search、comments（POST）、`video_detail`（POST）全部正常，
+说明不是设备/签名整体失效，而是这两条播放接口在网关侧被静默拒绝。空 body 让 serde 报 EOF，
+原先按 `Internal` 直抛，Dart 会把解析器原文当"原因"展示，且一次网关抖动就是一张失败页。
+
+| 文件 | 本地改动 | 原因 |
+|---|---|---|
+| `src/endpoints/video.rs` | `ParsedVideoResponse` 拆出 `from_value`；新增 `fetch_video_model_value()`：空/截断（`serde_json::Error::is_eof()`）响应重试 1 次（250ms 退避），仍为空 → `ApiError::upstream_5xx("上游没有返回取流数据（空响应），请稍后重试")`，非空非 JSON 保持 `Internal` 不重试，每次失败 `log::warn` 记录剧集 id / 接口 / 尝试次数 / 字节数。stream 主接口、stream 辅助接口、整集下载三条取流路径统一走它 | 空 body 是上游静默拒绝/网关抖动，不是响应格式变化；`upstream_5xx` 让 Dart 侧 `isTransient` + 可读文案生效，内部细节只进 `rust.log` |
+| `tests/video_model_empty_body.rs` | **新增**：空 → 重试后成功（恰好 2 次上游请求）；持续空 → 500 + `kind=upstream_5xx` + 人话（不透出 parse 文案）；非 JSON → 不重试 | 锁住重试次数、kind 与文案 |
+
+排查结论（未在本仓库修复）：这类空响应疑似上游把播放接口的签名要求升级到 mssdk 六签名
+（`X-Argus`/`X-Gorgon`/`X-Helios`/`X-Khronos`/`X-Ladon`/`X-Medusa`，现内核只有前者中的
+Argus/Ladon/Khronos）。旧 gorgon（0x8404401c）、gzip body、`Content-Encoding: gzip`、大写
+`x-ss-stub`、`preload` 端点、aid=8662/1967 两种身份、7 个镜像均试过，仍是 0 字节；参考
+`linzj/fanqie-dl` 的纯 Rust 签名实现（Helios 需用 unicorn 模拟官方 `libmetasec_ml.so`）。
+网页兜底 `hongguoduanju.com/video/public/<vid>/360p.mp4` 只公开每剧前 3 集，不足以覆盖。
+
 ## 4. 不在本文件范围内的部分
 
 - `rust/` 之外的 Dart 侧改动（UI/数据层/存储）由 git 历史管理，不需要和上游对齐；
