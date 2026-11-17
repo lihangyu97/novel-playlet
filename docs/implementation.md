@@ -937,10 +937,10 @@ flutter drive --profile -d <iPhone UDID> \
 
 ### 11.6 WebDAV 云同步（2026-11-16 第二版）
 
-- **入口**：设置 → WebDAV。配置表单填 WebDAV 根地址、账号、应用密码；密码只进
+- **入口**：设置 → 同步。配置表单填 WebDAV 根地址、账号、应用密码；密码只进
   `flutter_secure_storage`（iOS Keychain / Android Keystore），不写 SharedPreferences、
   日志或同步 JSON。表单先「测试连接」（MKCOL + PUT/GET/DELETE 探针），成功后才允许保存。
-  设置页一级有三个入口：**WebDAV 配置**（弹层）、**同步记录**（本机最近 50 次）、
+  设置页一级有三个入口：**WebDAV**（弹层）、**同步记录**（本机最近 50 次）、
   **云端数据**（只读展示云端 `sync.json` 的元信息与 500 条上限内的记录列表）。
 - **文件**：`novel-playlet/<release|beta|dev>/sync.json`。渠道由 `appFlavor` 与构建模式决定：
   release 包用 `release`，beta 包用 `beta`，debug 包用 `dev`，互不覆盖。文件只有书架、收藏、

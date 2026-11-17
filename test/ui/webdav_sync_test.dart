@@ -71,6 +71,8 @@ void main() {
 
     expect(store.config?.baseUrl, 'https://dav.example.com/dav/');
     expect(store.config?.password, 'app-password');
+    // 区块标题叫「同步」，卡片里第一行只写「WebDAV」。
+    expect(find.text('同步'), findsOneWidget);
     expect(find.text('WebDAV'), findsOneWidget);
     expect(find.textContaining('dav.example.com'), findsNothing);
     expect(find.byKey(webDavSyncNowKey), findsOneWidget);

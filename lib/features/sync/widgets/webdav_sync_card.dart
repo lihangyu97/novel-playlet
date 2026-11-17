@@ -16,7 +16,7 @@ const Key webDavSyncNowKey = Key('settings-webdav-sync-now');
 const Key webDavLogKey = Key('webdav-log-entry');
 const Key webDavCloudDataKey = Key('settings-webdav-cloud-data');
 
-/// 设置页「WebDAV」卡片：配置 / 同步记录 / 云端数据 三个一级入口。
+/// 设置页「同步」卡片：WebDAV / 同步记录 / 云端数据 三个一级入口。
 ///
 /// 行样式跟设置页其它卡片一致（`titleSmall` 标题 + 右侧控件，40pt 行高、
 /// 卡片内 16 横向内边距），不再用 `ListTile` 的图标/副标题形态。三个入口
@@ -42,7 +42,7 @@ class WebDavSyncCard extends ConsumerWidget {
           children: [
             _EntryRow(
               key: webDavConfigureKey,
-              title: 'WebDAV 配置',
+              title: 'WebDAV',
               onTap: () => _configure(context, ref),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -76,6 +76,9 @@ class WebDavSyncCard extends ConsumerWidget {
                           )
                         : const Icon(Icons.sync_rounded, size: 20),
                     padding: EdgeInsets.zero,
+                    // 图标右侧与下面两行的 chevron 右缘对齐：IconButton 默认把
+                    // 图标居中，视觉上会比 chevron 往左偏 8pt。
+                    alignment: Alignment.centerRight,
                     visualDensity: VisualDensity.compact,
                     constraints: const BoxConstraints.tightFor(
                       width: 36,

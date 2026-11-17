@@ -20,7 +20,7 @@ import 'settings_providers.dart';
 import 'widgets/dialogue_highlight_preview.dart';
 import 'widgets/theme_color_picker.dart';
 
-/// 设置页：主题（主题色 / 深浅色 / 推荐流布局 / 全局字重）+ 存储（占用清理 + 下载清晰度）+ WebDAV。
+/// 设置页：主题（主题色 / 深浅色 / 推荐流布局 / 全局字重）+ 存储（占用清理 + 下载清晰度）+ 同步（WebDAV）。
 ///
 /// 从「我的」右上角进。这里只放全局偏好与可重建缓存，书架/阅读进度属于用户
 /// 数据，不给清理入口（那些在「我的」页里操作）。
@@ -55,7 +55,7 @@ class SettingsPage extends StatelessWidget {
             _GlobalFontWeightCard(),
             _FeedLayoutCard(),
             AppSectionHeader(
-              title: 'WebDAV',
+              title: '同步',
               padding: EdgeInsets.fromLTRB(
                 _contentInset,
                 20,
