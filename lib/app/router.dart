@@ -9,6 +9,7 @@ import '../features/rank/rank_page.dart';
 import '../features/reader/reader_page.dart';
 import '../features/search/search_page.dart';
 import '../features/settings/settings_page.dart';
+import '../features/sync/cloud_sync_data_page.dart';
 import '../features/sync/sync_log_page.dart';
 import '../features/video/video_detail_page.dart';
 import '../features/video/video_player_page.dart';
@@ -65,13 +66,22 @@ final class CacheCenterRoute extends AppRoute<void> {
       MaterialPageRoute<void>(builder: (_) => const CacheCenterPage());
 }
 
-/// 同步记录页（设置 → WebDAV 配置弹层 → 「同步记录」）。
+/// 同步记录页（设置 → WebDAV → 「同步记录」）。
 final class SyncLogRoute extends AppRoute<void> {
   const SyncLogRoute();
 
   @override
   Route<void> toRoute() =>
       MaterialPageRoute<void>(builder: (_) => const SyncLogPage());
+}
+
+/// 云端数据页（设置 → WebDAV → 「云端数据」）：只读显示云端 `sync.json`。
+final class CloudSyncDataRoute extends AppRoute<void> {
+  const CloudSyncDataRoute();
+
+  @override
+  Route<void> toRoute() =>
+      MaterialPageRoute<void>(builder: (_) => const CloudSyncDataPage());
 }
 
 /// 短剧详情页。[preview] 同样用于接口返回前先画封面/标题。

@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/router.dart';
 import '../../../app/widgets/app_snack_bar.dart';
-import '../sync_meta.dart';
 import '../sync_log.dart';
+import '../sync_meta.dart';
 import '../sync_status.dart';
 import '../webdav_config.dart';
 import 'webdav_config_sheet.dart';
@@ -11,17 +12,18 @@ import 'webdav_config_sheet.dart';
 const Key webDavSyncCardKey = Key('settings-webdav-sync');
 const Key webDavConfigureKey = Key('settings-webdav-configure');
 const Key webDavSyncNowKey = Key('settings-webdav-sync-now');
+const Key webDavLogKey = Key('webdav-log-entry');
+const Key webDavCloudDataKey = Key('settings-webdav-cloud-data');
 
-/// 设置页「WebDAV」卡片。
+/// 设置页「WebDAV」卡片：配置 / 同步记录 / 云端数据 三个一级入口。
 ///
-/// 配置本身在弹层里完成；这里只展示连接状态、上次同步时间和两个动作。
+/// 配置本身在弹层里完成；卡片第一行展示连接状态 + 立即同步，后两行跳到
+/// 本机同步日志与云端 `sync.json` 只读页。
 class WebDavSyncCard extends ConsumerWidget {
   const WebDavSyncCard({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final configAsync = ref.watch(webDavConfigProvider);
     final status = ref.watch(syncStatusProvider);
     final metaAsync = ref.watch(syncMetaProvider);
@@ -33,34 +35,23 @@ class WebDavSyncCard extends ConsumerWidget {
       key: webDavSyncCardKey,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
-          child: Row(
-            children: [
-              Icon(Icons.cloud_outlined, color: scheme.primary, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  configAsync.hasError
-                      ? '读取配置失败'
-                      : configured
-                      ? _statusText(status, lastSync)
-                      : '未配置',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            ListTile(
+              key: webDavConfigureKey,
+              leading: const Icon(Icons.cloud_outlined, size: 20),
+              title: const Text('WebDAV 配置'),
+              subtitle: Text(
+                configAsync.hasError
+                    ? '读取配置失败'
+                    : configured
+                    ? _statusText(status, lastSync)
+                    : '未配置',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              IconButton(
-                key: webDavConfigureKey,
-                tooltip: configured ? '修改 WebDAV' : '配置 WebDAV',
-                onPressed: () => _configure(context, ref),
-                icon: const Icon(Icons.edit_outlined, size: 19),
-                visualDensity: VisualDensity.compact,
-              ),
-              IconButton(
+              trailing: IconButton(
                 key: webDavSyncNowKey,
                 tooltip: '立即同步',
                 onPressed: !configured || status.isSyncing
@@ -75,8 +66,30 @@ class WebDavSyncCard extends ConsumerWidget {
                     : const Icon(Icons.sync_rounded, size: 20),
                 visualDensity: VisualDensity.compact,
               ),
-            ],
-          ),
+              onTap: () => _configure(context, ref),
+              visualDensity: VisualDensity.compact,
+            ),
+            const Divider(height: 1, indent: 56),
+            ListTile(
+              key: webDavLogKey,
+              leading: const Icon(Icons.history_rounded, size: 20),
+              title: const Text('同步记录'),
+              subtitle: const Text('最近 50 次同步的结果与双向明细'),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () => context.pushAppRoute(const SyncLogRoute()),
+              visualDensity: VisualDensity.compact,
+            ),
+            const Divider(height: 1, indent: 56),
+            ListTile(
+              key: webDavCloudDataKey,
+              leading: const Icon(Icons.cloud_download_outlined, size: 20),
+              title: const Text('云端数据'),
+              subtitle: const Text('查看云端 sync.json 的元信息与列表'),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () => context.pushAppRoute(const CloudSyncDataRoute()),
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
         ),
       ),
     );

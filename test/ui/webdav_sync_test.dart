@@ -3,7 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/features/settings/settings_page.dart';
 import 'package:novel_playlet/features/sync/webdav_client.dart';
 import 'package:novel_playlet/features/sync/webdav_config.dart';
+import 'package:novel_playlet/core/storage/library_records.dart';
 import 'package:novel_playlet/features/sync/sync_log.dart';
+import 'package:novel_playlet/features/sync/sync_meta.dart';
+import 'package:novel_playlet/features/sync/sync_snapshot.dart';
 import 'package:novel_playlet/features/sync/widgets/webdav_config_sheet.dart';
 import 'package:novel_playlet/features/sync/widgets/webdav_sync_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -74,7 +77,7 @@ void main() {
     expect(find.textContaining('上次同步'), findsOneWidget);
     expect(client.files.keys.single.path, endsWith('/sync.json'));
   });
-  testWidgets('WebDAV 弹层里有「同步记录」入口，能打开记录页', (tester) async {
+  testWidgets('设置页一级有「同步记录」入口，能打开记录页', (tester) async {
     final store = InMemoryWebDavConfigStore();
     await pumpPreview(
       tester,
@@ -87,17 +90,131 @@ void main() {
       ],
     );
 
-    await tester.ensureVisible(find.byKey(webDavConfigureKey));
+    await tester.ensureVisible(find.byKey(webDavLogKey));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(webDavConfigureKey));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(webDavLogKey), findsOneWidget);
     await tester.tap(find.byKey(webDavLogKey));
     await tester.pumpAndSettle();
 
     expect(find.text('同步记录'), findsWidgets);
     expect(find.text('还没有同步记录'), findsOneWidget);
+  });
+
+  testWidgets('云端数据页：顶部元信息 + 最多 500 个提示 + 可读列表', (tester) async {
+    final config = const WebDavConfig(
+      baseUrl: 'https://dav.example.com/dav/',
+      username: 'user',
+      password: 'app-password',
+    );
+    final client = _FakeWebDavClient();
+    final now = DateTime.now();
+    final snapshot = SyncSnapshot(
+      schemaVersion: SyncSnapshot.currentSchema,
+      profile: syncProfile,
+      deviceId: 'device-alpha',
+      revision: 7,
+      updatedAt: now.subtract(const Duration(hours: 2)).millisecondsSinceEpoch,
+      data: {
+        'items': [
+          LibraryRecord(
+            type: LibraryType.novel,
+            sourceId: 'novel-1',
+            title: '测试小说',
+            progressRef: 'chapter-1',
+            progressIndex: 11,
+            lastReadAt: now
+                .subtract(const Duration(hours: 1))
+                .millisecondsSinceEpoch,
+            shelfAt: now.millisecondsSinceEpoch,
+          ).toJson(),
+          LibraryRecord(
+            type: LibraryType.playlet,
+            sourceId: 'playlet-1',
+            title: '测试短剧',
+            progressIndex: 2,
+            lastReadAt: now
+                .subtract(const Duration(hours: 3))
+                .millisecondsSinceEpoch,
+          ).toJson(),
+        ],
+      },
+    );
+    client.files[config.resolve('$syncRemoteDir/sync.json')] = snapshot
+        .encode();
+
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+      extraOverrides: [
+        webDavConfigStoreProvider.overrideWithValue(
+          InMemoryWebDavConfigStore(config),
+        ),
+        webDavClientProvider.overrideWithValue(client),
+        syncLogStoreProvider.overrideWithValue(MemorySyncLogStore()),
+        syncLogRunsProvider.overrideWith((ref) async => const <SyncLogRun>[]),
+      ],
+    );
+
+    await tester.ensureVisible(find.byKey(webDavCloudDataKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(webDavCloudDataKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text('云端数据'), findsWidgets);
+    expect(find.text('device-alpha'), findsOneWidget);
+    expect(find.text('第 7 版'), findsOneWidget);
+    expect(find.text(syncProfile), findsOneWidget);
+    expect(find.text('最多 500 个'), findsOneWidget);
+    expect(find.text('测试小说'), findsOneWidget);
+    expect(find.textContaining('第 12 章'), findsOneWidget);
+    expect(find.text('测试短剧'), findsOneWidget);
+    expect(find.textContaining('第 3 集'), findsOneWidget);
+    expect(find.textContaining('共 2 条'), findsOneWidget);
+  });
+
+  testWidgets('云端数据页：未配置和云端无文件分别提示', (tester) async {
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+      extraOverrides: [
+        webDavConfigStoreProvider.overrideWithValue(
+          InMemoryWebDavConfigStore(),
+        ),
+        webDavClientProvider.overrideWithValue(_FakeWebDavClient()),
+        syncLogStoreProvider.overrideWithValue(MemorySyncLogStore()),
+        syncLogRunsProvider.overrideWith((ref) async => const <SyncLogRun>[]),
+      ],
+    );
+    await tester.ensureVisible(find.byKey(webDavCloudDataKey));
+    await tester.tap(find.byKey(webDavCloudDataKey));
+    await tester.pumpAndSettle();
+    expect(find.text('还没有配置 WebDAV'), findsOneWidget);
+  });
+
+  testWidgets('云端数据页：已配置但云端没有 sync.json 时提示为空', (tester) async {
+    final config = const WebDavConfig(
+      baseUrl: 'https://dav.example.com/dav/',
+      username: 'user',
+      password: 'app-password',
+    );
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+      extraOverrides: [
+        webDavConfigStoreProvider.overrideWithValue(
+          InMemoryWebDavConfigStore(config),
+        ),
+        webDavClientProvider.overrideWithValue(_FakeWebDavClient()),
+        syncLogStoreProvider.overrideWithValue(MemorySyncLogStore()),
+        syncLogRunsProvider.overrideWith((ref) async => const <SyncLogRun>[]),
+      ],
+    );
+    await tester.ensureVisible(find.byKey(webDavCloudDataKey));
+    await tester.tap(find.byKey(webDavCloudDataKey));
+    await tester.pumpAndSettle();
+    expect(find.text('云端还没有同步数据'), findsOneWidget);
   });
 }
 
