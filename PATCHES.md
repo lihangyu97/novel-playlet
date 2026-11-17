@@ -114,6 +114,30 @@ axum 0.8 的 accept 循环对 accept 错误无限重试、永不返回，所以�
 | `tests/loopback_reclaim.rs` | **新增**：健康监听不自行结束；监听器死亡后 `connect()` 得到 ECONNREFUSED（不是 HTTP 5xx）；同端口重绑后 `/health` 恢复 | 把 TN2277 的症状模型与恢复路径锁成契约测试 |
 
 
+### 3.8 V5 播放门：短剧取流改用 x-medusa 签名（2026-11-17）
+
+原因：上游 2026-11 中旬把短剧播放地址从 `multi_video_model/v1`（argus 签名）切到
+`multi_video_model/player/v1`（V5：`x-medusa` + SM3），旧请求被统一拒绝——表现是
+`video_model` / `multi_video_model` 全部 `HTTP 200 + 0 字节`，App 侧报
+`parse upstream json: EOF while parsing a value at line 1 column 0`，整片短剧无法起播。
+协议数据/变换结构与请求形态移植自 GPL-3.0-only 的 `N3urda/hongguoTV`（`Signer.kt` /
+`AesV3.kt` / `V5Constants.kt` / `MobilePlayback.kt`，commit `18c37c2`），并与
+`beilunyang/openhongguo` PR 13 对照；本仓库同为 GPL-3.0，来源与许可证兼容。
+
+| 文件 | 本地改动 | 原因 |
+|---|---|---|
+| `src/sign/v5.rs`、`src/sign/v5_tables.rs` | **新增**：V5 播放签名（SM3 query hash → F13 分支哈希 → xmxor/AES 变换 → base64），query/header 全部由签名器生成；`x-ss-stub` 对**线上 gzip 字节**做 MD5 大写；挑 `_rticket` 直到 `branch_iv & 15 == 12` | 旧 `Manager::generate_headers`（argus）在这条门上无效 |
+| `src/upstream/client.rs` | `UpstreamClient::v5_playback()`：不注入通用签名（`no_sign`），按同一次签名发的 URL/headers/body 原样发送；传输/429/5xx 同设备退避重试，只有 401/403 换设备 | 签名绑定 query+body+时间戳，重签会得到另一组 nonce |
+| `src/endpoints/base.rs` | `Upstream::v5_playback()` 薄封装 | 端点层不直接依赖 `UpstreamClient` |
+| `src/endpoints/video.rs` | `v5_playback_body()`（gzip 先于签名、`dr_scene=player`、`device_level=1`）；`fetch_v5_video_model()`；主取流先走 V5，失败/无模型/选流 `NotFound` 才回落 legacy shortplay+phoenix（`fetch_legacy_video_models()`） | 保留旧行为兜底，V5 不改变选档/落盘/解密链路 |
+| `src/endpoints/video/v5_playback_contract.rs` | **新增**：gzip 先于签名、`x-ss-stub` 是线上字节 MD5（≠ 明文 MD5）、带 `x-medusa` 不带 `x-argus`、身份不全/脏 base URL 被拒 | 锁协议形态，防止重构把顺序改回去 |
+| `docs/implementation.md` §5.3 | 取上游一行改为 V5 主路径 + legacy 兜底，并补 V5 协议要点 | 与实现同步 |
+
+实测（2026-11-17，本机真实注册设备 + 真实上游）：目标集 `7702288607674895384` 与相邻集
+均返回 `/src/<id>.mp4`（`mode=stream`、`streaming=true`），整集下载同样成功；`video_detail`
+等读接口不受影响。
+
+
 ## 4. 不在本文件范围内的部分
 
 - `rust/` 之外的 Dart 侧改动（UI/数据层/存储）由 git 历史管理，不需要和上游对齐；

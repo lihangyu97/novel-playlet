@@ -2,6 +2,7 @@
 //! series detail and episode-list endpoints.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -44,6 +45,12 @@ const DIRECTORY_READING_URL: &str =
 const DIRECTORY_READING_QUERY_SUFFIX: &str = "&book_info_md5=&need_version=true&device_id={device_id}&ac=wifi&channel=xiaomi_1967_64&aid=1967&app_name=novelapp&version_code=65132&version_name=6.5.1.32&device_platform=android&os=android&ssmix=a&device_type=FRD-AL10&device_brand=honor&language=zh&os_api=28&os_version=9&manifest_version_code=65132&resolution=1080*1920&dpi=480&update_version_code=65132&pv_player=65132&=&need_personal_recommend=1&player_so_load=1&is_android_pad_screen=0&host_abi=arm64-v8a&dragon_device_type=phone&rom_version=FRD-AL10+8.0.0.556%28C00%29&compliance_status=0";
 
 const VIDEO_DETAIL_PATH: &str = "/novel/player/video_detail/v1/";
+
+/// v5 播放门：上游在 2026-11 中旬把短剧取流从 `multi_video_model/v1`
+/// 换成了带 v5 签名（x-medusa + SM3）的 `multi_video_model/player/v1`。
+/// 旧的 argus 签名请求从那时起统一被拒，表现为短剧整片无法起播。
+const V5_PLAYER_URL: &str =
+    "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/player/v1";
 
 type CacheLocks = HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>;
 static VIDEO_CACHE_LOCKS: Lazy<Mutex<CacheLocks>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -159,50 +166,47 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         // 了的 bytevc2（实测 2026-10-12 同一集对拍）。二选一必然少档：只信
         // shortplay 会丢 1080P，只信 phoenix 会让低档被编码门整片丢掉。
         // 两个请求互不依赖，并发发出，不额外占用一个往返。
-        let (parsed, phoenix_parsed, resolved) = if stream_mode || want_quality {
-            // Resolve the primary source while quality metadata is loading.
-            // A primary failure cancels the auxiliary work, but auxiliary
-            // failure remains non-fatal and successful tiers are never cut off.
-            let primary = async {
-                let parsed = ParsedVideoResponse::parse(
-                    &fetch_shortplay_video_model(ctx, &video_id).await?,
-                )?;
-                let resolved = resolve_video_source(ctx, &parsed).await;
-                if resolved == VideoSourceResolution::CodecRejected {
-                    return Err(ApiError::Internal("该视频暂不支持播放".to_string()));
+        //
+        // 2026-11 上游把播放门换成了 v5 签名（见 `V5_PLAYER_URL`），旧的
+        // argus 签名请求一律被拒。因此主取流先走 v5；只有 v5 整条链路不可用
+        // （请求失败 / 响应解析不出模型 / 选流 NotFound）时才回落到原来的
+        // shortplay + phoenix 双请求，保留旧行为作兜底。
+        let v5_parsed = match fetch_v5_video_model(ctx, &video_id).await {
+            Ok(raw) => match ParsedVideoResponse::parse(&raw) {
+                Ok(parsed) if !parsed.models.is_empty() => Some(parsed),
+                Ok(parsed) => {
+                    log::warn!(
+                        "video {video_id}: v5 body has no video payload: {}",
+                        body_envelope(&parsed.root)
+                    );
+                    None
                 }
-                Ok((parsed, resolved))
-            };
-            let auxiliary = async {
-                let response = fetch_phoenix_video_model(ctx, &video_id)
-                    .await
-                    .and_then(|raw| ParsedVideoResponse::parse(&raw));
-                Ok::<_, ApiError>(response)
-            };
-            let ((parsed, resolved), phoenix) = tokio::try_join!(primary, auxiliary)?;
-            // 凤凰那条失败原先被 `.ok()` 静默吃掉，而 1080P 只可能来自它那条
-            // 列表（短剧专用接口自带列表与其 `fallback_api` 都只到 720P）——
-            // 失败即面板少一档且毫无痕迹。**HTTP 成功不等于业务成功**：实测
-            // 2026-10-14 三集全部回火山错误封包
-            // `{BaseResp, Code:110001, Message:未知异常}`（无 `data`），上游只给
-            // 通用码、不给原因，所以这里把外壳与剧集 id 一起留在核心日志里。
-            match &phoenix {
-                Ok(body) if body.root.get("data").is_some_and(Value::is_object) => {}
-                Ok(body) => log::warn!(
-                    "video {video_id}: phoenix body unusable (quality tiers lost): {}",
-                    body_envelope(&body.root)
-                ),
-                Err(error) => log::warn!(
-                    "video {video_id}: phoenix request failed (quality tiers lost): {}",
-                    error.message()
-                ),
+                Err(error) => {
+                    log::warn!(
+                        "video {video_id}: v5 response unusable: {}",
+                        error.message()
+                    );
+                    None
+                }
+            },
+            Err(error) => {
+                log::warn!("video {video_id}: v5 request failed: {}", error.message());
+                None
             }
-            (parsed, phoenix.ok(), resolved)
+        };
+
+        let (parsed, phoenix_parsed, resolved) = if let Some(v5) = v5_parsed {
+            let resolved = resolve_video_source(ctx, &v5).await;
+            if resolved == VideoSourceResolution::NotFound {
+                log::warn!("video {video_id}: v5 source not found; falling back to shortplay");
+                let (parsed, phoenix, resolved) =
+                    fetch_legacy_video_models(ctx, &video_id, stream_mode, want_quality).await?;
+                (parsed, phoenix, resolved)
+            } else {
+                (v5, None, resolved)
+            }
         } else {
-            let parsed =
-                ParsedVideoResponse::parse(&fetch_phoenix_video_model(ctx, &video_id).await?)?;
-            let resolved = resolve_video_source(ctx, &parsed).await;
-            (parsed, None, resolved)
+            fetch_legacy_video_models(ctx, &video_id, stream_mode, want_quality).await?
         };
 
         // 官方 `wp3/o1.java:301-347` 的 `isSupportShowLandIcon` 按服务端
@@ -348,6 +352,105 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             Err(_) => Ok(source),
         }
     })
+}
+
+/// v5 播放门的请求体：与旧 `multi_video_model` 同源，但按官方
+/// `MobilePlayback` 的形态收紧——`device_level=1`、`mixed_video_id_map`
+/// 单集、`video_platform=1024`，并且多带一个 `dr_scene=player`。
+///
+/// 返回的是**将要上线的 gzip 字节**：v5 签名对该字节做 MD5/SM3，所以压缩
+/// 必须发生在签名之前，且签名后不得再改。
+fn v5_playback_body(video_id: &str) -> ApiResult<Vec<u8>> {
+    let plain = serde_json::to_vec(&json!({
+        "biz_param": {
+            "detail_page_version": 0,
+            "device_level": 1,
+            "disable_digg_stat": false,
+            "disable_video_relate_book": false,
+            "need_all_video_definition": true,
+            "need_mp4_align": false,
+            "use_os_player": false,
+            "use_server_dns": false,
+            "video_platform": 1024,
+        },
+        "mixed_video_id_map": {
+            "1004": [video_id],
+        },
+        "dr_scene": "player",
+    }))
+    .map_err(|e| ApiError::Internal(format!("marshal v5 playback body: {e}")))?;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&plain)
+        .map_err(|e| ApiError::Internal(format!("gzip v5 playback body: {e}")))?;
+    encoder
+        .finish()
+        .map_err(|e| ApiError::Internal(format!("gzip v5 playback body: {e}")))
+}
+
+/// v5 签名取流。签名由 `sign::v5` 全权负责（query/header/body 哈希都是它
+/// 自己的协议），所以这里不走通用的 `raw()` 签名路径。
+async fn fetch_v5_video_model(ctx: &Ctx, video_id: &str) -> ApiResult<Vec<u8>> {
+    let body = v5_playback_body(video_id)?;
+    Upstream::new(ctx.up.clone())
+        .v5_playback(V5_PLAYER_URL, &body)
+        .await
+}
+
+/// v5 不可用时的兜底取流：短剧专用模型 + 凤凰模型并发，清晰度列表取两者并集。
+async fn fetch_legacy_video_models(
+    ctx: &Ctx,
+    video_id: &str,
+    stream_mode: bool,
+    want_quality: bool,
+) -> ApiResult<(
+    ParsedVideoResponse,
+    Option<ParsedVideoResponse>,
+    VideoSourceResolution,
+)> {
+    if stream_mode || want_quality {
+        // Resolve the primary source while quality metadata is loading.
+        // A primary failure cancels the auxiliary work, but auxiliary
+        // failure remains non-fatal and successful tiers are never cut off.
+        let primary = async {
+            let parsed =
+                ParsedVideoResponse::parse(&fetch_shortplay_video_model(ctx, video_id).await?)?;
+            let resolved = resolve_video_source(ctx, &parsed).await;
+            if resolved == VideoSourceResolution::CodecRejected {
+                return Err(ApiError::Internal("该视频暂不支持播放".to_string()));
+            }
+            Ok((parsed, resolved))
+        };
+        let auxiliary = async {
+            let response = fetch_phoenix_video_model(ctx, video_id)
+                .await
+                .and_then(|raw| ParsedVideoResponse::parse(&raw));
+            Ok::<_, ApiError>(response)
+        };
+        let ((parsed, resolved), phoenix) = tokio::try_join!(primary, auxiliary)?;
+        // 凤凰那条失败原先被 `.ok()` 静默吃掉，而 1080P 只可能来自它那条
+        // 列表（短剧专用接口自带列表与其 `fallback_api` 都只到 720P）——
+        // 失败即面板少一档且毫无痕迹。**HTTP 成功不等于业务成功**：实测
+        // 2026-10-14 三集全部回火山错误封包
+        // `{BaseResp, Code:110001, Message:未知异常}`（无 `data`），上游只给
+        // 通用码、不给原因，所以这里把外壳与剧集 id 一起留在核心日志里。
+        match &phoenix {
+            Ok(body) if body.root.get("data").is_some_and(Value::is_object) => {}
+            Ok(body) => log::warn!(
+                "video {video_id}: phoenix body unusable (quality tiers lost): {}",
+                body_envelope(&body.root)
+            ),
+            Err(error) => log::warn!(
+                "video {video_id}: phoenix request failed (quality tiers lost): {}",
+                error.message()
+            ),
+        }
+        Ok((parsed, phoenix.ok(), resolved))
+    } else {
+        let parsed = ParsedVideoResponse::parse(&fetch_phoenix_video_model(ctx, video_id).await?)?;
+        let resolved = resolve_video_source(ctx, &parsed).await;
+        Ok((parsed, None, resolved))
+    }
 }
 
 /// Queries the phoenix multi_video_model endpoint.
@@ -4063,5 +4166,7 @@ mod spade_vectors;
 mod stream_loopback;
 #[cfg(test)]
 mod unsigned_get_cap;
+#[cfg(test)]
+mod v5_playback_contract;
 #[cfg(test)]
 mod variant_url_shapes;
