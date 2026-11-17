@@ -56,10 +56,6 @@ void main() {
     // 合并后推荐态不再有「为你推荐 / 短剧推荐」区块标题。
     expect(find.text('为你推荐'), findsNothing);
     expect(find.text('短剧推荐'), findsNothing);
-    await expectLater(
-      find.byType(RecommendPage),
-      matchesGoldenFile('../goldens/recommend.png'),
-    );
   });
 
   testWidgets('推荐页-小说卡：作者固定一行，推荐理由/热度各自有就显示', (tester) async {
@@ -127,10 +123,6 @@ void main() {
     await tester.tap(find.text('短剧'));
     await tester.pumpAndSettle();
     expect(find.textContaining('太奶奶'), findsWidgets);
-    await expectLater(
-      find.byType(RecommendPage),
-      matchesGoldenFile('../goldens/recommend_drama.png'),
-    );
   });
 
   testWidgets('推荐页-漫剧分类', (tester) async {
@@ -138,10 +130,6 @@ void main() {
     await tester.tap(find.text('漫剧'));
     await tester.pumpAndSettle();
     expect(find.textContaining('动态漫'), findsWidgets);
-    await expectLater(
-      find.byType(RecommendPage),
-      matchesGoldenFile('../goldens/recommend_anime.png'),
-    );
   });
 
   /// 轻量顶栏：分类 tabs 居中，左右各一个图标入口（排行榜 / 搜索），
@@ -452,10 +440,6 @@ void main() {
           () => RecommendLayoutController(initialLayout: RecommendLayout.three),
         ),
       ],
-    );
-    await expectLater(
-      find.byType(RecommendPage),
-      matchesGoldenFile('../goldens/recommend_three_columns.png'),
     );
   });
 

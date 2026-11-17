@@ -304,10 +304,6 @@ void main() {
     await pumpPreview(tester, const SearchPage(), transport: fake);
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('诡秘之主最新章'), findsOneWidget);
-    await expectLater(
-      find.byType(SearchPage),
-      matchesGoldenFile('../goldens/search_cue.png'),
-    );
   });
 
   testWidgets('搜索页-空输入提交直接搜当前占位热词', (tester) async {

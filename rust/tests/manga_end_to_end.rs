@@ -132,6 +132,7 @@ thread_local! {
 }
 
 #[tokio::test]
+#[ignore = "漫画接口 App 未使用；仅保留上游同步护栏"]
 async fn manga_chapter_is_downloaded_decrypted_written_and_served() {
     let (_dir, server, mock, plain, _key) = manga_fixture().await;
 
@@ -183,6 +184,7 @@ async fn manga_chapter_is_downloaded_decrypted_written_and_served() {
 }
 
 #[tokio::test]
+#[ignore = "漫画接口 App 未使用；仅保留上游同步护栏"]
 async fn show_html_returns_img_tags_pointing_at_the_served_files() {
     let (_dir, server, _mock, plain, _key) = manga_fixture().await;
 
@@ -206,6 +208,7 @@ async fn show_html_returns_img_tags_pointing_at_the_served_files() {
 }
 
 #[tokio::test]
+#[ignore = "漫画接口 App 未使用；仅保留上游同步护栏"]
 async fn a_tampered_image_is_skipped_instead_of_being_published() {
     let (_dir, server, _mock, _plain, _key) = manga_fixture().await;
     // Corrupt the tag of the downloaded image.
@@ -246,6 +249,7 @@ fn chapter_body(urls: &[&str], encrypt_key_hex: &str) -> String {
 /// A chapter with several pictures must serve them in picInfos order, even
 /// though the download pass works on a bounded batch at once.
 #[tokio::test]
+#[ignore = "漫画接口 App 未使用；仅保留上游同步护栏"]
 async fn several_pictures_are_served_in_picinfo_order() {
     let fixture = fixture();
     let f = &fixture["manga_image"];
@@ -310,6 +314,7 @@ async fn several_pictures_are_served_in_picinfo_order() {
 }
 
 #[tokio::test]
+#[ignore = "漫画接口 App 未使用；仅保留上游同步护栏"]
 async fn a_failed_image_is_skipped_without_reordering_the_rest() {
     let fixture = fixture();
     let f = &fixture["manga_image"];

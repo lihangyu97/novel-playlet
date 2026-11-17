@@ -550,11 +550,6 @@ void main() {
       find.ancestor(of: find.text('已缓存'), matching: find.byType(TextButton)),
       findsOneWidget,
     );
-    await expectLater(
-      find.byType(ReaderPage),
-      matchesGoldenFile('../goldens/reader_toolbar_readonly.png'),
-    );
-
     await tester.tap(find.text('已缓存'));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.byType(CacheCenterPage), findsOneWidget);

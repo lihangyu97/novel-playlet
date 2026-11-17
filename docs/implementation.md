@@ -683,6 +683,10 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 真实上游探针（需
 - CI 在 `.github/workflows/ci.yml`（当前只保留 `workflow_dispatch` 手动触发）：Flutter 门禁跑 macOS
   （golden 需要系统字体），Rust 门禁跑 Linux，外加 FRB 漂移校验与 iOS 无签名构建。
 - `integration_test/reader_pagination_perf_test.dart` 是真机 performance harness，不进 CI（见 §8）。
+- 书旗（`shuqi_contract` / `shuqi_live`）与漫画（`manga_end_to_end`）的契约测试默认
+  `#[ignore]`：App 的 `APP_APIS` 不暴露这两条链路，保留它们只作 fqapp 上游同步的护栏。
+  需要时手动跑：`cargo test --manifest-path rust/Cargo.toml --test shuqi_contract -- --ignored`
+  （漫画同理）。
 
 ### 7.5 真机覆盖安装与缓存保留（iOS 自签）
 
