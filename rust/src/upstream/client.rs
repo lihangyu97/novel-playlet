@@ -406,6 +406,70 @@ impl UpstreamClient {
             )),
         })
     }
+
+    /// Calls the v5 playback door with the exact gzip bytes it signs.
+    ///
+    /// The v5 signer owns every query/header field and the wire body hash, so
+    /// this path deliberately bypasses generic signing. Transport/429/5xx
+    /// retries stay on the same device; only HTTP 401/403 replace it.
+    pub async fn v5_playback(&self, base: &str, body: &[u8]) -> Result<Vec<u8>, ClientError> {
+        let mut last_err = None;
+
+        for _ in 0..self.max_retries {
+            let dev = self
+                .pool
+                .get()
+                .await
+                .map_err(|e| ClientError::Other(format!("get device: {e}")))?;
+
+            let cdid = if dev.cdid.is_empty() {
+                dev.openudid.as_str()
+            } else {
+                dev.cdid.as_str()
+            };
+            let identity = crate::sign::v5::V5Identity {
+                device_id: &dev.device_id,
+                install_id: &dev.install_id,
+                cdid,
+            };
+            // Sign exactly once per attempt: the signer draws fresh entropy, so
+            // a second call would yield a URL and headers from different
+            // nonces.
+            let signed = crate::sign::v5::sign_playback_v5(base, body, &identity)
+                .map_err(ClientError::Other)?;
+            match self
+                .do_resp_with_transient_retry(
+                    &UpstreamRequest {
+                        method: Some("POST".to_string()),
+                        url: signed.url,
+                        body: Some(body.to_vec()),
+                        headers: signed.headers,
+                        no_sign: true,
+                        pin: None,
+                    },
+                    Some(crate::upstream::http::API_BODY_LIMIT_BYTES),
+                )
+                .await
+            {
+                Ok((data, _)) => return Ok(data),
+                Err(err) => {
+                    last_err = Some(err.clone());
+                    if err.is_device_failed() {
+                        if super::budget::remaining().is_some_and(|left| left.is_zero()) {
+                            return Err(err);
+                        }
+                        let _ = self.pool.replace_failed(&dev.device_id).await;
+                        if !super::budget::retry_pause(Duration::from_millis(100)).await {
+                            return Err(err);
+                        }
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| ClientError::Other("v5 playback failed".to_string())))
+    }
 }
 
 pub fn substitute_device(raw_url: &str, dev: &Device) -> String {

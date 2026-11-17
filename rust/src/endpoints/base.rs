@@ -136,6 +136,15 @@ impl Upstream {
         let raw = self.raw(spec).await?;
         crate::endpoints::util::raw_json(&raw)
     }
+
+    /// Signed v5 playback call. `body` must be the exact bytes put on the wire
+    /// (already gzipped): the signer hashes those bytes.
+    pub async fn v5_playback(&self, base: &str, body: &[u8]) -> ApiResult<Vec<u8>> {
+        self.up
+            .v5_playback(base, body)
+            .await
+            .map_err(map_client_error)
+    }
 }
 
 /// Maps a transport-level failure onto the API error model (P1-4).

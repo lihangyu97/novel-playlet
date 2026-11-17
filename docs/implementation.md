@@ -421,13 +421,21 @@ _onTick：同页重载时新集 position>0 才释放旧帧；播到尾部自动 
 | 参数 | `mode=stream/cached`、`refresh=1`、`variants=0`、`max_height` |
 | `mode=cached` | 只查 `src/<id>{.mp4,.m4s,.ts}`（>0 字节、密文必须有可读 `.key`），**完全不打上游** |
 | `mode=stream`（M1） | 复用上面的取流/选档结果，启动后台下载到 `src/<id>.mp4.part`，拿到上游响应头（Content-Length）后**立即**返回本地 `/src` 地址（`streaming:true`），不读 body、不等整集落盘；同 id 复用进行中的会话，已有完整缓存直接按 cached 返回；`.m4s/.ts`、拿不到 Content-Length、启动失败 → 退回整集下载（`streaming:false`） |
-| 取上游 | 播放默认只打 phoenix `multi_video_model`；stream / 带 `max_height` 时并发 shortplay+phoenix 合并档位 |
+| 取上游 | 主取流打 V5 播放门 `multi_video_model/player/v1`（见下）；V5 请求失败 / 解析不出模型 / 选流 `NotFound` 时回落 legacy：播放默认只打 phoenix `multi_video_model`，stream / 带 `max_height` 时并发 shortplay+phoenix 合并档位 |
 | 选档 | 分数 `宽×1e9 + 高×1e6 + 码率 (+h264/avc1 1)`；`bytevc2` 整档排除；从高到低取第一个能解出 url+key 的档 |
 | 清晰度上限 | `max_height` → 短边 ≤N 的最高档；没有更低档 → 最低可用档 + `quality_fallback=true` |
 | 整集下载 | 流式写 `.part` → rename `src/<id>.<ext>`（**CENC 密文原样落盘**），密文再写 `.key` sidecar、有档位写 `.variant.json` |
 | 淘汰 | `src/` 总预算 **128 MiB**（与漫画图共享），每次下载后异步按 mtime 最旧删，跳过 `.part/.tmp` |
 
 下载限制：总超时 15s、单文件 2 GiB 上限、只接受 200；失败删 `.part`。
+
+**V5 播放门（2026-11）**：上游 2026-11 中旬把短剧取流换成 `multi_video_model/player/v1`，
+旧的 argus 签名请求被统一拒绝，表现为整片短剧无法起播。该门的签名由 `rust/src/sign/v5.rs`
+负责（`x-medusa` + SM3，`aid=8662`、`version_code=74332`），协议要点：
+
+- 请求体先 gzip，再对**线上字节**做 MD5 进 `x-ss-stub`、做 SM3 进签名——压缩必须排在签名之前，签完不得再改 body；
+- query/header 全部由签名器生成，**不走**通用 `Manager::generate_headers`，因此请求不带 `x-argus`；
+- 429/5xx/传输错误在同设备上退避重试，只有 HTTP 401/403 才判定设备失效并换号。
 `mode=stream` 的后台下载沿用同一超时；失败时删除 `.part` 与预写的 `.key`，等待中的 Range 请求收到 502。
 若只拿到远程加密地址（未落盘），Dart 直接报「整集缓存失败」。
 
