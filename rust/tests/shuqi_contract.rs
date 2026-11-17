@@ -31,6 +31,7 @@ fn text(body: &str) -> MockReply {
 // --- 路由 ------------------------------------------------------------------
 
 #[test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 fn routes_map_to_shuqi_endpoints() {
     for (path, api) in [
         ("/api/v1/shuqi/search", "shuqi_search"),
@@ -49,6 +50,7 @@ fn routes_map_to_shuqi_endpoints() {
 // --- 搜索 ------------------------------------------------------------------
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn search_posts_encrypted_form_and_collects_books() {
     let upstream = MockUpstream::start(|_: &Recorded| {
         MockReply::json(json!({
@@ -109,6 +111,7 @@ async fn search_posts_encrypted_form_and_collects_books() {
 }
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn search_without_key_is_bad_request() {
     let upstream = MockUpstream::start(|_: &Recorded| MockReply::status(500)).await;
     let dir = TempDir::new("shuqi-search-nokey");
@@ -123,6 +126,7 @@ async fn search_without_key_is_bad_request() {
 // --- 详情 ------------------------------------------------------------------
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn titlepage_maps_book_info() {
     let upstream = MockUpstream::start(|_: &Recorded| {
         MockReply::json(json!({
@@ -171,6 +175,7 @@ async fn titlepage_maps_book_info() {
 }
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn book_id_can_come_from_internal_url() {
     let upstream = MockUpstream::start(|_: &Recorded| {
         MockReply::json(json!({ "data": { "bookInfo": { "bookId": 7, "bookName": "x" } } }))
@@ -187,6 +192,7 @@ async fn book_id_can_come_from_internal_url() {
 // --- 目录 ------------------------------------------------------------------
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn toc_uses_h5_and_strips_vip_tags_and_ordinals() {
     let html = r#"<html><body>
 <a href="/reader?bid=34078&amp;cid=2180322">1.第1章 山边小村</a>
@@ -218,6 +224,7 @@ async fn toc_uses_h5_and_strips_vip_tags_and_ordinals() {
 }
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn toc_falls_back_to_index_when_h5_has_no_chapters() {
     let upstream = MockUpstream::start(|rec: &Recorded| match rec.path.as_str() {
         "/chapter" => text("<html><body>维护中，没有章节</body></html>"),
@@ -251,6 +258,7 @@ async fn toc_falls_back_to_index_when_h5_has_no_chapters() {
 }
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn toc_index_rejects_an_absurd_chapter_total() {
     let upstream = MockUpstream::start(|rec: &Recorded| match rec.path.as_str() {
         "/chapter" => text("<html><body>维护中，没有章节</body></html>"),
@@ -275,6 +283,7 @@ async fn toc_index_rejects_an_absurd_chapter_total() {
 }
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn toc_h5_rejects_more_than_the_chapter_cap() {
     let mut html = String::from("<html><body>");
     for i in 0..20_001 {
@@ -299,6 +308,7 @@ async fn toc_h5_rejects_more_than_the_chapter_cap() {
 // --- 正文 ------------------------------------------------------------------
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn chapter_prefers_cdn_plaintext() {
     let upstream = MockUpstream::start(|rec: &Recorded| {
         if rec.path.starts_with("/httpserver/filecache/") {
@@ -330,6 +340,7 @@ async fn chapter_prefers_cdn_plaintext() {
 }
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn chapter_falls_back_to_chapterinfo_and_decodes() {
     // chapterinfo 的正文是 rot13(base64(text))，再用 <br> 表示换行。
     let plain = "正文第一段<br/>正文第二段";
@@ -364,6 +375,7 @@ async fn chapter_falls_back_to_chapterinfo_and_decodes() {
 }
 
 #[tokio::test]
+#[ignore = "书旗接口 App 未使用；仅保留上游同步护栏"]
 async fn chapter_error_reports_the_failed_cdn_attempts() {
     let upstream = MockUpstream::start(|rec: &Recorded| {
         if rec.path.starts_with("/httpserver/filecache/") {

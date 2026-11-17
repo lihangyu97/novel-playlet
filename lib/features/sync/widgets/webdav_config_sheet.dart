@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../app/router.dart';
 import '../../../app/widgets/app_bottom_sheet.dart';
-import '../sync_log.dart';
 import '../webdav_client.dart';
 import '../webdav_config.dart';
 
@@ -13,7 +11,6 @@ const Key webDavPasswordFieldKey = Key('webdav-password-field');
 const Key webDavTestButtonKey = Key('webdav-test-button');
 const Key webDavSaveButtonKey = Key('webdav-save-button');
 const Key webDavClearButtonKey = Key('webdav-clear-button');
-const Key webDavLogKey = Key('webdav-log-entry');
 
 /// 打开 WebDAV 配置表单；保存成功返回 true。
 Future<bool?> showWebDavConfigSheet(BuildContext context) {
@@ -234,31 +231,6 @@ class _WebDavConfigSheetState extends ConsumerState<WebDavConfigSheet> {
                       ),
                     ),
                   ],
-                  ListTile(
-                    key: webDavLogKey,
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    leading: const Icon(Icons.history_rounded, size: 20),
-                    title: const Text('同步记录'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Consumer(
-                          builder: (context, ref, _) {
-                            final count = ref
-                                .watch(syncLogRunsProvider)
-                                .asData
-                                ?.value
-                                .length;
-                            return Text(count == null ? '' : '$count');
-                          },
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.chevron_right, size: 18),
-                      ],
-                    ),
-                    onTap: () => context.pushAppRoute(const SyncLogRoute()),
-                  ),
                   const SizedBox(height: 16),
                   if (_message != null) ...[
                     Text(

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/router.dart';
+import '../../../app/theme/app_theme.dart';
 import '../../../app/widgets/app_snack_bar.dart';
-import '../sync_meta.dart';
 import '../sync_log.dart';
+import '../sync_meta.dart';
 import '../sync_status.dart';
 import '../webdav_config.dart';
 import 'webdav_config_sheet.dart';
@@ -11,17 +13,19 @@ import 'webdav_config_sheet.dart';
 const Key webDavSyncCardKey = Key('settings-webdav-sync');
 const Key webDavConfigureKey = Key('settings-webdav-configure');
 const Key webDavSyncNowKey = Key('settings-webdav-sync-now');
+const Key webDavLogKey = Key('webdav-log-entry');
+const Key webDavCloudDataKey = Key('settings-webdav-cloud-data');
 
-/// 设置页「WebDAV」卡片。
+/// 设置页「同步」卡片：WebDAV / 同步记录 / 云端数据 三个一级入口。
 ///
-/// 配置本身在弹层里完成；这里只展示连接状态、上次同步时间和两个动作。
+/// 行样式跟设置页其它卡片一致（`titleSmall` 标题 + 右侧控件，40pt 行高、
+/// 卡片内 16 横向内边距），不再用 `ListTile` 的图标/副标题形态。三个入口
+/// 都是导航/动作，副标题只在配置行用状态文字（右侧）表达。
 class WebDavSyncCard extends ConsumerWidget {
   const WebDavSyncCard({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final configAsync = ref.watch(webDavConfigProvider);
     final status = ref.watch(syncStatusProvider);
     final metaAsync = ref.watch(syncMetaProvider);
@@ -33,50 +37,80 @@ class WebDavSyncCard extends ConsumerWidget {
       key: webDavSyncCardKey,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
-          child: Row(
-            children: [
-              Icon(Icons.cloud_outlined, color: scheme.primary, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  configAsync.hasError
-                      ? '读取配置失败'
-                      : configured
-                      ? _statusText(status, lastSync)
-                      : '未配置',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            _EntryRow(
+              key: webDavConfigureKey,
+              title: 'WebDAV',
+              onTap: () => _configure(context, ref),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 128),
+                    child: Text(
+                      configAsync.hasError
+                          ? '读取配置失败'
+                          : configured
+                          ? _statusText(status, lastSync)
+                          : '未配置',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ),
-                ),
+                  IconButton(
+                    key: webDavSyncNowKey,
+                    tooltip: '立即同步',
+                    onPressed: !configured || status.isSyncing
+                        ? null
+                        : () => _syncNow(context, ref),
+                    icon: status.isSyncing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.sync_rounded, size: 20),
+                    padding: EdgeInsets.zero,
+                    // 图标右侧与下面两行的 chevron 右缘对齐：IconButton 默认把
+                    // 图标居中，视觉上会比 chevron 往左偏 8pt。
+                    alignment: Alignment.centerRight,
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 36,
+                      height: 36,
+                    ),
+                  ),
+                ],
               ),
-              IconButton(
-                key: webDavConfigureKey,
-                tooltip: configured ? '修改 WebDAV' : '配置 WebDAV',
-                onPressed: () => _configure(context, ref),
-                icon: const Icon(Icons.edit_outlined, size: 19),
-                visualDensity: VisualDensity.compact,
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            _EntryRow(
+              key: webDavLogKey,
+              title: '同步记录',
+              onTap: () => context.pushAppRoute(const SyncLogRoute()),
+              trailing: Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-              IconButton(
-                key: webDavSyncNowKey,
-                tooltip: '立即同步',
-                onPressed: !configured || status.isSyncing
-                    ? null
-                    : () => _syncNow(context, ref),
-                icon: status.isSyncing
-                    ? const SizedBox(
-                        width: 17,
-                        height: 17,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.sync_rounded, size: 20),
-                visualDensity: VisualDensity.compact,
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            _EntryRow(
+              key: webDavCloudDataKey,
+              title: '云端数据',
+              onTap: () => context.pushAppRoute(const CloudSyncDataRoute()),
+              trailing: Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -101,6 +135,49 @@ class WebDavSyncCard extends ConsumerWidget {
     } else if (result != null) {
       showAppSnackBar(context, status.message);
     }
+  }
+}
+
+/// 设置页风格的一行：标题左、右侧控件，整行可点。
+class _EntryRow extends StatelessWidget {
+  const _EntryRow({
+    super.key,
+    required this.title,
+    this.trailing,
+    required this.onTap,
+  });
+
+  final String title;
+  final Widget? trailing;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: SizedBox(
+          height: 44,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: context.appWeight(FontWeight.w600),
+                  ),
+                ),
+              ),
+              if (trailing != null) ...[const SizedBox(width: 12), trailing!],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

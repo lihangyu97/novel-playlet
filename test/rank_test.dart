@@ -1,7 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/data/models/rank.dart';
-import 'package:novel_playlet/features/rank/rank_providers.dart';
-import 'package:novel_playlet/features/recommend/recommend_category.dart';
 
 /// 榜单解析：目录/条目都取 2026-11-15 真机抓包形态（小说 book_data、短剧/
 /// 漫剧 video_data），只断言字段与分页语义，不依赖网络。
@@ -211,15 +209,6 @@ void main() {
       expect(board.nextOffset, 100);
       expect(board.entries.first.kind, 'video');
     });
-  });
-
-  test('首页分类映射到推荐榜 / 短剧榜 / 漫剧榜', () {
-    final catalog = RankCatalog.fromHomepagePayload(_catalogue());
-    expect(rankTabForCategory(catalog, RecommendCategory.novel)?.algo, 101);
-    expect(rankTabForCategory(catalog, RecommendCategory.drama)?.algo, 502);
-    expect(rankTabForCategory(catalog, RecommendCategory.anime)?.algo, 550);
-    expect(rankTabForCategory(catalog, RecommendCategory.drama)?.genreTab, 4);
-    expect(rankTabForCategory(catalog, RecommendCategory.anime)?.genreTab, 5);
   });
 
   test('failed / malformed payload yields empty board', () {

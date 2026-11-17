@@ -683,6 +683,10 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 真实上游探针（需
 - CI 在 `.github/workflows/ci.yml`（当前只保留 `workflow_dispatch` 手动触发）：Flutter 门禁跑 macOS
   （golden 需要系统字体），Rust 门禁跑 Linux，外加 FRB 漂移校验与 iOS 无签名构建。
 - `integration_test/reader_pagination_perf_test.dart` 是真机 performance harness，不进 CI（见 §8）。
+- 书旗（`shuqi_contract` / `shuqi_live`）与漫画（`manga_end_to_end`）的契约测试默认
+  `#[ignore]`：App 的 `APP_APIS` 不暴露这两条链路，保留它们只作 fqapp 上游同步的护栏。
+  需要时手动跑：`cargo test --manifest-path rust/Cargo.toml --test shuqi_contract -- --ignored`
+  （漫画同理）。
 
 ### 7.5 真机覆盖安装与缓存保留（iOS 自签）
 
@@ -933,10 +937,11 @@ flutter drive --profile -d <iPhone UDID> \
 
 ### 11.6 WebDAV 云同步（2026-11-16 第二版）
 
-- **入口**：设置 → WebDAV。配置表单填 WebDAV 根地址、账号、应用密码；密码只进
+- **入口**：设置 → 同步。配置表单填 WebDAV 根地址、账号、应用密码；密码只进
   `flutter_secure_storage`（iOS Keychain / Android Keystore），不写 SharedPreferences、
   日志或同步 JSON。表单先「测试连接」（MKCOL + PUT/GET/DELETE 探针），成功后才允许保存。
-  配置弹层里另有「同步记录」入口。
+  设置页一级有三个入口：**WebDAV**（弹层）、**同步记录**（本机最近 50 次）、
+  **云端数据**（只读展示云端 `sync.json` 的元信息与 500 条上限内的记录列表）。
 - **文件**：`novel-playlet/<release|beta|dev>/sync.json`。渠道由 `appFlavor` 与构建模式决定：
   release 包用 `release`，beta 包用 `beta`，debug 包用 `dev`，互不覆盖。文件只有书架、收藏、
   阅读/观看进度，封面只存 URL，不存正文/图片/密码，通常小于 100 KB。

@@ -4,8 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/widgets/app_snack_bar.dart';
 import '../feed/feed_staggered_grid.dart';
 import '../feed/feed_view.dart';
-import '../rank/rank_providers.dart';
-import '../rank/widgets/rank_preview_card.dart';
 import '../../app/router.dart';
 import '../../app/widgets/category_tab_bar.dart';
 import '../../app/widgets/cover_hero.dart';
@@ -20,11 +18,11 @@ import 'recommend_item.dart';
 import 'recommend_layout.dart';
 import 'recommend_state.dart';
 
-/// 合并后的「推荐」页：顶部分类 tabs + 右侧搜索入口 + 每个分类一条流。
+/// 合并后的「推荐」页：顶部分类 tabs + 左右两个图标入口 + 每个分类一条流。
 ///
 /// 搜索是独立页面（`lib/features/search/`）：推荐页顶栏不再放整行搜索框，
-/// 只留右侧一个放大镜图标入口（点一下进搜索页，一次搜小说 / 短剧），整体是
-/// 小红书式的「分类 tabs + 搜索图标」顶栏。分类 tabs 各自保留自己的列表、
+/// 只留右侧放大镜图标；左上角对称放排行榜入口（进 `RankPage`，榜单目录复用
+/// `rankCatalogProvider`）。整体是「分类 tabs + 左右图标」的轻量顶栏。分类 tabs 各自保留自己的列表、
 /// 游标与滚动位置；分类 tabs 与内容都支持左右滑动（tabs 用与我页共用的
 /// [CategoryTabBar]，内容用 `TabBarView`）。
 ///
@@ -96,6 +94,9 @@ class RecommendPageState extends ConsumerState<RecommendPage>
   /// 返回时推荐流还是原来的内容与滚动位置。
   void _openSearch() => context.pushAppRoute(const SearchRoute());
 
+  /// 顶栏左上角排行榜入口（与右侧搜索图标对称）。
+  void _openRank() => context.pushAppRoute(const RankRoute());
+
   @override
   Widget build(BuildContext context) {
     // 渐变要盖到状态栏那一条（安全区不参与布局），否则顶部会留一条纯白。
@@ -122,21 +123,32 @@ class RecommendPageState extends ConsumerState<RecommendPage>
                 height: CategoryTabBar.height,
                 child: Row(
                   children: [
-                    // 右侧「40 图标 + 8 留白」的镜像占位：tabs 因此落在屏幕
-                    // 正中，而不是被右侧搜索入口压到左半边。
-                    const SizedBox(width: _SearchEntryButton.width + 8),
+                    // 左右各一个「图标 40 + 外侧留白 8」的入口（排行榜 / 搜索），
+                    // 两侧等宽，tabs 因此落在屏幕正中。
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: _HeaderIconButton(
+                        icon: Icons.leaderboard_outlined,
+                        tooltip: '排行榜',
+                        onTap: _openRank,
+                      ),
+                    ),
                     Expanded(
                       child: CategoryTabBar(
                         controller: _tabController,
                         labels: const ['小说', '短剧', '漫剧'],
-                        // 行内左右留白交给外层 Row 的镜像占位，居中才准。
+                        // 行内左右留白交给外层 Row 的占位，居中才准。
                         padding: EdgeInsets.zero,
                         center: true,
                       ),
                     ),
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
-                      child: _SearchEntryButton(onTap: _openSearch),
+                      child: _HeaderIconButton(
+                        icon: Icons.search_rounded,
+                        tooltip: '搜索',
+                        onTap: _openSearch,
+                      ),
                     ),
                   ],
                 ),
@@ -194,14 +206,6 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
 
   @override
   bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    // 榜单预览和推荐流并行拉：第一次进 tab 时不用等推荐流回来才发榜单请求，
-    // 卡片骨架也会更早换成真数据。
-    ref.read(rankPreviewProvider(_category));
-  }
 
   RecommendFeedController get _controller =>
       ref.read(recommendFeedProvider(_category).notifier);
@@ -292,7 +296,6 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
       onRetryLoadMore: _retryLoadMore,
       emptyMessage: '暂时没有${_category.label}推荐\n下拉刷新试试',
       emptyIcon: _category.emptyIcon,
-      header: RankPreviewCard(category: _category),
       sliverBuilder: (context, state) {
         return FeedStaggeredGrid<RecommendItem>(
           items: state.items,
@@ -350,30 +353,36 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
 /// 不再套白色圆角底：顶栏本身就是「tabs + 图标」的轻量结构，图标和「我的」
 /// 页头的设置/缓存入口同一套线性图标（同尺寸、同色、同样只带水波纹），
 /// 文字只走 Tooltip / 无障碍标签。缓存中心入口在「我的」页头，顶栏只留搜索。
-class _SearchEntryButton extends StatelessWidget {
-  const _SearchEntryButton({required this.onTap});
+class _HeaderIconButton extends StatelessWidget {
+  const _HeaderIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
 
   /// 触控区宽度（高度跟随顶栏，即 [CategoryTabBar.height]）。
   static const double width = 40;
 
+  final IconData icon;
+  final String tooltip;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return IconButton(
       onPressed: onTap,
-      tooltip: '搜索',
+      tooltip: tooltip,
       iconSize: 22,
       padding: EdgeInsets.zero,
       // compact 把 M3 默认给按钮四周留的 8pt 触控外扩收掉，按钮实际就是
-      // 40×行高，右侧「40 + 8」与左侧镜像占位等宽，tabs 才真的居中。
+      // 40×行高，左右「40 + 8」对称占位，tabs 才真的居中。
       visualDensity: VisualDensity.compact,
       constraints: BoxConstraints.tightFor(
         width: width,
         height: CategoryTabBar.height,
       ),
       color: Theme.of(context).colorScheme.onSurfaceVariant,
-      icon: const Icon(Icons.search_rounded),
+      icon: Icon(icon),
     );
   }
 }

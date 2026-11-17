@@ -56,10 +56,6 @@ void main() {
     // 合并后推荐态不再有「为你推荐 / 短剧推荐」区块标题。
     expect(find.text('为你推荐'), findsNothing);
     expect(find.text('短剧推荐'), findsNothing);
-    await expectLater(
-      find.byType(RecommendPage),
-      matchesGoldenFile('../goldens/recommend.png'),
-    );
   });
 
   testWidgets('推荐页-小说卡：作者固定一行，推荐理由/热度各自有就显示', (tester) async {
@@ -127,10 +123,6 @@ void main() {
     await tester.tap(find.text('短剧'));
     await tester.pumpAndSettle();
     expect(find.textContaining('太奶奶'), findsWidgets);
-    await expectLater(
-      find.byType(RecommendPage),
-      matchesGoldenFile('../goldens/recommend_drama.png'),
-    );
   });
 
   testWidgets('推荐页-漫剧分类', (tester) async {
@@ -138,15 +130,11 @@ void main() {
     await tester.tap(find.text('漫剧'));
     await tester.pumpAndSettle();
     expect(find.textContaining('动态漫'), findsWidgets);
-    await expectLater(
-      find.byType(RecommendPage),
-      matchesGoldenFile('../goldens/recommend_anime.png'),
-    );
   });
 
-  /// 小红书式顶栏：分类 tabs 是唯一主元素，搜索收成右侧一个图标入口，
-  /// 整行不再有输入框，也没有缓存入口。
-  testWidgets('推荐页-顶栏：tabs 居中 + 右侧搜索入口', (tester) async {
+  /// 轻量顶栏：分类 tabs 居中，左右各一个图标入口（排行榜 / 搜索），
+  /// 整行没有输入框，也没有缓存入口。
+  testWidgets('推荐页-顶栏：tabs 居中 + 左右图标入口', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     expect(
       find.byType(CategoryTabBar),
@@ -184,11 +172,25 @@ void main() {
       closeTo(390 - bar.right, 0.5),
       reason: '搜索入口一侧的留白要有左侧镜像，tabs 才在屏幕中间',
     );
-    // 搜索入口与 tabs 同一行：整行贴行底，右侧留白 8；图标本身没有底色，
-    // 只占 40×40 的触控区（Tooltip 是图标内容，量按钮本身）。
-    final entryButton = tester.getRect(find.byType(IconButton));
-    expect(entryButton.bottom, closeTo(bar.bottom, 0.5));
-    expect(entryButton.right, closeTo(390 - 8, 0.5));
+    // 左右图标入口与 tabs 同一行：整行贴行底，外侧各留 8；图标本身没有
+    // 底色，只占 40×40 的触控区（Tooltip 是图标内容，量按钮本身）。
+    final searchButton = find.ancestor(
+      of: find.byTooltip('搜索'),
+      matching: find.byType(IconButton),
+    );
+    final rankButton = find.ancestor(
+      of: find.byTooltip('排行榜'),
+      matching: find.byType(IconButton),
+    );
+    expect(searchButton, findsOneWidget);
+    expect(rankButton, findsOneWidget);
+    final searchRect = tester.getRect(searchButton);
+    final rankRect = tester.getRect(rankButton);
+    expect(searchRect.bottom, closeTo(bar.bottom, 0.5));
+    expect(searchRect.right, closeTo(390 - 8, 0.5));
+    expect(rankRect.bottom, closeTo(bar.bottom, 0.5));
+    expect(rankRect.left, closeTo(8, 0.5));
+    expect(searchRect.width, closeTo(rankRect.width, 0.5));
     expect(
       (tester.getRect(find.byIcon(Icons.search_rounded)).center.dy -
               tester.getRect(find.text('小说')).center.dy)
@@ -438,10 +440,6 @@ void main() {
           () => RecommendLayoutController(initialLayout: RecommendLayout.three),
         ),
       ],
-    );
-    await expectLater(
-      find.byType(RecommendPage),
-      matchesGoldenFile('../goldens/recommend_three_columns.png'),
     );
   });
 

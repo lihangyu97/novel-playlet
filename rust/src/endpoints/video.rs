@@ -349,7 +349,14 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             .await),
             // Legacy clients recursively extract URLs from raw payloads;
             // only the already-selected variant may survive a download error.
-            Err(_) => Ok(source),
+            Err(error) => {
+                // 下载失败时上游只留远程加密流，客户端播不了；这条日志是定位
+                // 「为什么整集缓存失败」的唯一线索（403/Referer/UA 等）。
+                log::warn!(
+                    "video {video_id}: whole-episode download failed, returning remote source: {error}"
+                );
+                Ok(source)
+            }
         }
     })
 }
@@ -1565,23 +1572,101 @@ async fn stream_download_to_file_tracked(
     cap_bytes: u64,
     session: Option<&StreamSession>,
 ) -> Result<u64, String> {
-    let client = streaming_client().ok_or_else(|| "streaming client unavailable".to_string())?;
+    let h2 = streaming_client().ok_or_else(|| "streaming client unavailable".to_string())?;
+    // 2026-11-17 实测：同一 CDN URL 走 HTTP/2 时约 1/3 概率报
+    // `Error in the HTTP2 framing layer`（代理/中间盒），整集下载一次失败就
+    // 让「缓存」整集报错。传输错误重试两次，最后一次换 HTTP/1.1 兜底；
+    // 取消、HTTP 状态码、超限等确定性错误不重试。
+    let mut last = String::new();
+    for attempt in 1..=3u8 {
+        let client = if attempt < 3 {
+            h2
+        } else {
+            match download_client_http1() {
+                Some(client) => client,
+                None => return Err(last),
+            }
+        };
+        let _ = tokio::fs::remove_file(part_path).await;
+        match download_attempt(client, url, user_agent, part_path, cap_bytes, session).await {
+            Ok(total) => return Ok(total),
+            Err(error) if !error.retryable => {
+                let _ = tokio::fs::remove_file(part_path).await;
+                return Err(error.message);
+            }
+            Err(error) => {
+                log::warn!(
+                    "download video: attempt {attempt} ({}) failed: {}",
+                    if attempt < 3 { "http2" } else { "http1" },
+                    error.message
+                );
+                last = error.message;
+                if attempt < 3 {
+                    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                }
+            }
+        }
+    }
+    let _ = tokio::fs::remove_file(part_path).await;
+    Err(last)
+}
+
+/// HTTP/1.1 兜底客户端：只在 HTTP/2 传输连续失败时使用。
+static HTTP1_DOWNLOAD_CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+
+fn download_client_http1() -> Option<&'static reqwest::Client> {
+    HTTP1_DOWNLOAD_CLIENT
+        .get_or_init(|| {
+            crate::upstream::http::ensure_crypto_provider();
+            let tls = crate::upstream::http::build_tls_config().ok()?;
+            reqwest::Client::builder()
+                .tls_backend_preconfigured(tls)
+                .timeout(VIDEO_DOWNLOAD_TIMEOUT)
+                .http1_only()
+                .build()
+                .ok()
+        })
+        .as_ref()
+}
+
+/// 一次下载尝试。`retryable` 只对传输/读 body 失败为真；取消、非 200、
+/// 超过体积上限都不应重试。
+struct DownloadAttemptError {
+    message: String,
+    retryable: bool,
+}
+
+async fn download_attempt(
+    client: &reqwest::Client,
+    url: &str,
+    user_agent: &str,
+    part_path: &Path,
+    cap_bytes: u64,
+    session: Option<&StreamSession>,
+) -> Result<u64, DownloadAttemptError> {
     let mut resp = client
         .get(url)
         .timeout(crate::upstream::budget::cap_timeout(VIDEO_DOWNLOAD_TIMEOUT))
         .header(reqwest::header::USER_AGENT, user_agent)
         .send()
         .await
-        .map_err(|e| format!("download video: {e}"))?;
+        .map_err(|e| DownloadAttemptError {
+            message: format!("download video: {e}"),
+            retryable: true,
+        })?;
     // The whole-body path rejects anything but 200; keep that contract.
     if resp.status() != reqwest::StatusCode::OK {
-        return Err(format!("download video: HTTP {}", resp.status()));
+        return Err(DownloadAttemptError {
+            message: format!("download video: HTTP {}", resp.status()),
+            retryable: false,
+        });
     }
     if let Some(len) = resp.content_length() {
         if len > cap_bytes {
-            return Err(format!(
-                "download video: content-length {len} exceeds cap {cap_bytes}"
-            ));
+            return Err(DownloadAttemptError {
+                message: format!("download video: content-length {len} exceeds cap {cap_bytes}"),
+                retryable: false,
+            });
         }
         if let Some(session) = session {
             session.set_total(len);
@@ -1589,32 +1674,58 @@ async fn stream_download_to_file_tracked(
     }
     let mut file = tokio::fs::File::create(part_path)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| DownloadAttemptError {
+            message: e.to_string(),
+            retryable: false,
+        })?;
     let mut total: u64 = 0;
     loop {
         if session.is_some_and(StreamSession::is_cancelled) {
-            return Err("download video: cancelled".to_string());
+            return Err(DownloadAttemptError {
+                message: "download video: cancelled".to_string(),
+                retryable: false,
+            });
         }
         match resp.chunk().await {
             Ok(Some(bytes)) => {
-                total = total
-                    .checked_add(bytes.len() as u64)
-                    .ok_or_else(|| "download video: size overflow".to_string())?;
+                total =
+                    total
+                        .checked_add(bytes.len() as u64)
+                        .ok_or_else(|| DownloadAttemptError {
+                            message: "download video: size overflow".to_string(),
+                            retryable: false,
+                        })?;
                 if total > cap_bytes {
-                    return Err(format!(
-                        "download video: streamed {total} bytes exceeds cap {cap_bytes}"
-                    ));
+                    return Err(DownloadAttemptError {
+                        message: format!(
+                            "download video: streamed {total} bytes exceeds cap {cap_bytes}"
+                        ),
+                        retryable: false,
+                    });
                 }
-                file.write_all(&bytes).await.map_err(|e| e.to_string())?;
+                file.write_all(&bytes)
+                    .await
+                    .map_err(|e| DownloadAttemptError {
+                        message: e.to_string(),
+                        retryable: false,
+                    })?;
                 if let Some(session) = session {
                     session.set_downloaded(total);
                 }
             }
             Ok(None) => break,
-            Err(e) => return Err(format!("download video: {e}")),
+            Err(e) => {
+                return Err(DownloadAttemptError {
+                    message: format!("download video: {e}"),
+                    retryable: true,
+                })
+            }
         }
     }
-    file.flush().await.map_err(|e| e.to_string())?;
+    file.flush().await.map_err(|e| DownloadAttemptError {
+        message: e.to_string(),
+        retryable: false,
+    })?;
     Ok(total)
 }
 

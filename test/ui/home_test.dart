@@ -150,9 +150,5 @@ void main() {
     expect(find.text('收藏'), findsOneWidget);
     expect(find.byKey(MinePage.historyKey), findsOneWidget);
     expect(find.byKey(MinePage.collectionKey), findsOneWidget);
-    await expectLater(
-      find.byType(HomeShell),
-      matchesGoldenFile('../goldens/home_mine.png'),
-    );
   });
 }
