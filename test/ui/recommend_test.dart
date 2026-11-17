@@ -144,9 +144,9 @@ void main() {
     );
   });
 
-  /// 小红书式顶栏：分类 tabs 是唯一主元素，搜索收成右侧一个图标入口，
-  /// 整行不再有输入框，也没有缓存入口。
-  testWidgets('推荐页-顶栏：tabs 居中 + 右侧搜索入口', (tester) async {
+  /// 轻量顶栏：分类 tabs 居中，左右各一个图标入口（排行榜 / 搜索），
+  /// 整行没有输入框，也没有缓存入口。
+  testWidgets('推荐页-顶栏：tabs 居中 + 左右图标入口', (tester) async {
     await pumpPreview(tester, const RecommendPage());
     expect(
       find.byType(CategoryTabBar),
@@ -184,11 +184,25 @@ void main() {
       closeTo(390 - bar.right, 0.5),
       reason: '搜索入口一侧的留白要有左侧镜像，tabs 才在屏幕中间',
     );
-    // 搜索入口与 tabs 同一行：整行贴行底，右侧留白 8；图标本身没有底色，
-    // 只占 40×40 的触控区（Tooltip 是图标内容，量按钮本身）。
-    final entryButton = tester.getRect(find.byType(IconButton));
-    expect(entryButton.bottom, closeTo(bar.bottom, 0.5));
-    expect(entryButton.right, closeTo(390 - 8, 0.5));
+    // 左右图标入口与 tabs 同一行：整行贴行底，外侧各留 8；图标本身没有
+    // 底色，只占 40×40 的触控区（Tooltip 是图标内容，量按钮本身）。
+    final searchButton = find.ancestor(
+      of: find.byTooltip('搜索'),
+      matching: find.byType(IconButton),
+    );
+    final rankButton = find.ancestor(
+      of: find.byTooltip('排行榜'),
+      matching: find.byType(IconButton),
+    );
+    expect(searchButton, findsOneWidget);
+    expect(rankButton, findsOneWidget);
+    final searchRect = tester.getRect(searchButton);
+    final rankRect = tester.getRect(rankButton);
+    expect(searchRect.bottom, closeTo(bar.bottom, 0.5));
+    expect(searchRect.right, closeTo(390 - 8, 0.5));
+    expect(rankRect.bottom, closeTo(bar.bottom, 0.5));
+    expect(rankRect.left, closeTo(8, 0.5));
+    expect(searchRect.width, closeTo(rankRect.width, 0.5));
     expect(
       (tester.getRect(find.byIcon(Icons.search_rounded)).center.dy -
               tester.getRect(find.text('小说')).center.dy)
