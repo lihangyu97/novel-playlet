@@ -45,22 +45,39 @@ class SyncLogPage extends ConsumerWidget {
               icon: Icons.history_rounded,
             );
           }
-          return ListView.builder(
-            padding: const EdgeInsets.only(bottom: 24),
-            itemCount: items.length,
-            itemBuilder: (context, index) {
-              final run = items[index];
-              final previous = index == 0 ? null : items[index - 1];
-              final showDay =
-                  previous == null || !_sameDay(previous.atTime, run.atTime);
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (showDay) _DayHeader(day: run.atTime),
-                  _RunTile(run: run),
-                ],
-              );
-            },
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Text(
+                  '最近 50 次同步的结果与双向明细',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  itemCount: items.length,
+                  itemBuilder: (context, index) {
+                    final run = items[index];
+                    final previous = index == 0 ? null : items[index - 1];
+                    final showDay =
+                        previous == null ||
+                        !_sameDay(previous.atTime, run.atTime);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (showDay) _DayHeader(day: run.atTime),
+                        _RunTile(run: run),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
           );
         },
       ),

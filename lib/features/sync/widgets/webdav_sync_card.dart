@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/router.dart';
+import '../../../app/theme/app_theme.dart';
 import '../../../app/widgets/app_snack_bar.dart';
 import '../sync_log.dart';
 import '../sync_meta.dart';
@@ -17,8 +18,9 @@ const Key webDavCloudDataKey = Key('settings-webdav-cloud-data');
 
 /// 设置页「WebDAV」卡片：配置 / 同步记录 / 云端数据 三个一级入口。
 ///
-/// 配置本身在弹层里完成；卡片第一行展示连接状态 + 立即同步，后两行跳到
-/// 本机同步日志与云端 `sync.json` 只读页。
+/// 行样式跟设置页其它卡片一致（`titleSmall` 标题 + 右侧控件，40pt 行高、
+/// 卡片内 16 横向内边距），不再用 `ListTile` 的图标/副标题形态。三个入口
+/// 都是导航/动作，副标题只在配置行用状态文字（右侧）表达。
 class WebDavSyncCard extends ConsumerWidget {
   const WebDavSyncCard({super.key});
 
@@ -38,56 +40,62 @@ class WebDavSyncCard extends ConsumerWidget {
         clipBehavior: Clip.antiAlias,
         child: Column(
           children: [
-            ListTile(
+            _EntryRow(
               key: webDavConfigureKey,
-              leading: const Icon(Icons.cloud_outlined, size: 20),
-              title: const Text('WebDAV 配置'),
-              subtitle: Text(
-                configAsync.hasError
-                    ? '读取配置失败'
-                    : configured
-                    ? _statusText(status, lastSync)
-                    : '未配置',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              trailing: IconButton(
-                key: webDavSyncNowKey,
-                tooltip: '立即同步',
-                onPressed: !configured || status.isSyncing
-                    ? null
-                    : () => _syncNow(context, ref),
-                icon: status.isSyncing
-                    ? const SizedBox(
-                        width: 17,
-                        height: 17,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.sync_rounded, size: 20),
-                visualDensity: VisualDensity.compact,
-              ),
+              title: 'WebDAV 配置',
               onTap: () => _configure(context, ref),
-              visualDensity: VisualDensity.compact,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 128),
+                    child: Text(
+                      configAsync.hasError
+                          ? '读取配置失败'
+                          : configured
+                          ? _statusText(status, lastSync)
+                          : '未配置',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: webDavSyncNowKey,
+                    tooltip: '立即同步',
+                    onPressed: !configured || status.isSyncing
+                        ? null
+                        : () => _syncNow(context, ref),
+                    icon: status.isSyncing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.sync_rounded, size: 20),
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 36,
+                      height: 36,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const Divider(height: 1, indent: 56),
-            ListTile(
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            _EntryRow(
               key: webDavLogKey,
-              leading: const Icon(Icons.history_rounded, size: 20),
-              title: const Text('同步记录'),
-              subtitle: const Text('最近 50 次同步的结果与双向明细'),
-              trailing: const Icon(Icons.chevron_right, size: 18),
+              title: '同步记录',
               onTap: () => context.pushAppRoute(const SyncLogRoute()),
-              visualDensity: VisualDensity.compact,
             ),
-            const Divider(height: 1, indent: 56),
-            ListTile(
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            _EntryRow(
               key: webDavCloudDataKey,
-              leading: const Icon(Icons.cloud_download_outlined, size: 20),
-              title: const Text('云端数据'),
-              subtitle: const Text('查看云端 sync.json 的元信息与列表'),
-              trailing: const Icon(Icons.chevron_right, size: 18),
+              title: '云端数据',
               onTap: () => context.pushAppRoute(const CloudSyncDataRoute()),
-              visualDensity: VisualDensity.compact,
             ),
           ],
         ),
@@ -114,6 +122,49 @@ class WebDavSyncCard extends ConsumerWidget {
     } else if (result != null) {
       showAppSnackBar(context, status.message);
     }
+  }
+}
+
+/// 设置页风格的一行：标题左、右侧控件，整行可点。
+class _EntryRow extends StatelessWidget {
+  const _EntryRow({
+    super.key,
+    required this.title,
+    this.trailing,
+    required this.onTap,
+  });
+
+  final String title;
+  final Widget? trailing;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: SizedBox(
+          height: 44,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: context.appWeight(FontWeight.w600),
+                  ),
+                ),
+              ),
+              if (trailing != null) ...[const SizedBox(width: 12), trailing!],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
