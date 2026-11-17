@@ -92,6 +92,21 @@ void main() {
 
     await tester.ensureVisible(find.byKey(webDavLogKey));
     await tester.pumpAndSettle();
+    // 两行导航入口都要有右侧箭头，明确「可点」。
+    expect(
+      find.descendant(
+        of: find.byKey(webDavLogKey),
+        matching: find.byIcon(Icons.chevron_right),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(webDavCloudDataKey),
+        matching: find.byIcon(Icons.chevron_right),
+      ),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(webDavLogKey));
     await tester.pumpAndSettle();
 

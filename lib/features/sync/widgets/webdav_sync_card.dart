@@ -90,12 +90,22 @@ class WebDavSyncCard extends ConsumerWidget {
               key: webDavLogKey,
               title: '同步记录',
               onTap: () => context.pushAppRoute(const SyncLogRoute()),
+              trailing: Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const Divider(height: 1, indent: 16, endIndent: 16),
             _EntryRow(
               key: webDavCloudDataKey,
               title: '云端数据',
               onTap: () => context.pushAppRoute(const CloudSyncDataRoute()),
+              trailing: Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
