@@ -272,8 +272,10 @@ ChapterContent{id,title,paragraphs}
 ### 4.6 进度与设置
 
 - 进度：`{chapterId, chapterIndex, blockIndex, updatedAt}`，`blockIndex` 是页首段落下标。
-- 写入：翻页 400ms 防抖、切章立即 flush、页面 dispose 再兜一次。
-- 表：`reading_progress_v1`（最近 200 本 LRU）+ `recent_reading_v1`（3 条）+ `last_read_book_v1`。
+- 写入：翻页 5s 防抖（`ReaderController.progressDebounce`）、切章立即 flush、退出阅读页与
+  App 切前后台（`inactive`/`paused`）再兜一次；同一本书的重复落点复用同一行 UPDATE。
+- 表：与书架/收藏同表，`library` 里一行（`type='novel'` + `source_id`），进度落
+  `progress_ref / progress_index / progress_sub`，看过的书就是「历史」的来源。
 - 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、字重 300–800（默认 **400**，整百档）、4 种底色（色块与「底色」标题同一行，不显示文字）、对话高亮开关
   （默认开）与颜色（默认 `#FFD54F`，设置页主题模块自定义）、段评气泡开关（默认开），落
   `reader_font_size_v1 / reader_line_height_v1 / reader_font_weight_v1 / reader_paper_v1 / reader_day_paper_v1 / reader_show_dialogue_highlight_v1 / reader_dialogue_highlight_color_v1 / reader_show_bubbles_v1`；
@@ -551,7 +553,8 @@ cached miss 时第一次取流仍会按内核重试预算耗一段时间，失�
 |---|---|---|---|
 | **pinned 离线区** | `<AppSupport>/offline/novel/`、`offline/video/` | 用户主动下载的正文 / 明文 mp4 | **永不自动淘汰**，只能用户删 |
 | **自动加速层** | `<AppSupport>/reader_chapters/`、`backend/src/` | 章节 JSON、CENC 密文视频 + `.key` | 各自有上限，自动淘汰 |
-| **偏好/进度** | `SharedPreferences` | 书架、进度、设置、主题 | 表级 LRU |
+| **用户库** | `<AppSupport>/library.db`（SQLite） | 书架、收藏、阅读/观看进度 | 每条内容一行；纯进度行上限 500（小说+短剧共享），淘汰写 `progress_pruned_at` 不删行 |
+| **偏好** | `SharedPreferences` | 主题、阅读设置、同步元数据 | 表级 LRU |
 
 ### 6.1 清单
 
@@ -567,7 +570,14 @@ cached miss 时第一次取流仍会按内核重试预算耗一段时间，失�
 | `backend/src/<videoId>.<ext>.variant.json` | `{name,width,height,short_edge}` | 随视频删 |
 | `Application Support/libCachedImageData.db` + `Library/Caches/libCachedImageData/` | 封面图 + sqflite 索引 | 120 对象 / 7 天；启动 >40 MB 裁到 25 MB |
 | `backend/config/` | 设备池 + 运行时 config | **不是缓存**，删了要重新注册设备 |
+| `library.db` | 书架/收藏/进度（单表 `library`，`type` 区分小说/短剧） | **不是缓存**，删了等于清空书架 |
 | `backend/rust.log`、`offline/diag.log` | 排障日志 | 轮转；可随时删 |
+
+> **升级不迁移（1.0.1 → 本版本）**：`shared_preferences` 里的 `shelf_books_v1` /
+> `reading_progress_v1` / `video_*` 不会被导入 `library.db`。覆盖升级后书架与历史
+> 从空开始，旧 key 仍留在原处；要保留数据需手工转成 `library` 行或重新同步。
+> 云同步同样**只认 `schemaVersion = 3`**：旧的 `sync.json` 会报「云端同步文件格式
+> 不正确，已停止覆盖」，不会用空数据覆盖远端。
 
 ### 6.2 隔离不变式
 
@@ -789,7 +799,8 @@ flutter drive --profile -d <iPhone UDID> \
 | `lib/app/widgets/comment_emoji_text.dart` | 评论/回复方括号表情：token 解析、包内 webp 内联渲染 |
 | `assets/images/emoji/` | 官方 53 个表情 token 对应的 120×120 webp（约 126 KB） |
 | `lib/features/settings/widgets/dialogue_highlight_preview.dart` | 对话高亮取色弹层里的阅读页示例预览 |
-| `lib/features/sync/{webdav_config,webdav_client,sync_service,sync_status}.dart` | WebDAV 云同步：配置安全存储、HTTP 客户端、合并上传、状态机 |
+| `lib/features/sync/{webdav_config,webdav_client,sync_service,sync_status}.dart` | WebDAV 云同步：配置安全存储、HTTP 客户端（ETag/If-Match）、合并上传、状态机 |
+| `lib/features/sync/{sync_log,sync_log_page}.dart` | 同步日志：本机 50 次记录（双向 diff）、记录页 |
 | `lib/features/sync/widgets/webdav_{sync_card,config_sheet}.dart` | 设置页云同步卡片与配置/测试连接表单 |
 | `lib/core/storage/reading_store.dart` | 书架/收藏 tombstone、同步导出与按条 LWW 合并 |
 
@@ -920,22 +931,33 @@ flutter drive --profile -d <iPhone UDID> \
   推荐流/搜索页/设置页改版后需 `--update-goldens` 重生成 `recommend*.png`、`home*.png`、`search*.png`、`settings*.png`。
 
 
-### 11.6 WebDAV 云同步（2026-11-15）
+### 11.6 WebDAV 云同步（2026-11-16 第二版）
 
 - **入口**：设置 → WebDAV。配置表单填 WebDAV 根地址、账号、应用密码；密码只进
   `flutter_secure_storage`（iOS Keychain / Android Keystore），不写 SharedPreferences、
   日志或同步 JSON。表单先「测试连接」（MKCOL + PUT/GET/DELETE 探针），成功后才允许保存。
+  配置弹层里另有「同步记录」入口。
 - **文件**：`novel-playlet/<release|beta|dev>/sync.json`。渠道由 `appFlavor` 与构建模式决定：
   release 包用 `release`，beta 包用 `beta`，debug 包用 `dev`，互不覆盖。文件只有书架、收藏、
   阅读/观看进度，封面只存 URL，不存正文/图片/密码，通常小于 100 KB。
-- **合并**：`ReadingStore.exportSyncData()` 导出快照；`applySyncData()` 按条目合并：
-  - 书架/收藏：每个条目有 `u`（最后修改毫秒）和 `d`（tombstone），取较新者，删除也能同步；
-  - 阅读/观看进度：按 `updatedAt` 取较新；
-  - 最近阅读/最近观看由合并后的进度按时间重建，不再单独存一份冲突源。
-- **同步时机**：App 回前台/退后台自动同步一次；设置页可手动「立即同步」。阅读进度本身
-  400ms 防抖落盘，不能每次落盘都上传；WebDAV 免费流量足够（1 GB 上传 / 3 GB 下载每月），
-  但仍要避免高频整包上传。
+- **合并**：单表 `library` 的记录直接进载荷（`{'items': [...]}`，`schemaVersion = 3`）：
+  - 快照整组按 `metaFetchedAt` 取新；进度整组按 `lastReadAt` 取新；
+  - 书架/收藏用 `shelfAt` / `shelfRemovedAt` 两列各取 max，`shelfAt > shelfRemovedAt` 才算在架，
+    删除也能同步；
+  - 进度淘汰墓碑：`progressPrunedAt` 晚于对方 `lastReadAt` 才丢弃，之后又读过会复活。
+- **条件请求**：先 `PROPFIND Depth:0` 取 ETag，与本机 `SyncMeta.remoteEtag` + 本地载荷指纹
+  （FNV-1a）比对，都命中就整轮跳过（不发 GET/PUT）。PROPFIND 不可用时用上次的 ETag 发条件
+  GET（`If-None-Match`），命中 304 也直接跳过；两者都不可用（实测坚果云就是这种）就回退到
+  无条件 GET + 内容比对，只保证不会白写 PUT，省不掉下载。
+- **并发保护**：`PUT` 带 `If-Match: <etag>`；被另一台设备抢先写入（412/409）时重读 → 重合并
+  → 重写，最多重试一次。写完再取一次 ETag 存回 `SyncMeta`。
+- **同步时机**：App 回前台/退后台自动同步一次；设置页可手动「立即同步」；保存配置后也会同步。
+  阅读进度本身 5s 防抖落盘（切后台会在 `inactive` 先落盘，早于这里的 `paused` 同步）。
+- **同步日志**：`<AppSupport>/sync-log.json` 保留最近 50 次，记录触发方式、结果、失败阶段、
+  revision 变化、双向字段 diff（每向最多 20 条明细）。它是本机诊断数据，不进 `library.db`、
+  不进同步载荷；写入 best-effort，日志失败不影响同步。
 - **错误**：云端 JSON 损坏或渠道不匹配时停止同步并报错，绝不用空数据覆盖；401/403、409、
   507 分别提示账号、上级目录、网盘配额问题。
 - **测试**：`webdav_client_test.dart` 用本地 `HttpServer` 覆盖认证/探针/读写；`reading_store_sync_test.dart`
-  覆盖 tombstone/进度合并；`webdav_sync_service_test.dart` 覆盖上传、拉取、损坏文件保护。
+  覆盖合并/墓碑/裁剪墓碑；`webdav_sync_service_test.dart` 覆盖上传、拉取、条件跳过、412 重试、
+  日志采集；`sync_log_test.dart` 覆盖双向 diff 与日志存储。

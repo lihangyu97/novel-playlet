@@ -1,12 +1,11 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/data/models/novel_item.dart';
+import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/app/shell/floating_navigation_bar.dart';
 import 'package:novel_playlet/app/shell/home_shell.dart';
 import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 
@@ -18,16 +17,10 @@ void main() {
     await loadPreviewFont();
   });
 
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
-  });
-
   testWidgets('推荐页与书架同书共存时 Hero tag 不冲突', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'shelf_books_v1': jsonEncode([
-        {'id': '1', 'title': '剑来', 'cover': '', 'author': '作者1'},
-      ]),
-    });
+    await ReadingStore().addToShelf(
+      const NovelItem(id: '1', title: '剑来', author: '作者1'),
+    );
     await pumpPreview(tester, const HomeShell());
     await tester.tap(find.text('我的'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
@@ -40,7 +33,7 @@ void main() {
         .toList();
     expect(tags.toSet().length, tags.length, reason: '保活页面之间 Hero tag 不能重复');
     expect(tags, contains('cover-novel-recommend-novel-1'));
-    expect(tags, contains('cover-novel-mine-shelf-1'));
+    expect(tags, contains('cover-novel-mine-collection-1'));
   });
 
   testWidgets('首页-推荐/我的两个底部 tab', (tester) async {
@@ -145,17 +138,18 @@ void main() {
     );
   });
 
-  /// 首页里切到「我的」：统一页头 + 小说/短剧两个 tab（真机是同一个
+  /// 首页里切到「我的」：统一页头 + 历史 / 收藏两个区块（真机是同一个
   /// Scaffold 里叠加悬浮胶囊，单独 pump MinePage 看不到胶囊）。
-  testWidgets('首页-我的（统一页头与两个 tab）', (tester) async {
+  testWidgets('首页-我的（统一页头与历史收藏）', (tester) async {
     await pumpPreview(tester, const HomeShell());
     await tester.tap(find.text('我的'));
     await tester.pumpAndSettle(const Duration(milliseconds: 400));
     // 底栏「我的」+ 页头「我的」各一个。
     expect(find.text('我的'), findsNWidgets(2));
-    expect(find.text('小说'), findsOneWidget);
-    expect(find.text('短剧'), findsOneWidget);
-    expect(find.byKey(MinePage.novelTabKey), findsOneWidget);
+    expect(find.text('历史'), findsOneWidget);
+    expect(find.text('收藏'), findsOneWidget);
+    expect(find.byKey(MinePage.historyKey), findsOneWidget);
+    expect(find.byKey(MinePage.collectionKey), findsOneWidget);
     await expectLater(
       find.byType(HomeShell),
       matchesGoldenFile('../goldens/home_mine.png'),

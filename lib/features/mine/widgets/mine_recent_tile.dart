@@ -19,6 +19,7 @@ class MineRecentTile extends StatelessWidget {
     required this.subtitle,
     required this.updatedAt,
     required this.onTap,
+    this.label,
   });
 
   final String cover;
@@ -30,6 +31,11 @@ class MineRecentTile extends StatelessWidget {
   static const double _coverRadius = 6;
   final String title;
   final String subtitle;
+
+  /// 副标题行最前面的小标签（小说 / 短剧）；null = 不显示。
+  ///
+  /// 高度低于一行 bodySmall，所以不会改变行高与封面边长换算。
+  final Widget? label;
   final DateTime updatedAt;
   final VoidCallback onTap;
 
@@ -82,13 +88,20 @@ class MineRecentTile extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: _titleGap),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
+                  Row(
+                    children: [
+                      if (label != null) ...[label!, const SizedBox(width: 4)],
+                      Expanded(
+                        child: Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

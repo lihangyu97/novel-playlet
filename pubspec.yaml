@@ -19,8 +19,11 @@ dependencies:
   path_provider: ^2.1.0
   # 设备池密钥（Keychain）。密钥材料不落任何明文存储。
   flutter_secure_storage: ^9.0.0
-  # 书架/阅读进度等轻量本地状态。
+  # 主题/阅读器设置等轻量偏好（书架/进度已迁到 SQLite）。
   shared_preferences: ^2.3.0
+  # 书架/收藏/进度的本地库：统一 library 记录，按生命周期拆状态/快照两张表。
+  # 方案与合并规则见 docs/storage-model-proposal.md。
+  sqflite: ^2.3.0
   cached_network_image: ^4.0.0
   flutter_cache_manager: ^3.4.8
   # 推荐流瀑布流（双列/三列、卡片不定高）：社区标准实现，自己手写 RenderSliver
@@ -49,6 +52,9 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # sqflite 的桌面端 FFI 实现：flutter test 在 macOS 上用内存库跑，
+  # 入口在 test/flutter_test_config.dart。
+  sqflite_common_ffi: ^2.3.0
 
 flutter:
   uses-material-design: true

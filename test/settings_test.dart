@@ -464,27 +464,6 @@ void main() {
     expect(find.text('设置'), findsWidgets);
   });
 
-  /// 切到短剧 tab 后，设置入口仍是右上角同一枚按钮。
-  testWidgets('我的页-短剧 tab 的设置入口也能打开设置页', (tester) async {
-    await tester.pumpWidget(
-      _wrap(
-        const Scaffold(body: MinePage()),
-        overrides: [appCacheProvider.overrideWithValue(_FakeAppCache())],
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('短剧'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 400));
-
-    final dramaSettings = find.byIcon(Icons.settings_outlined);
-    expect(dramaSettings, findsOneWidget);
-    await tester.tap(dramaSettings);
-    await tester.pumpAndSettle();
-
-    expect(find.byType(SettingsPage), findsOneWidget);
-  });
-
   test('默认深浅色模式跟随系统', () {
     final container = ProviderContainer();
     addTearDown(container.dispose);

@@ -25,8 +25,6 @@ class RankTab {
     return 2;
   }
 
-  bool get isDrama => genreTab != 2;
-
   bool get isEmpty => name.isEmpty || algo < 0;
 }
 

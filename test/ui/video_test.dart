@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,7 +12,6 @@ import 'package:novel_playlet/features/video/video_detail_page.dart';
 import 'package:novel_playlet/features/video/widgets/episode_picker.dart';
 import 'package:novel_playlet/features/video/widgets/episode_tile.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 
@@ -24,10 +21,6 @@ import 'preview_harness.dart';
 void main() {
   setUpAll(() async {
     await loadPreviewFont();
-  });
-
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
   });
 
   group('封面 Hero 飞入', () {
@@ -342,16 +335,11 @@ void main() {
   });
 
   testWidgets('短剧详情-有观看进度时显示继续观看', (tester) async {
-    final progress = VideoWatchProgress(
+    await ReadingStore().saveVideoProgress(
       seriesId: 'v1',
       title: '测试短剧',
       episodeIndex: 2,
-      updatedAt: DateTime.now(),
     );
-    SharedPreferences.setMockInitialValues({
-      'video_progress_v1': jsonEncode({'v1': progress.toJson()}),
-      'video_history_v1': jsonEncode([progress.toJson()]),
-    });
     const preview = VideoSeries(id: 'v1', title: '测试短剧', episodeCount: 40);
     await pumpPreview(
       tester,

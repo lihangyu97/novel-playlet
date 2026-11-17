@@ -26,13 +26,6 @@ int asInt(Object? value, [int fallback = 0]) {
   return fallback;
 }
 
-double? asDouble(Object? value) {
-  if (value == null) return null;
-  if (value is num) return value.toDouble();
-  if (value is String) return double.tryParse(value.trim());
-  return null;
-}
-
 Map<String, dynamic>? asMap(Object? value) {
   if (value is Map<String, dynamic>) return value;
   if (value is Map) {

@@ -395,8 +395,6 @@ class ReaderPage {
   const ReaderPage(this.fragments);
 
   final List<ReaderFragment> fragments;
-
-  int get firstBlockIndex => fragments.first.block.index;
 }
 
 /// 一章的分页结果。

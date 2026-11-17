@@ -17,9 +17,6 @@ enum VideoDownloadQuality {
   final int maxHeight;
   final String label;
 
-  /// 内核按档选流时不传 max_height（0 = 最高档）。
-  int? get kernelMaxHeight => maxHeight > 0 ? maxHeight : null;
-
   static VideoDownloadQuality fromMaxHeight(int maxHeight) => values.firstWhere(
     (quality) => quality.maxHeight == maxHeight,
     orElse: () => VideoDownloadQuality.best,

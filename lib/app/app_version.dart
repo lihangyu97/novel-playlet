@@ -15,8 +15,6 @@ class AppVersion {
   final String name;
   final String build;
 
-  bool get isKnown => name.isNotEmpty;
-
   /// 「1.0.0 (15)」；构建号缺失时只显示版本名。
   String get label => build.isEmpty ? name : '$name ($build)';
 
