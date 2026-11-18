@@ -67,11 +67,12 @@ const _catalog = RankCatalog(
   tabs: [
     RankTab(name: '短剧榜', algo: 502),
     RankTab(name: '推荐榜', algo: 101),
+    RankTab(name: '漫剧榜', algo: 550),
   ],
 );
 
 void main() {
-  test('预热一次拉热搜与默认榜第一页，重复调用不重复请求', () async {
+  test('预热一次拉热搜与三个内容域首屏，重复调用不重复请求', () async {
     final transport = _PrefetchTransport();
     final container = ProviderContainer(
       overrides: [
@@ -90,7 +91,8 @@ void main() {
     );
     expect(
       transport.calls.where((path) => path == '/api/v1/rank/rank-1'),
-      hasLength(1),
+      hasLength(3),
+      reason: '小说 / 短剧 / 漫剧各预拉第一页',
     );
 
     final hot = container.read(hotSearchProvider);
@@ -108,6 +110,18 @@ void main() {
     expect(
       cache.isFresh(cached, now: cached.fetchedAt.add(RankBoardCache.ttl)),
       isFalse,
+    );
+    expect(
+      cache.read(
+        const RankBoardCacheKey(rankId: 'rank-1', algo: 502, genreTab: 4),
+      ),
+      isNotNull,
+    );
+    expect(
+      cache.read(
+        const RankBoardCacheKey(rankId: 'rank-1', algo: 550, genreTab: 5),
+      ),
+      isNotNull,
     );
   });
 
