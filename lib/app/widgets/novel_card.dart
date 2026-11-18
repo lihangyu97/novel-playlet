@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/novel_item.dart';
+import 'card_flight_route.dart';
 import 'media_card.dart';
 import 'novel_cover.dart';
 
@@ -25,7 +26,7 @@ class NovelGridCard extends StatelessWidget {
   });
 
   final NovelItem item;
-  final VoidCallback onTap;
+  final void Function(CardRectResolver cardRect) onTap;
   final double width;
 
   /// 封面 Hero tag；null = 不参与飞入动画（例如深链/无列表来源）。
@@ -83,7 +84,7 @@ class NovelGridCard extends StatelessWidget {
       // 封面占位色用上游主色（`color_dominate`），加载过程不闪灰块。
       coverPlaceholderColor: coverPlaceholderColorOf(item.colorDominate),
       // 评分从作者行拿出来，单独放封面右上角角标（白字 + 半透明底）。
-      cornerText: showRecommendMeta ? scoreLabel(item.score) : null,
+      score: showRecommendMeta ? item.score : null,
       width: width,
       onTap: onTap,
       heroTag: heroTag,

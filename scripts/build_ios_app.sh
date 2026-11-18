@@ -12,6 +12,7 @@
 #   ./scripts/build_ios_app.sh --flavor release   # 建议在 main 上跑
 #   ./scripts/build_ios_app.sh --flavor beta      # 开发分支的包
 #   ./scripts/build_ios_app.sh --flavor beta --skip-rust   # 内核静态库已构建过
+#   ./scripts/build_ios_app.sh --flavor beta --build-number 22  # 临时提高构建号（便于在设置页确认装的是哪一版）
 #   ./scripts/build_ios_app.sh --flavor release --out /tmp/ipa
 #
 # 产物：build/ios/ipa/novel_playlet_<flavor>_<git短哈希>_unsigned.ipa
@@ -23,6 +24,7 @@ APP_DIR="$(dirname "$SCRIPT_DIR")"
 OUT_DIR="$APP_DIR/build/ios/ipa"
 FLAVOR=""
 SKIP_RUST=0
+BUILD_NUMBER=""
 
 usage() { sed -n '2,22p' "$0"; }
 
@@ -30,6 +32,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --flavor)    FLAVOR="${2:-}"; shift 2 ;;
     --skip-rust) SKIP_RUST=1; shift ;;
+    --build-number) BUILD_NUMBER="${2:-}"; shift 2 ;;
     --out)       OUT_DIR="${2:-}"; shift 2 ;;
     -h|--help)   usage; exit 0 ;;
     *) echo "错误：未知参数：$1" >&2; exit 2 ;;
@@ -77,10 +80,16 @@ fi
 echo "==> flutter build ios --release --no-codesign（flavor=${FLAVOR}）"
 # macOS 自带 bash 3.2 在 `set -u` 下展开空数组会报 unbound variable，
 # 所以按 flavor 分两条命令，而不是拼 DART_ARGS 数组。
+# --build-number 只覆盖这次构建的 CFBundleVersion（脚本默认沿用 pubspec 里的），
+# 用来在设置页版本脚注上区分「手机上装的到底是哪一版」。
+NUMBER_ARGS=()
+if [[ -n "$BUILD_NUMBER" ]]; then
+  NUMBER_ARGS=(--build-number="$BUILD_NUMBER")
+fi
 if [[ -n "$PORT" ]]; then
-  ( cd "$APP_DIR" && flutter build ios --release --no-codesign --dart-define="BACKEND_PORT=$PORT" --dart-define=APP_FLAVOR=beta )
+  ( cd "$APP_DIR" && flutter build ios --release --no-codesign --dart-define="BACKEND_PORT=$PORT" --dart-define=APP_FLAVOR=beta "${NUMBER_ARGS[@]}" )
 else
-  ( cd "$APP_DIR" && flutter build ios --release --no-codesign )
+  ( cd "$APP_DIR" && flutter build ios --release --no-codesign "${NUMBER_ARGS[@]}" )
 fi
 
 APP="$APP_DIR/build/ios/iphoneos/Runner.app"

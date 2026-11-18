@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/widgets/card_flight_route.dart';
 import '../../../app/widgets/media_card.dart';
 import '../../../app/widgets/novel_cover.dart';
 import '../../../data/models/video_series.dart';
@@ -25,7 +26,7 @@ class VideoCard extends StatelessWidget {
 
   final VideoSeries item;
   final double width;
-  final VoidCallback onTap;
+  final void Function(CardRectResolver cardRect) onTap;
 
   /// 封面 Hero tag；null = 不参与飞入动画。
   final String? heroTag;
@@ -71,7 +72,7 @@ class VideoCard extends StatelessWidget {
       // 封面占位色用上游主色（`color_dominate`），加载过程不闪灰块。
       coverPlaceholderColor: coverPlaceholderColorOf(item.colorDominate),
       // 评分和小说一致：移到封面右上角角标，不占元信息行。
-      cornerText: showRecommendMeta ? scoreLabel(item.score) : null,
+      score: showRecommendMeta ? item.score : null,
       width: width,
       onTap: onTap,
       heroTag: heroTag,

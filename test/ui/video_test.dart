@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/widgets/card_flight_route.dart';
 import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
 import 'package:novel_playlet/app/widgets/detail_circle_button.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
@@ -24,46 +25,29 @@ void main() {
   });
 
   group('封面 Hero 飞入', () {
-    testWidgets('短剧列表点进详情：封面飞入并在返回时飞回', (tester) async {
+    testWidgets('短剧列表点进详情：两段式转场后进详情，返回回到列表', (tester) async {
       final fake = FakePreviewTransport()
         ..videoCoverUrl = 'https://example.com/drama-1.jpg';
       await pumpPreview(tester, const RecommendPage(), transport: fake);
       await tester.tap(find.text('短剧'));
       await tester.pumpAndSettle();
       final card = tester.widget<VideoCard>(find.byType(VideoCard).first);
-      final tag = card.heroTag!;
-      expect(tag, startsWith('cover-video-recommend-drama-'));
 
       await tester.tap(find.byType(VideoCard).first);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 80));
+      await tester.pump();
       expect(find.byType(VideoDetailPage), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('cover-hero-flight')),
-        findsOneWidget,
-        reason: '进详情时应在飞行',
-      );
-      final detailHero = tester.widget<Hero>(
-        find
-            .descendant(
-              of: find.byType(VideoDetailPage),
-              matching: find.byType(Hero),
-            )
-            .first,
-      );
-      expect(detailHero.tag, tag, reason: '短剧详情封面必须用同一个 tag 接住 Hero');
+      final route = ModalRoute.of(tester.element(find.byType(VideoDetailPage)));
+      expect(route, isA<CardFlightRoute<void>>());
 
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
       expect(find.byType(VideoDetailPage), findsOneWidget);
+      // 详情页标题以详情接口为准（假数据里和列表标题不同），这里只确认页面
+      // 自己的标题已经渲染出来。
+      expect(find.text('详情标题'), findsOneWidget);
+      expect(card.item.title, isNotEmpty);
 
       Navigator.of(tester.element(find.byType(VideoDetailPage))).pop();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 80));
-      expect(
-        find.byKey(const ValueKey('cover-hero-flight')),
-        findsOneWidget,
-        reason: '从短剧详情返回时应执行反向封面飞行',
-      );
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
       expect(find.byType(VideoDetailPage), findsNothing);
     });
@@ -88,9 +72,15 @@ void main() {
         settle: false,
       );
       await tester.pump(const Duration(milliseconds: 30));
-      // 背景/Hero 目标从第一帧就在；文字信息等接口回来再淡入，不再转圈。
-      expect(find.byType(Hero), findsOneWidget);
-      expect(find.text('测试短剧'), findsNothing, reason: '文字信息等数据回来再淡入');
+      // 封面 + 标题 + 副标题（全 N 集）三个共享元素从第一帧就在：标题/集数
+      // 列表里就有，先画出来给 Hero 当目标，接口回来后再补播放量等字段。
+      expect(find.byType(Hero), findsNWidgets(3));
+      expect(
+        find.text('测试短剧'),
+        findsOneWidget,
+        reason: '标题用列表 preview 立刻画出来，Hero 目标不能等接口',
+      );
+      expect(find.text('全 40 集'), findsOneWidget, reason: '集数同样来自 preview');
       expect(
         find.byType(CircularProgressIndicator),
         findsNothing,
@@ -138,8 +128,10 @@ void main() {
         const VideoDetailPage(seriesId: 'v1', preview: preview),
         transport: FakePreviewTransport(),
       );
-      expect(find.text('全 40 集 · 1.2 万 次播放'), findsOneWidget);
-      expect(find.text('全 40 集'), findsNothing, reason: '集数和播放量应在同一行');
+      // 副标题拆成「全 40 集」（可飞的前半段）+「 · 1.2 万 次播放」（接口
+      // 才有，跟在后面一起占同一行）。
+      expect(find.text('全 40 集'), findsOneWidget);
+      expect(find.text(' · 1.2 万 次播放'), findsOneWidget);
       expect(find.text('都市'), findsOneWidget, reason: '分类只作为简介标签出现一次');
       expect(
         find.textContaining('都市 ·'),

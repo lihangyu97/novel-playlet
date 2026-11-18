@@ -6,9 +6,10 @@ import '../feed/feed_staggered_grid.dart';
 import '../feed/feed_view.dart';
 import '../../app/router.dart';
 import '../../app/widgets/category_tab_bar.dart';
+import '../../app/widgets/card_flight_route.dart';
+import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/novel_card.dart';
-import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../../app/widgets/top_glow.dart';
 import '../video/widgets/video_card.dart';
@@ -242,18 +243,42 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
   /// 列表还在详情页下面，用户看不到这次跳动；等详情页完全进来再移，返回时
   /// 落点已经落在视口内。代价是去程 Hero 仍从原位起飞（可能经过底栏），
   /// 这是「转场后再移」这个时序本身的取舍。
-  void _openDetail(RecommendItem item, BuildContext cardContext) {
+  void _openDetail(
+    RecommendItem item,
+    BuildContext cardContext,
+    CardRectResolver cardRect,
+  ) {
     final heroTag = _coverHeroTag(item);
+    final columns = ref.read(recommendLayoutProvider).columns;
+    // 卡片快照要跟卡片长得一样：角标只在双列时上封面，元信息按内容域取。
     final route = switch (item) {
       NovelRecommendItem(:final novel) => DetailRoute(
         bookId: novel.id,
         preview: novel,
         heroTag: heroTag,
+        cardFlight: CardFlightData(
+          rect: cardRect,
+          cover: novel.cover,
+          title: novel.title,
+          meta: novel.author.isNotEmpty ? novel.author : novel.category,
+          score: novel.score,
+          badge: columns == 2 ? novel.recommendReason : '',
+          coverAspect: kNovelCoverAspect,
+        ),
       ),
       VideoRecommendItem(:final video) => VideoDetailRoute(
         seriesId: video.id,
         preview: video,
         heroTag: heroTag,
+        cardFlight: CardFlightData(
+          rect: cardRect,
+          cover: video.cover,
+          title: video.title,
+          meta: video.episodeCount > 0 ? '全 ${video.episodeCount} 集' : '',
+          score: video.score,
+          badge: columns == 2 ? video.recommendReason : '',
+          coverAspect: kVideoCoverAspect,
+        ),
       ),
     }.toRoute();
 
@@ -306,7 +331,8 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
             // 视口里的位置（见 [revealHeroSource]）。
             return Builder(
               builder: (cardContext) {
-                void onTap() => _openDetail(item, cardContext);
+                void onTap(CardRectResolver cardRect) =>
+                    _openDetail(item, cardContext, cardRect);
                 final heroTag = _coverHeroTag(item);
                 // 小说与短剧/漫剧的卡片元信息不同（作者 vs 集数），复用各自
                 // 现有卡片；推荐流统一是白底不定高卡片，封面按内容域原生比例。

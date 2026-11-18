@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/widgets/card_flight_route.dart';
 import 'package:novel_playlet/app/widgets/detail/detail_common.dart';
 import 'package:novel_playlet/app/widgets/chapter_directory_sheet.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
@@ -31,73 +32,29 @@ void main() {
   });
 
   group('封面 Hero 飞入', () {
-    testWidgets('小说列表点进详情：封面飞入并在返回时飞回', (tester) async {
+    testWidgets('小说列表点进详情：两段式转场后进详情，返回回到列表', (tester) async {
       final fake = FakePreviewTransport()
         ..bookCoverUrl = 'https://example.com/cover-1.jpg';
       await pumpPreview(tester, const RecommendPage(), transport: fake);
       final card = tester.widget<NovelGridCard>(
         find.byType(NovelGridCard).first,
       );
-      final tag = card.heroTag!;
 
       await tester.tap(find.byType(NovelGridCard).first);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 80));
+      await tester.pump();
       expect(find.byType(DetailPage), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('cover-hero-flight')),
-        findsOneWidget,
-        reason: '进详情时应在飞行',
-      );
-      final detailHero = tester.widget<Hero>(
-        find
-            .descendant(
-              of: find.byType(DetailPage),
-              matching: find.byType(Hero),
-            )
-            .first,
-      );
-      expect(detailHero.tag, tag, reason: '详情页封面必须用同一个 tag 接住 Hero');
+      final route = ModalRoute.of(tester.element(find.byType(DetailPage)));
+      expect(route, isA<CardFlightRoute<void>>(), reason: '进详情走两段式容器变换');
 
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
       expect(find.byType(DetailPage), findsOneWidget);
       expect(find.text(card.item.title), findsWidgets);
 
-      // 返回时 Hero 反向飞回列表卡片。
       Navigator.of(tester.element(find.byType(DetailPage))).pop();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 80));
-      expect(
-        find.byKey(const ValueKey('cover-hero-flight')),
-        findsOneWidget,
-        reason: '从详情返回时应执行反向封面飞行',
-      );
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
       expect(find.byType(DetailPage), findsNothing);
       expect(find.byType(NovelGridCard), findsWidgets);
-    });
-
-    testWidgets('返回落位时 shuttle 下两角是直角，不会被卡片接管时「圆变尖」', (tester) async {
-      final fake = FakePreviewTransport()
-        ..bookCoverUrl = 'https://example.com/cover-1.jpg';
-      await pumpPreview(tester, const RecommendPage(), transport: fake);
-      await tester.tap(find.byType(NovelGridCard).first);
-      await tester.pumpAndSettle(const Duration(milliseconds: 100));
-
-      // 返程飞到一半：shuttle 仍在，下两角必须已经是直角（卡片封面形状），
-      // 上两角保留卡片顶部圆角，Hero 结束时不会出现「下两角由圆变尖」。
-      Navigator.of(tester.element(find.byType(DetailPage))).pop();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 120));
-      final shuttle = tester.widget<ClipRRect>(
-        find.byKey(const ValueKey('cover-hero-flight')),
-      );
-      final radius = shuttle.borderRadius.resolve(TextDirection.ltr);
-      expect(radius.bottomLeft, Radius.zero);
-      expect(radius.bottomRight, Radius.zero);
-      expect(radius.topLeft.x, greaterThan(0), reason: '上两角要跟着列表卡片的顶部圆角收');
-      await tester.pumpAndSettle(const Duration(milliseconds: 100));
-      expect(find.byType(DetailPage), findsNothing);
     });
 
     testWidgets('小说详情-接口回来后不替换列表封面（不闪）', (tester) async {
@@ -123,35 +80,6 @@ void main() {
         reason: '详情接口回来不应把封面换成 detail.jpg（会让 Hero 落位后再加载一次）',
       );
       expect(find.byType(NovelCover), findsNothing, reason: '详情页不再单独画小封面');
-    });
-
-    testWidgets('封面 Hero 支持 iOS 手势返回（侧滑也能飞回去）', (tester) async {
-      final fake = FakePreviewTransport()
-        ..bookCoverUrl = 'https://example.com/cover-1.jpg';
-      await pumpPreview(tester, const RecommendPage(), transport: fake);
-      final listHeroes = tester.widgetList<Hero>(find.byType(Hero)).toList();
-      expect(listHeroes, isNotEmpty);
-      expect(
-        listHeroes.every((hero) => hero.transitionOnUserGestures),
-        isTrue,
-        reason: '列表封面 Hero 必须支持手势转场，否则 iOS 侧滑返回不飞',
-      );
-
-      final card = tester.widget<NovelGridCard>(
-        find.byType(NovelGridCard).first,
-      );
-      await tester.tap(find.byType(NovelGridCard).first);
-      await tester.pumpAndSettle(const Duration(milliseconds: 100));
-      final detailHero = tester.widget<Hero>(
-        find
-            .descendant(
-              of: find.byType(DetailPage),
-              matching: find.byType(Hero),
-            )
-            .first,
-      );
-      expect(detailHero.tag, card.heroTag);
-      expect(detailHero.transitionOnUserGestures, isTrue);
     });
 
     testWidgets('小说详情-加载中不转圈', (tester) async {
@@ -182,7 +110,11 @@ void main() {
       );
 
       // 作者 · 状态 · 字数 在同一行；分类不再出现（简介里已有标签）。
-      expect(find.text('烽火戏诸侯 · 连载中 · 132.8万字'), findsOneWidget);
+      //
+      // 副标题现在拆成两段：作者是卡片上就有的字段，单独作为共享元素飞入
+      // （见 HeroFieldTag.subtitle）；状态/字数只有详情接口才有，跟着页面出现。
+      expect(find.text('烽火戏诸侯'), findsOneWidget);
+      expect(find.text(' · 连载中 · 132.8万字'), findsOneWidget);
       expect(find.textContaining('玄幻 ·'), findsNothing);
 
       // 评分 / 在读 合并成一行：两者中线一致。
@@ -212,7 +144,7 @@ void main() {
       // 评分 / 在读 / 更新至与「作者 · 状态 · 字数」同一字号，信息区不出现
       // 两套正文字号。
       final subtitleSize = tester
-          .widget<Text>(find.text('烽火戏诸侯 · 连载中 · 132.8万字'))
+          .widget<Text>(find.text(' · 连载中 · 132.8万字'))
           .style!
           .fontSize;
       for (final value in ['9.3', '1.2万人在读', '更新至 第一千零二十四章 开天']) {
@@ -267,7 +199,7 @@ void main() {
       );
     });
 
-    testWidgets('详情页-封面同时作为顶部背景（顶部不透明到底部透明）', (tester) async {
+    testWidgets('详情页-封面作为顶部背景，渐隐只压底部一段', (tester) async {
       const preview = NovelItem(
         id: '1',
         title: '剑来',
@@ -278,10 +210,24 @@ void main() {
         const DetailPage(bookId: '1', preview: preview),
         transport: FakePreviewTransport(),
       );
-      final backdrop = find.byWidgetPredicate(
-        (widget) => widget is ShaderMask && widget.blendMode == BlendMode.dstIn,
+      final backdrop = find.byType(DetailCoverBackdrop);
+      expect(backdrop, findsOneWidget);
+      expect(
+        find.descendant(of: backdrop, matching: find.byType(ShaderMask)),
+        findsOneWidget,
+        reason: '底部要融进页面底色，否则封面下方是一道硬边',
       );
-      expect(backdrop, findsOneWidget, reason: '封面应作为背景并做透明度渐变');
+
+      // 上半截必须完全不透明（老写法从顶部就开始掉 alpha，整张封面发灰）。
+      final gradient = detailCoverFadeGradient();
+      final stops = gradient.stops!;
+      final colors = gradient.colors;
+      for (var i = 0; i < stops.length; i++) {
+        if (stops[i] <= 0.5) {
+          expect(colors[i].a, 1.0, reason: '顶部到 50% 高度这一段封面必须完全不透明');
+        }
+      }
+      expect(colors.last.a, 0, reason: '最底部要完全透明');
     });
   });
 

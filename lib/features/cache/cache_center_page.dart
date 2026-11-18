@@ -9,7 +9,9 @@ import '../../app/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/router.dart';
+import '../../app/widgets/card_flight_route.dart';
 import '../../app/widgets/cover_hero.dart';
+import '../../app/widgets/hero_flight.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/app_section_header.dart';
 import '../../app/widgets/states.dart';
@@ -231,7 +233,7 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
       padding: const EdgeInsets.fromLTRB(16, 5, 16, 5),
       child: _CacheTile(
         entry: entry,
-        onTap: () => _openDetail(entry),
+        onTap: (cardRect) => _openDetail(entry, cardRect),
         onPause: _pause,
         onContinue: () => _continue(entry),
         onRetry: () => _retry(entry),
@@ -279,7 +281,7 @@ class _CacheCenterPageState extends ConsumerState<CacheCenterPage> {
     return entries;
   }
 
-  void _openDetail(_CacheEntry entry) {
+  void _openDetail(_CacheEntry entry, CardRectResolver cardRect) {
     switch (entry.kind) {
       case OfflineTaskKind.novel:
         final heroTag = CoverHeroTag.novel('cache-center', entry.id);
@@ -649,7 +651,7 @@ class _CacheTile extends StatelessWidget {
   });
 
   final _CacheEntry entry;
-  final VoidCallback onTap;
+  final void Function(CardRectResolver cardRect) onTap;
   final VoidCallback onPause;
   final VoidCallback onContinue;
   final VoidCallback onRetry;
@@ -663,11 +665,12 @@ class _CacheTile extends StatelessWidget {
     final heroTag = entry.kind == OfflineTaskKind.novel
         ? CoverHeroTag.novel('cache-center', entry.id)
         : CoverHeroTag.video('cache-center', entry.id);
+    final cardRect = cardRectResolver(context);
     return Card(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
+        onTap: () => onTap(cardRect),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
           child: Row(
@@ -692,10 +695,10 @@ class _CacheTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      entry.title,
+                    HeroText(
+                      tag: HeroFieldTag.title(heroTag),
+                      text: entry.title,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: context.appWeight(FontWeight.w600),
                       ),

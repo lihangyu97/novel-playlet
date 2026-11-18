@@ -13,6 +13,7 @@ import '../features/sync/cloud_sync_data_page.dart';
 import '../features/sync/sync_log_page.dart';
 import '../features/video/video_detail_page.dart';
 import '../features/video/video_player_page.dart';
+import 'widgets/card_flight_route.dart';
 
 /// 类型化路由：路由对象自己携带强类型参数，并负责构造对应的 [Route]。
 ///
@@ -39,7 +40,12 @@ extension AppRouteContext on BuildContext {
 /// 小说详情页。[preview] 是列表里点进来的卡片，用来在详情接口返回前先把
 /// 封面/标题画出来，避免白屏。
 final class DetailRoute extends AppRoute<void> {
-  const DetailRoute({required this.bookId, this.preview, this.heroTag});
+  const DetailRoute({
+    required this.bookId,
+    this.preview,
+    this.heroTag,
+    this.cardFlight,
+  });
 
   final String bookId;
   final NovelItem? preview;
@@ -47,10 +53,21 @@ final class DetailRoute extends AppRoute<void> {
   /// 发起点击的列表封面 Hero tag；详情页用同一个 tag 接住飞入动画。
   final String? heroTag;
 
+  /// 卡片快照数据（两段式转场的起点）；null = 没有卡片形态（榜单行/缓存
+  /// 条目/深链），转场退化成淡入。
+  final CardFlightData? cardFlight;
+
   @override
-  Route<void> toRoute() => MaterialPageRoute<void>(
-    builder: (_) =>
-        DetailPage(bookId: bookId, preview: preview, heroTag: heroTag),
+  Route<void> toRoute() => CardFlightRoute<void>(
+    data: cardFlight,
+    pageBuilder: (_, targets) => DetailPage(
+      bookId: bookId,
+      preview: preview,
+      // 有卡片快照时不要页面的 Hero（会有两份封面/书名各自飞）；
+      // 没有快照的入口（榜单行/缓存条目）仍走原来的封面 Hero 飞入。
+      heroTag: cardFlight == null ? heroTag : null,
+      flight: targets,
+    ),
   );
 }
 
@@ -86,7 +103,12 @@ final class CloudSyncDataRoute extends AppRoute<void> {
 
 /// 短剧详情页。[preview] 同样用于接口返回前先画封面/标题。
 final class VideoDetailRoute extends AppRoute<void> {
-  const VideoDetailRoute({required this.seriesId, this.preview, this.heroTag});
+  const VideoDetailRoute({
+    required this.seriesId,
+    this.preview,
+    this.heroTag,
+    this.cardFlight,
+  });
 
   final String seriesId;
   final VideoSeries? preview;
@@ -94,10 +116,18 @@ final class VideoDetailRoute extends AppRoute<void> {
   /// 发起点击的列表封面 Hero tag；详情页用同一个 tag 接住飞入动画。
   final String? heroTag;
 
+  /// 卡片快照数据；语义同 [DetailRoute.cardFlight]。
+  final CardFlightData? cardFlight;
+
   @override
-  Route<void> toRoute() => MaterialPageRoute<void>(
-    builder: (_) =>
-        VideoDetailPage(seriesId: seriesId, preview: preview, heroTag: heroTag),
+  Route<void> toRoute() => CardFlightRoute<void>(
+    data: cardFlight,
+    pageBuilder: (_, targets) => VideoDetailPage(
+      seriesId: seriesId,
+      preview: preview,
+      heroTag: cardFlight == null ? heroTag : null,
+      flight: targets,
+    ),
   );
 }
 

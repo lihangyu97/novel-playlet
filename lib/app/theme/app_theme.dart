@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/card_flight_route.dart';
+
 /// 默认品牌主色：天蓝。用户没自定义主题色时用它。
 ///
 /// primary/secondary 由它派生（Material 3 seed）；[AppTheme.accent] 这类
@@ -245,6 +247,17 @@ class AppTheme {
                 : scheme.onSurfaceVariant,
           ),
         ),
+      ),
+      // 页面转场：iOS 仍是 Cupertino 滑入，但要能关掉「下层视差」——详情页
+      // 是从卡片长出来的，下面那页不能同时往左滑（见 [AppPageTransitionsBuilder]）。
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: <TargetPlatform, PageTransitionsBuilder>{
+          TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+          TargetPlatform.iOS: AppPageTransitionsBuilder(),
+          TargetPlatform.macOS: AppPageTransitionsBuilder(),
+          TargetPlatform.windows: ZoomPageTransitionsBuilder(),
+          TargetPlatform.linux: ZoomPageTransitionsBuilder(),
+        },
       ),
       cardTheme: CardThemeData(
         color: brightness == Brightness.light

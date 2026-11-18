@@ -10,15 +10,46 @@ import 'package:flutter/services.dart';
 import '../../../core/cache/app_image_cache.dart';
 import '../../theme/app_theme.dart';
 import '../cover_hero.dart';
+import '../hero_flight.dart';
 
 /// 详情页左右留白。卡片、目录行、底部操作栏共用，保证竖线对齐。
 const double detailGutter = 16;
 
+/// 详情页封面底部的渐隐曲线。
+///
+/// 老写法是「顶部不透明 → 底部全透明」的线性渐变，整张封面都在掉不透明度，
+/// 看起来像蒙了一层灰。这里改成：
+///
+/// - 上半截（0–50%）**完全不透明**，封面保持清晰；
+/// - 50% 之后用一条越到后面越快的曲线淡出，最后 3% 才完全透明。
+///
+/// 也就是"封面清晰、只在最底部融进页面底色"，既没有硬边，也不会把整张图
+/// 压暗。[progress] 给 Hero 飞行用：0 = 两端都还没渐变（起飞时封面必须是
+/// 实心的），1 = 落地后的最终形态。
+LinearGradient detailCoverFadeGradient({double progress = 1}) {
+  const stops = <double>[0, 0.5, 0.62, 0.73, 0.83, 0.91, 0.97, 1];
+  const alphas = <double>[1, 1, 0.97, 0.90, 0.78, 0.55, 0.28, 0];
+  return LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    stops: stops,
+    colors: [
+      for (final alpha in alphas)
+        Color.lerp(
+          Colors.white,
+          Colors.white.withValues(alpha: alpha),
+          progress,
+        )!,
+    ],
+  );
+}
+
 /// 详情页顶部封面背景。
 ///
-/// 用列表带进来的封面铺满顶部固定高度：自上而下做透明度渐变（顶部
-/// opacity 1、底部 0），图片经 Hero 从列表卡片飞进来后直接成为背景。
-/// 不做模糊：封面保持清晰，标题/简介等内容仍按自己的节奏淡入。
+/// 用列表带进来的封面铺满顶部固定高度：图片经 Hero 从列表卡片飞进来后
+/// 直接成为背景，只在**底部最后一段**做透明度渐隐（见
+/// [detailCoverFadeGradient]）——上半截完全不透明，所以封面不会被压灰；
+/// 底部平滑融进页面底色，不会出现一道硬边。
 /// 高度只由本组件决定，和下方标题/简介/选集的内容高度无关，所以详情接口
 /// 回来、内容变高时背景不会跟着动一下。
 class DetailCoverBackdrop extends StatelessWidget {
@@ -27,6 +58,8 @@ class DetailCoverBackdrop extends StatelessWidget {
     required this.cover,
     this.heroTag,
     this.height = 230,
+    this.flightKey,
+    this.opacity = 1,
   });
 
   final String cover;
@@ -36,6 +69,12 @@ class DetailCoverBackdrop extends StatelessWidget {
 
   /// 状态栏以下可见的背景高度。
   final double height;
+
+  /// 卡片式转场用：详情页自己这块封面的落地矩形由路由量出来，飞行期间用
+  /// [opacity] 隐身，等飞过来的封面落位后再显形。
+  final GlobalKey? flightKey;
+
+  final double opacity;
 
   @override
   Widget build(BuildContext context) {
@@ -66,34 +105,34 @@ class DetailCoverBackdrop extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       height: topInset + height,
-      child: ClipRect(
-        child: ShaderMask(
-          // dstIn：白色渐变只保留图片对应的不透明度。顶部全白 = 完全不透明，
-          // 底部全透明 = 完全露出页面底色。
-          shaderCallback: (bounds) => const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.white, Color(0x00FFFFFF)],
-          ).createShader(bounds),
-          blendMode: BlendMode.dstIn,
-          child: cover.isEmpty
-              ? fallback
-              : CoverHero(
-                  tag: heroTag,
-                  flightShuttleBuilder: _coverFlightShuttle,
-                  child: SizedBox.expand(
-                    child: CachedNetworkImage(
-                      imageUrl: cover,
-                      cacheManager: AppImageCache.manager,
-                      fit: BoxFit.cover,
-                      memCacheWidth: decodeWidth,
-                      // 磁盘也别存原图；1440 已覆盖 Pro Max 的 1.5 倍余量。
-                      maxWidthDiskCache: 1440,
-                      placeholder: (_, _) => fallback,
-                      errorWidget: (_, _, _) => fallback,
+      child: Opacity(
+        opacity: opacity,
+        child: ClipRect(
+          key: flightKey,
+          child: ShaderMask(
+            // dstIn：白色渐变只保留图片对应的不透明度。
+            shaderCallback: (bounds) =>
+                detailCoverFadeGradient().createShader(bounds),
+            blendMode: BlendMode.dstIn,
+            child: cover.isEmpty
+                ? fallback
+                : CoverHero(
+                    tag: heroTag,
+                    flightShuttleBuilder: _coverFlightShuttle,
+                    child: SizedBox.expand(
+                      child: CachedNetworkImage(
+                        imageUrl: cover,
+                        cacheManager: AppImageCache.manager,
+                        fit: BoxFit.cover,
+                        memCacheWidth: decodeWidth,
+                        // 磁盘也别存原图；1440 已覆盖 Pro Max 的 1.5 倍余量。
+                        maxWidthDiskCache: 1440,
+                        placeholder: (_, _) => fallback,
+                        errorWidget: (_, _, _) => fallback,
+                      ),
                     ),
                   ),
-                ),
+          ),
         ),
       ),
     );
@@ -120,8 +159,13 @@ Widget _coverFlightShuttle(
     builder: (context, _) {
       // push 时动画跑 0→1（卡片 → 背景），pop 时被弹出路由的动画本来就跑
       // 1→0（背景 → 卡片），所以两个方向都用 animation.value 当"背景化"
-      // 的进度即可；不要再按方向取反，否则返回时会先变清晰再变暗。
+      // 的进度即可。
       final progress = animation.value;
+      // 渐隐只在最后 30% 补上：飞行中封面保持实心，落地前那一下才把底部
+      // 的渐隐「接上」，中途不会看起来蒙了一层灰。
+      final fadeProgress = Curves.easeIn.transform(
+        ((progress - 0.7) / 0.3).clamp(0.0, 1.0),
+      );
       // 落位目标是列表卡片的封面：卡片是「上圆下方」——上面两角跟着白底卡
       // 的圆角，下面两角和文字区相接所以是直角。飞行中只圆上面两角、下面
       // 两角始终直角；四角一起圆会在 Hero 结束、卡片接管的那一帧出现
@@ -132,16 +176,9 @@ Widget _coverFlightShuttle(
         key: const ValueKey('cover-hero-flight'),
         borderRadius: BorderRadius.vertical(top: Radius.circular(cornerRadius)),
         child: ShaderMask(
-          // 透明渐变也随飞行进度渐入：起飞时整张图都在，落位时正好和背景
-          // 底部的全透明渐变对齐，不会在落地瞬间"啪"地切一下。
-          shaderCallback: (bounds) => LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.white,
-              Color.lerp(Colors.white, Colors.transparent, progress)!,
-            ],
-          ).createShader(bounds),
+          shaderCallback: (bounds) =>
+              detailCoverFadeGradient(progress: fadeProgress)
+                  .createShader(bounds),
           blendMode: BlendMode.dstIn,
           child: child,
         ),
@@ -152,20 +189,44 @@ Widget _coverFlightShuttle(
 
 /// 书名/作者/分类·字数/评分等文字区。
 ///
-/// 单独从背景里拆出来，是为了让它在详情接口就绪后再从下方淡入；背景和
-/// Hero 落位不依赖这段内容，接口回来时页面不会整体跳一下。
+/// 拆成独立组件是为了让「哪些字段跟卡片飞来」这件事只在一个地方声明：
+/// [heroTag] 是封面 Hero tag，书名/副标题/评分的 tag 都由它派生（见
+/// [HeroFieldTag]），列表侧不用额外传一堆 tag。
+///
+/// [subtitleLead] / [subtitleTail]：副标题拆成「可飞的一段」和「跟在后半段
+/// 的文字」。小说是「作者」+「 · 状态 · 字数」，短剧是「全 N 集」+「 · 播放
+/// 量」——前半段在卡片上原样存在，能精确接到飞行；后半段只有详情接口才
+/// 有，留在原地不参与飞行。
 class DetailTitleSection extends StatelessWidget {
   const DetailTitleSection({
     super.key,
     required this.title,
     this.subtitle = '',
+    this.subtitleLead = '',
+    this.subtitleTail = '',
+    this.heroTag,
+    this.titleKey,
+    this.subtitleLeadKey,
     this.extra,
   });
 
   final String title;
 
-  /// 副标题：小说是「作者 · 状态 · 字数」，短剧是「全 N 集 · 播放量」。
+  /// 副标题纯文本（没有 [subtitleLead] 时整体渲染）。
   final String subtitle;
+
+  /// 副标题里跟卡片一起飞入的前半段。
+  final String subtitleLead;
+
+  /// 接在 [subtitleLead] 后面的文字（不飞，跟着页面出现）。
+  final String subtitleTail;
+
+  /// 封面 Hero tag：书名/副标题/评分从这里派生共享元素 tag；null = 不飞。
+  final String? heroTag;
+
+  /// 卡片式转场用：书名/作者的落点由路由量出来（挂在 Text 上）。
+  final Key? titleKey;
+  final Key? subtitleLeadKey;
 
   /// 附加区域：小说放「评分 · 在读 · 更新至」，短剧可为空。
   final Widget? extra;
@@ -174,6 +235,52 @@ class DetailTitleSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final subtitleStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: scheme.onSurfaceVariant,
+    );
+    final titleTag = heroTag == null ? null : HeroFieldTag.title(heroTag!);
+    final subtitleTag = heroTag == null
+        ? null
+        : HeroFieldTag.subtitle(heroTag!);
+
+    // 前半段（可飞）与后半段同一行：两段同字号，居中即基线对齐；Hero 飞行
+    // 期间它是个占位 SizedBox，不能用 baseline 对齐（会拿不到基线）。
+    Widget? subtitleWidget;
+    if (subtitleLead.isNotEmpty) {
+      subtitleWidget = Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Flexible(
+            fit: FlexFit.loose,
+            child: HeroText(
+              key: subtitleLeadKey,
+              tag: subtitleTag,
+              text: subtitleLead,
+              maxLines: 1,
+              style: subtitleStyle,
+            ),
+          ),
+          if (subtitleTail.isNotEmpty)
+            Flexible(
+              fit: FlexFit.loose,
+              child: Text(
+                subtitleTail,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: subtitleStyle,
+              ),
+            ),
+        ],
+      );
+    } else if (subtitle.isNotEmpty) {
+      subtitleWidget = HeroText(
+        tag: subtitleTag,
+        text: subtitle,
+        maxLines: 1,
+        style: subtitleStyle,
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         detailGutter + 4,
@@ -184,25 +291,19 @@ class DetailTitleSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
+          HeroText(
+            key: titleKey,
+            tag: titleTag,
+            text: title,
             maxLines: 3,
-            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: context.appWeight(FontWeight.w700),
               height: 1.25,
             ),
           ),
-          if (subtitle.isNotEmpty) ...[
+          if (subtitleWidget != null) ...[
             const SizedBox(height: 8),
-            Text(
-              subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
+            subtitleWidget,
           ],
           if (extra != null) ...[const SizedBox(height: 8), extra!],
         ],

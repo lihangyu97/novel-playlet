@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/widgets/app_snack_bar.dart';
 import '../../app/router.dart';
+import '../../app/widgets/card_flight_route.dart';
 import '../../app/widgets/detail/detail_common.dart';
+import '../../app/widgets/hero_flight.dart';
 import '../../app/widgets/states.dart';
 import '../../core/storage/reading_store.dart';
 import '../../data/models/book_comment.dart';
@@ -41,6 +43,7 @@ class VideoDetailPage extends ConsumerWidget {
     this.preview,
     this.heroTag,
     this.embed = false,
+    this.flight,
   });
 
   final String seriesId;
@@ -48,6 +51,9 @@ class VideoDetailPage extends ConsumerWidget {
 
   /// 封面 Hero tag（列表点进来时由 [VideoDetailRoute] 带下来）；null = 不飞入。
   final String? heroTag;
+
+  /// 卡片式转场的落点（同小说详情）。
+  final DetailFlightTargets? flight;
 
   /// 弹层模式：在播放页里以底部弹层打开。底部只保留收藏 / 缓存，
   /// 不显示「播放 / 继续观看」主按钮。
@@ -171,31 +177,32 @@ class VideoDetailPage extends ConsumerWidget {
         ? detail.episodeCount
         : (episodes?.length ?? preview?.episodeCount ?? 0);
     // 「全 N 集」和播放量合并成一行；分类已经作为标签显示在下方简介卡里，
-    // 不再出现在这行，避免重复。
-    final subtitle = [
-      if (count > 0) '全 $count 集',
-      if (detail != null && detail.playCount > 0)
-        '${_formatCount(detail.playCount)} 次播放',
-    ].join(' · ');
+    // 不再出现在这行，避免重复。前半段「全 N 集」列表卡上就有，作为共享
+    // 元素飞进来；播放量只有详情接口才有，跟在后面不飞。
+    final playCount = detail != null && detail.playCount > 0
+        ? ' · ${_formatCount(detail.playCount)} 次播放'
+        : '';
+    final episodeLabel = count > 0 ? '全 $count 集' : '';
     final ready = detail != null && episodes != null;
 
     return CustomScrollView(
       slivers: [
         // 背景只跟封面走、固定高度：Hero 目标从第一帧就存在，封面飞进来后
         // 直接成为背景；接口回来内容变高也不会牵动背景。
-        SliverToBoxAdapter(
-          child: DetailCoverBackdrop(cover: cover, heroTag: heroTag),
-        ),
-        if (ready) ...[
+        SliverToBoxAdapter(child: _coverWithFlight(cover)),
+        // 头部从第一帧就画（列表 preview 里已有标题/集数），Hero 需要目标
+        // 从转场开始就存在；不再等选集接口回来。
+        if (title.isNotEmpty)
           SliverToBoxAdapter(
-            child: DetailFadeIn(
-              child: DetailTitleSection(
-                title: title,
-                subtitle: subtitle,
-                extra: _buildScoreRow(context, detail),
-              ),
+            child: _titleWithFlight(
+              context,
+              detail,
+              title: title,
+              episodeLabel: episodeLabel,
+              playCount: playCount,
             ),
           ),
+        if (ready) ...[
           SliverToBoxAdapter(
             child: DetailFadeIn(
               delay: const Duration(milliseconds: 60),
@@ -278,21 +285,67 @@ class VideoDetailPage extends ConsumerWidget {
 
   /// 评分行（与小说详情的「星标 + 分数」同款）；未评分返回 null 不占位。
   Widget? _buildScoreRow(BuildContext context, VideoDetail? detail) {
-    final raw = detail?.score.trim() ?? '';
+    // 评分列表卡上就有（封面角标），接口没回来时先用 preview 的分数。
+    final raw = detail != null && detail.score.trim().isNotEmpty
+        ? detail.score.trim()
+        : (preview?.score.trim() ?? '');
     if (raw.isEmpty || raw == '0' || raw == '0.0') return null;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Row(
-      children: [
-        Icon(Icons.star_rounded, size: 16, color: scheme.primary),
-        const SizedBox(width: 3),
-        Text(
-          '$raw分',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: context.appWeight(FontWeight.w600),
-          ),
-        ),
-      ],
+    return HeroScore.inline(
+      key: flight?.scoreKey,
+      tag: heroTag == null ? null : HeroFieldTag.score(heroTag!),
+      score: raw,
+      label: '$raw分',
+      starSize: 16,
+      starColor: scheme.primary,
+      style: theme.textTheme.bodyMedium?.copyWith(
+        fontWeight: context.appWeight(FontWeight.w600),
+      ),
+    );
+  }
+
+  /// 封面：飞行期间隐身，落点 key 交给路由量。
+  Widget _coverWithFlight(String cover) {
+    final flight = this.flight;
+    Widget build(double opacity) => DetailCoverBackdrop(
+      cover: cover,
+      heroTag: heroTag,
+      flightKey: flight?.coverKey,
+      opacity: opacity,
+    );
+    if (flight == null) return build(1);
+    return AnimatedBuilder(
+      animation: flight.progress,
+      builder: (_, _) => build(flight.ownedContentOpacity),
+    );
+  }
+
+  /// 标题区：同样是「站位 + 隐身」。
+  Widget _titleWithFlight(
+    BuildContext context,
+    VideoDetail? detail, {
+    required String title,
+    required String episodeLabel,
+    required String playCount,
+  }) {
+    final flight = this.flight;
+    Widget build(double opacity) => Opacity(
+      opacity: opacity,
+      child: DetailTitleSection(
+        title: title,
+        heroTag: heroTag,
+        titleKey: flight?.titleKey,
+        subtitleLead: episodeLabel,
+        subtitleLeadKey: flight?.subtitleKey,
+        subtitleTail: playCount,
+        extra: _buildScoreRow(context, detail),
+      ),
+    );
+    if (flight == null) return build(1);
+    return AnimatedBuilder(
+      animation: flight.progress,
+      builder: (_, _) => build(flight.ownedContentOpacity),
     );
   }
 

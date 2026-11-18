@@ -35,7 +35,7 @@ void main() {
         recommendReason: reason,
         rankScore: rank,
       ),
-      onTap: () {},
+      onTap: (_) {},
       showRecommendMeta: enabled,
       reasonOnCover: reasonOnCover,
     );
@@ -142,7 +142,7 @@ void main() {
   testWidgets('标题只有一行时也占两行高度：同排卡片元信息行对齐', (tester) async {
     NovelGridCard build(String id, String title) => NovelGridCard(
       item: NovelItem(id: id, title: title, author: '作者', score: '9.3'),
-      onTap: () {},
+      onTap: (_) {},
       width: 108,
       showRecommendMeta: true,
     );
@@ -189,7 +189,7 @@ void main() {
     }) {
       return NovelGridCard(
         item: NovelItem(id: id, title: title, author: author, score: '9.3'),
-        onTap: () {},
+        onTap: (_) {},
         width: 173,
         showRecommendMeta: true,
         surface: true,
@@ -288,7 +288,7 @@ void main() {
         title: '书名',
         meta: meta,
         width: 173,
-        onTap: () {},
+        onTap: (_) {},
         surface: true,
         naturalTitleHeight: true,
       );

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../app/widgets/card_flight_route.dart';
 import '../../app/widgets/states.dart';
 import '../../data/models/json_utils.dart' show isRetryableError;
 import '../../data/models/rank.dart';
@@ -323,8 +324,13 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
     }
   }
 
-  void _openEntry(RankEntry entry) {
-    openRankEntry(context, entry, source: 'rank-${widget.tab.algo}');
+  void _openEntry(RankEntry entry, CardRectResolver cardRect) {
+    openRankEntry(
+      context,
+      entry,
+      source: 'rank-${widget.tab.algo}',
+      cardSource: cardRect,
+    );
   }
 
   @override
@@ -350,7 +356,7 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
           return RankEntryRow(
             entry: entry,
             source: 'rank-${widget.tab.algo}',
-            onTap: () => _openEntry(entry),
+            onTap: (cardRect) => _openEntry(entry, cardRect),
           );
         }, childCount: state.items.length),
       ),

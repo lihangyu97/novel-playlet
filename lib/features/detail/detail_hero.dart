@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_theme.dart';
 
 import '../../app/widgets/detail/detail_common.dart';
+import '../../app/widgets/hero_flight.dart';
 import '../../data/models/book_detail.dart';
 import '../../data/models/novel_item.dart';
 
@@ -16,16 +17,27 @@ class DetailHeroBackdrop extends StatelessWidget {
     this.detail,
     this.preview,
     this.heroTag,
+    this.flightKey,
+    this.opacity = 1,
   });
 
   final BookDetail? detail;
   final NovelItem? preview;
   final String? heroTag;
 
+  /// 卡片式转场用：这块封面的落点 key + 飞行期间的隐身透明度。
+  final GlobalKey? flightKey;
+  final double opacity;
+
   @override
   Widget build(BuildContext context) {
     final cover = _firstNonEmpty([preview?.cover, detail?.cover]);
-    return DetailCoverBackdrop(cover: cover, heroTag: heroTag);
+    return DetailCoverBackdrop(
+      cover: cover,
+      heroTag: heroTag,
+      flightKey: flightKey,
+      opacity: opacity,
+    );
   }
 }
 
@@ -34,10 +46,26 @@ class DetailHeroBackdrop extends StatelessWidget {
 /// 接口就绪后才构建（外层包 [DetailFadeIn]），所以这里不再需要 preview 兜底
 /// 标题；preview 只在详情缺字段时补分类/字数。
 class DetailHeroInfo extends StatelessWidget {
-  const DetailHeroInfo({super.key, this.detail, this.preview});
+  const DetailHeroInfo({
+    super.key,
+    this.detail,
+    this.preview,
+    this.heroTag,
+    this.titleKey,
+    this.subtitleKey,
+    this.scoreKey,
+  });
 
   final BookDetail? detail;
   final NovelItem? preview;
+
+  /// 封面 Hero tag：书名/作者/评分从这里派生共享元素 tag；null = 不飞。
+  final String? heroTag;
+
+  /// 卡片式转场用：书名/作者/评分的落点 key（由路由量出来）。
+  final Key? titleKey;
+  final Key? subtitleKey;
+  final Key? scoreKey;
 
   @override
   Widget build(BuildContext context) {
@@ -52,11 +80,12 @@ class DetailHeroInfo extends StatelessWidget {
     final lastChapter = _firstNonEmpty([detail?.lastChapterTitle]);
 
     // 作者同一行带上状态/字数；分类去掉了（简介下面已经有标签，重复）。
-    final subtitle = [
-      if (author.isNotEmpty) author,
+    // 作者是卡片上就有的字段，单独作为可飞的「前半段」；状态/字数只有详情
+    // 接口才有，跟在后面不参与飞行。
+    final subtitleMeta = [
       if (detail != null && detail!.statusLabel.isNotEmpty) detail!.statusLabel,
       if (detail != null && detail!.wordLabel.isNotEmpty) detail!.wordLabel,
-    ].join(' · ');
+    ];
 
     // 评分 / 在读 同一行；「更新至 …」单独起一行：章节名往往很长，和评分/
     // 在读挤一行时会被 Flexible 提前截断，单独一行可以用满卡片宽度，只有真
@@ -71,11 +100,13 @@ class DetailHeroInfo extends StatelessWidget {
     }
 
     if (score.isNotEmpty) {
-      segments.add(Icon(Icons.star_rounded, size: 17, color: scheme.primary));
-      segments.add(const SizedBox(width: 3));
+      // 评分是卡片封面角标的共享元素：飞行中角标长大成「★ 分数」。
       segments.add(
-        Text(
-          score,
+        HeroScore.inline(
+          key: scoreKey,
+          tag: heroTag == null ? null : HeroFieldTag.score(heroTag!),
+          score: score,
+          starColor: scheme.primary,
           style: theme.textTheme.bodyMedium?.copyWith(
             fontWeight: context.appWeight(FontWeight.w600),
           ),
@@ -112,7 +143,13 @@ class DetailHeroInfo extends StatelessWidget {
 
     return DetailTitleSection(
       title: title,
-      subtitle: subtitle,
+      heroTag: heroTag,
+      titleKey: titleKey,
+      subtitleLeadKey: subtitleKey,
+      subtitleLead: author,
+      subtitleTail: subtitleMeta.isEmpty
+          ? ''
+          : ' · ${subtitleMeta.join(' · ')}',
       extra: extras.isEmpty
           ? null
           : Column(

@@ -5,6 +5,8 @@ import '../../app/providers.dart';
 import '../../app/router.dart';
 import '../../app/widgets/app_section_header.dart';
 import '../../app/widgets/app_snack_bar.dart';
+import '../../app/widgets/card_flight_route.dart';
+import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/states.dart';
 import '../../app/widgets/top_glow.dart';
@@ -223,7 +225,7 @@ class _MineCollectionSection extends ConsumerWidget {
       crossAxisCount: metrics.columns,
       itemWidth: metrics.itemWidth,
       spacing: MineGridMetrics.spacing,
-      onOpen: (item) => _openDetail(context, item),
+      onOpen: (item, cardRect) => _openDetail(context, item, cardRect),
       onLongPress: (item) => _manage(context, ref, item),
       heroTagOf: _heroTagOf,
     );
@@ -233,7 +235,11 @@ class _MineCollectionSection extends ConsumerWidget {
       ? CoverHeroTag.video('mine-collection', item.sourceId)
       : CoverHeroTag.novel('mine-collection', item.sourceId);
 
-  void _openDetail(BuildContext context, LibraryRecord item) {
+  void _openDetail(
+    BuildContext context,
+    LibraryRecord item, [
+    CardRectResolver? source,
+  ]) {
     final heroTag = _heroTagOf(item);
     if (item.type.isPlaylet) {
       context.pushAppRoute(
@@ -248,6 +254,19 @@ class _MineCollectionSection extends ConsumerWidget {
             colorDominate: item.colorDominate,
           ),
           heroTag: heroTag,
+          cardFlight: source == null
+              ? null
+              : CardFlightData(
+                  rect: source,
+                  cover: item.cover,
+                  title: item.title,
+                  meta: item.type.isPlaylet
+                      ? (item.episodeCount > 0
+                            ? '全 ${item.episodeCount} 集'
+                            : '')
+                      : item.author,
+                  coverAspect: kNovelCoverAspect,
+                ),
         ),
       );
       return;
@@ -263,6 +282,15 @@ class _MineCollectionSection extends ConsumerWidget {
           colorDominate: item.colorDominate,
         ),
         heroTag: heroTag,
+        cardFlight: source == null
+            ? null
+            : CardFlightData(
+                rect: source,
+                cover: item.cover,
+                title: item.title,
+                meta: item.author,
+                coverAspect: kNovelCoverAspect,
+              ),
       ),
     );
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/router.dart';
+import '../../app/widgets/card_flight_route.dart';
 import '../../app/widgets/cover_hero.dart';
 import '../../data/models/rank.dart';
 
@@ -9,7 +10,11 @@ import '../../data/models/rank.dart';
 /// 排行榜页与首页榜单预览卡点击行为的唯一来源：按 `book_data` / `video_data`
 /// 分派到小说或短剧详情，Hero tag 带上「来源榜」，同一页面里多个榜的同一本书
 /// 不会撞 tag。
-AppRoute<void> rankEntryRoute(RankEntry entry, String source) {
+AppRoute<void> rankEntryRoute(
+  RankEntry entry,
+  String source, {
+  CardRectResolver? cardSource,
+}) {
   return entry.isVideo
       ? VideoDetailRoute(
           seriesId: entry.id,
@@ -33,7 +38,8 @@ void openRankEntry(
   BuildContext context,
   RankEntry entry, {
   required String source,
+  CardRectResolver? cardSource,
 }) {
   if (entry.isEmpty) return;
-  context.pushAppRoute(rankEntryRoute(entry, source));
+  context.pushAppRoute(rankEntryRoute(entry, source, cardSource: cardSource));
 }

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/widgets/app_pill.dart';
+import '../../../app/widgets/card_flight_route.dart';
 import '../../../app/widgets/cover_hero.dart';
+import '../../../app/widgets/hero_flight.dart';
 import '../../../app/widgets/novel_cover.dart';
 import '../../../data/models/rank.dart';
 import '../rank_entry_route.dart';
@@ -24,7 +26,7 @@ class RankEntryRow extends StatelessWidget {
 
   /// 来源标识（进 Hero tag 与路由），如 `rank-101` / `rank-preview-novel`。
   final String source;
-  final VoidCallback onTap;
+  final void Function(CardRectResolver cardRect) onTap;
   final bool dense;
 
   @override
@@ -46,10 +48,15 @@ class RankEntryRow extends StatelessWidget {
         placeholderColor: coverPlaceholderColorOf(entry.colorDominate),
       ),
     );
+    // 评分也是共享元素：详情里是「★ 9.3」，这里只画数字，飞行中把星标长出来。
     final score = entry.scoreLabel.isEmpty
         ? null
-        : Text(
-            entry.scoreLabel,
+        : HeroScore.inline(
+            tag: HeroFieldTag.score(heroTag),
+            score: entry.score,
+            label: entry.scoreLabel,
+            starSize: 0,
+            starColor: scheme.primary,
             style: theme.textTheme.labelSmall?.copyWith(
               color: scheme.primary,
               fontSize: dense ? 12 : 12.5,
@@ -58,9 +65,10 @@ class RankEntryRow extends StatelessWidget {
             ),
           );
 
+    final cardRect = cardRectResolver(context);
     if (dense) {
       return InkWell(
-        onTap: onTap,
+        onTap: () => onTap(cardRect),
         borderRadius: BorderRadius.circular(6),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 5),
@@ -72,10 +80,10 @@ class RankEntryRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      entry.title,
+                    HeroText(
+                      tag: HeroFieldTag.title(heroTag),
+                      text: entry.title,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: scheme.onSurface,
                         fontSize: 14,
@@ -106,7 +114,7 @@ class RankEntryRow extends StatelessWidget {
 
     final top = entry.position <= 3;
     return InkWell(
-      onTap: onTap,
+      onTap: () => onTap(cardRect),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
@@ -140,10 +148,10 @@ class RankEntryRow extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
-                        child: Text(
-                          entry.title,
+                        child: HeroText(
+                          tag: HeroFieldTag.title(heroTag),
+                          text: entry.title,
                           maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: scheme.onSurface,
                             fontSize: 14.5,

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import 'card_flight_route.dart';
 import 'cover_hero.dart';
+import 'hero_flight.dart';
 import 'novel_cover.dart';
 import 'surface_card.dart';
 
@@ -32,7 +34,7 @@ class MediaCard extends StatelessWidget {
     this.coverBadge,
     this.coverOverlay,
     this.heroTag,
-    this.cornerText,
+    this.score,
     this.coverPlaceholderColor,
     this.coverAspect = kCoverAspect,
     this.surface = false,
@@ -42,7 +44,10 @@ class MediaCard extends StatelessWidget {
   final String cover;
   final String title;
   final double width;
-  final VoidCallback onTap;
+
+  /// 点击回调带上卡片矩形解析器：详情页要「从这张卡片长出来」，pop 时还要
+  /// 按卡片当时的位置缩回去（列表可能已经滚过/卡片已被回收）。
+  final void Function(CardRectResolver cardRect) onTap;
 
   /// 元信息文案；null = 不占这一行。
   ///
@@ -83,10 +88,12 @@ class MediaCard extends StatelessWidget {
   /// 封面还没加载出来时用它垫底，见 [NovelCover.placeholderColor]。
   final Color? coverPlaceholderColor;
 
-  /// 封面右上角角标文案（如评分「9.3分」）；null / 空串不显示。
+  /// 封面右上角评分（原始分数字符串，如「9.3」）；null / 空 / `0` 不显示。
   ///
   /// 白字 + 半透明深色底 + 轻阴影：封面颜色不可控，纯白字直接压图容易糊。
-  final String? cornerText;
+  /// 它同时是一个 Hero（[HeroFieldTag.score]）：进详情时从角标飞成行内
+  /// 「★ 9.3」，所以这里收原始分数而不是拼好的文案。
+  final String? score;
 
   /// 封面高 / 宽；默认 [kCoverAspect]。
   ///
@@ -121,11 +128,14 @@ class MediaCard extends StatelessWidget {
     final titleLineHeight =
         textScaler.scale(titleStyle?.fontSize ?? 14) * titleLineHeightFactor;
 
-    final coverWidget = CoverHero(
-      tag: heroTag,
-      child: Stack(
-        children: [
-          NovelCover(
+    final scoreText = scoreLabel(score ?? '');
+    // 角标画在 CoverHero 外面：Hero 不能嵌套（评分自己也是 Hero），而且
+    // 封面飞行时推荐理由角标应该留在原地，不该跟着图一起飞。
+    final coverWidget = Stack(
+      children: [
+        CoverHero(
+          tag: heroTag,
+          child: NovelCover(
             url: cover,
             width: width,
             height: coverHeight,
@@ -133,25 +143,33 @@ class MediaCard extends StatelessWidget {
             radius: surface ? 0 : kCoverRadius,
             placeholderColor: coverPlaceholderColor,
           ),
-          if (coverOverlay != null)
-            Positioned(top: 6, left: 6, child: coverOverlay!)
-          else if (coverBadge != null && coverBadge!.isNotEmpty)
-            Positioned(
-              top: 6,
-              left: 6,
-              // 给右侧评分角标留位置：两个角标不能叠在一起。
-              child: _CornerBadge(coverBadge!, maxWidth: width - 72),
+        ),
+        if (coverOverlay != null)
+          Positioned(top: 6, left: 6, child: coverOverlay!)
+        else if (coverBadge != null && coverBadge!.isNotEmpty)
+          Positioned(
+            top: 6,
+            left: 6,
+            // 给右侧评分角标留位置：两个角标不能叠在一起。
+            child: _CornerBadge(coverBadge!, maxWidth: width - 72),
+          ),
+        if (scoreText.isNotEmpty)
+          Positioned(
+            top: 6,
+            right: 6,
+            child: HeroScore.badge(
+              tag: heroTag == null ? null : HeroFieldTag.score(heroTag!),
+              score: score!.trim(),
+              style: _cornerScoreStyle(context),
             ),
-          if (cornerText != null && cornerText!.isNotEmpty)
-            Positioned(top: 6, right: 6, child: _CornerBadge(cornerText!)),
-        ],
-      ),
+          ),
+      ],
     );
 
-    final titleWidget = Text(
-      title,
+    final titleWidget = HeroText(
+      tag: heroTag == null ? null : HeroFieldTag.title(heroTag!),
+      text: title,
       maxLines: 2,
-      overflow: TextOverflow.ellipsis,
       style: titleStyle,
     );
 
@@ -163,10 +181,10 @@ class MediaCard extends StatelessWidget {
     final metaText = meta;
     final metaWidget = metaText == null || (surface && metaText.isEmpty)
         ? null
-        : Text(
-            metaText,
+        : HeroText(
+            tag: heroTag == null ? null : HeroFieldTag.subtitle(heroTag!),
+            text: metaText,
             maxLines: 1,
-            overflow: TextOverflow.ellipsis,
             style: metaStyle,
           );
 
@@ -244,16 +262,17 @@ class MediaCard extends StatelessWidget {
             children: [coverWidget, const SizedBox(height: 8), textBlock],
           );
 
+    final cardRect = cardRectResolver(context);
     if (!surface) {
       return InkWell(
-        onTap: onTap,
+        onTap: () => onTap(cardRect),
         borderRadius: BorderRadius.circular(AppTheme.cardRadius),
         child: SizedBox(width: width, child: content),
       );
     }
     return SizedBox(
       width: width,
-      child: AppSurfaceCard(onTap: onTap, child: content),
+      child: AppSurfaceCard(onTap: () => onTap(cardRect), child: content),
     );
   }
 }
@@ -265,6 +284,14 @@ String scoreLabel(String raw) {
   if (value.isEmpty || value == '0' || value == '0.0') return '';
   return '$value分';
 }
+
+/// 封面右上角评分角标的文字样式（与 [HeroScore.badge] 共用同一套数值）。
+TextStyle _cornerScoreStyle(BuildContext context) => TextStyle(
+  color: Colors.white,
+  fontSize: 11,
+  fontWeight: context.appWeight(FontWeight.w600),
+  height: 1.15,
+);
 
 /// 封面右上角角标：白字 + 半透明深色底 + 轻阴影。
 class _CornerBadge extends StatelessWidget {

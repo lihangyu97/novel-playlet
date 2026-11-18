@@ -169,6 +169,21 @@ Rust 内核注册了 50 个 fqapp/Legado 兼容路由，App 实际只用 7 个 e
 `chapter()` 首选 `/chapters/{id}/novel`，失败回退 `/chapters/{id}`；详情/目录不做持久缓存。
 详情最下方用一张卡片展示书籍 ID（左侧 ID、右侧复制图标）并支持一键复制：数据就绪后才渲染、随内容一起淡入（避免先出现再被简介/目录顶下去）。
 
+进详情的转场是**两段式卡片容器变换**，不是系统右滑（`lib/app/widgets/card_flight_route.dart`）：
+
+- `DetailRoute` / `VideoDetailRoute` 用 `CardFlightRoute`（自定义 `PageRoute`），时间切成两段、重叠 10%：
+  - **0–58%**：用卡片数据重画一张**卡片快照**（白底卡片 + 封面 + 标题 + 作者 + 评分角标 + 推荐理由角标），从列表卡片的矩形**等比放大**到屏宽 75%（水平居中、比例与布局都不变），详情页完全不可见。快照的部件位置是渲染后量出来的（`GlobalKey`），不是按卡片公式算的。
+  - **42–100%**：快照里被 `GlobalKey` 标出来的封面/标题/作者/评分从「放大后的位置」飞到详情页的对应位置，文字按飞行矩形宽度重排、字号线性插值；页面底色立刻不透明、内容跟着淡入；最后 15% 飞行元素淡出，由详情页自己那份接管（落位位置已经重合）。返回严格反向。
+- 详情页怎么把落点交出来：路由创建一个 `DetailFlightTargets`（带封面/标题/副标题/评分的 `GlobalKey` + 路由动画），随 pageBuilder 传给 `DetailPage` / `VideoDetailPage`；页面把 key 挂到对应 widget 上，并用 `ownedContentOpacity` 在飞行期间隐身（否则会出现「页面封面 + 飞的封面」两份）。
+- 没有卡片形态的入口（榜单行、缓存条目）没有快照，`data == null` 时退化成「淡入 + 封面 Hero」，页面自己的封面/标题不隐身。
+- 封面在飞行层里用固定解码尺寸（`_FlightCover`）：`NovelCover` 会按传入宽度算 `memCacheWidth`，飞行中尺寸每帧都在变，复用它等于每帧重新解码、真机上会闪。
+- 飞行层包在透明 `Material` 里：它不在任何 Scaffold 下，`Text` 没有 Material 祖先时 debug 会画黄色下划线。
+- iOS 的边缘侧滑返回自己实现（Cupertino 的手势是私有的）：左侧 20pt 起手，拖动直接驱动转场进度，松手按进度/速度决定 pop 还是回弹（`CardFlightRoute.endSwipeBack`，注意收尾要用 `animateBack`，`animateTo` 会把方向重置成 forward，路由永远 finalize 不掉）。
+- 下层列表不能同时做 iOS 的视差位移（否则卡片放大的同时列表往左滑）：`AppPageTransitionsBuilder` 在卡片转场进行时把下层的 `secondaryAnimation` 换成 `kAlwaysDismissedAnimation`，其它页面仍是 Cupertino 滑入。只注册到 iOS/macOS；Android 的默认转场不变。
+- 系统「减弱动态效果」时退化成一次淡入淡出，侧滑仍然可用。
+- 详情页头部仍然是**进入即用列表 preview 渲染**，接口回来再补状态/字数/播放量。
+- 构建：`scripts/build_ios_app.sh --flavor beta --build-number N` 可以临时提高构建号，装完在设置页版本脚注（`Beta 1.0.2 (N)`）确认手机上是哪一版。
+
 ### 4.2 打开阅读页（bootstrap）
 
 `readerSessionProvider` 在 `build()` 里 `unawaited(_bootstrap())`：

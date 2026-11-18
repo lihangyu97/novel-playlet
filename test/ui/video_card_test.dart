@@ -30,7 +30,7 @@ void main() {
         rankScore: rank,
       ),
       width: 108,
-      onTap: () {},
+      onTap: (_) {},
       showRecommendMeta: enabled,
       reasonOnCover: reasonOnCover,
     );

@@ -39,7 +39,7 @@ void main() {
             key: ValueKey(item.id),
             item: item,
             width: width,
-            onTap: () {},
+            onTap: (_) {},
             showRecommendMeta: true,
             surface: true,
             naturalTitleHeight: true,

@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/widgets/app_snack_bar.dart';
 import '../../app/router.dart';
+import '../../app/widgets/card_flight_route.dart';
 import '../../app/widgets/detail/detail_common.dart';
 import '../../app/widgets/states.dart';
+import '../../data/models/book_detail.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/novel_item.dart';
@@ -32,6 +34,7 @@ class DetailPage extends ConsumerStatefulWidget {
     this.preview,
     this.heroTag,
     this.embed = false,
+    this.flight,
   });
 
   final String bookId;
@@ -39,6 +42,10 @@ class DetailPage extends ConsumerStatefulWidget {
 
   /// 封面 Hero tag（列表点进来时由 [DetailRoute] 带下来）；null = 不飞入。
   final String? heroTag;
+
+  /// 卡片式转场的落点：页面自己的封面/书名/作者/评分在飞行期间隐身，
+  /// 由路由把它们的矩形量给飞行层，落地后再显形。
+  final DetailFlightTargets? flight;
 
   /// 弹层模式：由阅读页「详情」打开时使用。去掉系统栏适配与滚动顶栏渐变，
   /// 底部操作栏只保留收藏 / 缓存（阅读按钮在弹层里没有意义）。
@@ -110,20 +117,12 @@ class _DetailPageState extends ConsumerState<DetailPage> {
 
     final slivers = <Widget>[
       // 背景只跟封面走、固定高度：接口回来内容变高也不会牵动它。
-      SliverToBoxAdapter(
-        child: DetailHeroBackdrop(
-          detail: detail,
-          preview: preview,
-          heroTag: widget.heroTag,
-        ),
-      ),
+      SliverToBoxAdapter(child: _coverWithFlight(detail, preview)),
+      // 头部（书名/作者/评分）从第一帧就画：这些字段列表里就有，Hero 需要
+      // 目标从转场开始就存在；状态/字数/评分补充信息等接口回来后再补齐。
+      if (detail != null || preview != null)
+        SliverToBoxAdapter(child: _infoWithFlight(detail, preview)),
       if (bundle != null) ...[
-        // 内容就绪后从下方淡入，避免接口回来的瞬间文字凭空跳出。
-        SliverToBoxAdapter(
-          child: DetailFadeIn(
-            child: DetailHeroInfo(detail: detail, preview: preview),
-          ),
-        ),
         SliverToBoxAdapter(
           child: DetailFadeIn(
             delay: const Duration(milliseconds: 60),
@@ -300,6 +299,44 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                     ),
             )
           : null,
+    );
+  }
+
+  /// 封面：飞行期间隐身（透明度由路由动画给），并把落点 key 挂上去。
+  Widget _coverWithFlight(BookDetail? detail, NovelItem? preview) {
+    final flight = widget.flight;
+    Widget build(double opacity) => DetailHeroBackdrop(
+      detail: detail,
+      preview: preview,
+      heroTag: widget.heroTag,
+      flightKey: flight?.coverKey,
+      opacity: opacity,
+    );
+    if (flight == null) return build(1);
+    return AnimatedBuilder(
+      animation: flight.progress,
+      builder: (_, _) => build(flight.ownedContentOpacity),
+    );
+  }
+
+  /// 书名/作者/评分：同样是「站位 + 隐身」，位置由路由量。
+  Widget _infoWithFlight(BookDetail? detail, NovelItem? preview) {
+    final flight = widget.flight;
+    Widget build(double opacity) => Opacity(
+      opacity: opacity,
+      child: DetailHeroInfo(
+        detail: detail,
+        preview: preview,
+        heroTag: widget.heroTag,
+        titleKey: flight?.titleKey,
+        subtitleKey: flight?.subtitleKey,
+        scoreKey: flight?.scoreKey,
+      ),
+    );
+    if (flight == null) return build(1);
+    return AnimatedBuilder(
+      animation: flight.progress,
+      builder: (_, _) => build(flight.ownedContentOpacity),
     );
   }
 

@@ -8,10 +8,11 @@ import '../../app/router.dart';
 import '../../app/widgets/app_pill.dart';
 import '../../app/widgets/app_section_header.dart';
 import '../../app/widgets/compact_card_row.dart';
+import '../../app/widgets/card_flight_route.dart';
+import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/inline_error_row.dart';
 import '../../app/widgets/novel_card.dart';
-import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../../app/widgets/top_glow.dart';
 import '../../data/models/hot_search.dart';
@@ -618,7 +619,7 @@ class _CompactCard extends StatelessWidget {
   /// 页面与分类，否则两个路由里的 Hero 会撞 tag。
   String get _heroSource => 'search-${category.name}';
 
-  void _open(BuildContext context) {
+  void _open(BuildContext context, CardRectResolver cardRect) {
     switch (item) {
       case NovelRecommendItem(:final novel):
         context.pushAppRoute(
@@ -626,6 +627,14 @@ class _CompactCard extends StatelessWidget {
             bookId: novel.id,
             preview: novel,
             heroTag: CoverHeroTag.novel(_heroSource, novel.id),
+            cardFlight: CardFlightData(
+              rect: cardRect,
+              cover: novel.cover,
+              title: novel.title,
+              meta: novel.author.isNotEmpty ? novel.author : novel.category,
+              score: novel.score,
+              coverAspect: kNovelCoverAspect,
+            ),
           ),
         );
       case VideoRecommendItem(:final video):
@@ -634,6 +643,14 @@ class _CompactCard extends StatelessWidget {
             seriesId: video.id,
             preview: video,
             heroTag: CoverHeroTag.video(_heroSource, video.id),
+            cardFlight: CardFlightData(
+              rect: cardRect,
+              cover: video.cover,
+              title: video.title,
+              meta: video.episodeCount > 0 ? '全 ${video.episodeCount} 集' : '',
+              score: video.score,
+              coverAspect: kVideoCoverAspect,
+            ),
           ),
         );
     }
@@ -641,7 +658,7 @@ class _CompactCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    void onTap() => _open(context);
+    void onTap(CardRectResolver cardRect) => _open(context, cardRect);
     // 搜索结果里作者 / 集数固定一行，评分走封面右上角角标；理由/热度这类
     // 推荐字段搜索一般没有，有就按首页三列规则各占一行。
     final card = switch (item) {

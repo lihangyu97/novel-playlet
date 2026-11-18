@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/widgets/card_flight_route.dart';
 import '../../../app/widgets/media_card.dart';
 import '../../../app/widgets/novel_cover.dart';
 import '../../../app/widgets/states.dart';
@@ -29,7 +30,7 @@ class MineLibraryGrid extends StatelessWidget {
   final int crossAxisCount;
   final double itemWidth;
   final double spacing;
-  final ValueChanged<LibraryRecord> onOpen;
+  final void Function(LibraryRecord item, CardRectResolver cardRect) onOpen;
   final ValueChanged<LibraryRecord> onLongPress;
   final String Function(LibraryRecord item) heroTagOf;
 
@@ -54,7 +55,7 @@ class MineLibraryGrid extends StatelessWidget {
             : item.author,
         coverOverlay: LibraryTypeBadge(type: item.type),
         width: itemWidth,
-        onTap: () => onOpen(item),
+        onTap: (cardRect) => onOpen(item, cardRect),
         heroTag: heroTag,
         // 混排统一 3:4：短剧封面会被轻微裁切，换来同一行高度一致。
         coverAspect: kNovelCoverAspect,
