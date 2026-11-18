@@ -45,13 +45,27 @@ class ThemeSeedController extends Notifier<Color> {
   static const seedKey = 'app_seed_color_v1';
 
   bool _userChanged = false;
+  Future<void>? _restoreFuture;
+
+  /// 本地恢复完成（或无需恢复）的 Future；设置同步启动前要等它。
+  Future<void> get restoreFuture {
+    if (initialSeed != null) return Future<void>.value();
+    return _restoreFuture ??= _restore();
+  }
 
   @override
   Color build() {
     final initial = initialSeed;
     if (initial != null) return initial;
-    _restore();
+    _restoreFuture = _restore();
     return appSeedColor;
+  }
+
+  /// 应用云端设置：直接改状态并落盘，不经过“用户改过就跳过”的恢复守卫。
+  Future<void> applyRemote(Color color) async {
+    _userChanged = true;
+    if (color != state) state = color;
+    await _persist(color);
   }
 
   void setSeed(Color color) {
@@ -105,11 +119,20 @@ class CustomThemeSeedController extends Notifier<Color> {
   static const fallback = Color(0xFF7E57C2);
 
   bool _userChanged = false;
+  Future<void>? _restoreFuture;
+
+  Future<void> get restoreFuture => _restoreFuture ??= _restore();
 
   @override
   Color build() {
-    _restore();
+    _restoreFuture = _restore();
     return fallback;
+  }
+
+  Future<void> applyRemote(Color color) async {
+    _userChanged = true;
+    if (color != state) state = color;
+    await _persist(color);
   }
 
   /// 只在取色弹层点「确定」时调用，记录用户挑的颜色。
@@ -165,13 +188,25 @@ class ThemeModeController extends Notifier<ThemeMode> {
   static const modeKey = 'app_theme_mode_v1';
 
   bool _userChanged = false;
+  Future<void>? _restoreFuture;
+
+  Future<void> get restoreFuture {
+    if (initialMode != null) return Future<void>.value();
+    return _restoreFuture ??= _restore();
+  }
 
   @override
   ThemeMode build() {
     final initial = initialMode;
     if (initial != null) return initial;
-    _restore();
+    _restoreFuture = _restore();
     return ThemeMode.system;
+  }
+
+  Future<void> applyRemote(ThemeMode mode) async {
+    _userChanged = true;
+    if (mode != state) state = mode;
+    await _persist(mode);
   }
 
   void setMode(ThemeMode mode) {

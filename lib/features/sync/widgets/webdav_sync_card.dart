@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/router.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/widgets/app_snack_bar.dart';
+import '../settings_sync_coordinator.dart';
 import '../sync_log.dart';
 import '../sync_meta.dart';
 import '../sync_status.dart';
@@ -28,10 +29,12 @@ class WebDavSyncCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final configAsync = ref.watch(webDavConfigProvider);
     final status = ref.watch(syncStatusProvider);
+    final settingsStatus = ref.watch(settingsSyncStatusProvider);
     final metaAsync = ref.watch(syncMetaProvider);
     final config = configAsync.value;
     final lastSync = status.lastSyncAt ?? metaAsync.value?.lastSyncAt;
     final configured = config != null;
+    final syncing = status.isSyncing || settingsStatus.isSyncing;
 
     return Padding(
       key: webDavSyncCardKey,
@@ -65,10 +68,10 @@ class WebDavSyncCard extends ConsumerWidget {
                   IconButton(
                     key: webDavSyncNowKey,
                     tooltip: '立即同步',
-                    onPressed: !configured || status.isSyncing
+                    onPressed: !configured || syncing
                         ? null
                         : () => _syncNow(context, ref),
-                    icon: status.isSyncing
+                    icon: syncing
                         ? const SizedBox(
                             width: 16,
                             height: 16,
@@ -120,21 +123,40 @@ class WebDavSyncCard extends ConsumerWidget {
     final saved = await showWebDavConfigSheet(context);
     if (!context.mounted || saved != true) return;
     ref.invalidate(webDavConfigProvider);
-    // 保存成功后立即试同步一次；失败只更新状态，不打扰用户。
-    await ref
-        .read(syncStatusProvider.notifier)
-        .syncNow(trigger: SyncTrigger.config);
+    // 保存成功后立即试同步一次（书架 + 设置）；失败只更新状态，不打扰用户。
+    await _syncAll(ref, SyncTrigger.config);
+    if (!context.mounted) return;
+    final status = ref.read(syncStatusProvider);
+    final settingsStatus = ref.read(settingsSyncStatusProvider);
+    if (status.phase == SyncPhase.error) {
+      showAppSnackBar(context, status.message);
+    } else if (settingsStatus.phase == SettingsSyncPhase.error) {
+      showAppSnackBar(context, '设置同步失败：${settingsStatus.message}');
+    }
   }
 
   Future<void> _syncNow(BuildContext context, WidgetRef ref) async {
-    final result = await ref.read(syncStatusProvider.notifier).syncNow();
+    await _syncAll(ref, SyncTrigger.manual);
     if (!context.mounted) return;
     final status = ref.read(syncStatusProvider);
+    final settingsStatus = ref.read(settingsSyncStatusProvider);
     if (status.phase == SyncPhase.error) {
       showAppSnackBar(context, status.message);
-    } else if (result != null) {
-      showAppSnackBar(context, status.message);
+    } else if (settingsStatus.phase == SettingsSyncPhase.error) {
+      showAppSnackBar(context, '设置同步失败：${settingsStatus.message}');
+    } else if (status.lastSyncAt != null || settingsStatus.lastSyncAt != null) {
+      final message = status.message.isNotEmpty
+          ? status.message
+          : settingsStatus.message;
+      if (message.isNotEmpty) showAppSnackBar(context, message);
     }
+  }
+
+  Future<void> _syncAll(WidgetRef ref, SyncTrigger trigger) async {
+    await Future.wait([
+      ref.read(syncStatusProvider.notifier).syncNow(trigger: trigger),
+      ref.read(settingsSyncStatusProvider.notifier).syncNow(trigger: trigger),
+    ]);
   }
 }
 

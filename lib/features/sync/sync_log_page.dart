@@ -52,7 +52,7 @@ class SyncLogPage extends ConsumerWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                 child: Text(
-                  '最近 50 次同步的结果与双向明细',
+                  '最近 50 次书架与设置的同步结果',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -175,13 +175,30 @@ class _RunTileState extends State<_RunTile> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'r${run.revBefore} → r${run.revAfter}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                  if (run.scope == SyncScope.library)
+                    Text(
+                      'r${run.revBefore} → r${run.revAfter}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: scheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '设置',
+                        style: Theme.of(context).textTheme.labelSmall
+                            ?.copyWith(color: scheme.onSecondaryContainer),
+                      ),
                     ),
-                  ),
                   const SizedBox(width: 10),
                   SizedBox(
                     width: 44,
@@ -251,6 +268,7 @@ class _RunTileState extends State<_RunTile> {
         SyncTrigger.manual => '手动',
         SyncTrigger.lifecycle => '前后台',
         SyncTrigger.config => '保存配置',
+        SyncTrigger.settings => '设置变更',
       }}',
       if (run.remoteUpdatedAt > 0)
         '云端：${logTimeLabel(DateTime.fromMillisecondsSinceEpoch(run.remoteUpdatedAt))} 生成',
@@ -367,6 +385,17 @@ String _fieldLabel(String field) => switch (field) {
 };
 
 String _summary(SyncLogRun run) {
+  if (run.scope == SyncScope.settings) {
+    if (run.outcome == SyncOutcome.failed) {
+      return '设置同步失败（${syncPhaseFailureLabel(run.phase)}）';
+    }
+    if (run.outcome == SyncOutcome.skipped) {
+      return run.phase == 'deferred' ? '设置稍后应用' : '设置无变化';
+    }
+    if (run.uploaded) return '设置已上传';
+    if (run.pulledTotal > 0) return '设置已拉取';
+    return '设置已同步';
+  }
   if (run.outcome == SyncOutcome.failed) {
     return syncPhaseFailureLabel(run.phase);
   }

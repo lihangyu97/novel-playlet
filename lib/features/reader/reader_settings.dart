@@ -195,6 +195,16 @@ class ReaderSettingsController extends Notifier<ReaderSettings> {
     return const ReaderSettings();
   }
 
+  /// 应用云端排版：等本地恢复完成，再整体替换并落盘。
+  ///
+  /// 不用 `_restore()` 的“用户改过就跳过”逻辑：远端赢的时候就是要覆盖。
+  Future<void> applyRemote(ReaderSettings settings) async {
+    await restoreFuture;
+    _userChanged = true;
+    if (settings != state) state = settings;
+    await _persist();
+  }
+
   void setFontSize(double value) {
     final next = value.clamp(minFontSize, maxFontSize).toDouble();
     if (next == state.fontSize) return;

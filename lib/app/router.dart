@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/models/chapter.dart';
 import '../data/models/novel_item.dart';
 import '../data/models/video_series.dart';
+import 'immersive_page.dart';
 import '../features/cache/cache_center_page.dart';
 import '../features/detail/detail_page.dart';
 import '../features/logs/app_log_page.dart';
@@ -11,6 +12,7 @@ import '../features/reader/reader_page.dart';
 import '../features/search/search_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/sync/cloud_sync_data_page.dart';
+import '../features/sync/widgets/settings_sync_flush.dart';
 import '../features/sync/sync_log_page.dart';
 import '../features/video/video_detail_page.dart';
 import '../features/video/video_player_page.dart';
@@ -142,8 +144,9 @@ final class ReaderRoute extends AppRoute<void> {
   final ReaderArgs args;
 
   @override
-  Route<void> toRoute() =>
-      MaterialPageRoute<void>(builder: (_) => ReaderPage(args: args));
+  Route<void> toRoute() => MaterialPageRoute<void>(
+    builder: (_) => ImmersivePageTracker(child: ReaderPage(args: args)),
+  );
 }
 
 /// 播放页入参：整份选集 + 起播下标。
@@ -176,8 +179,9 @@ final class VideoPlayRoute extends AppRoute<void> {
   final VideoPlayArgs args;
 
   @override
-  Route<void> toRoute() =>
-      MaterialPageRoute<void>(builder: (_) => VideoPlayerPage(args: args));
+  Route<void> toRoute() => MaterialPageRoute<void>(
+    builder: (_) => ImmersivePageTracker(child: VideoPlayerPage(args: args)),
+  );
 }
 
 /// 设置页路由：无参数。
@@ -185,8 +189,11 @@ final class SettingsRoute extends AppRoute<void> {
   const SettingsRoute();
 
   @override
-  Route<void> toRoute() =>
-      MaterialPageRoute<void>(builder: (_) => const SettingsPage());
+  Route<void> toRoute() => MaterialPageRoute<void>(
+    builder: (_) => const ImmersivePageTracker(
+      child: SettingsSyncFlush(child: SettingsPage()),
+    ),
+  );
 }
 
 /// 排行榜页路由。[initialAlgo] 是首页榜单卡片带过去的榜；null = 默认第一档。

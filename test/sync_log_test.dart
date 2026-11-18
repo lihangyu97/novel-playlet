@@ -158,6 +158,21 @@ void main() {
       expect(await store.read(), isEmpty);
     });
 
+    test('JSON 往返保留 scope=settings 与设置变更触发', () async {
+      const run = SyncLogRun(
+        at: 10,
+        durationMs: 20,
+        outcome: SyncOutcome.success,
+        trigger: SyncTrigger.settings,
+        scope: SyncScope.settings,
+        uploaded: true,
+      );
+      final decoded = SyncLogRun.tryFromJson(run.toJson())!;
+      expect(decoded.scope, SyncScope.settings);
+      expect(decoded.trigger, SyncTrigger.settings);
+      expect(decoded.uploaded, isTrue);
+    });
+
     test('JSON 往返保留失败阶段与明细', () async {
       const run = SyncLogRun(
         at: 10,

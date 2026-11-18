@@ -87,15 +87,20 @@
 仍必须保留的复杂度只有两处：`shelf_at` / `shelf_removed_at` 这对时间戳（布尔状态同步必须能表达"删除"），
 以及合并函数的收敛性（"本地优先"这类规则会让两台设备永久抖动）。
 
-## 设置项云同步（设计 2026-11-18）
+## 设置项云同步（已实现 2026-11-18）
 
-**结论**：设置走**独立** `novel-playlet/<profile>/settings.json`，不用给 `sync.json` 加字段，
-也不做 `ConfigProvider` 重构。设计见 [docs/settings-sync-design.md](docs/settings-sync-design.md)。
+**结论**：设置走**独立** `novel-playlet/<profile>/settings.json`，不给 `sync.json` 加字段，
+也不做单一 `AppConfig` / `ConfigProvider` 重构；用 `SettingsSection` 注册表 + 领域 provider。
+设计见 [docs/settings-sync-design.md](docs/settings-sync-design.md)，实现见 §11.8。
 
 - 为什么不合并进 `sync.json`：合并是「按类型模型重建 `data`」，旧客户端（`schemaVersion = 3`）
   同步一次就会把 `settings` 静默删掉；bump 到 4 又会让旧客户端整条同步停摆。独立文件两边都不碰。
-- 触发：`resumed` / 冷启动拉取，去抖 1.5–2s + `paused` + 离开设置页推送（脏才推）。
+- 触发：`resumed` / 冷启动拉取，1.6s 去抖 + `paused` + 离开设置页推送（脏才推）；
+  手动「立即同步」与保存 WebDAV 配置并行跑书架 + 设置。
 - 边界：阅读页 / 播放页 / 设置页在栈顶时不回填（避免重排、改播放速度、开关跳动），
   且不推进 `lastRemoteUpdatedAt`，下次自动重试。
 - 白名单：主题 / 字重 / 推荐布局 / 阅读排版同步；倍速与下载清晰度保持本机。
-- 工作量：约 0.8–1.2 人日；状态 ⬜ 待实现。
+- 一致性：整包 LWW（本地 `settings_local_updated_at_v1` vs 云端 `updatedAt`），
+  推送带 `If-Match`，412 重读重判；未知 `v` 停止同步，不降级覆盖。
+- 记录：设置同步也进「同步记录」（`scope = settings`），无变化不记，避免刷屏。
+- 状态：✅ 已实现；测试见 `test/settings_sync_test.dart`。

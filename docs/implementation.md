@@ -956,10 +956,12 @@ flutter drive --profile -d <iPhone UDID> \
   无条件 GET + 内容比对，只保证不会白写 PUT，省不掉下载。
 - **并发保护**：`PUT` 带 `If-Match: <etag>`；被另一台设备抢先写入（412/409）时重读 → 重合并
   → 重写，最多重试一次。写完再取一次 ETag 存回 `SyncMeta`。
-- **同步时机**：App 回前台/退后台自动同步一次；设置页可手动「立即同步」；保存配置后也会同步。
+- **同步时机**：App 回前台/退后台自动同步一次；设置页「立即同步」和保存配置会**并行**
+  跑书架 + 设置两个文件；设置改动另有 1.6s 去抖与离开设置页 flush。
   阅读进度本身 5s 防抖落盘（切后台会在 `inactive` 先落盘，早于这里的 `paused` 同步）。
 - **同步日志**：`<AppSupport>/sync-log.json` 保留最近 50 次，记录触发方式、结果、失败阶段、
-  revision 变化、双向字段 diff（每向最多 20 条明细）。它是本机诊断数据，不进 `library.db`、
+  revision 变化、双向字段 diff（每向最多 20 条明细）。`scope` 区分书架（`library`）与设置
+  （`settings`）；设置无变化不记，避免刷屏。它是本机诊断数据，不进 `library.db`、
   不进同步载荷；写入 best-effort，日志失败不影响同步。
 - **错误**：云端 JSON 损坏或渠道不匹配时停止同步并报错，绝不用空数据覆盖；401/403、409、
   507 分别提示账号、上级目录、网盘配额问题。
@@ -988,3 +990,27 @@ flutter drive --profile -d <iPhone UDID> \
   覆盖 HTTP 失败、内核超时、非 JSON/非对象响应、URL 查询串脱敏；`diagnostic_error_handlers_test.dart`
   覆盖 silent 过滤与异步错误透传；
   `test/ui/app_log_page_test.dart` 覆盖列表/展开/空态与设置页入口。
+
+### 11.8 设置项云同步（settings.json，2026-11-18）
+
+- **入口/触发**：不新增手动按钮。冷启动 / `resumed` 拉取，设置改动 1.6s 去抖后推送，
+  `paused` 与离开设置页 flush；「立即同步」同时跑书架与设置，保存 WebDAV 配置后也两者一起跑。
+- **文件**：`novel-playlet/<release|beta|dev>/settings.json`，与 `sync.json` 完全独立；
+  外层 `{v: 1, deviceId, updatedAt, settings}`。`v` 只认 1，更高版本直接停止同步、不降级覆盖。
+- **内容**：主题（seed / mode / customSeed）、全局字重、推荐布局、阅读排版 10 项；
+  **不同步**播放倍速与下载清晰度（设备相关）。枚举存 name（`system` / `two` / `parchment`），
+  不存下标；脏值按字号 15–30、行距 1.3–2.0、字重整百档、纸色/样式白名单 clamp 或回落默认。
+- **LWW**：本地 `settings_local_updated_at_v1` 记录最后一次变更时间；与云端 `updatedAt`
+  比较，本地更新推本地，否则远端赢（时间相同远端赢）。apply 时用 `_applyingRemote` 屏蔽
+  脏标记，绝不 ping-pong；推送带 `If-Match`，412 重读后按同一规则重判，最多重试一次。
+- **防脏写**：apply 被沉浸页挡住时只更新 etag / remoteHash，不推进 `lastRemoteUpdatedAt`，
+  下次 resumed 自动重试；不写 `updatedAt` 相同但 hash 不同的“假最新”。
+- **挡板**：`ImmersivePageTracker` 在阅读页 / 播放页 / 设置页压栈时计数，`idle == 0` 才 apply；
+  详情 / 搜索 / 缓存中心允许回填。
+- **注册表**：`SettingsSection` 把主题、全局字重、推荐布局、阅读排版拆成 4 组；每组只实现
+  `capture()` / `applyRemote()`，新增设置优先加字段而不是加一套同步代码。同步服务与 coordinator
+  都不认识具体 provider，方便单测。
+- **同步记录**：成功推送/拉取写一条 `scope = settings` 的记录；失败写失败阶段；无变化与
+  沉浸页 deferred 不写。列表行用「设置」标记区分书架记录。
+- **测试**：`settings_sync_test.dart` 覆盖推送/拉取/LWW/412/未知 v/沉浸页/脏值 clamp/coordinator；
+  `sync_log_test.dart` 与 `test/ui/sync_log_test.dart` 覆盖 scope 字段与设置行展示。
