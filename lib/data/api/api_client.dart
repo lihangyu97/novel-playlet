@@ -39,6 +39,7 @@ class ApiClient {
   Future<FeedPage<NovelItem>> recommend({
     int offset = 0,
     String? sessionId,
+    void Function(Map<String, dynamic> payload)? onPayload,
   }) async {
     final query = <String, String>{
       'tab_type': '2',
@@ -47,6 +48,8 @@ class ApiClient {
       if (sessionId != null && sessionId.isNotEmpty) 'session_id': sessionId,
     };
     final payload = await _getJson('/api/v1/recommend/homepage', query);
+    // 排行榜目录藏在同一份首页 payload 里，顺手交给调用方缓存，避免再次请求。
+    onPayload?.call(payload);
     final data = unwrapEnvelope(payload);
     // 游标与 session 挂在"被回答的那个 tab_item"上（data.tab_item[]），
     // tab 的身份由 data.tab_index 指定；data 顶层没有这两个字段。

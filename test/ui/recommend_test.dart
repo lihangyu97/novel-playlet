@@ -322,8 +322,16 @@ void main() {
   testWidgets('推荐页-搜索页返回不重拉推荐流且搜索词已清空', (tester) async {
     final fake = FakePreviewTransport();
     await pumpPreview(tester, const RecommendPage(), transport: fake);
+    // 先把首屏后的预热跑完，再开始计「搜索/返回是否重拉」。
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+    // 只看小说流；短剧/漫剧首屏是首页预热，不属于「搜索返回重拉推荐流」。
     int feedCalls() => fake.calls
-        .where((call) => call.startsWith('/api/v1/recommend/homepage'))
+        .where(
+          (call) =>
+              call.startsWith('/api/v1/recommend/homepage') &&
+              call.contains('tab_type=2'),
+        )
         .length;
     final before = feedCalls();
 

@@ -18,6 +18,7 @@ abstract interface class ContentSource {
     ApiClient api, {
     int offset = 0,
     String? sessionId,
+    void Function(Map<String, dynamic> payload)? onPayload,
   });
 
   /// 搜索的一页。搜索不需要 session，游标只认 `offset`。
@@ -37,8 +38,14 @@ final class NovelSource implements ContentSource {
     ApiClient api, {
     int offset = 0,
     String? sessionId,
-  }) async =>
-      _novelPage(await api.recommend(offset: offset, sessionId: sessionId));
+    void Function(Map<String, dynamic> payload)? onPayload,
+  }) async => _novelPage(
+    await api.recommend(
+      offset: offset,
+      sessionId: sessionId,
+      onPayload: onPayload,
+    ),
+  );
 
   @override
   Future<FeedPage<RecommendItem>> search(
@@ -60,6 +67,7 @@ final class DramaSource implements ContentSource {
     ApiClient api, {
     int offset = 0,
     String? sessionId,
+    void Function(Map<String, dynamic> payload)? onPayload,
   }) async => _videoPage(
     await api.videoFeed(
       tabType: _feedTabType,
@@ -99,6 +107,7 @@ final class ManjuSource implements ContentSource {
     ApiClient api, {
     int offset = 0,
     String? sessionId,
+    void Function(Map<String, dynamic> payload)? onPayload,
   }) async {
     // offset > 0 = 翻页：首页流没有游标，只能继续走搜索兜底。
     if (offset > 0) return _searchPage(api, _fallbackQuery, offset: offset);

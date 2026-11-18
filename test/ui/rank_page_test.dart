@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/data/models/rank.dart';
+import 'package:novel_playlet/features/rank/rank_cache.dart';
 import 'package:novel_playlet/features/rank/rank_page.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 
@@ -328,5 +331,149 @@ void main() {
     await tester.tap(find.text('重试'));
     await tester.pumpAndSettle();
     expect(find.text('榜书1'), findsOneWidget);
+  });
+
+  testWidgets('排行榜-命中预取缓存先渲染，不发首屏请求', (tester) async {
+    final cache = RankBoardCache();
+    cache.write(
+      const RankBoardCacheKey(
+        rankId: '7098235271900037133',
+        algo: 101,
+        genreTab: 2,
+      ),
+      RankBoard(entries: [_book(1)]),
+    );
+    var calls = 0;
+    await pumpPreview(
+      tester,
+      RankPage(
+        catalogLoader: () async => _catalog(),
+        pageLoader:
+            ({
+              required rankId,
+              required tab,
+              required offset,
+              required startAt,
+            }) async {
+              calls++;
+              return RankBoard(entries: [_book(2)]);
+            },
+      ),
+      extraOverrides: [rankBoardCacheProvider.overrideWithValue(cache)],
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('榜书1'), findsOneWidget);
+    expect(find.text('榜书2'), findsNothing);
+    expect(calls, 0, reason: '缓存新鲜时首屏不发请求');
+  });
+
+  testWidgets('排行榜-短剧命中预热缓存不发首屏请求', (tester) async {
+    final cache = RankBoardCache();
+    cache.write(
+      const RankBoardCacheKey(
+        rankId: '7098235271900037133',
+        algo: 502,
+        genreTab: 4,
+      ),
+      RankBoard(entries: [_book(2)]),
+    );
+    var calls = 0;
+    await pumpPreview(
+      tester,
+      RankPage(
+        initialAlgo: 502,
+        catalogLoader: () async => _catalog(),
+        pageLoader:
+            ({
+              required rankId,
+              required tab,
+              required offset,
+              required startAt,
+            }) async {
+              calls++;
+              return RankBoard(entries: [_book(9)]);
+            },
+      ),
+      extraOverrides: [rankBoardCacheProvider.overrideWithValue(cache)],
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('榜书2'), findsOneWidget);
+    expect(calls, 0, reason: '短剧榜命中缓存时首屏不发请求');
+  });
+
+  testWidgets('排行榜-漫剧命中预热缓存不发首屏请求', (tester) async {
+    final cache = RankBoardCache();
+    cache.write(
+      const RankBoardCacheKey(
+        rankId: '7098235271900037133',
+        algo: 550,
+        genreTab: 5,
+      ),
+      RankBoard(entries: [_book(3)]),
+    );
+    var calls = 0;
+    await pumpPreview(
+      tester,
+      RankPage(
+        initialAlgo: 550,
+        catalogLoader: () async => _catalog(),
+        pageLoader:
+            ({
+              required rankId,
+              required tab,
+              required offset,
+              required startAt,
+            }) async {
+              calls++;
+              return RankBoard(entries: [_book(9)]);
+            },
+      ),
+      extraOverrides: [rankBoardCacheProvider.overrideWithValue(cache)],
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('榜书3'), findsOneWidget);
+    expect(calls, 0, reason: '漫剧榜命中缓存时首屏不发请求');
+  });
+
+  testWidgets('排行榜-预热缓存晚到会替换 loading，网络结果再替换缓存', (tester) async {
+    final cache = RankBoardCache();
+    final boardFuture = Completer<RankBoard>();
+    await pumpPreview(
+      tester,
+      RankPage(
+        initialAlgo: 502,
+        catalogLoader: () async => _catalog(),
+        pageLoader: ({
+          required rankId,
+          required tab,
+          required offset,
+          required startAt,
+        }) => boardFuture.future,
+      ),
+      extraOverrides: [rankBoardCacheProvider.overrideWithValue(cache)],
+      settle: false,
+    );
+    await tester.pump();
+    expect(find.textContaining('正在加载榜单'), findsOneWidget);
+
+    // 模拟预热请求在页面首屏请求之后才返回。
+    cache.write(
+      const RankBoardCacheKey(
+        rankId: '7098235271900037133',
+        algo: 502,
+        genreTab: 4,
+      ),
+      RankBoard(entries: [_book(4)]),
+    );
+    await tester.pump();
+    expect(find.text('榜书4'), findsOneWidget);
+    expect(find.textContaining('正在加载榜单'), findsNothing);
+
+    boardFuture.complete(RankBoard(entries: [_book(9)]));
+    await tester.pumpAndSettle();
+    expect(find.text('榜书9'), findsOneWidget);
   });
 }

@@ -151,4 +151,43 @@ void main() {
     expect(find.byKey(MinePage.historyKey), findsOneWidget);
     expect(find.byKey(MinePage.collectionKey), findsOneWidget);
   });
+
+  testWidgets('首页首屏完成后预取热搜榜', (tester) async {
+    final fake = FakePreviewTransport()
+      ..hotSearchPayload = {
+        'code': 0,
+        'data': [
+          {
+            'search_tag_data': [
+              {'tag_title': '预热热搜', 'tag_attached': '1.2万热搜值'},
+            ],
+          },
+        ],
+      };
+    await pumpPreview(tester, const HomeShell(), transport: fake);
+    // 预取排在首屏后 400ms，等计时器触发并让请求完成。
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+
+    expect(
+      fake.calls.where((call) => call.startsWith('/api/v1/search/hot')),
+      isNotEmpty,
+    );
+  });
+
+  testWidgets('首页预热短剧/漫剧首屏后切换不再 loading', (tester) async {
+    final fake = FakePreviewTransport();
+    await pumpPreview(tester, const HomeShell(), transport: fake);
+    // 等首屏后的预热完成。
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('短剧'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('正在加载短剧'), findsNothing);
+
+    await tester.tap(find.text('漫剧'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('正在加载漫剧'), findsNothing);
+  });
 }

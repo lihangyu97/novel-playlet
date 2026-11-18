@@ -7,6 +7,7 @@ import '../../data/models/json_utils.dart' show isRetryableError;
 import '../../data/models/rank.dart';
 import '../feed/feed_state.dart';
 import '../feed/feed_view.dart';
+import 'rank_cache.dart';
 import 'rank_entry_route.dart';
 import 'rank_providers.dart';
 import 'widgets/rank_entry_row.dart';
@@ -110,7 +111,7 @@ class _RankPageState extends ConsumerState<RankPage>
       return;
     }
 
-    final tabs = _orderTabs(catalog.tabs);
+    final tabs = orderRankTabs(catalog.tabs);
     final initialAlgo = widget.initialAlgo;
     var index = initialAlgo == null
         ? 0
@@ -129,23 +130,6 @@ class _RankPageState extends ConsumerState<RankPage>
       _loadingCatalog = false;
       _catalogError = null;
     });
-  }
-
-  /// 小说榜在前，短剧榜次之，漫剧榜最后；同组内保持上游目录顺序。
-  static List<RankTab> _orderTabs(List<RankTab> tabs) {
-    int group(RankTab tab) {
-      if (tab.genreTab == 2) return 0;
-      if (tab.genreTab == 4) return 1;
-      if (tab.genreTab == 5) return 2;
-      return 3;
-    }
-
-    final indexed = tabs.indexed.toList();
-    indexed.sort((a, b) {
-      final byGroup = group(a.$2).compareTo(group(b.$2));
-      return byGroup != 0 ? byGroup : a.$1.compareTo(b.$1);
-    });
-    return [for (final item in indexed) item.$2];
   }
 
   @override
@@ -218,16 +202,54 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
   @override
   bool get wantKeepAlive => true;
 
+  RankBoardCacheKey get _cacheKey => RankBoardCacheKey(
+    rankId: widget.rankId,
+    algo: widget.tab.algo,
+    genreTab: widget.tab.genreTab,
+  );
+
+  late final RankBoardCache _cache;
+
   @override
   void initState() {
     super.initState();
-    _loadFirst();
+    _cache = ref.read(rankBoardCacheProvider);
+    _cache.addListener(_onCacheChanged);
+    final cached = _cache.read(_cacheKey);
+    if (cached != null) {
+      _state = FeedState<RankEntry>(
+        items: cached.board.entries,
+        nextOffset: _nextOffsetOf(cached.board),
+      );
+      _loading = false;
+    }
+    // 有缓存先画缓存，过期/没有才请求；过期时也先保留旧数据，拿到新页再替换。
+    if (cached == null || !_cache.isFresh(cached)) {
+      _loadFirst(silent: cached != null);
+    }
   }
 
   @override
   void dispose() {
+    _cache.removeListener(_onCacheChanged);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 页面已经打开、首屏请求还在路上时，预热刚好写完缓存：直接切到缓存，
+  /// 不再让用户继续看 loading。
+  void _onCacheChanged() {
+    if (!mounted || _state.items.isNotEmpty) return;
+    final cached = _cache.read(_cacheKey);
+    if (cached == null) return;
+    setState(() {
+      _state = FeedState<RankEntry>(
+        items: cached.board.entries,
+        nextOffset: _nextOffsetOf(cached.board),
+      );
+      _loading = false;
+      _error = null;
+    });
   }
 
   Future<RankBoard> _loadBoard({required int offset, required int startAt}) {
@@ -257,16 +279,21 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
     return board.nextOffset ?? board.entries.length;
   }
 
-  Future<void> _loadFirst() async {
+  Future<void> _loadFirst({bool silent = false}) async {
     final token = ++_generation;
-    setState(() {
-      _loading = true;
-      _error = null;
-      _state = const FeedState<RankEntry>(items: []);
-    });
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+        _state = const FeedState<RankEntry>(items: []);
+      });
+    }
     try {
       final board = await _loadBoard(offset: 0, startAt: 1);
       if (!mounted || token != _generation) return;
+      // 后台刷新拿到空页时保留旧缓存，避免把已有内容闪没。
+      if (silent && board.entries.isEmpty && _state.items.isNotEmpty) return;
+      _writeCache(board);
       setState(() {
         _state = FeedState<RankEntry>(
           items: board.entries,
@@ -277,11 +304,21 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
       });
     } catch (error) {
       if (!mounted || token != _generation) return;
+      if (silent && _state.items.isNotEmpty) {
+        // 缓存还在：后台刷新失败不打断当前列表，下拉刷新/下次进入再试。
+        return;
+      }
       setState(() {
         _loading = false;
         _error = describeFeedError(error);
       });
     }
+  }
+
+  void _writeCache(RankBoard board) {
+    // 测试注入的 loader 不写生产缓存，避免跨用例污染。
+    if (widget.pageLoader != null) return;
+    _cache.write(_cacheKey, board);
   }
 
   /// 触底/重试都走这里；并发守卫与「到底了不再发」由 [_state] 决定。

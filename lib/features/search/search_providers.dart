@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -84,12 +86,65 @@ final searchCueProvider = FutureProvider<SearchCue>((ref) async {
 
 /// 空搜索页的热搜榜（官方 472 热搜榜，最多 50 条，页面最多铺前 30）。
 ///
-/// autoDispose：每次打开搜索页拿一份新的榜单，关页后释放；失败一律返回空榜，
+/// 进程级缓存：首页首屏完成后会预取一份，打开搜索页直接有内容；搜索页每次
+/// 打开时由 [ensureFresh] 按 TTL 决定是否后台刷新。失败保留旧值/空榜，
 /// 搜索历史仍然可用，热搜只是引导内容，不能把搜索页卡在错误态。
-final hotSearchProvider = FutureProvider.autoDispose<HotSearch>((ref) async {
-  try {
-    return await ref.read(apiClientProvider).hotSearch();
-  } catch (_) {
+final hotSearchProvider = NotifierProvider<HotSearchController, HotSearch>(
+  HotSearchController.new,
+);
+
+class HotSearchController extends Notifier<HotSearch> {
+  /// 热搜榜变化慢，10 分钟内不重复请求；TTL 到了先展示旧数据再后台刷新。
+  static const ttl = Duration(minutes: 10);
+
+  DateTime? _fetchedAt;
+  Future<void>? _inFlight;
+
+  @override
+  HotSearch build() {
+    unawaited(_load());
     return HotSearch.empty;
   }
-});
+
+  /// 页面打开/预热入口：缓存新鲜就什么都不做，过期才拉。
+  Future<void> ensureFresh({bool force = false}) async {
+    final inFlight = _inFlight;
+    if (inFlight != null) {
+      await inFlight;
+      return;
+    }
+    final fetchedAt = _fetchedAt;
+    if (!force &&
+        fetchedAt != null &&
+        DateTime.now().difference(fetchedAt) < ttl) {
+      return;
+    }
+    await _load();
+  }
+
+  Future<void> _load() async {
+    final existing = _inFlight;
+    if (existing != null) {
+      await existing;
+      return;
+    }
+    final future = _fetch();
+    _inFlight = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_inFlight, future)) _inFlight = null;
+    }
+  }
+
+  Future<void> _fetch() async {
+    try {
+      final hot = await ref.read(apiClientProvider).hotSearch();
+      if (!ref.mounted) return;
+      state = hot;
+      _fetchedAt = DateTime.now();
+    } catch (_) {
+      // 保留上一次成功的热搜榜；首次失败就是空榜，页面走搜索历史。
+    }
+  }
+}
