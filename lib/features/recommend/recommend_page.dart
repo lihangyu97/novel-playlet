@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -15,6 +17,7 @@ import '../video/widgets/video_card.dart';
 import 'recommend_category.dart';
 import 'recommend_controller.dart';
 import 'recommend_item.dart';
+import '../prefetch/app_prefetch.dart';
 import 'recommend_layout.dart';
 import 'recommend_state.dart';
 
@@ -56,13 +59,28 @@ class RecommendPageState extends ConsumerState<RecommendPage>
   /// 底栏再次点「推荐」时只滚当前分类这一条。
   final _feedControllers = <RecommendCategory, ScrollController>{};
 
+  /// 首屏完成后只排一次预热，下拉刷新/切分类不重复。
+  bool _prefetchScheduled = false;
+  Timer? _prefetchTimer;
+
   ScrollController _feedControllerFor(RecommendCategory category) =>
       _feedControllers.putIfAbsent(category, ScrollController.new);
 
   RecommendCategory get _activeCategory => _categories[_tabController.index];
 
   @override
+  void initState() {
+    super.initState();
+    // 首帧后如果流已经有数据（保活/测试注入），也要能排上预热；
+    // 正常情况下这里还没有数据，由 build 里的 listen 在首屏到达时触发。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _maybeSchedulePrefetch();
+    });
+  }
+
+  @override
   void dispose() {
+    _prefetchTimer?.cancel();
     _tabController.dispose();
     for (final controller in _feedControllers.values) {
       controller.dispose();
@@ -88,6 +106,23 @@ class RecommendPageState extends ConsumerState<RecommendPage>
     );
   }
 
+  void _maybeSchedulePrefetch() {
+    if (_prefetchScheduled) return;
+    final state = ref.read(recommendFeedProvider(RecommendCategory.novel));
+    if (!state.hasValue) return;
+    _prefetchScheduled = true;
+    _schedulePrefetch();
+  }
+
+  void _schedulePrefetch() {
+    // 让首屏卡片先画完、图片解码先启动，再把小请求排到空闲时间。
+    // 用可取消的 Timer：测试/页面销毁时不能留 pending timer。
+    _prefetchTimer = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      unawaited(ref.read(appPrefetchProvider).warm());
+    });
+  }
+
   /// 搜索入口是顶栏右侧的放大镜：点一下进独立搜索页，一次搜小说 / 短剧。
   ///
   /// 推荐页本身不再有内联搜索态（旧实现把搜索词塞进三个推荐流 provider），
@@ -99,6 +134,14 @@ class RecommendPageState extends ConsumerState<RecommendPage>
 
   @override
   Widget build(BuildContext context) {
+    // 首屏小说流就绪后，等一帧再预热热搜 + 排行榜默认榜；不阻塞首屏。
+    ref.listen(recommendFeedProvider(RecommendCategory.novel), (
+      previous,
+      next,
+    ) {
+      if (next.hasValue) _maybeSchedulePrefetch();
+    });
+
     // 渐变要盖到状态栏那一条（安全区不参与布局），否则顶部会留一条纯白。
     final topInset = MediaQuery.paddingOf(context).top;
     return Stack(

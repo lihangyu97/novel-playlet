@@ -151,4 +151,27 @@ void main() {
     expect(find.byKey(MinePage.historyKey), findsOneWidget);
     expect(find.byKey(MinePage.collectionKey), findsOneWidget);
   });
+
+  testWidgets('首页首屏完成后预取热搜榜', (tester) async {
+    final fake = FakePreviewTransport()
+      ..hotSearchPayload = {
+        'code': 0,
+        'data': [
+          {
+            'search_tag_data': [
+              {'tag_title': '预热热搜', 'tag_attached': '1.2万热搜值'},
+            ],
+          },
+        ],
+      };
+    await pumpPreview(tester, const HomeShell(), transport: fake);
+    // 预取排在首屏后 400ms，等计时器触发并让请求完成。
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+
+    expect(
+      fake.calls.where((call) => call.startsWith('/api/v1/search/hot')),
+      isNotEmpty,
+    );
+  });
 }

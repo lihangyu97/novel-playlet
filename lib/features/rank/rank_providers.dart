@@ -11,3 +11,22 @@ import '../../data/models/rank.dart';
 final rankCatalogProvider = FutureProvider<RankCatalog>((ref) async {
   return ref.read(apiClientProvider).rankCatalog();
 });
+
+/// 小说榜在前，短剧榜次之，漫剧榜最后；同组内保持上游目录顺序。
+///
+/// 排行榜页与首页预取共用：预取默认榜第一页时必须和页面看到的第一顺位一致。
+List<RankTab> orderRankTabs(List<RankTab> tabs) {
+  int group(RankTab tab) {
+    if (tab.genreTab == 2) return 0;
+    if (tab.genreTab == 4) return 1;
+    if (tab.genreTab == 5) return 2;
+    return 3;
+  }
+
+  final indexed = tabs.indexed.toList();
+  indexed.sort((a, b) {
+    final byGroup = group(a.$2).compareTo(group(b.$2));
+    return byGroup != 0 ? byGroup : a.$1.compareTo(b.$1);
+  });
+  return [for (final item in indexed) item.$2];
+}

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
@@ -59,6 +61,16 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   /// 搜索框当前轮播到的热词（子组件上报，普通字段，不触发重建）。
   String _currentCueWord = '';
+
+  @override
+  void initState() {
+    super.initState();
+    // 首页已经预热过时这里直接命中缓存；TTL 过期才补一次请求。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(ref.read(hotSearchProvider.notifier).ensureFresh());
+    });
+  }
 
   @override
   void dispose() {
@@ -125,8 +137,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   Widget build(BuildContext context) {
     final query = ref.watch(searchQueryProvider);
     // 热搜榜在这里也保持订阅：搜索结果页仍让它在后台加载完，清空输入回到
-    // 引导页时立即有榜单，不会先闪一下「输入关键词」空态再跳出来。页面临时
-    // 关闭时随 autoDispose 释放，下次进来重新拉一份。
+    // 引导页时立即有榜单，不会先闪一下「输入关键词」空态再跳出来。
+    // 首页预热 + TTL 缓存，页面关闭不释放。
     ref.watch(hotSearchProvider);
     // 渐变要盖到状态栏那一条（安全区不参与布局），与推荐页同一套观感。
     final topInset = MediaQuery.paddingOf(context).top;
@@ -194,7 +206,7 @@ class _SearchLandingView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(searchHistoryProvider);
-    final hot = ref.watch(hotSearchProvider).value ?? HotSearch.empty;
+    final hot = ref.watch(hotSearchProvider);
     if (history.isEmpty && hot.isEmpty) {
       return const EmptyView(
         message: '输入关键词，一次搜小说 / 短剧',
