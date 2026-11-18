@@ -10,10 +10,13 @@ import 'app/theme/app_font_weight.dart';
 import 'app/theme/app_theme.dart';
 import 'app/theme/theme_settings.dart';
 import 'core/cache/app_image_cache.dart';
+import 'core/diagnostics/error_handlers.dart';
 import 'features/recommend/recommend_layout.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 先装全局错误捕获：启动期（内核初始化、读偏好）的未捕获异常也要能落日志。
+  installDiagnosticErrorHandlers();
   // 全局竖屏：阅读器是横向分页、列表也是竖屏布局，转横屏只会把布局挤坏。
   // 播放页需要横屏放视频时，自己在进入全屏时临时放开、退出时恢复（见
   // features/video/video_player_page.dart 的 _enterFullscreen/_restorePortrait）。

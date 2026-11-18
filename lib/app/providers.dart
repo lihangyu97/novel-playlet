@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/backend/backend_service.dart';
+import '../core/diagnostics/diagnostic_log.dart';
 import '../core/storage/reading_store.dart';
 import '../data/api/api_client.dart';
 
@@ -11,7 +12,10 @@ final backendServiceProvider = Provider<BackendService>(
 
 /// 业务接口。页面/controller 通过它拿数据，不直接碰 transport。
 final apiClientProvider = Provider<ApiClient>(
-  (ref) => ApiClient(ref.watch(backendServiceProvider).transport),
+  (ref) => ApiClient(
+    ref.watch(backendServiceProvider).transport,
+    logStore: ref.watch(diagnosticLogStoreProvider),
+  ),
 );
 
 /// 回环自愈入口：探活失败时重启内核（同端口重绑），见

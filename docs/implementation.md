@@ -966,3 +966,24 @@ flutter drive --profile -d <iPhone UDID> \
 - **测试**：`webdav_client_test.dart` 用本地 `HttpServer` 覆盖认证/探针/读写；`reading_store_sync_test.dart`
   覆盖合并/墓碑/裁剪墓碑；`webdav_sync_service_test.dart` 覆盖上传、拉取、条件跳过、412 重试、
   日志采集；`sync_log_test.dart` 覆盖双向 diff 与日志存储。
+
+### 11.7 运行日志（诊断，2026-11-18）
+
+- **入口**：设置 → 诊断 →「运行日志」。页面按天分组倒序展示，可展开看 HTTP 状态 / kind /
+  耗时 / 异常堆栈，单条可复制；右上角可清空（只删本机日志）。
+- **数据**：`<AppSupport>/app-log.json`，最多 200 条；同一级别 + 来源 + 摘要 8 秒内重复出现
+  只增加计数（`×N`），避免断网时同一接口刷屏。日志是本机诊断数据，**不进 `library.db`、
+  不进同步载荷**，写入 best-effort，失败只在控制台留一句。
+- **来源**：
+  - `api`：`ApiClient._getJson` 统一记录传输异常、HTTP 非 200、200 但 body 非 JSON / 非对象；
+    另在「推荐返回的分类不匹配」「video_url 为空」「只拿到远程加密流」「批量正文缺失」
+    「图文正文回退纯文本」等已兜底/不符合预期的地方记 `unexpected`。只记 method + path，
+    **不记 query**（搜索词等用户数据不进日志）。
+  - `app`：`installDiagnosticErrorHandlers()` 接管 `FlutterError.onError` 与
+    `PlatformDispatcher.onError`，记录后仍交给原处理器（框架错误继续 `presentError`，
+    异步错误返回 false），不改变崩溃/打印行为。
+- **不做**：远程上报、日志上传、全量请求审计；业务信封（HTTP 200 + 非 0 code）里的
+  「没有段评」等软失败不记（会被当成噪音），请求成功也不记。
+- **测试**：`diagnostic_log_test.dart` 覆盖排序/上限/合并/坏文件；`api_diagnostic_log_test.dart`
+  覆盖 HTTP 失败、内核超时、非 JSON 响应；`test/ui/app_log_page_test.dart` 覆盖列表/展开/
+  空态与设置页入口。

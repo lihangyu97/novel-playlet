@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../../core/backend/backend_transport.dart';
+import '../../core/diagnostics/diagnostic_log.dart';
 import '../models/book_comment.dart';
 import '../models/book_detail.dart';
 import '../models/chapter.dart';
@@ -25,9 +26,13 @@ import '../parsers/video_parsers.dart';
 /// 这里刻意不做缓存、不做重试、不碰 UI——签名/设备池/限流在 Rust 核里，
 /// 页面状态在 controller 里，这一层只负责"一次请求 → 一个模型"。
 class ApiClient {
-  ApiClient(this._transport);
+  ApiClient(this._transport, {DiagnosticLogStore? logStore})
+    : _logStore = logStore;
 
   final BackendTransport _transport;
+
+  /// 请求失败/响应不符合预期时写运行日志；测试不传就完全不落盘。
+  final DiagnosticLogStore? _logStore;
 
   /// 上游书城小说推荐（`tab_type=2`）。[sessionId] 翻页时必须回传，否则
   /// 上游会换设备导致 101116。
@@ -163,6 +168,12 @@ class ApiClient {
     // 上游会答非所问：`tab_item` 里只有被回答那项带 cell_data，按 `tab_type`
     // 认领。类型对不上就是别的分类的流（fqapp 同样会整页拒绝），不能当本分类画。
     if (tab == null || asInt(tab['tab_type'], -1) != tabType) {
+      final actual = tab == null ? '空' : '${asInt(tab['tab_type'], -1)}';
+      _logUnexpected(
+        '/api/v1/recommend/homepage',
+        '推荐返回的分类不匹配',
+        detail: '期望 tab_type=$tabType，实际=$actual',
+      );
       throw ApiException('推荐数据异常，下拉刷新试试');
     }
     final nextOffset = asInt(tab['next_offset']);
@@ -250,13 +261,24 @@ class ApiClient {
     final source = VideoSource.fromPayload(payload);
     final url = absoluteUrl(source.url);
     if (url.isEmpty) {
+      _logUnexpected(
+        '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
+        '上游没有返回可播放地址',
+        detail: 'video_url 为空',
+      );
       throw ApiException('上游没有返回可播放地址（video_url 为空）');
     }
     // 下载失败时内核会退回「远程地址 + key」的流式形态；那种地址是密文，
     // 播放器不能直接播，这里明确失败而不是让 AVPlayer 黑屏。
     if (source.keyHex.isNotEmpty && !url.contains('/src/')) {
+      final host = Uri.tryParse(url)?.host ?? 'CDN';
+      _logUnexpected(
+        '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
+        '内核只拿到远程加密流，播放器无法直接播放',
+        detail: 'host=$host',
+      );
       throw ApiException(
-        '整集缓存失败：内核只拿到了远程加密流（${Uri.tryParse(url)?.host ?? 'CDN'}），'
+        '整集缓存失败：内核只拿到了远程加密流（$host），'
         '播放器无法直接播放。',
       );
     }
@@ -337,6 +359,11 @@ class ApiClient {
     } catch (error) {
       if (!_shouldFallbackToPlainChapter(error)) rethrow;
       firstError = error;
+      _logUnexpected(
+        '/api/v1/chapters/$encoded/novel',
+        '图文正文不可用，已回退纯文本接口',
+        detail: _describeForLog(error),
+      );
     }
     try {
       final payload = await _getJson('/api/v1/chapters/$encoded', const {});
@@ -385,7 +412,15 @@ class ApiClient {
     final payload = await _getJson('/api/v1/chapters/batch', {
       'item_ids': ids.join(','),
     }, timeout: timeout);
-    return parseBatchChapterContents(payload);
+    final contents = parseBatchChapterContents(payload);
+    if (contents.length < ids.length) {
+      _logUnexpected(
+        '/api/v1/chapters/batch',
+        '批量正文缺失 ${ids.length - contents.length} 章',
+        detail: '请求 ${ids.length} 章，返回 ${contents.length} 章',
+      );
+    }
+    return contents;
   }
 
   /// 一章的段评/章末评论汇总（计数 + 评论 id，整章一次、不分页）。
@@ -534,6 +569,7 @@ class ApiClient {
     Duration? timeout,
   }) async {
     final encodedQuery = Uri(queryParameters: query).query;
+    final stopwatch = Stopwatch()..start();
     final BackendResponse response;
     try {
       response = await _transport.send(
@@ -545,10 +581,19 @@ class ApiClient {
     } on BackendTimeoutException {
       // B2：内核 504 是真实超时，在这里归一成带 kind 的 ApiException；499
       // 取消仍是 TimeoutException，不在这里接（取消不是用户可见错误）。
-      throw ApiException(
+      final error = ApiException(
         ApiErrorKind.timeout.userCopy,
         kind: ApiErrorKind.timeout,
       );
+      _logFailure(path, error, elapsedMs: stopwatch.elapsedMilliseconds);
+      throw error;
+    } on TimeoutException {
+      // 499 取消不是错误：保持静默取消语义，也不写日志。
+      rethrow;
+    } catch (error) {
+      // 内核未启动（StateError）等传输层意外：记一条再原样抛，页面表现不变。
+      _logFailure(path, error, elapsedMs: stopwatch.elapsedMilliseconds);
+      rethrow;
     }
     if (response.statusCode != 200) {
       // 内核把错误也包成 JSON，能读 message 就透出去；kind 一并透出，
@@ -571,18 +616,91 @@ class ApiClient {
         // 非 JSON 响应保持状态码文案与 kind 的默认判断。
       }
       // 技术兜底 message（如 "HTTP 500"）换成 kind 短句；具体 message 原样抛出。
-      final exception = ApiException(message, kind: kind);
-      throw ApiException(
-        apiErrorCopy(exception, fallback: message),
-        kind: kind,
+      final raw = ApiException(message, kind: kind);
+      _logFailure(
+        path,
+        raw,
+        status: response.statusCode,
+        elapsedMs: stopwatch.elapsedMilliseconds,
       );
+      throw ApiException(apiErrorCopy(raw, fallback: message), kind: kind);
     }
-    final decoded = jsonDecode(response.text);
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(response.text);
+    } on FormatException catch (error) {
+      // 状态码 200 但 body 不是 JSON：上游/内核契约破了，属于"不符合预期"。
+      _logUnexpected(path, '响应不是合法 JSON', detail: '$error');
+      rethrow;
+    }
     if (decoded is! Map) {
       // HTTP 200 但不是信封：格式异常，语义未知。
+      _logUnexpected(path, '响应格式异常（顶层不是对象）');
       throw ApiException('响应格式异常');
     }
-    return Map<String, dynamic>.from(decoded);
+    final payload = Map<String, dynamic>.from(decoded);
+    _logEnvelopeFailure(
+      path,
+      payload,
+      elapsedMs: stopwatch.elapsedMilliseconds,
+    );
+    return payload;
+  }
+
+  /// HTTP 200 但显式 `success: false` 的失败信封也记一条。
+  ///
+  /// 只认 `success` 字段：上游 200 + 非 0 `code` 里有「没有段评」这类软失败，
+  /// 一律记会把日志刷成噪音。
+  void _logEnvelopeFailure(
+    String path,
+    Map<String, dynamic> payload, {
+    int? elapsedMs,
+  }) {
+    if (payload['success'] != false) return;
+    final message = firstString(payload, ['error', 'message', 'msg', 'errmsg']);
+    _logFailure(
+      path,
+      ApiException(message, kind: ApiErrorKind.fromWire(payload['kind'])),
+      status: 200,
+      elapsedMs: elapsedMs,
+    );
+  }
+
+  /// 把一次请求失败写进运行日志（日志写失败不影响抛错路径）。
+  void _logFailure(String path, Object error, {int? status, int? elapsedMs}) {
+    final store = _logStore;
+    if (store == null) return;
+    final kind = error is ApiException ? error.kind : null;
+    final userCopy = apiErrorCopy(error, fallback: '请求失败');
+    final detail = <String>[
+      if (status != null) 'HTTP $status',
+      if (kind != null) 'kind=${kind.wireName}',
+      if (elapsedMs != null) '耗时 ${elapsedMs}ms',
+      if (error is ApiException && error.message.trim() != userCopy)
+        '原始错误：${error.message}',
+      if (error is! ApiException) '异常：${_describeForLog(error)}',
+    ];
+    store.record(
+      level: DiagnosticLevel.error,
+      source: DiagnosticSource.api,
+      message: 'GET $path 失败：$userCopy',
+      detail: detail.isEmpty ? null : detail.join('\n'),
+    );
+  }
+
+  void _logUnexpected(String path, String message, {String? detail}) {
+    _logStore?.record(
+      level: DiagnosticLevel.unexpected,
+      source: DiagnosticSource.api,
+      message: 'GET $path · $message',
+      detail: detail,
+    );
+  }
+
+  /// 异常摘要：`ApiException` 用 message，其它异常截断 `toString`。
+  String _describeForLog(Object error) {
+    final text = error is ApiException ? error.message : '$error';
+    return text.length <= 300 ? text : '${text.substring(0, 300)}…';
   }
 }
 

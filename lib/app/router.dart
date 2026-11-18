@@ -5,6 +5,7 @@ import '../data/models/novel_item.dart';
 import '../data/models/video_series.dart';
 import '../features/cache/cache_center_page.dart';
 import '../features/detail/detail_page.dart';
+import '../features/logs/app_log_page.dart';
 import '../features/rank/rank_page.dart';
 import '../features/reader/reader_page.dart';
 import '../features/search/search_page.dart';
@@ -73,6 +74,15 @@ final class SyncLogRoute extends AppRoute<void> {
   @override
   Route<void> toRoute() =>
       MaterialPageRoute<void>(builder: (_) => const SyncLogPage());
+}
+
+/// 运行日志页（设置 → 诊断 →「运行日志」）：接口报错与异常事件。
+final class AppLogRoute extends AppRoute<void> {
+  const AppLogRoute();
+
+  @override
+  Route<void> toRoute() =>
+      MaterialPageRoute<void>(builder: (_) => const AppLogPage());
 }
 
 /// 云端数据页（设置 → WebDAV → 「云端数据」）：只读显示云端 `sync.json`。
