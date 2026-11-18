@@ -208,11 +208,13 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
     genreTab: widget.tab.genreTab,
   );
 
-  RankBoardCache get _cache => ref.read(rankBoardCacheProvider);
+  late final RankBoardCache _cache;
 
   @override
   void initState() {
     super.initState();
+    _cache = ref.read(rankBoardCacheProvider);
+    _cache.addListener(_onCacheChanged);
     final cached = _cache.read(_cacheKey);
     if (cached != null) {
       _state = FeedState<RankEntry>(
@@ -229,8 +231,25 @@ class _RankTabPageState extends ConsumerState<_RankTabPage>
 
   @override
   void dispose() {
+    _cache.removeListener(_onCacheChanged);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 页面已经打开、首屏请求还在路上时，预热刚好写完缓存：直接切到缓存，
+  /// 不再让用户继续看 loading。
+  void _onCacheChanged() {
+    if (!mounted || _state.items.isNotEmpty) return;
+    final cached = _cache.read(_cacheKey);
+    if (cached == null) return;
+    setState(() {
+      _state = FeedState<RankEntry>(
+        items: cached.board.entries,
+        nextOffset: _nextOffsetOf(cached.board),
+      );
+      _loading = false;
+      _error = null;
+    });
   }
 
   Future<RankBoard> _loadBoard({required int offset, required int startAt}) {

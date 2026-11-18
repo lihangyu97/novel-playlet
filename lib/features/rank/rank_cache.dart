@@ -47,7 +47,7 @@ class RankBoardCacheEntry {
 ///
 /// 首页首屏完成后预取默认榜第一页，进排行榜页时先画缓存、再按 TTL 决定是否
 /// 后台刷新。只留第一页，内存很小；图片仍然只存 URL，由全局图片缓存负责。
-class RankBoardCache {
+class RankBoardCache extends ChangeNotifier {
   /// 榜单变化不快，5 分钟内直接复用；过期后先画旧数据再刷新。
   static const ttl = Duration(minutes: 5);
 
@@ -64,11 +64,18 @@ class RankBoardCache {
       board: board,
       fetchedAt: fetchedAt ?? DateTime.now(),
     );
+    notifyListeners();
   }
 
-  void clear() => _entries.clear();
+  void clear() {
+    if (_entries.isEmpty) return;
+    _entries.clear();
+    notifyListeners();
+  }
 }
 
-final rankBoardCacheProvider = Provider<RankBoardCache>(
-  (ref) => RankBoardCache(),
-);
+final rankBoardCacheProvider = Provider<RankBoardCache>((ref) {
+  final cache = RankBoardCache();
+  ref.onDispose(cache.dispose);
+  return cache;
+});
