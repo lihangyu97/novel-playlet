@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_version.dart';
+import '../../app/router.dart';
 import '../../app/theme/app_font_weight.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_section_header.dart';
@@ -78,6 +79,16 @@ class SettingsPage extends StatelessWidget {
             // 下载清晰度是「存多少」的一部分：和占用/清理同区，不再单开一
             // 个「视频」区块（一页里为一个开关单开一节太重）。
             _VideoDownloadQualityCard(),
+            AppSectionHeader(
+              title: '诊断',
+              padding: EdgeInsets.fromLTRB(
+                _contentInset,
+                20,
+                _contentInset,
+                10,
+              ),
+            ),
+            _DiagnosticsCard(),
             _AppVersionFooter(),
           ],
         ),
@@ -128,16 +139,21 @@ class _Card extends StatelessWidget {
       _cardPadding,
       16,
     ),
+    this.clipBehavior = Clip.none,
   });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
+
+  /// 整卡可点的入口要裁掉水波纹，否则圆角外会看到方角高亮。
+  final Clip clipBehavior;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: _cardMargin),
       child: Card(
+        clipBehavior: clipBehavior,
         child: Padding(padding: padding, child: child),
       ),
     );
@@ -812,6 +828,59 @@ class _UsageRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 诊断
+// ---------------------------------------------------------------------------
+
+/// 运行日志入口的 key：测试用它点进日志页。
+const Key diagnosticsLogEntryKey = Key('settings-diagnostics-log');
+
+/// 诊断：运行日志入口。
+///
+/// 放在设置最底部：排障是低频动作，别把主流程（主题/同步/存储）往后挤。
+class _DiagnosticsCard extends StatelessWidget {
+  const _DiagnosticsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return _Card(
+      padding: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: diagnosticsLogEntryKey,
+        onTap: () => context.pushAppRoute(const AppLogRoute()),
+        child: SizedBox(
+          height: 44,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _cardPadding),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '运行日志',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: context.appWeight(FontWeight.w600),
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

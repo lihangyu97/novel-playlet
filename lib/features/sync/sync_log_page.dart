@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/widgets/app_snack_bar.dart';
+import '../../app/widgets/log_timeline.dart';
 import '../../app/widgets/states.dart';
 import '../mine/widgets/library_type_badge.dart';
 import 'sync_log.dart';
@@ -51,7 +52,7 @@ class SyncLogPage extends ConsumerWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                 child: Text(
-                  '最近 50 次同步的结果与双向明细',
+                  '最近 50 次书架与设置的同步结果',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -66,11 +67,11 @@ class SyncLogPage extends ConsumerWidget {
                     final previous = index == 0 ? null : items[index - 1];
                     final showDay =
                         previous == null ||
-                        !_sameDay(previous.atTime, run.atTime);
+                        !isSameCalendarDay(previous.atTime, run.atTime);
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (showDay) _DayHeader(day: run.atTime),
+                        if (showDay) LogDayHeader(day: run.atTime),
                         _RunTile(run: run),
                       ],
                     );
@@ -106,27 +107,6 @@ class SyncLogPage extends ConsumerWidget {
     await ref.read(syncLogStoreProvider).clear();
     ref.invalidate(syncLogRunsProvider);
     if (context.mounted) showAppSnackBar(context, '已清空同步记录');
-  }
-}
-
-class _DayHeader extends StatelessWidget {
-  const _DayHeader({required this.day});
-
-  final DateTime day;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
-      child: Text(
-        _dayLabel(day),
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-          color: scheme.onSurfaceVariant,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
   }
 }
 
@@ -173,7 +153,7 @@ class _RunTileState extends State<_RunTile> {
                   SizedBox(
                     width: 44,
                     child: Text(
-                      _timeLabel(run.atTime),
+                      logTimeLabel(run.atTime),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: scheme.onSurfaceVariant,
                         fontFeatures: const [FontFeature.tabularFigures()],
@@ -195,13 +175,30 @@ class _RunTileState extends State<_RunTile> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'r${run.revBefore} → r${run.revAfter}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                  if (run.scope == SyncScope.library)
+                    Text(
+                      'r${run.revBefore} → r${run.revAfter}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: scheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '设置',
+                        style: Theme.of(context).textTheme.labelSmall
+                            ?.copyWith(color: scheme.onSecondaryContainer),
+                      ),
                     ),
-                  ),
                   const SizedBox(width: 10),
                   SizedBox(
                     width: 44,
@@ -271,9 +268,10 @@ class _RunTileState extends State<_RunTile> {
         SyncTrigger.manual => '手动',
         SyncTrigger.lifecycle => '前后台',
         SyncTrigger.config => '保存配置',
+        SyncTrigger.settings => '设置变更',
       }}',
       if (run.remoteUpdatedAt > 0)
-        '云端：${_timeLabel(DateTime.fromMillisecondsSinceEpoch(run.remoteUpdatedAt))} 生成',
+        '云端：${logTimeLabel(DateTime.fromMillisecondsSinceEpoch(run.remoteUpdatedAt))} 生成',
       if (run.remoteDeviceId.isNotEmpty)
         '设备 ${_deviceLabel(run.remoteDeviceId)}',
     ];
@@ -387,17 +385,19 @@ String _fieldLabel(String field) => switch (field) {
 };
 
 String _summary(SyncLogRun run) {
+  if (run.scope == SyncScope.settings) {
+    if (run.outcome == SyncOutcome.failed) {
+      return '设置同步失败（${syncPhaseFailureLabel(run.phase)}）';
+    }
+    if (run.outcome == SyncOutcome.skipped) {
+      return run.phase == 'deferred' ? '设置稍后应用' : '设置无变化';
+    }
+    if (run.uploaded) return '设置已上传';
+    if (run.pulledTotal > 0) return '设置已拉取';
+    return '设置已同步';
+  }
   if (run.outcome == SyncOutcome.failed) {
-    return switch (run.phase) {
-      'config' => '配置校验失败',
-      'dir' => '创建目录失败',
-      'get' => '拉取失败',
-      'parse' => '云端格式不合法',
-      'merge' => '合并失败',
-      'put' => '上传失败',
-      'meta' => '写入本地元数据失败',
-      _ => '同步失败',
-    };
+    return syncPhaseFailureLabel(run.phase);
   }
   if (run.outcome == SyncOutcome.skipped) return '无变化，已跳过';
   if (run.uploaded && run.pulledTotal > 0) {
@@ -413,20 +413,6 @@ String _durationLabel(int ms) {
   if (ms < 1000) return '${ms}ms';
   return '${(ms / 1000).toStringAsFixed(1)}s';
 }
-
-String _timeLabel(DateTime time) =>
-    '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-
-String _dayLabel(DateTime day) {
-  final now = DateTime.now();
-  if (_sameDay(day, now)) return '今天';
-  final yesterday = now.subtract(const Duration(days: 1));
-  if (_sameDay(day, yesterday)) return '昨天';
-  return '${day.month} 月 ${day.day} 日';
-}
-
-bool _sameDay(DateTime a, DateTime b) =>
-    a.year == b.year && a.month == b.month && a.day == b.day;
 
 String _deviceLabel(String deviceId) {
   if (deviceId.length <= 6) return deviceId;

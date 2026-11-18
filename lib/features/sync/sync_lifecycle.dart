@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'settings_sync_coordinator.dart';
 import 'sync_log.dart';
 import 'sync_status.dart';
 
@@ -41,9 +42,10 @@ class _SyncLifecycleState extends ConsumerState<SyncLifecycle>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed ||
-        state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.resumed) {
       _sync();
+    } else if (state == AppLifecycleState.paused) {
+      _flush();
     }
   }
 
@@ -54,6 +56,21 @@ class _SyncLifecycleState extends ConsumerState<SyncLifecycle>
           .read(syncStatusProvider.notifier)
           .syncNow(trigger: SyncTrigger.lifecycle),
     );
+    unawaited(
+      ref
+          .read(settingsSyncStatusProvider.notifier)
+          .syncNow(trigger: SyncTrigger.lifecycle),
+    );
+  }
+
+  /// 退后台前把设置去抖队列里的改动推上去；书架同步保持原有行为。
+  void _flush() {
+    unawaited(
+      ref
+          .read(syncStatusProvider.notifier)
+          .syncNow(trigger: SyncTrigger.lifecycle),
+    );
+    unawaited(ref.read(settingsSyncStatusProvider.notifier).flush());
   }
 
   @override

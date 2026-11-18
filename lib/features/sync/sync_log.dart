@@ -12,7 +12,8 @@ import '../../data/models/json_utils.dart';
 enum SyncTrigger {
   manual('manual'),
   lifecycle('lifecycle'),
-  config('config');
+  config('config'),
+  settings('settings');
 
   const SyncTrigger(this.wire);
 
@@ -42,6 +43,40 @@ enum SyncOutcome {
       if (outcome.wire == wire) return outcome;
     }
     return SyncOutcome.failed;
+  }
+}
+
+/// 同步失败阶段的人话文案：同步记录页与运行日志共用，避免两处各写一份。
+String syncPhaseFailureLabel(String? phase) => switch (phase) {
+  'config' => '配置校验失败',
+  'dir' => '创建目录失败',
+  'get' => '拉取失败',
+  'parse' => '云端格式不合法',
+  'merge' => '合并失败',
+  'apply' => '应用设置失败',
+  'put' => '上传失败',
+  'meta' => '写入本地元数据失败',
+  _ => '同步失败',
+};
+
+/// 一次同步记录属于哪个文件。
+///
+/// 书架/收藏/进度走 `sync.json`，设置走 `settings.json`；两个文件独立同步，
+/// 但共用同一份本地同步记录，页面用这个字段区分。
+enum SyncScope {
+  library('library'),
+  settings('settings');
+
+  const SyncScope(this.wire);
+
+  final String wire;
+
+  static SyncScope parse(Object? value) {
+    final wire = asString(value);
+    for (final scope in values) {
+      if (scope.wire == wire) return scope;
+    }
+    return SyncScope.library;
   }
 }
 
@@ -113,6 +148,7 @@ class SyncLogRun {
     required this.durationMs,
     required this.outcome,
     required this.trigger,
+    this.scope = SyncScope.library,
     this.phase,
     this.revBefore = 0,
     this.revAfter = 0,
@@ -133,6 +169,7 @@ class SyncLogRun {
   final int durationMs;
   final SyncOutcome outcome;
   final SyncTrigger trigger;
+  final SyncScope scope;
 
   /// 失败阶段：config / dir / get / parse / merge / put / meta。
   final String? phase;
@@ -165,6 +202,7 @@ class SyncLogRun {
     'ms': durationMs,
     'out': outcome.wire,
     'trig': trigger.wire,
+    if (scope != SyncScope.library) 'scope': scope.wire,
     if (phase != null) 'ph': phase,
     'rev': [revBefore, revAfter],
     'up': uploaded,
@@ -191,6 +229,7 @@ class SyncLogRun {
       durationMs: asInt(json['ms']),
       outcome: SyncOutcome.parse(json['out']),
       trigger: SyncTrigger.parse(json['trig']),
+      scope: SyncScope.parse(json['scope']),
       phase: asString(json['ph']).isEmpty ? null : asString(json['ph']),
       revBefore: rev.isEmpty ? 0 : asInt(rev[0]),
       revAfter: rev.length < 2 ? 0 : asInt(rev[1]),
@@ -226,6 +265,10 @@ class SyncLogStore {
   /// 测试注入用；为 null 时落到 `<AppSupport>/sync-log.json`。
   static String? overridePath;
 
+  /// 串行化写入：书架同步和设置同步可能同时追加记录，read-modify-write
+  /// 不加锁会互相覆盖（真机上确实丢过一条 settings 记录）。
+  Future<void> _tail = Future<void>.value();
+
   Future<File> _file() async {
     final path =
         overridePath ??
@@ -251,7 +294,14 @@ class SyncLogStore {
   /// 追加一条，超出上限的旧记录丢掉。
   ///
   /// 调用方要保证这是 best-effort：日志写失败绝不能影响同步结果。
-  Future<void> append(SyncLogRun run) async {
+  /// 所有写入串行化，避免书架同步与设置同步并发时互相覆盖。
+  Future<void> append(SyncLogRun run) {
+    final next = _tail.then((_) => _append(run));
+    _tail = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _append(SyncLogRun run) async {
     final runs = [run, ...await read()];
     final kept = runs.take(maxRuns).toList();
     await writeJsonAtomically(await _file(), {
@@ -260,10 +310,19 @@ class SyncLogStore {
     });
   }
 
-  Future<void> clear() async {
+  Future<void> clear() {
+    final next = _tail.then((_) => _clear());
+    _tail = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _clear() async {
     final file = await _file();
     if (await file.exists()) await file.delete();
   }
+
+  /// 等待已排队的写入完成（测试/退出前用）。
+  Future<void> flush() => _tail;
 }
 
 final syncLogStoreProvider = Provider<SyncLogStore>((ref) => SyncLogStore());

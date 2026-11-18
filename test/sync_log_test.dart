@@ -126,6 +126,37 @@ void main() {
       expect(runs.last.at, 1005, reason: '最旧的 5 条被丢掉');
     });
 
+    test('并发追加不丢记录（书架 + 设置同时写）', () async {
+      final store = SyncLogStore();
+      await Future.wait([
+        for (var i = 1; i <= 10; i++)
+          store.append(
+            SyncLogRun(
+              at: i,
+              durationMs: i,
+              outcome: SyncOutcome.success,
+              trigger: SyncTrigger.lifecycle,
+            ),
+          ),
+      ]);
+      await store.flush();
+
+      final runs = await store.read();
+      expect(runs, hasLength(10));
+      expect(runs.map((run) => run.at).toSet(), {
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+      });
+    });
+
     test('损坏文件按空日志处理，写入后覆盖', () async {
       final file = File(SyncLogStore.overridePath!);
       await file.parent.create(recursive: true);
@@ -156,6 +187,21 @@ void main() {
       );
       await store.clear();
       expect(await store.read(), isEmpty);
+    });
+
+    test('JSON 往返保留 scope=settings 与设置变更触发', () async {
+      const run = SyncLogRun(
+        at: 10,
+        durationMs: 20,
+        outcome: SyncOutcome.success,
+        trigger: SyncTrigger.settings,
+        scope: SyncScope.settings,
+        uploaded: true,
+      );
+      final decoded = SyncLogRun.tryFromJson(run.toJson())!;
+      expect(decoded.scope, SyncScope.settings);
+      expect(decoded.trigger, SyncTrigger.settings);
+      expect(decoded.uploaded, isTrue);
     });
 
     test('JSON 往返保留失败阶段与明细', () async {

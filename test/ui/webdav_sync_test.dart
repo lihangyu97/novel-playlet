@@ -77,7 +77,15 @@ void main() {
     expect(find.textContaining('dav.example.com'), findsNothing);
     expect(find.byKey(webDavSyncNowKey), findsOneWidget);
     expect(find.textContaining('上次同步'), findsOneWidget);
-    expect(client.files.keys.single.path, endsWith('/sync.json'));
+    expect(
+      client.files.keys.any((uri) => uri.path.endsWith('/sync.json')),
+      isTrue,
+    );
+    expect(
+      client.files.keys.any((uri) => uri.path.endsWith('/settings.json')),
+      isTrue,
+      reason: '手动同步同时推书架与设置',
+    );
   });
   testWidgets('设置页一级有「同步记录」入口，能打开记录页', (tester) async {
     final store = InMemoryWebDavConfigStore();

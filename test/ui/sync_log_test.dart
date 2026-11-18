@@ -79,6 +79,30 @@ void main() {
     expect(find.text('下载同步文件失败：账号或应用密码错误'), findsOneWidget);
   });
 
+  testWidgets('同步记录页：设置同步行用「设置」标记区分', (tester) async {
+    final run = SyncLogRun(
+      at: DateTime.now().millisecondsSinceEpoch,
+      durationMs: 120,
+      outcome: SyncOutcome.success,
+      trigger: SyncTrigger.settings,
+      scope: SyncScope.settings,
+      uploaded: true,
+      pushedTotal: 1,
+    );
+
+    await pumpPreview(
+      tester,
+      const SyncLogPage(),
+      extraOverrides: [
+        syncLogRunsProvider.overrideWith((ref) async => [run]),
+      ],
+    );
+
+    expect(find.text('设置'), findsOneWidget);
+    expect(find.text('设置已上传'), findsOneWidget);
+    expect(find.textContaining('r0'), findsNothing);
+  });
+
   testWidgets('同步记录页：空态', (tester) async {
     await pumpPreview(
       tester,

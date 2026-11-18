@@ -48,13 +48,26 @@ class AppFontWeightController extends Notifier<FontWeight> {
   static const fontWeightKey = 'app_font_weight_v1';
 
   bool _userChanged = false;
+  Future<void>? _restoreFuture;
+
+  Future<void> get restoreFuture {
+    if (initialFontWeight != null) return Future<void>.value();
+    return _restoreFuture ??= _restore();
+  }
 
   @override
   FontWeight build() {
     final initial = initialFontWeight;
     if (initial != null) return initial;
-    _restore();
+    _restoreFuture = _restore();
     return FontWeight.w400;
+  }
+
+  Future<void> applyRemote(FontWeight weight) async {
+    final next = appFontWeightFromValue(weight.value);
+    _userChanged = true;
+    if (next != state) state = next;
+    await _persist(next);
   }
 
   void setFontWeight(FontWeight weight) {

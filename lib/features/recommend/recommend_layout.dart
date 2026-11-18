@@ -52,13 +52,25 @@ class RecommendLayoutController extends Notifier<RecommendLayout> {
   static const layoutKey = 'home_recommend_layout_v1';
 
   bool _userChanged = false;
+  Future<void>? _restoreFuture;
+
+  Future<void> get restoreFuture {
+    if (initialLayout != null) return Future<void>.value();
+    return _restoreFuture ??= _restore();
+  }
 
   @override
   RecommendLayout build() {
     final initial = initialLayout;
     if (initial != null) return initial;
-    _restore();
+    _restoreFuture = _restore();
     return RecommendLayout.two;
+  }
+
+  Future<void> applyRemote(RecommendLayout layout) async {
+    _userChanged = true;
+    if (layout != state) state = layout;
+    await _persist(layout);
   }
 
   void setLayout(RecommendLayout layout) {
