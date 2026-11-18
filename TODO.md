@@ -53,8 +53,8 @@
 
 ### 可观测性
 
-- [x] ~~**运行日志**~~：设置 → 诊断 → 「运行日志」页，记录接口报错（method + path + HTTP 状态 + kind + 耗时）与不符合预期的事件（分类不匹配 / 回退纯文本 / 仅远程加密流等），以及 Flutter 未捕获异常。
-  - 存储：`<appSupport>/app-log.json` 保留最近 200 条，同摘要 8s 内合并计数；只在本机，不进同步载荷。
+- [x] ~~**运行日志**~~：设置 → 诊断 → 「运行日志」页，记录接口报错（method + path + HTTP 状态 + kind + 耗时）与不符合预期的事件（分类不匹配 / 回退纯文本 / 仅远程加密流等），、WebDAV 同步失败，以及 Flutter 未捕获异常。
+  - 存储：`<appSupport>/app-log.json` 保留最近 300 条，同摘要 8s 内合并计数；只在本机，不进同步载荷。
   - 入口/页面：`lib/features/logs/app_log_page.dart`；采集在 `ApiClient._getJson` + `lib/core/diagnostics/error_handlers.dart`，不改原有错误处理。
 - [x] ~~**同步日志**~~：设置 → WebDAV 配置弹层 → 「同步记录」页，按时间倒序展示每次同步，
   可展开看具体同步了哪本书、哪个字段。设计见 [docs/sync-log-design.md](docs/sync-log-design.md)。

@@ -698,18 +698,8 @@ class ApiClient {
     );
   }
 
-  /// 日志里不放 URL 的查询串。
-  ///
-  /// 上游错误消息常把整条请求 URL 带进来（例如设备注册失败），查询串里会有
-  /// `openudid` / `_rticket` 这类设备标识。只保留 `scheme://host/path`，
-  /// 既不丢定位信息，也不把标识写进日志。
-  String _redactForLog(String text) {
-    return text.replaceAllMapped(RegExp(r'https?://[^\s)<>"]+'), (match) {
-      final uri = Uri.tryParse(match[0]!);
-      if (uri == null || uri.host.isEmpty) return '<url>';
-      return '${uri.scheme}://${uri.host}${uri.path}';
-    });
-  }
+  /// 日志里不放 URL 的查询串（规则见 [redactLogUrlQueries]）。
+  String _redactForLog(String text) => redactLogUrlQueries(text);
 
   /// 异常摘要：`ApiException` 用 message，其它异常截断 `toString`。
   String _describeForLog(Object error) {

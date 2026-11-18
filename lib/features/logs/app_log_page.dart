@@ -52,7 +52,7 @@ class AppLogPage extends ConsumerWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                 child: Text(
-                  '接口报错与不符合预期的事件，只保存在本机',
+                  '接口报错、同步失败与不符合预期的事件，只保存在本机（最多 300 条）',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -256,6 +256,7 @@ class _EntryTileState extends State<_EntryTile> {
 String _sourceLabel(DiagnosticSource source) => switch (source) {
   DiagnosticSource.api => '接口',
   DiagnosticSource.app => '应用',
+  DiagnosticSource.sync => '同步',
 };
 
 String _levelLabel(LogLevel level) => switch (level) {

@@ -45,6 +45,18 @@ enum SyncOutcome {
   }
 }
 
+/// 同步失败阶段的人话文案：同步记录页与运行日志共用，避免两处各写一份。
+String syncPhaseFailureLabel(String? phase) => switch (phase) {
+  'config' => '配置校验失败',
+  'dir' => '创建目录失败',
+  'get' => '拉取失败',
+  'parse' => '云端格式不合法',
+  'merge' => '合并失败',
+  'put' => '上传失败',
+  'meta' => '写入本地元数据失败',
+  _ => '同步失败',
+};
+
 /// 一个字段的变化。`before` / `after` 存渲染好的文案，页面不用再懂小说/短剧。
 class SyncLogField {
   const SyncLogField({

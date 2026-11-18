@@ -36,7 +36,7 @@ void main() {
   });
 
   group('DiagnosticLogStore', () {
-    test('追加按时间倒序，最多保留 200 条', () async {
+    test('追加按时间倒序，最多保留 300 条', () async {
       final store = DiagnosticLogStore();
       for (var i = 0; i < DiagnosticLogStore.maxEntries + 5; i++) {
         await store.append(_entry(1000 + i, message: '错误 $i'));
@@ -100,7 +100,7 @@ void main() {
       ];
       final file = File(DiagnosticLogStore.overridePath!);
       await file.parent.create(recursive: true);
-      // 打乱顺序，模拟旧文件/手工修改；读取时要整理成倒序并只留最近 200 条。
+      // 打乱顺序，模拟旧文件/手工修改；读取时要整理成倒序并只留最近 300 条。
       await file.writeAsString(
         jsonEncode({'v': 1, 'entries': raw.reversed.toList()}),
       );

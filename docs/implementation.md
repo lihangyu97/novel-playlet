@@ -971,7 +971,7 @@ flutter drive --profile -d <iPhone UDID> \
 
 - **入口**：设置 → 诊断 →「运行日志」。页面按天分组倒序展示，可展开看 HTTP 状态 / kind /
   耗时 / 异常堆栈，单条可复制；右上角可清空（只删本机日志）。
-- **数据**：`<AppSupport>/app-log.json`，最多 200 条；同一级别 + 来源 + 摘要 8 秒内重复出现
+- **数据**：`<AppSupport>/app-log.json`，最多 300 条；同一级别 + 来源 + 摘要 8 秒内重复出现
   只增加计数（`×N`），避免断网时同一接口刷屏。日志是本机诊断数据，**不进 `library.db`、
   不进同步载荷**，写入 best-effort，失败只在控制台留一句。
 - **来源**：
@@ -981,9 +981,13 @@ flutter drive --profile -d <iPhone UDID> \
     **不记 query**（搜索词等用户数据不进日志）。
   - `app`：`installDiagnosticErrorHandlers()` 接管 `FlutterError.onError` 与
     `PlatformDispatcher.onError`，记录后仍交给原处理器（框架错误继续 `presentError`，
-    异步错误返回 false），不改变崩溃/打印行为。
+    异步错误返回 false），不改变崩溃/打印行为；`silent` 的框架错误不落日志。
+  - `sync`：`WebDavSyncService` 在同步失败（配置校验 / 目录 / 拉取 / 解析 / 合并 /
+    上传 / 元数据）时记一条，带失败阶段、触发方式与渠道；成功与「无变化跳过」不记，
+    完整明细仍看同步记录页。
 - **不做**：远程上报、日志上传、全量请求审计；业务信封（HTTP 200 + 非 0 code）里的
   「没有段评」等软失败不记（会被当成噪音），请求成功也不记。
 - **测试**：`diagnostic_log_test.dart` 覆盖排序/上限/合并/坏文件；`api_diagnostic_log_test.dart`
-  覆盖 HTTP 失败、内核超时、非 JSON 响应；`test/ui/app_log_page_test.dart` 覆盖列表/展开/
-  空态与设置页入口。
+  覆盖 HTTP 失败、内核超时、非 JSON/非对象响应、URL 查询串脱敏；`diagnostic_error_handlers_test.dart`
+  覆盖 silent 过滤与异步错误透传；`webdav_sync_service_test.dart` 覆盖同步失败写入运行日志；
+  `test/ui/app_log_page_test.dart` 覆盖列表/展开/空态与设置页入口。

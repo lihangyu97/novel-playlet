@@ -368,16 +368,7 @@ String _fieldLabel(String field) => switch (field) {
 
 String _summary(SyncLogRun run) {
   if (run.outcome == SyncOutcome.failed) {
-    return switch (run.phase) {
-      'config' => '配置校验失败',
-      'dir' => '创建目录失败',
-      'get' => '拉取失败',
-      'parse' => '云端格式不合法',
-      'merge' => '合并失败',
-      'put' => '上传失败',
-      'meta' => '写入本地元数据失败',
-      _ => '同步失败',
-    };
+    return syncPhaseFailureLabel(run.phase);
   }
   if (run.outcome == SyncOutcome.skipped) return '无变化，已跳过';
   if (run.uploaded && run.pulledTotal > 0) {

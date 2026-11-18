@@ -27,10 +27,11 @@ enum LogLevel {
   }
 }
 
-/// 日志来源：接口层，或 App 运行时（Flutter 未捕获异常）。
+/// 日志来源：接口层、App 运行时（Flutter 未捕获异常）或 WebDAV 同步。
 enum DiagnosticSource {
   api('api'),
-  app('app');
+  app('app'),
+  sync('sync');
 
   const DiagnosticSource(this.wire);
 
@@ -112,7 +113,7 @@ class DiagnosticEntry {
 /// 和同步记录一样是**本机诊断数据**：不进 `library.db`、不进同步载荷。
 /// 写入全是 best-effort——日志写失败绝不能反过来影响业务。
 class DiagnosticLogStore {
-  static const int maxEntries = 200;
+  static const int maxEntries = 300;
 
   /// 同一级别 + 来源 + 摘要在这个窗口内重复出现时合并计数，而不是新增一行。
   static const int duplicateWindowMs = 8000;
@@ -253,6 +254,16 @@ final diagnosticLogEntriesProvider =
       await store.flush();
       return store.read();
     });
+
+/// 日志文本脱敏：URL 只保留 `scheme://host/path`，去掉可能含设备标识/
+/// 凭据的查询串。
+String redactLogUrlQueries(String text) {
+  return text.replaceAllMapped(RegExp(r'https?://[^\s)<>"]+'), (match) {
+    final uri = Uri.tryParse(match[0]!);
+    if (uri == null || uri.host.isEmpty) return '<url>';
+    return '${uri.scheme}://${uri.host}${uri.path}';
+  });
+}
 
 String _text(Object? value) => value == null ? '' : '$value';
 
