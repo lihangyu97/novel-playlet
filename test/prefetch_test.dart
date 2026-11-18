@@ -10,6 +10,8 @@ import 'package:novel_playlet/data/models/rank.dart';
 import 'package:novel_playlet/features/prefetch/app_prefetch.dart';
 import 'package:novel_playlet/features/rank/rank_cache.dart';
 import 'package:novel_playlet/features/rank/rank_providers.dart';
+import 'package:novel_playlet/features/recommend/recommend_category.dart';
+import 'package:novel_playlet/features/recommend/recommend_controller.dart';
 import 'package:novel_playlet/features/search/search_providers.dart';
 
 class _PrefetchTransport extends BackendTransport {
@@ -51,6 +53,23 @@ class _PrefetchTransport extends BackendTransport {
           },
         },
       });
+    }
+    if (path == '/api/v1/recommend/homepage') {
+      final tabType = int.tryParse(
+        Uri.splitQueryString(query ?? '')['tab_type'] ?? '',
+      );
+      if (tabType == 8 || tabType == 24) {
+        // 推荐分类首屏：只需让 videoFeed 认出 tab_type，空列表即可。
+        return _json({
+          'code': 0,
+          'data': {
+            'tab_index': 0,
+            'tab_item': [
+              {'tab_type': tabType, 'cell_data': <dynamic>[], 'next_offset': 0},
+            ],
+          },
+        });
+      }
     }
     return _json({'code': 0, 'data': <dynamic>[]});
   }
@@ -97,6 +116,14 @@ void main() {
 
     final hot = container.read(hotSearchProvider);
     expect(hot.entries.single.title, '第一条热搜');
+    for (final category in const [
+      RecommendCategory.drama,
+      RecommendCategory.anime,
+    ]) {
+      final feed = container.read(recommendFeedProvider(category));
+      expect(feed.hasValue, isTrue, reason: '${category.label} 首屏已预热');
+      expect(feed.isLoading, isFalse, reason: '${category.label} 不再 loading');
+    }
 
     final cache = container.read(rankBoardCacheProvider);
     final key = const RankBoardCacheKey(
@@ -147,6 +174,23 @@ void main() {
     expect(
       transport.calls.where((path) => path == '/api/v1/search/hot').length,
       first + 1,
+    );
+  });
+
+  test('目录缓存命中时不再请求首页接口', () async {
+    final transport = _PrefetchTransport();
+    final container = ProviderContainer(
+      overrides: [apiClientProvider.overrideWithValue(ApiClient(transport))],
+    );
+    addTearDown(container.dispose);
+    container.read(rankCatalogCacheProvider).write(_catalog);
+
+    final catalog = await container.read(rankCatalogProvider.future);
+
+    expect(catalog.rankId, 'rank-1');
+    expect(
+      transport.calls.any((path) => path == '/api/v1/recommend/homepage'),
+      isFalse,
     );
   });
 }

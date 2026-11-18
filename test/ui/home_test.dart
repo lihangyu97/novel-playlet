@@ -174,4 +174,20 @@ void main() {
       isNotEmpty,
     );
   });
+
+  testWidgets('首页预热短剧/漫剧首屏后切换不再 loading', (tester) async {
+    final fake = FakePreviewTransport();
+    await pumpPreview(tester, const HomeShell(), transport: fake);
+    // 等首屏后的预热完成。
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('短剧'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('正在加载短剧'), findsNothing);
+
+    await tester.tap(find.text('漫剧'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('正在加载漫剧'), findsNothing);
+  });
 }

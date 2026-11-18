@@ -79,3 +79,24 @@ final rankBoardCacheProvider = Provider<RankBoardCache>((ref) {
   ref.onDispose(cache.dispose);
   return cache;
 });
+
+/// 首页 recommend payload 里解析出的排行榜目录。
+///
+/// 目录不需要再打一次首页接口：预取和首次打开排行榜页都先读这份缓存。
+/// 目录在同一进程内稳定，不做 TTL；下一次首页刷新会覆盖。
+class RankCatalogCache {
+  RankCatalog? _catalog;
+
+  RankCatalog? read() => _catalog;
+
+  void write(RankCatalog catalog) {
+    if (catalog.isEmpty) return;
+    _catalog = catalog;
+  }
+
+  void clear() => _catalog = null;
+}
+
+final rankCatalogCacheProvider = Provider<RankCatalogCache>(
+  (ref) => RankCatalogCache(),
+);

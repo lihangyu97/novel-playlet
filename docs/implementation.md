@@ -1021,16 +1021,23 @@ flutter drive --profile -d <iPhone UDID> \
   不阻塞首屏。预热只做数据缓存，**不保活 SearchPage / RankPage 页面树**。
 - **搜索热搜**：`hotSearchProvider` 改成进程级 `Notifier` + 10 分钟 TTL；首页预热一份，
   搜索页打开时 `ensureFresh()` 命中缓存直接展示，过期后台刷新，失败保留旧值/空榜。
+- **推荐分类首屏**：后台 `ref.read(recommendFeedProvider(短剧/漫剧).future)` 把两个分类的
+  第一页先拉好。推荐页默认在小说 tab，用户第一次切短剧/漫剧时直接命中 `AsyncData`，不再
+  闪「正在加载短剧/漫剧」。失败则保持未加载，切过去按原逻辑重试。
 - **排行榜**：`RankBoardCache` 缓存小说 / 短剧 / 漫剧三个内容域各自第一顺位榜的首屏（5 分钟 TTL）。`RankPage` 的每个
   榜单 tab 初始化时先读缓存：命中新鲜缓存不发首屏请求；过期时先画缓存再静默刷新，失败保留
   缓存。翻页数据不进缓存，仍由页面 `FeedState` 管。缓存写入会通知已打开的
   `_RankTabPage`：预热晚于页面首屏请求时直接替换 loading，随后网络结果再替换缓存。
-- **预取服务**：`lib/features/prefetch/app_prefetch.dart` 并行预热「热搜 + 排行榜目录 +
+- **预取服务**：`lib/features/prefetch/app_prefetch.dart` 并行预热「热搜 +
   三个内容域各自第一顺位榜的首屏」，不把小说的完本/巅峰/新书也拉一遍；失败静默。
-- **成本**：热搜 1 次小请求、三个内容域首屏共 3 次请求；排行榜目录当前仍会再请求一次首页接口
-  （`rankCatalog()` 的实现），后续可复用首页 recommend payload 省掉；若目录也能复用，总请求可降到 4 次。缓存只存榜单对象和
-  URL，量级远小于保活页面。
+- **目录复用**：`ApiClient.recommend` 把首页 payload 交给回调，`RecommendFeedController`
+  顺手解析 `RankCatalog` 写进 `RankCatalogCache`，`rankCatalogProvider` 优先读它；预取和首次
+  打开排行榜页都不再重复请求首页（实测这次重复请求约 4s）。
+- **成本**：热搜 1 次 + 排行榜三个内容域首屏 3 次 + 短剧推荐首屏 1 次 + 漫剧推荐首屏
+  1–2 次（漫剧首屏有搜索兜底），共约 6–7 次小请求；目录复用首页 payload 后不再额外请求。
+  缓存只存列表对象和 URL，量级远小于保活页面。
 - **排行榜入场动画**：`RankRoute` 使用 `PageRouteBuilder` 从左侧滑入、返回时滑回左侧，不再用系统默认的右进左出。
-- **测试**：`prefetch_test.dart` 覆盖预热一次 / 重复调用不重复请求 / force 刷新；
+- **测试**：`prefetch_test.dart` 覆盖预热一次 / 重复调用不重复请求 / force 刷新 / 目录缓存
+  命中不请求首页 / 短剧漫剧推荐首屏已就绪；
   `test/ui/rank_page_test.dart` 覆盖缓存命中不发首屏请求；`test/ui/home_test.dart` 覆盖
   首屏完成后触发预热。

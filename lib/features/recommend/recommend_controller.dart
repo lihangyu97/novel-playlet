@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../data/api/api_client.dart';
 import '../../data/models/json_utils.dart';
+import '../../data/models/rank.dart';
+import '../rank/rank_cache.dart';
 import 'recommend_category.dart';
 import 'recommend_item.dart';
 import 'recommend_state.dart';
@@ -187,6 +189,21 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
 
   Future<RecommendState> _loadFeed() => _fetchFeed();
 
+  /// 首页 recommend payload 里顺带解析排行榜目录。
+  ///
+  /// 排行榜目录和小说首页是同一个响应；这里缓存下来，预取和第一次打开
+  /// 排行榜页就不用再打一次首页接口（实测这次重复请求要 4s 左右）。
+  void _captureRankCatalog(Map<String, dynamic> payload) {
+    try {
+      final catalog = RankCatalog.fromHomepagePayload(payload);
+      if (!catalog.isEmpty) {
+        ref.read(rankCatalogCacheProvider).write(catalog);
+      }
+    } catch (_) {
+      // 顺带缓存，解析异常不能反过来影响推荐流。
+    }
+  }
+
   /// 推荐流的一页。分类 → 上游请求的差异（tab、漫剧兜底）全在
   /// [RecommendCategory.source] 里。
   Future<RecommendState> _fetchFeed({int offset = 0, String? sessionId}) async {
@@ -194,6 +211,7 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
       _api,
       offset: offset,
       sessionId: sessionId,
+      onPayload: _captureRankCatalog,
     );
     return FeedState<RecommendItem>(
       items: page.items,

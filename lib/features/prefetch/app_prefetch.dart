@@ -4,11 +4,14 @@ import '../../app/providers.dart';
 import '../../data/models/rank.dart';
 import '../rank/rank_cache.dart';
 import '../rank/rank_providers.dart';
+import '../recommend/recommend_category.dart';
+import '../recommend/recommend_controller.dart';
 import '../search/search_providers.dart';
 
 final appPrefetchProvider = Provider<AppPrefetch>((ref) => AppPrefetch(ref));
 
-/// 首页首屏完成后的低优先级预热：搜索页热搜榜 + 排行榜三个内容域首屏。
+/// 首页首屏完成后的低优先级预热：搜索页热搜榜 + 推荐页短剧/漫剧首屏 +
+/// 排行榜三个内容域首屏。
 ///
 /// 只做数据缓存，不保活页面。失败静默：预热是锦上添花，不能影响首页可用性。
 /// 只跑一次/进程；搜索页与排行榜页仍保留自己的按需请求和刷新路径。
@@ -21,8 +24,33 @@ class AppPrefetch {
   Future<void> warm() => _warmFuture ??= _warm();
 
   Future<void> _warm() async {
-    // 两类请求互不依赖：一个失败不影响另一个。
-    await Future.wait([_warmHotSearch(), _warmRankBoards()]);
+    // 三组请求互不依赖：一个失败不影响另外两个。
+    await Future.wait([
+      _warmHotSearch(),
+      _warmRankBoards(),
+      _warmRecommendFeeds(),
+    ]);
+  }
+
+  /// 短剧 / 漫剧分类首屏。推荐页默认在小说 tab，用户第一次切过去时
+  /// `RecommendFeedController` 还没 build，会先闪加载态；这里提前把 family
+  /// 实例建好并拉完第一页，切 tab 时直接命中 AsyncData。
+  Future<void> _warmRecommendFeeds() async {
+    await Future.wait([
+      for (final category in const [
+        RecommendCategory.drama,
+        RecommendCategory.anime,
+      ])
+        _warmFeed(category),
+    ]);
+  }
+
+  Future<void> _warmFeed(RecommendCategory category) async {
+    try {
+      await ref.read(recommendFeedProvider(category).future);
+    } catch (_) {
+      // 某个分类失败就保持未加载，用户切过去时按原逻辑重试。
+    }
   }
 
   Future<void> _warmHotSearch() async {
