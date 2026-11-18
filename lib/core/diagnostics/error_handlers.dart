@@ -12,12 +12,16 @@ void installDiagnosticErrorHandlers([DiagnosticLogStore? store]) {
 
   final previous = FlutterError.onError;
   FlutterError.onError = (details) {
-    log.record(
-      level: LogLevel.error,
-      source: DiagnosticSource.app,
-      message: _firstLine(details.exceptionAsString()),
-      detail: details.stack?.toString() ?? details.toString(),
-    );
+    // 封面图加载失败这类 `silent` 错误由框架有意静音（不打印、不崩溃），
+    // 每张图一条会把 200 条的缓冲刷满，反而挤掉真正的接口报错。
+    if (!details.silent) {
+      log.record(
+        level: LogLevel.error,
+        source: DiagnosticSource.app,
+        message: _firstLine(details.exceptionAsString()),
+        detail: details.stack?.toString() ?? details.toString(),
+      );
+    }
     if (previous != null) {
       previous(details);
     } else {

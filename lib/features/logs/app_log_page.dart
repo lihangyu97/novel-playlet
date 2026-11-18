@@ -105,8 +105,10 @@ class AppLogPage extends ConsumerWidget {
     );
     if (confirmed != true || !context.mounted) return;
     await ref.read(diagnosticLogStoreProvider).clear();
+    // 清空是异步的；期间用户可能已经返回，避免对已销毁的 ref 做 invalidate。
+    if (!context.mounted) return;
     ref.invalidate(diagnosticLogEntriesProvider);
-    if (context.mounted) showAppSnackBar(context, '已清空运行日志');
+    showAppSnackBar(context, '已清空运行日志');
   }
 }
 

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -90,6 +91,24 @@ void main() {
       expect(await store.read(), isEmpty);
       await store.append(_entry(1));
       expect(await store.read(), hasLength(1));
+    });
+
+    test('读取时按时间倒序并截断到上限', () async {
+      final raw = [
+        for (var i = 0; i < DiagnosticLogStore.maxEntries + 5; i++)
+          _entry(1000 + i, message: '错误 $i').toJson(),
+      ];
+      final file = File(DiagnosticLogStore.overridePath!);
+      await file.parent.create(recursive: true);
+      // 打乱顺序，模拟旧文件/手工修改；读取时要整理成倒序并只留最近 200 条。
+      await file.writeAsString(
+        jsonEncode({'v': 1, 'entries': raw.reversed.toList()}),
+      );
+
+      final entries = await DiagnosticLogStore().read();
+      expect(entries, hasLength(DiagnosticLogStore.maxEntries));
+      expect(entries.first.at, 1000 + DiagnosticLogStore.maxEntries + 4);
+      expect(entries.last.at, 1005);
     });
 
     test('清空后读到空列表', () async {

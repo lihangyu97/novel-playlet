@@ -173,6 +173,39 @@ void main() {
     expect(entry.detail, isNot(contains('openudid')));
   });
 
+  test('200 + success:false 的失败信封记一条 error', () async {
+    final api = ApiClient(
+      _StubTransport(
+        200,
+        jsonEncode({'success': false, 'error': '没有权限', 'kind': 'bad_input'}),
+      ),
+      logStore: store,
+    );
+
+    try {
+      await api.bookDetail('b1');
+    } catch (_) {
+      // 信封失败后解析层怎么抛不影响日志；这里只验证记录。
+    }
+    await store.flush();
+
+    final entry = (await store.read()).single;
+    expect(entry.level, LogLevel.error);
+    expect(entry.message, contains('没有权限'));
+    expect(entry.detail, contains('HTTP 200'));
+  });
+
+  test('200 但顶层不是对象记一条 unexpected', () async {
+    final api = ApiClient(_StubTransport(200, '[]'), logStore: store);
+
+    await expectLater(api.bookDetail('b1'), throwsA(isA<ApiException>()));
+    await store.flush();
+
+    final entry = (await store.read()).single;
+    expect(entry.level, LogLevel.unexpected);
+    expect(entry.message, contains('响应格式异常'));
+  });
+
   test('不传 logStore 时不落盘', () async {
     final api = ApiClient(_TimeoutTransport());
     await expectLater(api.bookDetail('b1'), throwsA(isA<ApiException>()));

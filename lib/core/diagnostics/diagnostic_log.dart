@@ -142,10 +142,14 @@ class DiagnosticLogStore {
       if (!await file.exists()) return <DiagnosticEntry>[];
       final decoded = jsonDecode(await file.readAsString());
       if (decoded is! Map) return <DiagnosticEntry>[];
-      return [
+      final entries = [
         for (final raw in _list(decoded['entries']))
           ?DiagnosticEntry.tryFromJson(raw),
       ];
+      // 文件可能被旧版本/手工改成乱序或超长，读的时候统一整理，页面只按
+      // 倒序假设渲染；下一次写入也会把整理后的结果落盘。
+      entries.sort((a, b) => b.at.compareTo(a.at));
+      return entries.take(maxEntries).toList(growable: false);
     } catch (_) {
       // 坏文件按空日志处理；下一次写入会覆盖它。
       return <DiagnosticEntry>[];
@@ -243,9 +247,12 @@ final diagnosticLogStoreProvider = Provider<DiagnosticLogStore>(
 /// 用 autoDispose：每次打开页面重新读一次文件，避免停留在一个旧快照上；
 /// 清空后页面自己 invalidate 即可。
 final diagnosticLogEntriesProvider =
-    FutureProvider.autoDispose<List<DiagnosticEntry>>(
-      (ref) => ref.watch(diagnosticLogStoreProvider).read(),
-    );
+    FutureProvider.autoDispose<List<DiagnosticEntry>>((ref) async {
+      final store = ref.watch(diagnosticLogStoreProvider);
+      // 先等排队中的写入落盘，否则刚发生的错误可能在打开页面时还读不到。
+      await store.flush();
+      return store.read();
+    });
 
 String _text(Object? value) => value == null ? '' : '$value';
 
