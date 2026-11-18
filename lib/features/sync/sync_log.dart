@@ -265,6 +265,10 @@ class SyncLogStore {
   /// 测试注入用；为 null 时落到 `<AppSupport>/sync-log.json`。
   static String? overridePath;
 
+  /// 串行化写入：书架同步和设置同步可能同时追加记录，read-modify-write
+  /// 不加锁会互相覆盖（真机上确实丢过一条 settings 记录）。
+  Future<void> _tail = Future<void>.value();
+
   Future<File> _file() async {
     final path =
         overridePath ??
@@ -290,7 +294,14 @@ class SyncLogStore {
   /// 追加一条，超出上限的旧记录丢掉。
   ///
   /// 调用方要保证这是 best-effort：日志写失败绝不能影响同步结果。
-  Future<void> append(SyncLogRun run) async {
+  /// 所有写入串行化，避免书架同步与设置同步并发时互相覆盖。
+  Future<void> append(SyncLogRun run) {
+    final next = _tail.then((_) => _append(run));
+    _tail = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _append(SyncLogRun run) async {
     final runs = [run, ...await read()];
     final kept = runs.take(maxRuns).toList();
     await writeJsonAtomically(await _file(), {
@@ -299,10 +310,19 @@ class SyncLogStore {
     });
   }
 
-  Future<void> clear() async {
+  Future<void> clear() {
+    final next = _tail.then((_) => _clear());
+    _tail = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _clear() async {
     final file = await _file();
     if (await file.exists()) await file.delete();
   }
+
+  /// 等待已排队的写入完成（测试/退出前用）。
+  Future<void> flush() => _tail;
 }
 
 final syncLogStoreProvider = Provider<SyncLogStore>((ref) => SyncLogStore());
