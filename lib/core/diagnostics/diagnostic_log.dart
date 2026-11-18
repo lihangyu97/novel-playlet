@@ -27,11 +27,10 @@ enum LogLevel {
   }
 }
 
-/// 日志来源：接口层、App 运行时（Flutter 未捕获异常）或 WebDAV 同步。
+/// 日志来源：接口层，或 App 运行时（Flutter 未捕获异常）。
 enum DiagnosticSource {
   api('api'),
-  app('app'),
-  sync('sync');
+  app('app');
 
   const DiagnosticSource(this.wire);
 

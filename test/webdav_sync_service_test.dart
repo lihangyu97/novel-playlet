@@ -1,7 +1,4 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
-import 'package:novel_playlet/core/diagnostics/diagnostic_log.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/features/sync/sync_log.dart';
 import 'package:novel_playlet/features/sync/sync_meta.dart';
@@ -214,36 +211,6 @@ void main() {
     expect(runs, hasLength(2));
     expect(runs.first.outcome, SyncOutcome.skipped);
     expect(runs.first.revAfter, runs.first.revBefore);
-  });
-
-  test('同步失败也写进运行日志', () async {
-    final dir = await Directory.systemTemp.createTemp('sync-diag-test');
-    DiagnosticLogStore.overridePath = '${dir.path}/app-log.json';
-    addTearDown(() async {
-      DiagnosticLogStore.overridePath = null;
-      if (await dir.exists()) await dir.delete(recursive: true);
-    });
-
-    client.files[config.resolve('novel-playlet/release/sync.json')] = '{broken';
-    final diagnosticStore = DiagnosticLogStore();
-    final service = WebDavSyncService(
-      store: store,
-      client: client,
-      metaStore: SyncMetaStore(),
-      diagnosticStore: diagnosticStore,
-      profile: 'release',
-    );
-
-    await expectLater(service.sync(config), throwsA(isA<WebDavException>()));
-    await diagnosticStore.flush();
-
-    final entry = (await diagnosticStore.read()).single;
-    expect(entry.level, LogLevel.error);
-    expect(entry.source, DiagnosticSource.sync);
-    expect(entry.message, contains('云端格式不合法'));
-    expect(entry.message, contains('格式不正确'));
-    expect(entry.detail, contains('阶段 parse'));
-    expect(entry.detail, contains('渠道 release'));
   });
 
   test('同步失败时日志记下失败阶段与错误文案', () async {

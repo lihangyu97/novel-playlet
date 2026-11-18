@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
-import '../../core/diagnostics/diagnostic_log.dart';
 import '../../core/storage/reading_store.dart';
 import 'sync_log.dart';
 import 'sync_meta.dart';
@@ -42,7 +41,6 @@ class WebDavSyncService {
     required this.client,
     required this.metaStore,
     SyncLogStore? logStore,
-    this.diagnosticStore,
     String? profile,
   }) : logStore = logStore ?? SyncLogStore(),
        profile = profile ?? syncProfile;
@@ -51,9 +49,6 @@ class WebDavSyncService {
   final WebDavClient client;
   final SyncMetaStore metaStore;
   final SyncLogStore logStore;
-
-  /// 运行日志（设置 → 诊断 → 运行日志）；为 null 时不写（测试默认）。
-  final DiagnosticLogStore? diagnosticStore;
   final String profile;
 
   String get _dir => 'novel-playlet/$profile';
@@ -320,16 +315,6 @@ class WebDavSyncService {
     } catch (_) {
       // 日志是诊断数据，磁盘满/权限问题都不该影响同步结果。
     }
-    if (failed) {
-      diagnosticStore?.record(
-        level: LogLevel.error,
-        source: DiagnosticSource.sync,
-        message:
-            'WebDAV 同步失败（${syncPhaseFailureLabel(phase)}）：'
-            '${redactLogUrlQueries(error ?? '同步失败')}',
-        detail: '阶段 $phase\n触发 ${trigger.wire}\n渠道 $profile',
-      );
-    }
   }
 
   static List<SyncLogChange> _take(List<SyncLogChange> changes) =>
@@ -381,6 +366,5 @@ final webDavSyncServiceProvider = Provider<WebDavSyncService>(
     // 测试可以 override 成内存实现：widget 测试的 FakeAsync 里真实文件 IO
     // 不会完成，会把「保存配置后立即同步」卡在 正在同步…
     logStore: ref.watch(syncLogStoreProvider),
-    diagnosticStore: ref.watch(diagnosticLogStoreProvider),
   ),
 );

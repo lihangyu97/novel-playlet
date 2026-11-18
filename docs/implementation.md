@@ -982,12 +982,9 @@ flutter drive --profile -d <iPhone UDID> \
   - `app`：`installDiagnosticErrorHandlers()` 接管 `FlutterError.onError` 与
     `PlatformDispatcher.onError`，记录后仍交给原处理器（框架错误继续 `presentError`，
     异步错误返回 false），不改变崩溃/打印行为；`silent` 的框架错误不落日志。
-  - `sync`：`WebDavSyncService` 在同步失败（配置校验 / 目录 / 拉取 / 解析 / 合并 /
-    上传 / 元数据）时记一条，带失败阶段、触发方式与渠道；成功与「无变化跳过」不记，
-    完整明细仍看同步记录页。
 - **不做**：远程上报、日志上传、全量请求审计；业务信封（HTTP 200 + 非 0 code）里的
   「没有段评」等软失败不记（会被当成噪音），请求成功也不记。
 - **测试**：`diagnostic_log_test.dart` 覆盖排序/上限/合并/坏文件；`api_diagnostic_log_test.dart`
   覆盖 HTTP 失败、内核超时、非 JSON/非对象响应、URL 查询串脱敏；`diagnostic_error_handlers_test.dart`
-  覆盖 silent 过滤与异步错误透传；`webdav_sync_service_test.dart` 覆盖同步失败写入运行日志；
+  覆盖 silent 过滤与异步错误透传；
   `test/ui/app_log_page_test.dart` 覆盖列表/展开/空态与设置页入口。
