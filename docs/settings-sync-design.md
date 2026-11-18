@@ -129,7 +129,7 @@ read-modify-write；重启后仍然能做 LWW。
 
 拉取可以在任何时刻发起，但**应用（apply）前要判断当前有没有沉浸页**：
 阅读页、播放页、设置页压栈时不 apply，只更新 `remoteEtag` 与 `lastSyncAt`，
-**不推进 `lastRemoteUpdatedAt`**，这样下次 `resumed` 还会判定「远端比已应用的新」并重试。
+**不推进 `lastRemoteUpdatedAt`**，这样离开沉浸页或下次 `resumed` 还会判定「远端比已应用的新」并重试。
 
 理由：
 

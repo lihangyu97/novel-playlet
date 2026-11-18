@@ -1004,7 +1004,7 @@ flutter drive --profile -d <iPhone UDID> \
   比较，本地更新推本地，否则远端赢（时间相同远端赢）。apply 时用 `_applyingRemote` 屏蔽
   脏标记，绝不 ping-pong；推送带 `If-Match`，412 重读后按同一规则重判，最多重试一次。
 - **防脏写**：apply 被沉浸页挡住时只更新 etag / remoteHash，不推进 `lastRemoteUpdatedAt`，
-  下次 resumed 自动重试；不写 `updatedAt` 相同但 hash 不同的“假最新”。
+  离开沉浸页或下次 resumed 自动重试；不写 `updatedAt` 相同但 hash 不同的“假最新”。
 - **挡板**：`ImmersivePageTracker` 在阅读页 / 播放页 / 设置页压栈时计数，`idle == 0` 才 apply；
   详情 / 搜索 / 缓存中心允许回填。
 - **注册表**：`SettingsSection` 把主题、全局字重、推荐布局、阅读排版拆成 4 组；每组只实现

@@ -81,6 +81,14 @@ class SettingsSyncCoordinator extends Notifier<SettingsSyncStatus> {
     ref.listen(appFontWeightProvider, (_, _) => _onLocalChanged());
     ref.listen(recommendLayoutProvider, (_, _) => _onLocalChanged());
     ref.listen(readerSettingsProvider, (_, _) => _onLocalChanged());
+    // 离开阅读/播放/设置页后如果还有 deferred 的云端设置，立刻补一次 apply。
+    ref.listen(immersivePageProvider, (previous, next) {
+      if ((previous ?? 0) > 0 &&
+          next == 0 &&
+          state.phase == SettingsSyncPhase.deferred) {
+        unawaited(syncNow(trigger: SyncTrigger.lifecycle));
+      }
+    });
 
     ref.onDispose(() => _debounce?.cancel());
     _ready = _initialize();
@@ -187,6 +195,11 @@ class SettingsSyncCoordinator extends Notifier<SettingsSyncStatus> {
         );
       }
       ref.invalidate(syncLogRunsProvider);
+      // 网络请求期间用户可能已经离开沉浸页：下一轮立刻重试。
+      if (result.action == SettingsSyncAction.deferred &&
+          ref.read(immersivePageProvider) == 0) {
+        _syncAgain = true;
+      }
       if (_dirty && ref.mounted) {
         _schedulePush();
       }
