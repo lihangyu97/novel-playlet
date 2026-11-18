@@ -10,20 +10,20 @@ import '../storage/offline/offline_paths.dart';
 
 /// 日志级别：`error` 是明确失败的报错；`unexpected` 是没按预期走、但可能已经
 /// 兜底恢复的事件（响应形状不对、回退备用接口等）。
-enum DiagnosticLevel {
+enum LogLevel {
   error('error'),
   unexpected('unexpected');
 
-  const DiagnosticLevel(this.wire);
+  const LogLevel(this.wire);
 
   final String wire;
 
-  static DiagnosticLevel parse(Object? value) {
+  static LogLevel parse(Object? value) {
     final wire = _text(value);
     for (final level in values) {
       if (level.wire == wire) return level;
     }
-    return DiagnosticLevel.error;
+    return LogLevel.error;
   }
 }
 
@@ -61,7 +61,7 @@ class DiagnosticEntry {
   });
 
   final int at;
-  final DiagnosticLevel level;
+  final LogLevel level;
   final DiagnosticSource source;
   final String message;
   final String? detail;
@@ -98,7 +98,7 @@ class DiagnosticEntry {
     final count = _int(json['n']);
     return DiagnosticEntry(
       at: _int(json['at']),
-      level: DiagnosticLevel.parse(json['lv']),
+      level: LogLevel.parse(json['lv']),
       source: DiagnosticSource.parse(json['src']),
       message: message,
       detail: detail.isEmpty ? null : detail,
@@ -154,7 +154,7 @@ class DiagnosticLogStore {
 
   /// 记一条（不等待落盘）。调用点都在错误路径上，不能为此拖慢请求。
   void record({
-    required DiagnosticLevel level,
+    required LogLevel level,
     required DiagnosticSource source,
     required String message,
     String? detail,

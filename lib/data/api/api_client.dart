@@ -27,12 +27,12 @@ import '../parsers/video_parsers.dart';
 /// 页面状态在 controller 里，这一层只负责"一次请求 → 一个模型"。
 class ApiClient {
   ApiClient(this._transport, {DiagnosticLogStore? logStore})
-    : _logStore = logStore;
+    : _diagnosticLog = logStore;
 
   final BackendTransport _transport;
 
   /// 请求失败/响应不符合预期时写运行日志；测试不传就完全不落盘。
-  final DiagnosticLogStore? _logStore;
+  final DiagnosticLogStore? _diagnosticLog;
 
   /// 上游书城小说推荐（`tab_type=2`）。[sessionId] 翻页时必须回传，否则
   /// 上游会换设备导致 101116。
@@ -668,20 +668,21 @@ class ApiClient {
 
   /// 把一次请求失败写进运行日志（日志写失败不影响抛错路径）。
   void _logFailure(String path, Object error, {int? status, int? elapsedMs}) {
-    final store = _logStore;
+    final store = _diagnosticLog;
     if (store == null) return;
     final kind = error is ApiException ? error.kind : null;
-    final userCopy = apiErrorCopy(error, fallback: '请求失败');
+    final rawCopy = apiErrorCopy(error, fallback: '请求失败');
+    final userCopy = _redactForLog(rawCopy);
     final detail = <String>[
       if (status != null) 'HTTP $status',
       if (kind != null) 'kind=${kind.wireName}',
       if (elapsedMs != null) '耗时 ${elapsedMs}ms',
-      if (error is ApiException && error.message.trim() != userCopy)
-        '原始错误：${error.message}',
-      if (error is! ApiException) '异常：${_describeForLog(error)}',
+      if (error is ApiException && error.message.trim() != rawCopy)
+        '原始错误：${_redactForLog(error.message)}',
+      if (error is! ApiException) '异常：${_redactForLog(_describeForLog(error))}',
     ];
     store.record(
-      level: DiagnosticLevel.error,
+      level: LogLevel.error,
       source: DiagnosticSource.api,
       message: 'GET $path 失败：$userCopy',
       detail: detail.isEmpty ? null : detail.join('\n'),
@@ -689,12 +690,25 @@ class ApiClient {
   }
 
   void _logUnexpected(String path, String message, {String? detail}) {
-    _logStore?.record(
-      level: DiagnosticLevel.unexpected,
+    _diagnosticLog?.record(
+      level: LogLevel.unexpected,
       source: DiagnosticSource.api,
       message: 'GET $path · $message',
-      detail: detail,
+      detail: detail == null ? null : _redactForLog(detail),
     );
+  }
+
+  /// 日志里不放 URL 的查询串。
+  ///
+  /// 上游错误消息常把整条请求 URL 带进来（例如设备注册失败），查询串里会有
+  /// `openudid` / `_rticket` 这类设备标识。只保留 `scheme://host/path`，
+  /// 既不丢定位信息，也不把标识写进日志。
+  String _redactForLog(String text) {
+    return text.replaceAllMapped(RegExp(r'https?://[^\s)<>"]+'), (match) {
+      final uri = Uri.tryParse(match[0]!);
+      if (uri == null || uri.host.isEmpty) return '<url>';
+      return '${uri.scheme}://${uri.host}${uri.path}';
+    });
   }
 
   /// 异常摘要：`ApiException` 用 message，其它异常截断 `toString`。

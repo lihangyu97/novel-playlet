@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/core/diagnostics/diagnostic_log.dart';
 import 'package:novel_playlet/features/logs/app_log_page.dart';
@@ -6,7 +7,7 @@ import 'package:novel_playlet/features/settings/settings_page.dart';
 import 'preview_harness.dart';
 
 DiagnosticEntry _entry({
-  DiagnosticLevel level = DiagnosticLevel.error,
+  LogLevel level = LogLevel.error,
   DiagnosticSource source = DiagnosticSource.api,
   String message = 'GET /api/v1/feed 失败：网络超时，请重试',
   String? detail,
@@ -55,7 +56,7 @@ void main() {
 
   testWidgets('运行日志页：意外事件用另一套文案', (tester) async {
     final entry = _entry(
-      level: DiagnosticLevel.unexpected,
+      level: LogLevel.unexpected,
       source: DiagnosticSource.app,
       message: '推荐返回的分类不匹配',
       detail: '期望 tab_type=8，实际=2',

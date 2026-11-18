@@ -5,7 +5,7 @@ import 'package:novel_playlet/core/diagnostics/diagnostic_log.dart';
 
 DiagnosticEntry _entry(
   int at, {
-  DiagnosticLevel level = DiagnosticLevel.error,
+  LogLevel level = LogLevel.error,
   DiagnosticSource source = DiagnosticSource.api,
   String message = 'GET /api/v1/a 失败：网络超时，请重试',
   String? detail,
@@ -75,11 +75,7 @@ void main() {
       final store = DiagnosticLogStore();
       await store.append(_entry(1000));
       await store.append(
-        _entry(
-          1200,
-          level: DiagnosticLevel.unexpected,
-          message: _entry(0).message,
-        ),
+        _entry(1200, level: LogLevel.unexpected, message: _entry(0).message),
       );
 
       expect(await store.read(), hasLength(2));
@@ -108,7 +104,7 @@ void main() {
     test('JSON 往返保留级别 / 来源 / 计数 / 上下文', () {
       const entry = DiagnosticEntry(
         at: 10,
-        level: DiagnosticLevel.unexpected,
+        level: LogLevel.unexpected,
         source: DiagnosticSource.api,
         message: 'GET /api/v1/recommend/homepage · 推荐返回的分类不匹配',
         detail: '期望 tab_type=8，实际=2',
@@ -117,7 +113,7 @@ void main() {
 
       final decoded = DiagnosticEntry.tryFromJson(entry.toJson())!;
       expect(decoded.at, 10);
-      expect(decoded.level, DiagnosticLevel.unexpected);
+      expect(decoded.level, LogLevel.unexpected);
       expect(decoded.source, DiagnosticSource.api);
       expect(decoded.message, contains('分类不匹配'));
       expect(decoded.detail, '期望 tab_type=8，实际=2');

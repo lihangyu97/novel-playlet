@@ -31,6 +31,23 @@ class _StubTransport extends BackendTransport {
   }
 }
 
+class _ThrowingTransport extends BackendTransport {
+  _ThrowingTransport() : super(port: 0);
+
+  @override
+  Future<BackendResponse> send(
+    String method,
+    String path, {
+    String? query,
+    Uint8List? body,
+    Duration timeout = BackendTransport.defaultTimeout,
+  }) async {
+    throw StateError(
+      '内核没起来 https://log.example.com/boot?token=secret&openudid=abc',
+    );
+  }
+}
+
 class _TimeoutTransport extends BackendTransport {
   _TimeoutTransport() : super(port: 0);
 
@@ -76,7 +93,7 @@ void main() {
     final entries = await store.read();
     expect(entries, hasLength(1));
     final entry = entries.single;
-    expect(entry.level, DiagnosticLevel.error);
+    expect(entry.level, LogLevel.error);
     expect(entry.source, DiagnosticSource.api);
     expect(entry.message, contains('/api/v1/books/b1/detail'));
     expect(entry.message, contains('上游炸了'));
@@ -111,8 +128,49 @@ void main() {
     await store.flush();
 
     final entries = await store.read();
-    expect(entries.single.level, DiagnosticLevel.unexpected);
+    expect(entries.single.level, LogLevel.unexpected);
     expect(entries.single.message, contains('响应不是合法 JSON'));
+  });
+
+  test('上游错误文案里的 URL 查询串不写进日志', () async {
+    final api = ApiClient(
+      _StubTransport(
+        500,
+        jsonEncode({
+          'success': false,
+          'error':
+              'device_register: Network("error sending request for url '
+              '(https://log.example.com/service/2/device_register'
+              '?openudid=abc&_rticket=1)")',
+          'kind': 'device_failed',
+        }),
+      ),
+      logStore: store,
+    );
+
+    await expectLater(api.bookDetail('b1'), throwsA(isA<ApiException>()));
+    await store.flush();
+
+    final entry = (await store.read()).single;
+    expect(
+      entry.message,
+      contains('https://log.example.com/service/2/device_register'),
+      reason: '保留 host + path 便于定位',
+    );
+    expect(entry.message, isNot(contains('openudid')));
+    expect(entry.message, isNot(contains('_rticket')));
+  });
+
+  test('传输层异常的 URL 查询串也不写进 detail', () async {
+    final api = ApiClient(_ThrowingTransport(), logStore: store);
+
+    await expectLater(api.bookDetail('b1'), throwsA(isA<StateError>()));
+    await store.flush();
+
+    final entry = (await store.read()).single;
+    expect(entry.detail, contains('https://log.example.com/boot'));
+    expect(entry.detail, isNot(contains('token')));
+    expect(entry.detail, isNot(contains('openudid')));
   });
 
   test('不传 logStore 时不落盘', () async {

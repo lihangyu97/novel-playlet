@@ -126,7 +126,7 @@ class _EntryTileState extends State<_EntryTile> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final entry = widget.entry;
-    final failed = entry.level == DiagnosticLevel.error;
+    final failed = entry.level == LogLevel.error;
     final color = failed ? scheme.error : scheme.tertiary;
     final icon = failed
         ? Icons.error_outline_rounded
@@ -256,9 +256,9 @@ String _sourceLabel(DiagnosticSource source) => switch (source) {
   DiagnosticSource.app => '应用',
 };
 
-String _levelLabel(DiagnosticLevel level) => switch (level) {
-  DiagnosticLevel.error => '报错',
-  DiagnosticLevel.unexpected => '意外',
+String _levelLabel(LogLevel level) => switch (level) {
+  LogLevel.error => '报错',
+  LogLevel.unexpected => '意外',
 };
 
 String _fullTime(DateTime time) {

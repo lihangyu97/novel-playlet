@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/foundation.dart';
 
 import 'diagnostic_log.dart';
@@ -15,7 +13,7 @@ void installDiagnosticErrorHandlers([DiagnosticLogStore? store]) {
   final previous = FlutterError.onError;
   FlutterError.onError = (details) {
     log.record(
-      level: DiagnosticLevel.error,
+      level: LogLevel.error,
       source: DiagnosticSource.app,
       message: _firstLine(details.exceptionAsString()),
       detail: details.stack?.toString() ?? details.toString(),
@@ -29,7 +27,7 @@ void installDiagnosticErrorHandlers([DiagnosticLogStore? store]) {
 
   PlatformDispatcher.instance.onError = (error, stack) {
     log.record(
-      level: DiagnosticLevel.error,
+      level: LogLevel.error,
       source: DiagnosticSource.app,
       message: _firstLine('$error'),
       detail: stack.toString(),
