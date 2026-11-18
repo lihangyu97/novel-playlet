@@ -83,3 +83,30 @@
 
 仍必须保留的复杂度只有两处：`shelf_at` / `shelf_removed_at` 这对时间戳（布尔状态同步必须能表达"删除"），
 以及合并函数的收敛性（"本地优先"这类规则会让两台设备永久抖动）。
+
+## 离线内容导出 / 导入（评估 2026-11-18）
+
+评估"缓存能不能带走"：视频导出 mp4、小说导出 txt、小说导入 txt。完整结论与代码依据见
+[docs/offline-export-import-proposal.md](docs/offline-export-import-proposal.md)。
+
+### 结论
+
+| 需求 | 成本 | 结论 |
+|---|---|---|
+| 视频 → mp4 | 0.5–2d | **技术成本≈0**：离线区落盘的就是明文、自洽、faststart 的标准 mp4；成本全在交付方式、命名、磁盘翻倍 |
+| 小说 → txt | 0.5–1d | 便宜：章节字段本来就是纯文本数组，按 manifest 顺序拼即可 |
+| 小说 ← txt | 1–4d | 贵在「本地书身份」，不在「转 JSON」（转 JSON 只占约 10%） |
+
+### 待拍板
+
+- [ ] 交付方式：`share_plus`（进依赖白名单）还是改 `ios/Info.plist` 开 `UIFileSharingEnabled`（零依赖但碰 `ios/`）
+- [ ] 导入的书是否允许进 WebDAV 同步（决定要不要给记录加 `origin`）
+- [ ] 导入区独立（`imported/novel/`）还是复用 `offline/novel/` + `origin` 标记（后者会牵动「清空小说缓存」逻辑）
+- [ ] 是否需要「整剧打包 zip」（要加 `archive` 依赖，建议先不做）
+
+### 已知的坑（实现前必须处理）
+
+- 缓存中心「清空小说缓存」走 `clearAll()`，导入的书若放在 `offline/novel/` 会被一起删
+- 阅读页对合成 `bookId` 会每章补取一次网络锚点、每次进书刷一次目录，纯损耗；上游限流 40 次/分
+- 中文 txt 大量是 GBK/GB18030，Dart 原生只认 UTF-8
+- 少数源是 `.m4s`/`.ts`，离线区仍命名 `.mp4`，导出前要按 `ftyp` 校验
