@@ -738,7 +738,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _controller?.noteReadingBlock(pagination.blockAtPage(pageIndex));
   }
 
-  /// 常驻信息条：左侧章节名最多半屏宽，右侧当前页/本章总页数。
+  /// 常驻信息条：左侧章节名最多占屏宽 80%，超出省略；右侧当前页/本章总页数。
   /// 它不属于工具栏，收起工具栏时也一直在，方便随时知道读到哪。
   Widget _buildInfoBar(
     ReaderSessionState session,
@@ -756,7 +756,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               alignment: Alignment.centerLeft,
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxWidth: MediaQuery.sizeOf(context).width * 0.5,
+                  maxWidth: MediaQuery.sizeOf(context).width * 0.8,
                 ),
                 child: Text(
                   chapterTitle,
