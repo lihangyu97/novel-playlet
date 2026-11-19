@@ -20,6 +20,7 @@ import 'recommend_controller.dart';
 import 'recommend_item.dart';
 import '../prefetch/app_prefetch.dart';
 import 'recommend_layout.dart';
+import 'recommend_skeleton.dart';
 
 /// 合并后的「推荐」页：顶部分类 tabs + 左右两个图标入口 + 每个分类一条流。
 ///
@@ -318,8 +319,14 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
     final data = async.value;
 
     if (data == null) {
+      // 首屏（含重试 invalidate 后的重新加载）用和真卡同口径的骨架占位，
+      // 不再给一个整屏转圈：卡片位置、封面比例、行高都和真卡一致，数据
+      // 到达时只是原地「填色」，不会整屏跳版。
       if (async.isLoading) {
-        return LoadingView(label: '正在加载${_category.label}');
+        return RecommendFeedSkeleton(
+          category: _category,
+          columns: layout.columns,
+        );
       }
       if (async.hasError) {
         return ErrorView(
@@ -327,7 +334,10 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
           onRetry: _retry,
         );
       }
-      return LoadingView(label: '正在加载${_category.label}');
+      return RecommendFeedSkeleton(
+        category: _category,
+        columns: layout.columns,
+      );
     }
 
     return FeedView<RecommendItem>(
