@@ -62,13 +62,6 @@ List<CommentImageRef> parseCommentImageRefs(Object? raw) {
   return List<CommentImageRef>.unmodifiable(refs);
 }
 
-/// 评论配图的原图 URL 列表（兼容旧调用；新代码用 [parseCommentImageRefs]）。
-List<String> parseCommentImages(Object? raw) {
-  return List<String>.unmodifiable([
-    for (final ref in parseCommentImageRefs(raw)) ref.full,
-  ]);
-}
-
 /// 把上游图片地址归一成可直接加载的绝对 URL。
 ///
 /// 上游多数是 `https://p3-sign.douyinpic.com/...`，但兼容两种脏数据：

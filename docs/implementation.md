@@ -308,7 +308,7 @@ loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（
 
 - **只读**：没有发评论/点赞/回复入口（内核只有短剧写接口，小说段评写接口不存在）。
 - **配图只读展示**：评论正文的 `content.image_data_list.image_data[].web_url` 由
-  `parseCommentImages` 归一成 http(s) 绝对 URL（兼容协议相对地址 / `&amp;` / 去重），
+  `parseCommentImageRefs` 归一成 http(s) 绝对 URL（兼容协议相对地址 / `&amp;` / 去重），
   评论与回复都渲染缩略图；点开全屏查看器可左右切图、双指缩放，单击画面任意处（或右上角 x）立即关闭。图片走
   `AppImageCache`（与封面共用磁盘缓存），只做展示，不参与任何写操作。
 - **表情内联渲染**：正文里的 `[微笑]` 等 53 个官方 token 由 `CommentEmojiText`

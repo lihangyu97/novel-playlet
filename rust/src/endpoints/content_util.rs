@@ -25,7 +25,6 @@ static CONTENT_STRIP_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
 });
 
 static AMP_X_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"&amp;x").unwrap());
-static CLOSE_P_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"</p>").unwrap());
 
 static FULL_BR: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)<\s*br\s*/?>").unwrap());
 static FULL_OPEN_P: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)<\s*p[^>]*>").unwrap());
@@ -74,20 +73,4 @@ impl FullContentProcessor {
         c = self.multi_nl.replace_all(&c, "\n").into_owned();
         c.trim().to_string()
     }
-}
-
-/// `processFullContent` as a free function.
-pub fn process_full_content(content: &str) -> String {
-    FullContentProcessor::new().process(content)
-}
-
-/// `processContentPatterns`.
-pub fn process_content_patterns(content: &str) -> String {
-    let mut c = content.to_string();
-    for re in CONTENT_STRIP_PATTERNS.iter() {
-        c = re.replace_all(&c, "").into_owned();
-    }
-    c = AMP_X_RE.replace_all(&c, "&x").into_owned();
-    c = CLOSE_P_RE.replace_all(&c, "\n").into_owned();
-    c.trim().to_string()
 }

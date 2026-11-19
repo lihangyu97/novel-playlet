@@ -33,8 +33,3 @@ pub mod timeutil;
 pub mod upstream;
 
 mod frb_generated;
-
-#[cfg(target_os = "windows")]
-mod desktop_fetch;
-#[cfg(target_os = "windows")]
-mod desktop_media;

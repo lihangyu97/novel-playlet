@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/widgets/app_snack_bar.dart';
 import '../feed/feed_staggered_grid.dart';
+import '../feed/feed_state.dart';
 import '../feed/feed_view.dart';
 import '../../app/router.dart';
 import '../../app/widgets/category_tab_bar.dart';
@@ -19,7 +20,6 @@ import 'recommend_controller.dart';
 import 'recommend_item.dart';
 import '../prefetch/app_prefetch.dart';
 import 'recommend_layout.dart';
-import 'recommend_state.dart';
 
 /// 合并后的「推荐」页：顶部分类 tabs + 左右两个图标入口 + 每个分类一条流。
 ///

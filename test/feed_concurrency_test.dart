@@ -10,7 +10,6 @@ import 'package:novel_playlet/data/models/json_utils.dart';
 import 'package:novel_playlet/features/recommend/recommend_category.dart';
 import 'package:novel_playlet/features/recommend/recommend_controller.dart';
 import 'package:novel_playlet/features/recommend/recommend_item.dart';
-import 'package:novel_playlet/features/recommend/recommend_state.dart';
 
 /// 回归：翻页请求必须串行。
 ///

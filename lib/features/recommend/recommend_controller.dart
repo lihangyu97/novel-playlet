@@ -6,10 +6,14 @@ import '../../app/providers.dart';
 import '../../data/api/api_client.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/rank.dart';
+import '../feed/feed_state.dart';
 import '../rank/rank_cache.dart';
 import 'recommend_category.dart';
 import 'recommend_item.dart';
-import 'recommend_state.dart';
+
+/// 合并推荐页的列表状态。三类卡片统一成 [RecommendItem]，分页/去重逻辑在
+/// 通用 [FeedState] 里。
+typedef RecommendState = FeedState<RecommendItem>;
 
 /// 一个分类的推荐流。
 ///

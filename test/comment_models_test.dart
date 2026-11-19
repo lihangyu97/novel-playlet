@@ -234,7 +234,7 @@ void main() {
 
   group('评论配图', () {
     test('解析 web_url / url / thumb_url，补齐协议并去重', () {
-      final urls = parseCommentImages({
+      final refs = parseCommentImageRefs({
         'image_data': [
           {'web_url': '//p3.example.com/a.jpg?x=1&amp;y=2'},
           {'url': 'https://p3.example.com/b.jpg'},
@@ -243,7 +243,7 @@ void main() {
           {'web_url': ''},
         ],
       });
-      expect(urls, [
+      expect([for (final ref in refs) ref.full], [
         'https://p3.example.com/a.jpg?x=1&y=2',
         'https://p3.example.com/b.jpg',
       ]);
@@ -279,15 +279,6 @@ void main() {
           full: 'https://img.example.com/2.jpg',
         ),
       ]);
-      // 旧入口只返回原图，行为不变。
-      expect(
-        parseCommentImages({
-          'image_data': [
-            {'web_url': 'https://img.example.com/1.jpg'},
-          ],
-        }),
-        ['https://img.example.com/1.jpg'],
-      );
     });
 
     test('段评 / 回复解析出的 imageRefs 带 thumb 与原图', () {

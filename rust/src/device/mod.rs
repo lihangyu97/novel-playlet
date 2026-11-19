@@ -5,7 +5,7 @@
 //! version-guarded so an in-flight registration cannot overwrite newer state,
 //! and a caller that finds no usable device waits for exactly one registration
 //! - the rest of the pool is topped up in the background, never on the
-//! request's critical path (P1-8).
+//!   request's critical path (P1-8).
 
 pub mod crypto;
 pub mod pool_crypto;

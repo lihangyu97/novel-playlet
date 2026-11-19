@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
-use crate::endpoints::{router, Params, RawOut, Server};
+use crate::endpoints::{router, Params, Server};
 use crate::error::ApiError;
 
 #[derive(Debug, Clone, Default)]
@@ -301,21 +301,6 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
             .headers
             .push(("allow".to_string(), "POST".to_string()));
         return response;
-    }
-
-    // HTML page endpoints write their own response and bypass the envelope.
-    if let Some(raw) = server.raw_handler(m.api) {
-        return match raw(ctx, &params).await {
-            Ok(RawOut {
-                status,
-                content_type,
-                body,
-            }) => Response::text(status, content_type, body),
-            Err(e) => {
-                log::warn!("api {} failed: {}", m.api, e.message());
-                error_response(&e)
-            }
-        };
     }
 
     let Some(ep) = server.handler(m.api) else {

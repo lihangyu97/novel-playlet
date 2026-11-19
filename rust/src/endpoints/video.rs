@@ -3433,9 +3433,7 @@ async fn serve_cached_src(
             }),
         ));
     };
-    let Some(index) = cached_meta.index.clone() else {
-        return None;
-    };
+    let index = cached_meta.index.clone()?;
     let content_type = crate::dispatch::mime_for(&path).to_string();
     let range = crate::static_files::parse_range(req.header("range"), total);
     let is_head = req.method.eq_ignore_ascii_case("HEAD");
