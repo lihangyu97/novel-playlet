@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
-/// 加载中：整页居中，保持克制，不做骨架屏（首版）。
+/// 加载中：整页居中转圈，保持克制。
+///
+/// 只作为「还没有卡片版式可占位」的兜底（如阅读器正文、榜单切 tab 首屏）。
+/// 列表类首屏应当优先用和真卡同口径的骨架（推荐流见
+/// `RecommendFeedSkeleton`，搜索结果见 `CompactSkeletonRow`）：位置/尺寸都
+/// 对得上，数据到达时原地填色，不会从「空转圈」跳到「满屏卡片」。
 class LoadingView extends StatelessWidget {
   const LoadingView({super.key, this.label});
 

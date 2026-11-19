@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/app/widgets/skeleton.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/top_glow.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
@@ -405,6 +406,97 @@ void main() {
       reason: '默认双列：前两张卡片左右各一张',
     );
     expect(find.byType(AppSurfaceCard), findsWidgets, reason: '推荐卡是白底卡片');
+  });
+
+  /// 首屏没有数据时铺和真卡同口径的骨架，而不是整屏转圈：数据回来后只是
+  /// 原地填色，卡片位置/封面比例/行高都对得上，不会整屏跳版。
+  testWidgets('推荐页-首屏加载显示骨架而不是转圈', (tester) async {
+    final fake = FakePreviewTransport()
+      ..responseDelay = const Duration(milliseconds: 300);
+    final semantics = tester.ensureSemantics();
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      transport: fake,
+      settle: false,
+    );
+    await tester.pump(const Duration(milliseconds: 20));
+
+    final skeleton = find.byKey(const ValueKey('recommend-skeleton-novel'));
+    expect(skeleton, findsOneWidget, reason: '首屏加载中应显示骨架');
+    expect(
+      find.byType(CircularProgressIndicator),
+      findsNothing,
+      reason: '骨架替代原来的整屏转圈',
+    );
+    expect(find.byType(NovelGridCard), findsNothing, reason: '数据还没到，不该有真卡');
+    expect(
+      find.bySemanticsLabel('正在加载小说'),
+      findsOneWidget,
+      reason: '骨架保留加载中的读屏文案',
+    );
+    // 骨架按当前布局铺开（默认双列），列宽与真卡同一套口径。
+    final skeletonLefts = {
+      for (final element
+          in find
+              .descendant(of: skeleton, matching: find.byType(AppSurfaceCard))
+              .evaluate())
+        tester.getTopLeft(find.byWidget(element.widget)).dx,
+    };
+    expect(skeletonLefts, hasLength(2), reason: '骨架同样按双列铺开');
+
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(skeleton, findsNothing, reason: '数据到达后骨架撤掉');
+    expect(find.byType(NovelGridCard), findsWidgets, reason: '换成真卡');
+    semantics.dispose();
+  });
+
+  /// 三个分类各自一条流：首屏还没回来时切到短剧/漫剧，新分类同样是骨架，
+  /// 不会退回整屏转圈；封面比例按各自内容域走（小说 3:4，短剧/漫剧 7:10）。
+  testWidgets('推荐页-首屏未返回时切分类也是骨架', (tester) async {
+    final fake = FakePreviewTransport()
+      ..responseDelay = const Duration(seconds: 3);
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      transport: fake,
+      settle: false,
+    );
+    await tester.pump(const Duration(milliseconds: 20));
+
+    final novel = find.byKey(const ValueKey('recommend-skeleton-novel'));
+    expect(novel, findsOneWidget, reason: '小说分类首屏加载中');
+
+    await tester.drag(find.byType(TabBarView), const Offset(-320, 0));
+    await tester.pumpAndSettle();
+    final drama = find.byKey(const ValueKey('recommend-skeleton-drama'));
+    expect(drama, findsOneWidget, reason: '短剧分类也在等首屏，给同款骨架');
+    expect(novel, findsNothing, reason: '切走的分类骨架不再露出');
+    expect(
+      find.byType(CircularProgressIndicator),
+      findsNothing,
+      reason: '三个分类都不再退回整屏转圈',
+    );
+
+    await tester.drag(find.byType(TabBarView), const Offset(-320, 0));
+    await tester.pumpAndSettle();
+    final anime = find.byKey(const ValueKey('recommend-skeleton-anime'));
+    expect(anime, findsOneWidget, reason: '漫剧分类同样有骨架');
+
+    // 封面比例跟随分类：短剧/漫剧是 7:10，不是小说的 3:4。
+    for (final tab in [drama, anime]) {
+      final cover = tester.widget<SkeletonBox>(
+        find.descendant(of: tab, matching: find.byType(SkeletonBox)).first,
+      );
+      expect(
+        cover.height / cover.width,
+        closeTo(kVideoCoverAspect, 0.001),
+        reason: '短剧/漫剧骨架按视频封面比例占位',
+      );
+    }
+
+    // 收尾：让延迟请求和首屏后的预取都落地，别给测试留 pending timer。
+    await tester.pumpAndSettle(const Duration(seconds: 4));
   });
 
   /// 布局偏好是全局状态：设置页把布局切成三列后，推荐页立即按三列排版。
