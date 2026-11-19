@@ -180,6 +180,22 @@ App 只走 16 个读接口（见 §3.1 的 `APP_APIS` 收口），其余兼容�
 仍保留：`tests/static_and_loopback.rs` 里的 `#[cfg(windows)] symlink_file` 辅助分支——
 那只是让同一份测试在 Windows 上也能跑，跟产品支持面无关，删了反而降低可移植性。
 
+### 3.12 删除两条只有路由映射、没有 handler 的死路径（2026-11-19）
+
+`router.rs` 里有两条 `api` 名从来没有 `add_route` 注册过，命中后只会拿到
+`404 unsupported api type`：
+
+| 路径 | 原 api 名 | 处理 | 说明 |
+|---|---|---|---|
+| `/api/v1/search/suggest` | `search_predict` | 删映射 | 搜索联想（`/reading/.../search/predict`）。fork 基线里就没实现；同族的 `novel-sound` 也只登记了映射，客户端调用后 404 被 `catch` 吞成空列表，等于静默失效。本 App 的搜索页用 `search/cue` + `search/hot`，不调这条 |
+| `/api/v1/articles/{id}` | `toutiao_article` | 删映射 + `match_articles` | 「按头条文章 id 取正文」，和 `/chapters/{id}/toutiao` 是同一条实现（`fetch_novel_reader_content` → `novel.snssdk.com/.../reader/content/v1`，头条客户端 UA + DH 解密），移植时只注册了 `toutiao` 这个名字 |
+
+`tests/mock_upstream_contract.rs` 里的两条映射断言同步删除。
+
+如果以后要恢复：`/articles/{id}` 只需在 `toutiao.rs` 里补
+`s.add_route("toutiao_article", handle)` 或把路由改指 `"toutiao"`；
+`/search/suggest` 则要先有真正的联想 handler。
+
 ## 4. 不在本文件范围内的部分
 
 - `rust/` 之外的 Dart 侧改动（UI/数据层/存储）由 git 历史管理，不需要和上游对齐；

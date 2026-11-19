@@ -45,7 +45,6 @@ pub fn match_rest_path(path: &str, query: &Params) -> Option<RouteMatch> {
         "series" => match_series(tail, query),
         "recommend" => match_recommend(tail, query),
         "rank" => match_rank(tail, query),
-        "articles" => match_articles(tail, query),
         "items" => match_items(tail, query),
         "comments" => match_comments(tail, query),
         "forum-id" => Some(RouteMatch {
@@ -253,13 +252,6 @@ fn match_search(parts: &[&str], q: &Params) -> Option<RouteMatch> {
             set_query_alias(&mut p, "query", "q");
             Some(RouteMatch {
                 api: "search",
-                params: p,
-            })
-        }
-        "suggest" => {
-            set_query_alias(&mut p, "keyword", "q");
-            Some(RouteMatch {
-                api: "search_predict",
                 params: p,
             })
         }
@@ -506,18 +498,6 @@ fn match_rank(parts: &[&str], q: &Params) -> Option<RouteMatch> {
     p.set("rank_id", parts[0]);
     Some(RouteMatch {
         api: "rank_data",
-        params: p,
-    })
-}
-
-fn match_articles(parts: &[&str], q: &Params) -> Option<RouteMatch> {
-    if parts.is_empty() {
-        return None;
-    }
-    let mut p = q.clone();
-    p.set("item_ids", parts[0]);
-    Some(RouteMatch {
-        api: "toutiao_article",
         params: p,
     })
 }
