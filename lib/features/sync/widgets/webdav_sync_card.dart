@@ -17,11 +17,12 @@ const Key webDavSyncNowKey = Key('settings-webdav-sync-now');
 const Key webDavLogKey = Key('webdav-log-entry');
 const Key webDavCloudDataKey = Key('settings-webdav-cloud-data');
 
-/// 设置页「同步」卡片：WebDAV / 同步记录 / 云端数据 三个一级入口。
+/// 设置页「同步」区块：WebDAV / 同步记录 / 云端数据 三个一级入口。
 ///
-/// 行样式跟设置页其它卡片一致（`titleSmall` 标题 + 右侧控件，40pt 行高、
-/// 卡片内 16 横向内边距），不再用 `ListTile` 的图标/副标题形态。三个入口
-/// 都是导航/动作，副标题只在配置行用状态文字（右侧）表达。
+/// 三个入口共用一张卡、卡内不画分割线（与主题区块一致）；行样式跟设置页
+/// 其它卡片一致（`titleSmall` 标题 + 右侧控件、44pt 行高、16 横向内边距），
+/// 不再用 `ListTile` 的图标/副标题形态。三个入口都是导航/动作，副标题只在
+/// 配置行用状态文字（右侧）表达。
 class WebDavSyncCard extends ConsumerWidget {
   const WebDavSyncCard({super.key});
 
@@ -36,6 +37,8 @@ class WebDavSyncCard extends ConsumerWidget {
     final configured = config != null;
     final syncing = status.isSyncing || settingsStatus.isSyncing;
 
+    // 三个入口共用一张卡、不画卡内分割线：行高一致，靠 16 的左右内边距
+    // 和 44pt 行高分组就够了。
     return Padding(
       key: webDavSyncCardKey,
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -91,7 +94,6 @@ class WebDavSyncCard extends ConsumerWidget {
                 ],
               ),
             ),
-            const Divider(height: 1, indent: 16, endIndent: 16),
             _EntryRow(
               key: webDavLogKey,
               title: '同步记录',
@@ -102,7 +104,6 @@ class WebDavSyncCard extends ConsumerWidget {
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
-            const Divider(height: 1, indent: 16, endIndent: 16),
             _EntryRow(
               key: webDavCloudDataKey,
               title: '云端数据',

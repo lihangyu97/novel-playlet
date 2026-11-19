@@ -11,12 +11,13 @@ import 'package:novel_playlet/features/cache/download_quality.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/reader/reader_settings.dart';
 import 'package:novel_playlet/features/settings/settings_page.dart';
+import 'package:novel_playlet/features/sync/widgets/webdav_sync_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 
 /// 设置页预览：主题色（3 个预设 + 自定义）、深浅色模式、推荐流布局、全局字重、
-/// 存储区块（占用清理 + 下载清晰度）。
+/// 对话高亮、存储区块（占用明细 / 清理 / 缓存质量）。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/settings_page_test.dart`。
 void main() {
@@ -75,14 +76,18 @@ void main() {
 
       await tester.ensureVisible(find.byKey(globalFontWeightKey));
       await tester.pump();
-      final rect = tester.getRect(find.byKey(globalFontWeightKey));
-      await tester.tapAt(Offset(rect.right - 8, rect.center.dy));
+      // 只留 300 / 400 / 500 三档，按钮组要正好是三段。
+      expect(
+        tester
+            .widget<SegmentedButton<int>>(find.byKey(globalFontWeightKey))
+            .segments
+            .map((segment) => segment.value),
+        [300, 400, 500],
+      );
+      await tester.tap(find.byKey(globalFontWeightOptionKey(500)));
       await tester.pumpAndSettle();
 
-      expect(
-        container.read(appEffectiveFontWeightProvider).value,
-        greaterThan(400),
-      );
+      expect(container.read(appEffectiveFontWeightProvider).value, 500);
       final context = tester.element(find.byType(SettingsPage));
       expect(
         Theme.of(context).extension<AppFontWeightScale>()?.delta,
@@ -93,17 +98,17 @@ void main() {
     }
   });
 
-  /// 下载清晰度（已并进「存储」区块）：默认 720P，可切换并落盘。
-  testWidgets('设置页-下载清晰度默认 720P，可切换', (tester) async {
+  /// 缓存质量（已并进「存储」区块）：默认 720P，可切换并落盘。
+  testWidgets('设置页-缓存质量默认 720P，可切换', (tester) async {
     await pumpPreview(tester, const SettingsPage());
     final container = ProviderScope.containerOf(
       tester.element(find.byType(SettingsPage)),
     );
 
-    await tester.scrollUntilVisible(find.text('下载清晰度'), 300);
+    await tester.scrollUntilVisible(find.text('缓存质量'), 300);
     await tester.pumpAndSettle();
-    expect(find.text('下载清晰度'), findsOneWidget);
-    expect(find.text('离线下载清晰度'), findsNothing, reason: '标题精简为「下载清晰度」');
+    expect(find.text('缓存质量'), findsOneWidget);
+    expect(find.text('下载清晰度'), findsNothing, reason: '标题改叫「缓存质量」');
     expect(
       container.read(videoDownloadQualityProvider),
       VideoDownloadQuality.p720,
@@ -123,10 +128,10 @@ void main() {
     expect(_qualitySegments(tester).selected, {VideoDownloadQuality.p1080});
   });
 
-  /// 四档清晰度收在一个按钮组里，不再是一排独立 chip。
-  testWidgets('设置页-下载清晰度用 M3 按钮组（SegmentedButton）', (tester) async {
+  /// 四档质量收在一个按钮组里，不再是一排独立 chip。
+  testWidgets('设置页-缓存质量用 M3 按钮组（SegmentedButton）', (tester) async {
     await pumpPreview(tester, const SettingsPage());
-    await tester.scrollUntilVisible(find.text('下载清晰度'), 300);
+    await tester.scrollUntilVisible(find.text('缓存质量'), 300);
     await tester.pumpAndSettle();
 
     final segmented = _qualitySegments(tester);
@@ -138,7 +143,7 @@ void main() {
     expect(
       segmented.segments.map((segment) => segment.value),
       VideoDownloadQuality.values,
-      reason: '四档顺序与枚举一致：最高 / 1080P / 720P / 480P',
+      reason: '四档顺序与枚举一致：Max / 1080P / 720P / 480P',
     );
     expect(segmented.showSelectedIcon, isFalse, reason: '段内文案短，打勾会撑宽');
 
@@ -160,7 +165,7 @@ void main() {
 
     for (final (title, group) in [
       ('推荐流布局', find.byType(SegmentedButton<RecommendLayout>)),
-      ('下载清晰度', find.byType(SegmentedButton<VideoDownloadQuality>)),
+      ('缓存质量', find.byType(SegmentedButton<VideoDownloadQuality>)),
     ]) {
       await tester.scrollUntilVisible(find.text(title), 300);
       await tester.pumpAndSettle();
@@ -442,26 +447,155 @@ void main() {
       reason: '自定义圆点右沿应对齐内容右边界',
     );
 
-    // 存储行：图标贴内容左边界、数值贴内容右边界（label 在图标后面）。
-    expect(
-      tester.getTopLeft(find.byIcon(Icons.smart_display_outlined)).dx,
-      inset,
-    );
+    // 存储明细：label 贴内容左边界、数值贴内容右边界（不再有行首图标）。
+    expect(tester.getTopLeft(find.text('视频缓存')).dx, inset);
     expect(tester.getRect(find.text('339 MB')).right, 390 - inset);
   });
 
-  testWidgets('设置页-范围说明收在存储卡片最下方', (tester) async {
+  /// 明细与清理共用一张卡，缓存质量单独一张卡；明细无行首图标、无分割线。
+  testWidgets('设置页-存储明细与清理共卡、缓存质量独立卡', (tester) async {
     await pumpPreview(tester, const SettingsPage());
 
-    final hint = find.text('不包括主动缓存的小说、短剧');
+    await tester.scrollUntilVisible(find.text('缓存质量'), 300);
+    await tester.pumpAndSettle();
+
+    final usageCard = tester.widget<Card>(
+      find.ancestor(of: find.text('视频缓存'), matching: find.byType(Card)).first,
+    );
+    final clearCard = tester.widget<Card>(
+      find
+          .ancestor(
+            of: find.byKey(clearCacheButtonKey),
+            matching: find.byType(Card),
+          )
+          .first,
+    );
+    final qualityCard = tester.widget<Card>(
+      find.ancestor(of: find.text('缓存质量'), matching: find.byType(Card)).first,
+    );
+    expect(identical(usageCard, clearCard), isTrue);
+    expect(identical(clearCard, qualityCard), isFalse, reason: '缓存质量是独立的一张卡');
+
+    for (final label in ['视频缓存', '封面缓存', '章节缓存']) {
+      expect(
+        find.ancestor(of: find.text(label), matching: find.byType(Card)),
+        findsOneWidget,
+        reason: '$label 属于同一张存储卡',
+      );
+    }
+
+    // 三行明细不再带图标（以前是 video/image/chapter 三个）。
+    for (final icon in [
+      Icons.smart_display_outlined,
+      Icons.image_outlined,
+      Icons.article_outlined,
+    ]) {
+      expect(find.byIcon(icon), findsNothing, reason: '缓存明细不再画行首图标');
+    }
+    // 默认「跟随系统」时外观卡也不画分割线，所以整页应该一条都没有。
+    expect(find.byType(Divider), findsNothing, reason: '主题/同步/存储卡片都不再画分割线');
+  });
+
+  testWidgets('设置页-范围说明收在存储卡片里', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+
+    final hint = find.text('不包括主动下载');
     expect(hint, findsOneWidget);
     expect(
       find.ancestor(of: hint, matching: find.byType(Card)),
       findsOneWidget,
       reason: '说明是卡片内部最后一行，不再单挂在页面下方',
     );
+    expect(find.textContaining('主动缓存的小说、短剧'), findsNothing);
     expect(find.textContaining('离线缓存不在此列'), findsNothing);
     expect(find.textContaining('请到「我的 → 缓存」页清理'), findsNothing);
+  });
+
+  /// 主题区块顺序：常用外观项在前，阅读页局部的「对话高亮」收在最后。
+  testWidgets('设置页-主题区块：对话高亮排在推荐流布局与全局字重之后', (tester) async {
+    final originalPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await pumpPreview(tester, const SettingsPage());
+      // 拉高视口让主题区块整段同时被 build，避免 ListView 懒加载导致
+      // 比较时前一项已被回收。
+      tester.view.physicalSize = const Size(390, 1600);
+      await tester.pump();
+
+      final feed = tester.getTopLeft(find.text('推荐流布局')).dy;
+      final weight = tester.getTopLeft(find.text('全局字重')).dy;
+      final dialogue = tester.getTopLeft(find.text('对话高亮')).dy;
+      expect(feed, lessThan(weight));
+      expect(weight, lessThan(dialogue), reason: '对话高亮应在主题区块最后');
+      expect(
+        dialogue,
+        lessThan(tester.getTopLeft(find.text('同步')).dy),
+        reason: '对话高亮仍在主题区块内',
+      );
+    } finally {
+      debugDefaultTargetPlatformOverride = originalPlatform;
+    }
+  });
+
+  /// 主题区块的所有控件共用一张卡，卡内不画分割线（含深色/跟随系统之间）。
+  testWidgets('设置页-主题区块共用一张卡片、无分割线', (tester) async {
+    final originalPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await pumpPreview(tester, const SettingsPage());
+      tester.view.physicalSize = const Size(390, 1600);
+      await tester.pump();
+
+      final cards = [
+        for (final label in ['跟随系统', '推荐流布局', '全局字重', '对话高亮'])
+          tester.widget<Card>(
+            find
+                .ancestor(of: find.text(label), matching: find.byType(Card))
+                .first,
+          ),
+      ];
+      for (final card in cards) {
+        expect(identical(card, cards.first), isTrue);
+      }
+      expect(
+        find
+            .ancestor(
+              of: find.byKey(themeCustomColorKey),
+              matching: find.byType(Card),
+            )
+            .evaluate()
+            .length,
+        1,
+        reason: '主题色圆点与其它行同属一张卡',
+      );
+      expect(find.byType(Divider), findsNothing, reason: '主题卡内不画分割线');
+    } finally {
+      debugDefaultTargetPlatformOverride = originalPlatform;
+    }
+  });
+
+  /// 同步的三个入口共用一张卡，卡内不画分割线（与主题区块一致）。
+  testWidgets('设置页-同步三项共用一张卡片、无分割线', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+
+    await tester.scrollUntilVisible(find.text('云端数据'), 300);
+    await tester.pumpAndSettle();
+
+    final cards = [
+      for (final key in [webDavConfigureKey, webDavLogKey, webDavCloudDataKey])
+        tester.widget<Card>(
+          find.ancestor(of: find.byKey(key), matching: find.byType(Card)).first,
+        ),
+    ];
+    expect(identical(cards[0], cards[1]), isTrue);
+    expect(identical(cards[1], cards[2]), isTrue);
+    expect(
+      find.descendant(
+        of: find.byKey(webDavSyncCardKey),
+        matching: find.byType(Divider),
+      ),
+      findsNothing,
+    );
   });
 
   /// 清理入口只留图标（与详情页「复制 ID」同款小图标按钮），不再占一整行。
@@ -692,7 +826,7 @@ void main() {
   });
 }
 
-/// 「下载清晰度」那一组按钮（M3 SegmentedButton）。
+/// 「缓存质量」那一组按钮（M3 SegmentedButton）。
 SegmentedButton<VideoDownloadQuality> _qualitySegments(WidgetTester tester) =>
     tester.widget<SegmentedButton<VideoDownloadQuality>>(
       find.byType(SegmentedButton<VideoDownloadQuality>),

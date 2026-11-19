@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 全局字重可选档位。只开放整百，避免主题里出现 350/450 这类中间值。
-const List<int> appFontWeightSteps = [300, 400, 500, 600, 700];
+/// 全局字重可选档位。只开放整百，避免主题里出现 350/450 这类中间值；
+/// 又只留 300 / 400 / 500 三档：更细/更粗在正文里可读性明显变差，设置页
+/// 也用按钮组而不是滑块，三档刚好一行放下。
+const List<int> appFontWeightSteps = [300, 400, 500];
 
 /// 把持久化/外部传入的数值收敛到最近的合法档位；非法值回默认 400。
 FontWeight appFontWeightFromValue(int? value) {
