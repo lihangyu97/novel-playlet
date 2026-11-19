@@ -1,5 +1,21 @@
 # TODO
 
+## macOS 适配（进行中 2026-11-19）
+
+完整清单、状态与排查对号在 [docs/macos-port.md](docs/macos-port.md)。这里只留速览：
+
+| 阶段 | 状态 |
+|---|---|
+| 工程与构建（M1–M6） | ✅ 已落地（静态库脚本 / 沙盒 / ATS / 图标 / 部署目标 13.0） |
+| 系统集成（M7–M11） | M7 ✅；M8 待真机验；M9–M11 未做 |
+| 交互（M12–M17） | ☐ 未做，**M12（鼠标拖拽）优先** |
+| 播放（M18–M19） | ☐ 未做：全屏要从「转横屏」改成「窗口全屏」 |
+| 布局（M21–M26） | ☐ 未做，**M21–M23（行宽/列数/缩放去抖）优先** |
+| 质量（M27–M30） | ☐ 未做 |
+
+分支 `feat/lhy/macos-target`（PR #75）。本机没有 Flutter SDK，`flutter build macos` 还没跑过；
+在自己机器上先 `./scripts/build_rust_macos.sh` 再 `flutter build macos --release`。
+
 ## Android 全局字重（已完成 2026-11-15）
 
 - 设置页新增「全局字重」滑块，仅 Android 显示/生效，默认 400，范围 300–700，持久化 key `app_font_weight_v1`。

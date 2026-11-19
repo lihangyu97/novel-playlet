@@ -690,6 +690,8 @@ flutter build macos --release    # 或 flutter run -d macos；首次会自动 po
 - **窗口**：最小 900×700（`MainFlutterWindow.swift`），再窄推荐页双列会挤坏；
   版本号方法通道 `novel_playlet/app_version` 也在同一个文件里注册（对应 Dart 的 `app_version.dart`）。
 - `macos/Frameworks/libfqapi_core.a` 与 iOS 一样不入库，没跑构建脚本时链接会直接失败。
+- 适配进度、剩余任务（M12 鼠标拖拽、M18 窗口全屏、M21–M23 布局）与排查对号见
+  [docs/macos-port.md](macos-port.md)。
 
 ### 7.5 测试与门禁
 

@@ -79,6 +79,7 @@ flutter test  # 数据解析、缓存、并发、存储与 UI golden，不需要
 | [CONTRACTS.md](CONTRACTS.md) | 页面开发约定：数据层与存储 API、路由、状态管理、测试门禁 |
 | [PATCHES.md](PATCHES.md) | Rust 内核相对 fqapp 的 fork 基线与本地补丁清单 |
 | [third_party/README.md](third_party/README.md) | video_player_avfoundation 补丁说明与升级流程 |
+| [docs/macos-port.md](docs/macos-port.md) | macOS 适配清单与进度（M1–M30）、验证记录与排查对号 |
 
 ## 已知限制
 
