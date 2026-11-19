@@ -1,0 +1,6 @@
+#include "ephemeral/Flutter-Generated.xcconfig"
+
+// Rust 内核（fqapi_core）静态库：静态库默认按需取目标文件，这里整库装进来，
+// 运行时由 flutter_rust_bridge 的 ExternalLibrary.process() 从进程符号里找入口。
+// 产物由 `./scripts/build_rust_macos.sh` 生成，不入库（见 .gitignore）。
+OTHER_LDFLAGS = $(inherited) -force_load $(SRCROOT)/Frameworks/libfqapi_core.a -framework Security -framework CoreFoundation -Wl,-export_dynamic

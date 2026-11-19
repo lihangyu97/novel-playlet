@@ -668,7 +668,30 @@ flutter build apk --release --target-platform android-arm64
 - 常见问题：启动报 `UnsatisfiedLinkError` → `.so` 没编或 ABI 不对；release 包接口全失败 → 缺 `INTERNET`；
   播放报 `PanicException(... rustls-platform-verifier ...)` → 旧包，重新构建；装不上 → 签名不一致，先卸载。
 
-### 7.4 测试与门禁
+### 7.4 macOS
+
+```bash
+flutter pub get
+./scripts/build_rust_macos.sh    # universal 静态库（arm64 + x86_64）→ macos/Frameworks/
+flutter build macos --release    # 或 flutter run -d macos；首次会自动 pod install
+# 产物 build/macos/Build/Products/Release/novel_playlet.app
+```
+
+- **内核链接**：与 iOS 同一套——静态库 `-force_load` 进主二进制（`macos/Flutter/*.xcconfig`），
+  运行时 `initRustRuntime()` 对 iOS / macOS 都走 `ExternalLibrary.process()`。
+- **最低版本 13.0**（pbxproj 与 `macos/Podfile` 同口径）：倍速修复依赖 `AVPlayer.defaultRate`
+  （`iOS 16 / macOS 13` 才有），低于 13 会退回「UI 显示 2x、实际 1x」。
+- **沙盒**：`com.apple.security.network.client`（上游 HTTPS）与 `network.server`（内核
+  `127.0.0.1` 回环，`/src` 送视频、`/health` 探活）缺一不可；Debug/Profile 另带 `allow-jit`。
+- **ATS**：`macos/Runner/Info.plist` 与 iOS 同口径放行 `127.0.0.1` 明文，否则 AVPlayer 播
+  `/src/*.mp4` 直接失败。
+- **设备池密钥**：仍走 Keychain（`flutter_secure_storage`）。如果每次启动都重新注册设备，
+  说明 Keychain 不可用——在 Xcode 的 Runner target 打开 Keychain Sharing 再验。
+- **窗口**：最小 900×700（`MainFlutterWindow.swift`），再窄推荐页双列会挤坏；
+  版本号方法通道 `novel_playlet/app_version` 也在同一个文件里注册（对应 Dart 的 `app_version.dart`）。
+- `macos/Frameworks/libfqapi_core.a` 与 iOS 一样不入库，没跑构建脚本时链接会直接失败。
+
+### 7.5 测试与门禁
 
 ```bash
 make check             # = CI 三个 job：Dart format/analyze/test、Rust fmt/clippy/test、FRB 绑定漂移
@@ -688,7 +711,7 @@ LIVE_PROBE=1 flutter test test/live_probe_test.dart   # 真实上游探针（需
   需要时手动跑：`cargo test --manifest-path rust/Cargo.toml --test shuqi_contract -- --ignored`
   （漫画同理）。
 
-### 7.5 真机覆盖安装与缓存保留（iOS 自签）
+### 7.6 真机覆盖安装与缓存保留（iOS 自签）
 
 - **覆盖安装不丢数据的前提**：同一个 bundle id + 同一个 Team（`529D3FU98W`）用
   `xcrun devicectl device install app` 安装；这是升级（update），不会卸载 App，数据容器
@@ -714,7 +737,7 @@ xcrun devicectl device copy from --device <UDID> \
 
 ---
 
-### 7.6 版本号与发版
+### 7.7 版本号与发版
 
 `pubspec.yaml` 的 `version: X.Y.Z+N` 是唯一来源（iOS 的 `CFBundleShortVersionString` / `CFBundleVersion`、Android 的 `versionName` / `versionCode` 都由它派生）。
 

@@ -50,6 +50,7 @@ app.*.map.json
 # 原生内核构建产物（由 scripts/build_rust_ios.sh 重建，不入库）
 rust/target/
 ios/Frameworks/libfqapi_core.a
+macos/Frameworks/libfqapi_core.a
 
 # 本地探针产物
 .probe/

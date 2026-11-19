@@ -53,6 +53,14 @@ Android：
 flutter build apk --release --target-platform android-arm64
 ```
 
+macOS（13+，Apple Silicon / Intel 通用）：
+
+```bash
+flutter pub get
+./scripts/build_rust_macos.sh   # 编 universal Rust 静态库（arm64 + x86_64）→ macos/Frameworks/
+flutter build macos --release    # 或 flutter run -d macos
+```
+
 App 显示名「摆烂盒子」，Bundle ID `com.lihangyu.novelPlaylet`。免费 Apple ID 自签 7 天有效，
 真机安装与签名细节见 [docs/implementation.md](docs/implementation.md) §7。
 
