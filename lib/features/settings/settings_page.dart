@@ -21,7 +21,7 @@ import 'settings_providers.dart';
 import 'widgets/dialogue_highlight_preview.dart';
 import 'widgets/theme_color_picker.dart';
 
-/// 设置页：主题（主题色 / 深浅色 / 推荐流布局 / 全局字重）+ 存储（占用清理 + 下载清晰度）+ 同步（WebDAV）。
+/// 设置页：主题（主题色 / 深浅色 / 推荐流布局 / 全局字重 / 对话高亮）+ 存储（占用清理 + 缓存质量）+ 同步（WebDAV）。
 ///
 /// 从「我的」右上角进。这里只放全局偏好与可重建缓存，书架/阅读进度属于用户
 /// 数据，不给清理入口（那些在「我的」页里操作）。
@@ -37,8 +37,8 @@ class SettingsPage extends StatelessWidget {
         child: ListView(
           physics: const ClampingScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 28),
-          children: const [
-            AppSectionHeader(
+          children: [
+            const AppSectionHeader(
               title: '主题',
               padding: EdgeInsets.fromLTRB(
                 _contentInset,
@@ -47,15 +47,10 @@ class SettingsPage extends StatelessWidget {
                 10,
               ),
             ),
-            _ThemeColorCard(),
-            SizedBox(height: 12),
-            _DialogueHighlightColorCard(),
-            SizedBox(height: 12),
-            _AppearanceCard(),
-            SizedBox(height: 12),
-            _GlobalFontWeightCard(),
-            _FeedLayoutCard(),
-            AppSectionHeader(
+            // 整个主题区块共用一张卡：这些偏好都互相独立，拆成多张卡反而
+            // 把竖屏切成一截一截；靠行间留白分组就够了，不画分割线。
+            const _ThemeCard(),
+            const AppSectionHeader(
               title: '同步',
               padding: EdgeInsets.fromLTRB(
                 _contentInset,
@@ -64,8 +59,8 @@ class SettingsPage extends StatelessWidget {
                 10,
               ),
             ),
-            WebDavSyncCard(),
-            AppSectionHeader(
+            const WebDavSyncCard(),
+            const AppSectionHeader(
               title: '存储',
               padding: EdgeInsets.fromLTRB(
                 _contentInset,
@@ -74,12 +69,12 @@ class SettingsPage extends StatelessWidget {
                 10,
               ),
             ),
-            _StorageCard(),
-            SizedBox(height: 12),
-            // 下载清晰度是「存多少」的一部分：和占用/清理同区，不再单开一
-            // 个「视频」区块（一页里为一个开关单开一节太重）。
-            _VideoDownloadQualityCard(),
-            AppSectionHeader(
+            // 明细 + 清理共用一张卡（与主题区块一致，不画分割线）；缓存质量
+            // 是独立偏好，单独一张卡。
+            const _StorageSection(),
+            const SizedBox(height: 12),
+            const _VideoDownloadQualityCard(),
+            const AppSectionHeader(
               title: '诊断',
               padding: EdgeInsets.fromLTRB(
                 _contentInset,
@@ -88,8 +83,8 @@ class SettingsPage extends StatelessWidget {
                 10,
               ),
             ),
-            _DiagnosticsCard(),
-            _AppVersionFooter(),
+            const _DiagnosticsCard(),
+            const _AppVersionFooter(),
           ],
         ),
       ),
@@ -97,7 +92,7 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-/// 设置页里两个按钮组（推荐流布局 / 下载清晰度）共用的外观。
+/// 设置页里几个按钮组（推荐流布局 / 全局字重 / 缓存质量）共用的外观。
 ///
 /// 不要 M3 默认的描边：一圈外框加段间竖线在卡片上很吵，选中态靠底色已经
 /// 够清楚；去掉后整组是一条浅色底轨 + 一个实心选中段。段的左右内边距也收
@@ -160,6 +155,34 @@ class _Card extends StatelessWidget {
   }
 }
 
+/// 主题区块：所有外观偏好共用一张卡，卡内不画分割线。
+///
+/// 顺序按「一眼就能定」排：主题色 → 深浅色 → 推荐流布局 → 全局字重（仅
+/// Android）→ 对话高亮（阅读页局部装饰，放最后）。每行自己带上下 padding，
+/// 卡片只保留 6pt 的外边距，行间留白就是唯一的分组手段。
+class _ThemeCard extends StatelessWidget {
+  const _ThemeCard();
+
+  @override
+  Widget build(BuildContext context) {
+    // 全局字重只有 Android 有；iOS 直接不建这一行，卡内不留空位。
+    final showFontWeight = Theme.of(context).platform == TargetPlatform.android;
+    return _Card(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const _ThemeColorRow(),
+          const _AppearanceRows(),
+          const _FeedLayoutRow(),
+          if (showFontWeight) const _GlobalFontWeightRow(),
+          const _DialogueHighlightRow(),
+        ],
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 主题色
 // ---------------------------------------------------------------------------
@@ -167,8 +190,8 @@ class _Card extends StatelessWidget {
 /// 「自定义颜色」色块的 key：测试用它点开取色弹层。
 const Key themeCustomColorKey = Key('theme-color-custom');
 
-class _ThemeColorCard extends ConsumerWidget {
-  const _ThemeColorCard();
+class _ThemeColorRow extends ConsumerWidget {
+  const _ThemeColorRow();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -177,7 +200,8 @@ class _ThemeColorCard extends ConsumerWidget {
     final customSeed = ref.watch(customThemeSeedProvider);
     final customController = ref.read(customThemeSeedProvider.notifier);
     final customSelected = !isPresetColor(seed);
-    return _Card(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -243,8 +267,8 @@ const Key dialogueHighlightStyleKey = Key('settings-dialogue-highlight-style');
 
 /// 阅读页人物对话荧光笔的颜色。和主题色分开：主题色决定全站配色，对话高亮
 /// 只是阅读页的一层标记色，用户可以单独挑一个顺眼的荧光笔颜色。
-class _DialogueHighlightColorCard extends ConsumerWidget {
-  const _DialogueHighlightColorCard();
+class _DialogueHighlightRow extends ConsumerWidget {
+  const _DialogueHighlightRow();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -252,8 +276,8 @@ class _DialogueHighlightColorCard extends ConsumerWidget {
     final controller = ref.read(readerSettingsProvider.notifier);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return _Card(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       // 样式和颜色都收进右边圆点打开的弹层里：圆点亮的是当前颜色，点开先挑
       // 画法再挑颜色，预览跟着两者一起变。
       child: Row(
@@ -358,8 +382,8 @@ class _DialogueHighlightPreviewSlot extends ConsumerWidget {
 ///
 /// 两个开关都保持可点：开着「跟随系统」时直接点「深色模式」会退出跟随、
 /// 固定成手动模式，比把开关置灰更符合直觉。
-class _AppearanceCard extends ConsumerWidget {
-  const _AppearanceCard();
+class _AppearanceRows extends ConsumerWidget {
+  const _AppearanceRows();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -369,12 +393,12 @@ class _AppearanceCard extends ConsumerWidget {
         MediaQuery.platformBrightnessOf(context) == Brightness.dark;
     final following = mode == ThemeMode.system;
     final dark = following ? platformDark : mode == ThemeMode.dark;
-    return _Card(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(
         children: [
           // 跟随系统时深色由系统决定，这一项没有意义，直接收起。
-          if (!following) ...[
+          if (!following)
             SettingSwitchRow(
               padding: const EdgeInsets.symmetric(vertical: 4),
               title: '深色模式',
@@ -383,11 +407,6 @@ class _AppearanceCard extends ConsumerWidget {
               onChanged: (value) =>
                   controller.setMode(value ? ThemeMode.dark : ThemeMode.light),
             ),
-            Divider(
-              color: Theme.of(context).colorScheme.outlineVariant
-                  .withValues(alpha: 0.5),
-            ),
-          ],
           SettingSwitchRow(
             padding: const EdgeInsets.symmetric(vertical: 4),
             title: '跟随系统',
@@ -409,79 +428,60 @@ class _AppearanceCard extends ConsumerWidget {
 // 全局字重（仅 Android）
 // ---------------------------------------------------------------------------
 
-/// 全局字重滑块；测试用它拖动和断言。
+/// 全局字重按钮组；测试用它点档位和断言。
 const Key globalFontWeightKey = Key('settings-global-font-weight');
+
+/// 每个字重档位的 key：测试直接点，不依赖文案。
+Key globalFontWeightOptionKey(int value) =>
+    ValueKey('settings-global-font-weight-$value');
 
 /// 全局字重：只有 Android 显示，iOS 保持现在的写死字重。
 ///
-/// 拖动时只更新本地预览，松手才写入 provider：整站主题重建一次即可，避免
-/// 每个 tick 都重建 MaterialApp。阅读器默认跟随这个值，进入阅读器后还能
-/// 单独覆盖。
-class _GlobalFontWeightCard extends ConsumerStatefulWidget {
-  const _GlobalFontWeightCard();
+/// 只开放 300 / 400 / 500 三档（见 [appFontWeightSteps]）：两头的极细/极粗
+/// 在正文里可读性明显变差，不值当。三档互斥、又要一眼看出当前值，所以用
+/// 按钮组（与「推荐流布局」同一种控件）而不是滑块。
+class _GlobalFontWeightRow extends ConsumerWidget {
+  const _GlobalFontWeightRow();
 
   @override
-  ConsumerState<_GlobalFontWeightCard> createState() =>
-      _GlobalFontWeightCardState();
-}
-
-class _GlobalFontWeightCardState extends ConsumerState<_GlobalFontWeightCard> {
-  double? _preview;
-
-  @override
-  Widget build(BuildContext context) {
-    if (Theme.of(context).platform != TargetPlatform.android) {
-      return const SizedBox.shrink();
-    }
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final weight = ref.watch(appFontWeightProvider);
-    final value = _preview ?? weight.value.toDouble();
+    final weight = appFontWeightFromValue(
+      ref.watch(appFontWeightProvider).value,
+    );
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: _Card(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Text(
-                    '全局字重',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: context.appWeight(FontWeight.w600),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  '${value.round()}',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '全局字重',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: context.appWeight(FontWeight.w600),
+              ),
             ),
-            Slider(
-              key: globalFontWeightKey,
-              min: appFontWeightSteps.first.toDouble(),
-              max: appFontWeightSteps.last.toDouble(),
-              divisions: appFontWeightSteps.length - 1,
-              value: value,
-              label: '${value.round()}',
-              onChanged: (next) => setState(() => _preview = next),
-              onChangeEnd: (next) {
-                ref
-                    .read(appFontWeightProvider.notifier)
-                    .setFontWeight(appFontWeightFromValue(next.round()));
-                setState(() => _preview = null);
-              },
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(width: 12),
+          SegmentedButton<int>(
+            key: globalFontWeightKey,
+            style: _segmentedStyle(theme),
+            segments: [
+              for (final step in appFontWeightSteps)
+                ButtonSegment(
+                  value: step,
+                  label: Text('$step', key: globalFontWeightOptionKey(step)),
+                ),
+            ],
+            selected: {weight.value},
+            // 段里只有三位数字，打勾会把控件撑宽；选中态靠底色区分。
+            showSelectedIcon: false,
+            onSelectionChanged: (selected) => ref
+                .read(appFontWeightProvider.notifier)
+                .setFontWeight(appFontWeightFromValue(selected.single)),
+          ),
+        ],
       ),
     );
   }
@@ -503,21 +503,21 @@ const Key recommendLayoutThreeKey = ValueKey('recommend-layout-three');
 
 /// 推荐流布局：双列 / 三列瀑布流。
 ///
-/// 与「下载清晰度」同一种控件（M3 SegmentedButton，按钮组）：两个互斥选项
+/// 与「缓存质量」同一种控件（M3 SegmentedButton，按钮组）：两个互斥选项
 /// 就是按钮组最直接的表达，比一排独立 chip 更省地方、选中态也连成一体。
 /// 标题和选项收在同一行，不写「封面更大 / 一屏更多」这类说明文案；标题自身
 /// 超宽时省略，不挤压按钮组。
 /// 默认双列，改完立即生效（推荐页 watch 同一个 provider）。
-class _FeedLayoutCard extends ConsumerWidget {
-  const _FeedLayoutCard();
+class _FeedLayoutRow extends ConsumerWidget {
+  const _FeedLayoutRow();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final layout = ref.watch(recommendLayoutProvider);
     final controller = ref.read(recommendLayoutProvider.notifier);
-    return _Card(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
           // 标题占剩余宽度（长标题省略），按钮组按内容宽贴右端：就是
@@ -558,14 +558,15 @@ class _FeedLayoutCard extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 存储：下载清晰度
+// 存储：缓存质量
 // ---------------------------------------------------------------------------
 
 /// 离线整剧下载的清晰度上限（默认 720P）。
 ///
 /// 只影响「下一部开始下载」的剧：已下完的内容不自动重下，需要用户删掉重新
 /// 缓存；在线播放不受这里影响（默认档由内核选流，后续清晰度面板再开）。
-/// 标题精简成「下载清晰度」：区块标题已经是「存储」，这里不必再重复「离线」。
+/// 标题精简成「缓存质量」：区块标题已经是「存储」，这里不必再重复「离线」；
+/// 它管的是「主动下载整本/整剧时存多大」，不是在线播放清晰度。
 class _VideoDownloadQualityCard extends ConsumerWidget {
   const _VideoDownloadQualityCard();
 
@@ -581,7 +582,7 @@ class _VideoDownloadQualityCard extends ConsumerWidget {
         children: [
           Expanded(
             child: Text(
-              '下载清晰度',
+              '缓存质量',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.titleSmall?.copyWith(
@@ -612,17 +613,22 @@ class _VideoDownloadQualityCard extends ConsumerWidget {
 // 存储
 // ---------------------------------------------------------------------------
 
-/// 存储卡右下角的清理入口：测试用它点，不依赖图标/文案。
+/// 清理卡右侧的清理入口：测试用它点，不依赖图标/文案。
 const Key clearCacheButtonKey = Key('settings-clear-cache');
 
-class _StorageCard extends ConsumerStatefulWidget {
-  const _StorageCard();
+/// 存储区块：占用明细一张卡，清理单独一张卡。
+///
+/// 拆两张卡是为了把「纯信息」和「破坏性动作」分开：明细不再画行间分割线、
+/// 也不带每行图标（三行短文本本来就是一列数据，图标只会把行高撑散），
+/// 清理那张卡里放「共 x MB」+ 适用范围说明 + 右侧图标按钮。
+class _StorageSection extends ConsumerStatefulWidget {
+  const _StorageSection();
 
   @override
-  ConsumerState<_StorageCard> createState() => _StorageCardState();
+  ConsumerState<_StorageSection> createState() => _StorageSectionState();
 }
 
-class _StorageCardState extends ConsumerState<_StorageCard> {
+class _StorageSectionState extends ConsumerState<_StorageSection> {
   bool _clearing = false;
 
   /// 确认框还开着时再点按钮不能叠出第二个框（两个都点确定会并发清理）。
@@ -682,115 +688,129 @@ class _StorageCardState extends ConsumerState<_StorageCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final usageAsync = ref.watch(cacheUsageProvider);
+    final usage = usageAsync.value;
     return _Card(
-      child: usageAsync.when(
-        loading: () => Row(
-          children: [
-            const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              '正在统计缓存占用…',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+      // 明细、清理、缓存质量都在一张卡里：行间靠留白分组，不画分割线。
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          usageAsync.when(
+            loading: () => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    '正在统计缓存占用…',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-        error: (error, _) => Row(
-          children: [
-            Expanded(
-              child: Text(
-                '缓存占用统计失败',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.error,
+            error: (error, _) => Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '缓存占用统计失败',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
                 ),
-              ),
+                TextButton(
+                  onPressed: () => ref.invalidate(cacheUsageProvider),
+                  child: const Text('重试'),
+                ),
+              ],
             ),
-            TextButton(
-              onPressed: () => ref.invalidate(cacheUsageProvider),
-              child: const Text('重试'),
+            data: (usage) => Column(
+              children: [
+                _UsageRow(label: '视频缓存', bytes: usage.video),
+                _UsageRow(label: '封面缓存', bytes: usage.image),
+                _UsageRow(label: '章节缓存', bytes: usage.chapter),
+                if (usage.legacyLog > 0)
+                  _UsageRow(label: '遗留日志', bytes: usage.legacyLog),
+              ],
             ),
-          ],
-        ),
-        data: (usage) => _buildUsage(context, usage),
+          ),
+          const SizedBox(height: 4),
+          _buildClearRow(
+            theme,
+            usage == null ? null : '共 ${formatBytes(usage.total)}',
+            // 只有真正拿到统计、且还有东西可清时才允许点；loading / 失败
+            // 期间按钮置灰，避免对着「共 —」弹确认框。
+            onClear: usage == null || usage.isEmpty || _clearing
+                ? null
+                : () => _clear(usage),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildUsage(BuildContext context, CacheUsage usage) {
-    final theme = Theme.of(context);
+  Widget _buildClearRow(
+    ThemeData theme,
+    String? total, {
+    required VoidCallback? onClear,
+  }) {
     final scheme = theme.colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Row(
+      // 整行按中线对齐：按钮的触控区比文字高，若也按底边对齐，文字会被
+      // 压在卡片底部、上方空出一截（截图里像「卡片高度不对」）。
       children: [
-        _UsageRow(
-          icon: Icons.smart_display_outlined,
-          label: '视频缓存',
-          bytes: usage.video,
-        ),
-        _UsageRow(
-          icon: Icons.image_outlined,
-          label: '封面缓存',
-          bytes: usage.image,
-        ),
-        _UsageRow(
-          icon: Icons.article_outlined,
-          label: '章节缓存',
-          bytes: usage.chapter,
-        ),
-        if (usage.legacyLog > 0)
-          _UsageRow(
-            icon: Icons.description_outlined,
-            label: '遗留日志',
-            bytes: usage.legacyLog,
-          ),
-        const SizedBox(height: 6),
-        Divider(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '共 ${formatBytes(usage.total)}',
+        Expanded(
+          child: Row(
+            // 「共 x MB」与副标题字号不同，这两段之间按底边对齐。
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                total ?? '共 —',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: context.appWeight(FontWeight.w600),
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
-            ),
-            // 清理只留图标（与详情页「复制 ID」同一档尺寸）：带文案的
-            // 胶囊按钮会把这一行撑满，而「共 xx MB」才是这里的信息主体。
-            IconButton(
-              key: clearCacheButtonKey,
-              tooltip: '清理缓存',
-              onPressed: usage.isEmpty || _clearing
-                  ? null
-                  : () => _clear(usage),
-              icon: _clearing
-                  ? const SizedBox(
-                      width: 15,
-                      height: 15,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.cleaning_services_outlined, size: 18),
-              color: scheme.onSurfaceVariant,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              visualDensity: VisualDensity.compact,
-            ),
-          ],
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  '不包括主动下载',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 4),
-        // 范围说明只对「这里清什么」负责：主动缓存的小说/短剧在缓存中心，
-        // 位置写进文案比在页面下方单独挂一行提示更近。
-        Text(
-          '不包括主动缓存的小说、短剧',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-            height: 1.3,
+        IconButton(
+          key: clearCacheButtonKey,
+          tooltip: '清理缓存',
+          onPressed: onClear,
+          icon: _clearing
+              ? const SizedBox(
+                  width: 15,
+                  height: 15,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.cleaning_services_outlined, size: 18),
+          color: scheme.onSurfaceVariant,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+          visualDensity: VisualDensity.compact,
+          // 不 shrinkWrap 的话 M3 会把触控区撑到 40，卡片跟着变高。
+          style: IconButton.styleFrom(
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
         ),
       ],
@@ -799,13 +819,8 @@ class _StorageCardState extends ConsumerState<_StorageCard> {
 }
 
 class _UsageRow extends StatelessWidget {
-  const _UsageRow({
-    required this.icon,
-    required this.label,
-    required this.bytes,
-  });
+  const _UsageRow({required this.label, required this.bytes});
 
-  final IconData icon;
   final String label;
   final int bytes;
 
@@ -814,11 +829,9 @@ class _UsageRow extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          Icon(icon, size: 19, color: scheme.onSurfaceVariant),
-          const SizedBox(width: 10),
           Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
           Text(
             formatBytes(bytes),

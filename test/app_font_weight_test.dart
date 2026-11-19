@@ -44,8 +44,9 @@ void main() {
     expect(text.style?.fontWeight, FontWeight.w700);
   });
 
-  test('全局字重只接受 300–700 的整百档', () {
-    expect(appFontWeightFromValue(999), FontWeight.w700);
+  test('全局字重只接受 300 / 400 / 500 三档', () {
+    expect(appFontWeightFromValue(999), FontWeight.w500);
+    expect(appFontWeightFromValue(600), FontWeight.w500, reason: '旧档位收敛到最近的一档');
     expect(appFontWeightFromValue(100), FontWeight.w300);
     expect(appFontWeightFromValue(null), FontWeight.w400);
   });
@@ -56,10 +57,10 @@ void main() {
     addTearDown(container.dispose);
     container
         .read(appFontWeightProvider.notifier)
-        .setFontWeight(FontWeight.w700);
+        .setFontWeight(FontWeight.w500);
     await pumpEventQueue();
     final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getInt(AppFontWeightController.fontWeightKey), 700);
+    expect(prefs.getInt(AppFontWeightController.fontWeightKey), 500);
   });
 
   test('iOS 不使用全局字重，Android 使用', () {
@@ -68,7 +69,7 @@ void main() {
     final ios = ProviderContainer(
       overrides: [
         appFontWeightProvider.overrideWith(
-          () => AppFontWeightController(initialFontWeight: FontWeight.w700),
+          () => AppFontWeightController(initialFontWeight: FontWeight.w500),
         ),
       ],
     );
@@ -79,11 +80,11 @@ void main() {
     final android = ProviderContainer(
       overrides: [
         appFontWeightProvider.overrideWith(
-          () => AppFontWeightController(initialFontWeight: FontWeight.w700),
+          () => AppFontWeightController(initialFontWeight: FontWeight.w500),
         ),
       ],
     );
     addTearDown(android.dispose);
-    expect(android.read(appEffectiveFontWeightProvider), FontWeight.w700);
+    expect(android.read(appEffectiveFontWeightProvider), FontWeight.w500);
   });
 }

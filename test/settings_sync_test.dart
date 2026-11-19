@@ -316,7 +316,7 @@ void main() {
 
     final fontSection = sections.firstWhere((s) => s.id == 'fontWeight');
     await fontSection.applyRemote(999);
-    expect(container.read(appFontWeightProvider).value, 700);
+    expect(container.read(appFontWeightProvider).value, 500);
   });
 
   test('coordinator 手动同步会把本地主题推到 settings.json', () async {
