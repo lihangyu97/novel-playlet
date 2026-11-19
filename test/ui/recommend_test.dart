@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
@@ -602,10 +603,9 @@ void main() {
     );
   });
 
-  testWidgets('推荐页-首屏失败立即显示错误页（不等待自动重试）', (tester) async {
-    // Riverpod 3 默认对异常自动重试 10 次（约 38 秒），期间状态一直是 loading，
-    // 错误页会被推迟。这里不用 pumpAndSettle（会把自动重试跑完），固定时长
-    // 观察：首请求失败后必须马上出现 ErrorView，且只发过一次请求。
+  /// 首屏失败先做两次短退避重试（覆盖首次安装的联网权限弹窗：弹窗期间请求
+  /// 必失败，用户点完「允许」之后的重试才可能成功），重试用尽才给错误页。
+  testWidgets('推荐页-首屏失败先自动重试两次再给错误页', (tester) async {
     final fake = FakePreviewTransport()..failRecommend = true;
     await pumpPreview(
       tester,
@@ -613,15 +613,89 @@ void main() {
       transport: fake,
       settle: false,
     );
+
+    int homepageCalls() => fake.calls
+        .where((call) => call.startsWith('/api/v1/recommend/homepage'))
+        .length;
+
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.pump(const Duration(milliseconds: 700));
+    expect(homepageCalls(), 1);
+    expect(find.text('boom'), findsNothing, reason: '重试窗口里先别闪错误页');
+    expect(
+      find.byKey(const ValueKey('recommend-skeleton-novel')),
+      findsOneWidget,
+      reason: '自动重试期间骨架继续占位',
+    );
+
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(homepageCalls(), 2, reason: '退避 400ms 后自动重试第二次');
+    expect(find.text('boom'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump();
+    expect(homepageCalls(), 3, reason: '再退避 800ms 重试第三次');
+    expect(find.text('boom'), findsOneWidget, reason: '重试用尽才把错误交给用户');
+  });
+
+  /// 确定性失败（bad_input / too_large / device_failed）重试同一个请求也不会
+  /// 变好：首屏必须立刻给错误页，不浪费两次请求。
+  testWidgets('推荐页-确定性失败不自动重试', (tester) async {
+    final fake = FakePreviewTransport()
+      ..failRecommend = true
+      ..recommendFailureKind = 'bad_input';
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      transport: fake,
+      settle: false,
+    );
+    await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('boom'), findsOneWidget);
     expect(
       fake.calls
           .where((call) => call.startsWith('/api/v1/recommend/homepage'))
           .length,
       1,
-      reason: '关闭自动重试后，失败应立即交给用户手动重试',
+      reason: '确定性失败不重试',
     );
   });
+
+  /// 首次安装的联网权限弹窗如果停留超过首屏重试窗口，用户点完「允许」回到
+  /// App（resumed）时应当自动再拉一次，而不是停在错误页等用户点重试。
+  testWidgets('推荐页-首屏失败后回前台自动重试', (tester) async {
+    final fake = FakePreviewTransport()..failRecommend = true;
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      transport: fake,
+      settle: false,
+    );
+    // 走完首屏的三次尝试，停在错误页。
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump();
+    expect(find.text('boom'), findsOneWidget);
+
+    // 用户在系统里点了「允许」、回到 App。
+    fake.failRecommend = false;
+    await _dispatchLifecycle(tester, 'AppLifecycleState.paused');
+    await _dispatchLifecycle(tester, 'AppLifecycleState.resumed');
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(find.text('boom'), findsNothing, reason: '回前台后错误页应被重试替换');
+    expect(find.byType(NovelGridCard), findsWidgets, reason: '首屏恢复出内容');
+  });
+}
+
+/// 模拟系统的 lifecycle 消息（暂停 / 回前台）。
+///
+/// 走真实的消息通道，而不是直接调 `binding.handleAppLifecycleStateChanged`
+/// （后者是 `@protected`，测试里调用会触发 analyzer 警告）。
+Future<void> _dispatchLifecycle(WidgetTester tester, String state) async {
+  await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+    'flutter/lifecycle',
+    const StringCodec().encodeMessage(state),
+    (_) {},
+  );
 }

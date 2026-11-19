@@ -168,8 +168,9 @@ enum ApiErrorKind {
 
   /// 是否值得"稍后再试一次"：只有上游/网络侧的瞬时失败算可重试。
   ///
-  /// 这里只描述语义，Dart 不实现重试循环（Rust 核已有重试/退避，Dart 再循环
-  /// 只会放大请求）。[badInput] 是确定性错误，同一请求重试不会变好；
+  /// 这里只描述语义：重试/退避在 Rust 核，Dart 不做通用重试循环（唯一例外是
+  /// 推荐流首屏为首次安装的联网权限弹窗做的有界重试）。[badInput] 是确定性
+  /// 错误，同一请求重试不会变好；
   /// [tooLarge] 是体积上限；[unknown] 无法判断；[deviceFailed] 见
   /// [needsRestart]。因此它们都不算 transient。
   bool get isTransient => switch (this) {

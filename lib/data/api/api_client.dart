@@ -104,6 +104,23 @@ class ApiClient {
     return HotSearch.fromPayload(payload);
   }
 
+  /// 启动期的最小联网请求：只为把系统联网权限弹窗提前到启动页。
+  ///
+  /// 首次安装时（国产 ROM 的「允许使用 WLAN 和移动数据」、iOS 的无线数据
+  /// 提示）系统要等 App 第一次真实联网才弹窗，而弹窗期间的连接会被系统直接
+  /// 拒掉——如果第一次请求就是首页，用户会先看到骨架再看到错误页。启动期先
+  /// 发一次 cue 这种小请求，弹窗就和「正在准备阅读环境…」同时出现。
+  ///
+  /// 结果与失败都不处理：弹窗出来就算达成目的；首屏失败由推荐流的有限重试 +
+  /// 回前台重试兜底，这里不需要也不应该拖住启动。
+  Future<void> warmUpNetwork() async {
+    try {
+      await searchCue();
+    } catch (_) {
+      // 忽略：这次请求只负责触发系统权限弹窗。
+    }
+  }
+
   /// 首页榜单目录（藏在小说首页 payload 的排行榜 cell 里）。
   Future<RankCatalog> rankCatalog() async {
     final payload = await _getJson('/api/v1/recommend/homepage', {
