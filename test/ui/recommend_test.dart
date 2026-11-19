@@ -8,6 +8,7 @@ import 'package:novel_playlet/app/widgets/novel_cover.dart';
 import 'package:novel_playlet/app/widgets/skeleton.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/top_glow.dart';
+import 'package:novel_playlet/features/prefetch/app_prefetch.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/features/search/search_page.dart';
@@ -42,6 +43,29 @@ List<double> _firstCardLefts(WidgetTester tester, {required int count}) {
   return {for (final card in cards) tester.getTopLeft(find.byWidget(card)).dx}
       .toList();
 }
+
+/// 骨架第一张卡封面色块的高宽比（骨架按内容域取 3:4 / 7:10）。
+///
+/// 只在骨架所在分类还在前台时调用：finder 默认跳过 offstage。
+double _skeletonCoverAspect(WidgetTester tester, Finder skeleton) {
+  final cover = tester.widget<SkeletonBox>(
+    find.descendant(of: skeleton, matching: find.byType(SkeletonBox)).first,
+  );
+  return cover.height / cover.width;
+}
+
+/// 测试里不跑首屏预热：预热请求也带 responseDelay，在延迟用例里会留下
+/// `pumpAndSettle` 消化不掉的 pending timer，和这些用例要验证的骨架/重试无关。
+class _NoopAppPrefetch extends AppPrefetch {
+  _NoopAppPrefetch(super.ref);
+
+  @override
+  Future<void> warm() async {}
+}
+
+final _noPrefetch = appPrefetchProvider.overrideWith(
+  (ref) => _NoopAppPrefetch(ref),
+);
 
 void main() {
   setUpAll(() async {
@@ -420,6 +444,7 @@ void main() {
       const RecommendPage(),
       transport: fake,
       settle: false,
+      extraOverrides: [_noPrefetch],
     );
     await tester.pump(const Duration(milliseconds: 20));
 
@@ -462,6 +487,7 @@ void main() {
       const RecommendPage(),
       transport: fake,
       settle: false,
+      extraOverrides: [_noPrefetch],
     );
     await tester.pump(const Duration(milliseconds: 20));
 
@@ -479,25 +505,29 @@ void main() {
       reason: '三个分类都不再退回整屏转圈',
     );
 
+    // 封面比例跟随分类：短剧是 7:10，不是小说的 3:4。要在短剧页还在前台时
+    // 取色块（finder 默认跳过 offstage，切走之后就查不到短剧骨架了）。
+    expect(
+      _skeletonCoverAspect(tester, drama),
+      closeTo(kVideoCoverAspect, 0.001),
+      reason: '短剧骨架按视频封面比例占位',
+    );
+
     await tester.drag(find.byType(TabBarView), const Offset(-320, 0));
     await tester.pumpAndSettle();
     final anime = find.byKey(const ValueKey('recommend-skeleton-anime'));
     expect(anime, findsOneWidget, reason: '漫剧分类同样有骨架');
+    expect(
+      _skeletonCoverAspect(tester, anime),
+      closeTo(kVideoCoverAspect, 0.001),
+      reason: '漫剧骨架按视频封面比例占位',
+    );
 
-    // 封面比例跟随分类：短剧/漫剧是 7:10，不是小说的 3:4。
-    for (final tab in [drama, anime]) {
-      final cover = tester.widget<SkeletonBox>(
-        find.descendant(of: tab, matching: find.byType(SkeletonBox)).first,
-      );
-      expect(
-        cover.height / cover.width,
-        closeTo(kVideoCoverAspect, 0.001),
-        reason: '短剧/漫剧骨架按视频封面比例占位',
-      );
+    // 收尾：每个泵末尾才发起的延迟请求要下一轮才落地（短剧/漫剧首屏各带
+    // 3s responseDelay），多推几轮，别给测试留 pending timer。
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(seconds: 4));
     }
-
-    // 收尾：让延迟请求和首屏后的预取都落地，别给测试留 pending timer。
-    await tester.pumpAndSettle(const Duration(seconds: 4));
   });
 
   /// 布局偏好是全局状态：设置页把布局切成三列后，推荐页立即按三列排版。
