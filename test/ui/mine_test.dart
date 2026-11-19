@@ -107,6 +107,13 @@ void main() {
     );
     expect(badges, hasLength(2));
     expect(badges.where((b) => b.type.isPlaylet), hasLength(1));
+    // 历史行的标签与收藏封面同尺寸（标准 15pt），不要为了塞进副标题行缩小。
+    expect(badges.every((b) => !b.dense), isTrue);
+    expect(
+      tester.getSize(find.byType(LibraryTypeBadge).first).height,
+      15,
+      reason: '历史行标签高度与收藏封面标签一致',
+    );
 
     // 短剧条目点进去直接进播放页（续播到第 5 集）。
     await tester.tap(find.text('看到第 5 集'));

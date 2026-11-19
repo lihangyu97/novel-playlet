@@ -27,7 +27,10 @@ class LibraryTypeBadge extends StatelessWidget {
 
   final LibraryType type;
 
-  /// 紧凑形态：历史列表的副标题行用，字号与内边距都小一档。
+  /// 紧凑形态：同步记录这类「小字日志行」的内联标签用，字号与内边距小一档。
+  ///
+  /// 历史 / 收藏 / 云端数据统一用标准尺寸（与封面角标同高），不要为了塞进
+  /// 副标题行而缩小——副标题行高（bodySmall 行盒）本来就放得下。
   final bool dense;
 
   /// 无障碍文案；默认按类型念「小说」/「短剧」（视觉上是单字「书」/「剧」）。
