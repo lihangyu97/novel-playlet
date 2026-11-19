@@ -724,6 +724,51 @@ void main() {
     expect(find.textContaining('第二章'), findsWidgets);
   });
 
+  testWidgets('阅读页-底栏章节名放宽到 80% 屏宽且页码不被挤动', (tester) async {
+    const longTitle = '第一章 这一段章节名故意写得很长很长，用来验证底栏左侧从半屏放宽到八成屏宽后仍然省略';
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: _LongChapterTitleTransport(longTitle: longTitle),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    final titleFinder = find.text(longTitle);
+    expect(titleFinder, findsOneWidget, reason: '底栏信息条应显示目录里的章节名');
+    final pageFinder = find.byWidgetPredicate(
+      (widget) =>
+          widget is Text &&
+          widget.data != null &&
+          RegExp(r'^\d+/\d+$').hasMatch(widget.data!),
+    );
+    expect(pageFinder, findsOneWidget, reason: '底栏信息条应显示页码');
+
+    final screenWidth =
+        tester.view.physicalSize.width / tester.view.devicePixelRatio;
+    final titleRect = tester.getRect(titleFinder);
+    final pageRect = tester.getRect(pageFinder);
+    // 旧上限是半屏宽：长章节名到这里就被省略，右侧白白空着一截。
+    expect(
+      titleRect.width,
+      greaterThan(screenWidth * 0.5 + 1),
+      reason: '章节名应能用超过半屏的宽度',
+    );
+    // 新上限是 80% 屏宽，再长也只能到这里。
+    expect(
+      titleRect.width,
+      lessThanOrEqualTo(screenWidth * 0.8 + 0.5),
+      reason: '章节名最多占 80% 屏宽',
+    );
+    // 页码位置不受影响：仍然贴着底栏右内边距（_horizontalPadding = 20）。
+    expect(pageRect.right, closeTo(screenWidth - 20, 0.5));
+    expect(titleRect.right, lessThan(pageRect.left), reason: '章节名不能盖住页码');
+    final titleText = tester.widget<Text>(titleFinder);
+    expect(titleText.maxLines, 1);
+    expect(titleText.overflow, TextOverflow.ellipsis);
+  });
+
   /// 阅读弹层的主题作用域回归：弹层挂在 root Navigator 上，必须显式包一层
   /// 「纸色对应的 Theme」。否则暗色 App + 浅色纸底时，弹层里会用全局的亮色
   testWidgets('阅读页-设置：字重滑块与底色色块同行', (tester) async {
@@ -1291,6 +1336,49 @@ class _DialogueTextTransport extends FakePreviewTransport {
                   '<p idx="1">这一段没有对话。</p>',
                   '<p idx="2">“第二段对话”后面还有字。</p>',
                 ].join(),
+              },
+            }),
+          ),
+        ),
+        'application/json',
+      );
+    }
+    return super.send(method, path, query: query, body: body, timeout: timeout);
+  }
+}
+
+/// 目录里放一个超长章节名：验证底栏左侧宽度上限从 50% 放宽到 80%。
+///
+/// 正文/段评沿用 [FakePreviewTransport]，只替换目录，保证页码仍是真实分页结果。
+class _LongChapterTitleTransport extends FakePreviewTransport {
+  _LongChapterTitleTransport({required this.longTitle});
+
+  final String longTitle;
+
+  @override
+  Future<BackendResponse> send(
+    String method,
+    String path, {
+    String? query,
+    Uint8List? body,
+    Duration timeout = BackendTransport.defaultTimeout,
+  }) async {
+    if (path.endsWith('/directory')) {
+      return BackendResponse(
+        200,
+        Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'code': 0,
+              'data': {
+                'item_data_list': [
+                  for (var i = 1; i <= 3; i++)
+                    {
+                      'item_id': 'c$i',
+                      'title': longTitle,
+                      'volume_name': '第一卷',
+                    },
+                ],
               },
             }),
           ),
