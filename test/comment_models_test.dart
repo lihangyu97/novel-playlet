@@ -243,10 +243,13 @@ void main() {
           {'web_url': ''},
         ],
       });
-      expect([for (final ref in refs) ref.full], [
-        'https://p3.example.com/a.jpg?x=1&y=2',
-        'https://p3.example.com/b.jpg',
-      ]);
+      expect(
+        [for (final ref in refs) ref.full],
+        [
+          'https://p3.example.com/a.jpg?x=1&y=2',
+          'https://p3.example.com/b.jpg',
+        ],
+      );
     });
 
     test('非 http(s) / 无 host / 空地址直接丢弃', () {
