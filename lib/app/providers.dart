@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/backend/backend_service.dart';
@@ -36,4 +38,12 @@ final readingStoreProvider = Provider<ReadingStore>((ref) => ReadingStore());
 /// 不来时任何页面都没有意义，所以在进首页之前就要完成。
 final bootstrapProvider = FutureProvider<void>((ref) async {
   await ref.watch(backendServiceProvider).start();
+  // 首次安装时，系统联网权限弹窗（国产 ROM 的「允许使用 WLAN 和移动数据」、
+  // iOS 的无线数据提示）要等 App 第一次真实联网才出现，而弹窗期间请求会被
+  // 系统直接拒掉。这里顺手发一次最小请求，把弹窗提前到启动页
+  // （[BootstrapGate] 的「正在准备阅读环境…」），不要在首页骨架后面才弹。
+  //
+  // 不 await：弹窗挂着时这次请求可能很久才失败，不能拖住进首页；失败也不
+  // 需要处理，首屏自己的有限重试会兜住（见 RecommendFeedController）。
+  unawaited(ref.read(apiClientProvider).warmUpNetwork());
 });
