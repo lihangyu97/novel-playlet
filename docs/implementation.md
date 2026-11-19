@@ -1040,7 +1040,7 @@ flutter drive --profile -d <iPhone UDID> \
 - **成本**：热搜 1 次 + 排行榜三个内容域首屏 3 次 + 短剧推荐首屏 1 次 + 漫剧推荐首屏
   1–2 次（漫剧首屏有搜索兜底），共约 6–7 次小请求；目录复用首页 payload 后不再额外请求。
   缓存只存列表对象和 URL，量级远小于保活页面。
-- **排行榜入场动画**：`RankRoute` 使用 `PageRouteBuilder` 从左侧滑入、返回时滑回左侧，不再用系统默认的右进左出。
+- **排行榜转场**：`RankRoute` 用 `MaterialPageRoute`，跟着系统转场走（iOS 右进左出，带左边缘侧滑返回）。不要再换成 `PageRouteBuilder` 自定义「左侧滑入」：自定义转场会绕过 `PageTransitionsTheme`，iOS 侧滑返回手势随之失效，只能点返回按钮退出。
 - **测试**：`prefetch_test.dart` 覆盖预热一次 / 重复调用不重复请求 / force 刷新 / 目录缓存
   命中不请求首页 / 短剧漫剧推荐首屏已就绪；
   `test/ui/rank_page_test.dart` 覆盖缓存命中不发首屏请求；`test/ui/home_test.dart` 覆盖

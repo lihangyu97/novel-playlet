@@ -199,6 +199,29 @@ void main() {
     expect(find.byType(RankPage), findsOneWidget);
   });
 
+  /// iOS 的左边缘侧滑返回由 `PageTransitionsTheme` 里的
+  /// `CupertinoPageTransitionsBuilder` 装手势。`RankRoute` 曾经改成自定义
+  /// `PageRouteBuilder` 做「左滑入场」，绕过了主题，侧滑返回就没了。
+  testWidgets('推荐页-排行榜支持 iOS 左边缘侧滑返回', (tester) async {
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      platform: TargetPlatform.iOS,
+      transport: FakePreviewTransport(),
+      rankCatalog: _catalog(),
+    );
+    await tester.tap(find.byTooltip('排行榜'));
+    await tester.pumpAndSettle();
+    expect(find.byType(RankPage), findsOneWidget);
+
+    // 从屏幕左边缘往右拖，触发 iOS 的交互式返回手势。
+    await tester.dragFrom(const Offset(2, 400), const Offset(320, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(RankPage), findsNothing, reason: '侧滑应退出排行榜');
+    expect(find.byType(RecommendPage), findsOneWidget, reason: '应回到推荐页');
+  });
+
   testWidgets('排行榜-内容区左右滑切换 tab', (tester) async {
     final calls = <String>[];
     await pumpPreview(
