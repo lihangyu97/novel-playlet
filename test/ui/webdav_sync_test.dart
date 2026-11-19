@@ -193,6 +193,9 @@ void main() {
     expect(find.text('测试小说'), findsOneWidget);
     expect(find.textContaining('第 12 章'), findsOneWidget);
     expect(find.text('测试短剧'), findsOneWidget);
+    // 类型标签与「我的」页共用同一个单字样式。
+    expect(find.text('书'), findsOneWidget);
+    expect(find.text('剧'), findsOneWidget);
     expect(find.textContaining('第 3 集'), findsOneWidget);
     expect(find.textContaining('共 2 条'), findsOneWidget);
   });

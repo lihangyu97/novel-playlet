@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/core/storage/library_records.dart';
 import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
@@ -47,6 +48,36 @@ void main() {
     );
   });
 
+  testWidgets('标签：视觉单字「书 / 剧」，读屏仍念「小说 / 短剧」', (tester) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Row(
+              children: [
+                LibraryTypeBadge(type: LibraryType.novel),
+                LibraryTypeBadge(type: LibraryType.playlet, dense: true),
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(find.text('书'), findsOneWidget);
+      expect(find.text('剧'), findsOneWidget);
+      expect(
+        tester.getSemantics(find.byType(LibraryTypeBadge).first).label,
+        '小说',
+      );
+      expect(
+        tester.getSemantics(find.byType(LibraryTypeBadge).last).label,
+        '短剧',
+      );
+    } finally {
+      semantics.dispose();
+    }
+  });
+
   testWidgets('我的页-历史混排：标签区分类型，短剧点击直接续播', (tester) async {
     final store = ReadingStore();
     await store.saveProgress(
@@ -76,6 +107,13 @@ void main() {
     );
     expect(badges, hasLength(2));
     expect(badges.where((b) => b.type.isPlaylet), hasLength(1));
+    // 历史行的标签与收藏封面同尺寸（标准 15pt），不要为了塞进副标题行缩小。
+    expect(badges.every((b) => !b.dense), isTrue);
+    expect(
+      tester.getSize(find.byType(LibraryTypeBadge).first).height,
+      15,
+      reason: '历史行标签高度与收藏封面标签一致',
+    );
 
     // 短剧条目点进去直接进播放页（续播到第 5 集）。
     await tester.tap(find.text('看到第 5 集'));

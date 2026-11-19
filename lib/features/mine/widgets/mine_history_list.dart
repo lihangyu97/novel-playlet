@@ -22,7 +22,7 @@ class MineHistoryList extends StatelessWidget {
       tileOf: (item) => MineRecentTile(
         cover: item.cover,
         title: item.title.isEmpty ? '未命名作品' : item.title,
-        label: LibraryTypeBadge(type: item.type, dense: true),
+        label: LibraryTypeBadge(type: item.type),
         subtitle: _subtitleOf(item),
         updatedAt: DateTime.fromMillisecondsSinceEpoch(item.lastReadAt),
         onTap: () => onOpen(item),
