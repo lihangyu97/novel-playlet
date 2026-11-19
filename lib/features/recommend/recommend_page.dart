@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/widgets/app_snack_bar.dart';
 import '../feed/feed_staggered_grid.dart';
+import '../feed/feed_state.dart';
 import '../feed/feed_view.dart';
 import '../../app/router.dart';
 import '../../app/widgets/category_tab_bar.dart';
@@ -13,13 +14,14 @@ import '../../app/widgets/novel_card.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../../app/widgets/top_glow.dart';
+import '../../data/models/json_utils.dart';
 import '../video/widgets/video_card.dart';
 import 'recommend_category.dart';
 import 'recommend_controller.dart';
 import 'recommend_item.dart';
 import '../prefetch/app_prefetch.dart';
 import 'recommend_layout.dart';
-import 'recommend_state.dart';
+import 'recommend_skeleton.dart';
 
 /// 合并后的「推荐」页：顶部分类 tabs + 左右两个图标入口 + 每个分类一条流。
 ///
@@ -244,11 +246,38 @@ class _CategoryFeedPage extends ConsumerStatefulWidget {
 }
 
 class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   RecommendCategory get _category => widget.category;
 
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// 回到前台时把停在错误态的首屏再拉一次。
+  ///
+  /// 首次安装的联网权限弹窗（国产 ROM 的「允许使用 WLAN 和移动数据」、iOS
+  /// 的无线数据提示）会在用户点「允许」之前一直挡住请求；用户点完弹窗、App
+  /// 回到前台时自动重试，比让用户自己找「重试」按钮少一步。只补一次首屏：
+  /// 确定性的失败（badInput 之类）重试也不会变好，交给错误页。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final async = ref.read(recommendFeedProvider(_category));
+    final error = async.error;
+    if (error == null || async.isLoading || !isRetryableError(error)) return;
+    _retry();
+  }
 
   RecommendFeedController get _controller =>
       ref.read(recommendFeedProvider(_category).notifier);
@@ -318,8 +347,14 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
     final data = async.value;
 
     if (data == null) {
+      // 首屏（含重试 invalidate 后的重新加载）用和真卡同口径的骨架占位，
+      // 不再给一个整屏转圈：卡片位置、封面比例、行高都和真卡一致，数据
+      // 到达时只是原地「填色」，不会整屏跳版。
       if (async.isLoading) {
-        return LoadingView(label: '正在加载${_category.label}');
+        return RecommendFeedSkeleton(
+          category: _category,
+          columns: layout.columns,
+        );
       }
       if (async.hasError) {
         return ErrorView(
@@ -327,7 +362,10 @@ class _CategoryFeedPageState extends ConsumerState<_CategoryFeedPage>
           onRetry: _retry,
         );
       }
-      return LoadingView(label: '正在加载${_category.label}');
+      return RecommendFeedSkeleton(
+        category: _category,
+        columns: layout.columns,
+      );
     }
 
     return FeedView<RecommendItem>(

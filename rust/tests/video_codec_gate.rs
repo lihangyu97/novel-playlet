@@ -258,6 +258,83 @@ async fn successful_download_keeps_the_local_source_contract() {
     );
 }
 
+/// 在线播放默认挑 720P：同一集同时给出 360/720/1080 时，下载的是 720 档
+/// （手机屏观感差异很小，体积差不多省一半）。
+#[tokio::test]
+async fn default_playback_prefers_720_over_the_top_tier() {
+    let upstream = MockUpstream::start(|req| {
+        if req.path.ends_with(".mp4") {
+            return MockReply {
+                status: 200,
+                headers: vec![],
+                body: b"video fixture".to_vec(),
+            };
+        }
+        MockReply::json(json!({"data": {"video_model": {
+            "key_seed": "AAAA",
+            "video_list": {
+                "video_1": {"main_url": "https://example.invalid/360.mp4",
+                    "codec_type": "h264", "vwidth": 360, "vheight": 640, "spade_a": SPADE_A},
+                "video_2": {"main_url": "https://example.invalid/720.mp4",
+                    "codec_type": "h264", "vwidth": 720, "vheight": 1280, "spade_a": SPADE_A},
+                "video_3": {"main_url": "https://example.invalid/1080.mp4",
+                    "codec_type": "h264", "vwidth": 1080, "vheight": 1920, "spade_a": SPADE_A}
+            }
+        }}}))
+    })
+    .await;
+    let dir = TempDir::new("video-default-720");
+    let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
+    let (status, body) = request_video(&server, "prefer_height=720").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["video_url"], "/src/episode.mp4", "{body}");
+    let requests = upstream.requests();
+    assert!(
+        requests.iter().any(|r| r.path == "/720.mp4"),
+        "默认应下载 720P 档：{requests:?}"
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|r| r.path != "/1080.mp4" && r.path != "/360.mp4"),
+        "不应下载最高档或最低档：{requests:?}"
+    );
+}
+
+/// 没有 720P 档时保持旧行为：选当次最高可解码档。
+#[tokio::test]
+async fn default_playback_falls_back_to_the_top_tier_without_720() {
+    let upstream = MockUpstream::start(|req| {
+        if req.path.ends_with(".mp4") {
+            return MockReply {
+                status: 200,
+                headers: vec![],
+                body: b"video fixture".to_vec(),
+            };
+        }
+        MockReply::json(json!({"data": {"video_model": {
+            "key_seed": "AAAA",
+            "video_list": {
+                "video_1": {"main_url": "https://example.invalid/360.mp4",
+                    "codec_type": "h264", "vwidth": 360, "vheight": 640, "spade_a": SPADE_A},
+                "video_3": {"main_url": "https://example.invalid/1080.mp4",
+                    "codec_type": "h264", "vwidth": 1080, "vheight": 1920, "spade_a": SPADE_A}
+            }
+        }}}))
+    })
+    .await;
+    let dir = TempDir::new("video-default-no-720");
+    let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
+    let (status, body) = request_video(&server, "prefer_height=720").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["video_url"], "/src/episode.mp4", "{body}");
+    let requests = upstream.requests();
+    assert!(
+        requests.iter().any(|r| r.path == "/1080.mp4"),
+        "没有 720P 时应退回最高档：{requests:?}"
+    );
+}
+
 /// The shortplay list stops at 720P; the model's `fallback_api` list carries
 /// the top tier. The stream response must merge both, or the quality panel
 /// silently loses a row (measured 2026-10-12 on the live upstream).

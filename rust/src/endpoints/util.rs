@@ -87,61 +87,6 @@ pub fn set_content_in_place(raw: &[u8], plaintext: &str) -> Result<Value, crate:
     Ok(v)
 }
 
-/// Go's `readMaybeGzip` is handled by the transport.
-/// Go's `Dechunk` (raw chunked framing the transport did not de-frame).
-pub fn dechunk(data: &[u8]) -> Vec<u8> {
-    let nl = match data.iter().position(|b| *b == b'\n') {
-        Some(0) | None => return data.to_vec(),
-        Some(n) => n,
-    };
-    let size_line: Vec<u8> = data[..nl]
-        .iter()
-        .copied()
-        .take_while(|b| *b != b'\r')
-        .collect();
-    if size_line.is_empty() {
-        return data.to_vec();
-    }
-    if !size_line.iter().all(|b| b.is_ascii_hexdigit()) {
-        return data.to_vec();
-    }
-
-    let mut out: Vec<u8> = Vec::new();
-    let mut rest: &[u8] = data;
-    while let Some(nl) = rest.iter().position(|b| *b == b'\n') {
-        let size_line: Vec<u8> = rest[..nl]
-            .iter()
-            .copied()
-            .take_while(|b| *b != b'\r')
-            .collect();
-        if size_line.is_empty() {
-            break;
-        }
-        let text = String::from_utf8_lossy(&size_line);
-        let size = match usize::from_str_radix(&text, 16) {
-            Ok(s) => s,
-            Err(_) => break,
-        };
-        rest = &rest[nl + 1..];
-        if size == 0 {
-            break;
-        }
-        let take = size.min(rest.len());
-        out.extend_from_slice(&rest[..take]);
-        rest = &rest[take..];
-        if rest.len() >= 2 && rest[0] == b'\r' && rest[1] == b'\n' {
-            rest = &rest[2..];
-        } else if !rest.is_empty() && rest[0] == b'\n' {
-            rest = &rest[1..];
-        }
-    }
-    if out.is_empty() {
-        data.to_vec()
-    } else {
-        out
-    }
-}
-
 pub fn user_agent_headers(agent: &str) -> Vec<(String, String)> {
     vec![("User-Agent".to_string(), agent.to_string())]
 }

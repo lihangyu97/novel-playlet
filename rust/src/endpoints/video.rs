@@ -124,6 +124,9 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         // 时回退到最低可用档（quality_fallback=true）。0/缺省 = 现状最高档。
         let requested_max_height = int_default(&params.get_str("max_height"), 0).max(0);
         let want_quality = requested_max_height > 0;
+        // 在线播放的默认档位偏好（按短边）：播放页传 720，没有 720 的剧
+        // 仍退回最高可解码档。0/缺省 = 旧行为（最高档），下载链路不传。
+        let prefer_short_edge = int_default(&params.get_str("prefer_height"), 0).max(0);
 
         if cached_mode && !force_refresh {
             let src_dir = if ctx.src_dir.is_empty() {
@@ -196,17 +199,24 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         };
 
         let (parsed, phoenix_parsed, resolved) = if let Some(v5) = v5_parsed {
-            let resolved = resolve_video_source(ctx, &v5).await;
+            let resolved = resolve_video_source(ctx, &v5, prefer_short_edge).await;
             if resolved == VideoSourceResolution::NotFound {
                 log::warn!("video {video_id}: v5 source not found; falling back to shortplay");
-                let (parsed, phoenix, resolved) =
-                    fetch_legacy_video_models(ctx, &video_id, stream_mode, want_quality).await?;
+                let (parsed, phoenix, resolved) = fetch_legacy_video_models(
+                    ctx,
+                    &video_id,
+                    stream_mode,
+                    want_quality,
+                    prefer_short_edge,
+                )
+                .await?;
                 (parsed, phoenix, resolved)
             } else {
                 (v5, None, resolved)
             }
         } else {
-            fetch_legacy_video_models(ctx, &video_id, stream_mode, want_quality).await?
+            fetch_legacy_video_models(ctx, &video_id, stream_mode, want_quality, prefer_short_edge)
+                .await?
         };
 
         // 官方 `wp3/o1.java:301-347` 的 `isSupportShowLandIcon` 按服务端
@@ -410,6 +420,7 @@ async fn fetch_legacy_video_models(
     video_id: &str,
     stream_mode: bool,
     want_quality: bool,
+    prefer_short_edge: i64,
 ) -> ApiResult<(
     ParsedVideoResponse,
     Option<ParsedVideoResponse>,
@@ -422,7 +433,7 @@ async fn fetch_legacy_video_models(
         let primary = async {
             let parsed =
                 ParsedVideoResponse::parse(&fetch_shortplay_video_model(ctx, video_id).await?)?;
-            let resolved = resolve_video_source(ctx, &parsed).await;
+            let resolved = resolve_video_source(ctx, &parsed, prefer_short_edge).await;
             if resolved == VideoSourceResolution::CodecRejected {
                 return Err(ApiError::Internal("该视频暂不支持播放".to_string()));
             }
@@ -455,7 +466,7 @@ async fn fetch_legacy_video_models(
         Ok((parsed, phoenix.ok(), resolved))
     } else {
         let parsed = ParsedVideoResponse::parse(&fetch_phoenix_video_model(ctx, video_id).await?)?;
-        let resolved = resolve_video_source(ctx, &parsed).await;
+        let resolved = resolve_video_source(ctx, &parsed, prefer_short_edge).await;
         Ok((parsed, None, resolved))
     }
 }
@@ -522,27 +533,31 @@ async fn fetch_shortplay_video_model(ctx: &Ctx, video_id: &str) -> ApiResult<Vec
         .await
 }
 
-/// Parses the multi_video_model response and extracts the best quality MP4 URL.
+/// Parses the multi_video_model response and extracts the source to play,
+/// honouring `prefer_short_edge` (0 = highest decodable tier).
 #[cfg(test)]
-fn extract_video_url(raw: &[u8]) -> VideoSourceResolution {
+fn extract_video_url(raw: &[u8], prefer_short_edge: i64) -> VideoSourceResolution {
     let Ok(parsed) = ParsedVideoResponse::parse(raw) else {
         return VideoSourceResolution::NotFound;
     };
-    extract_parsed_video_url(&parsed)
+    extract_parsed_video_url(&parsed, prefer_short_edge)
 }
 
-fn extract_parsed_video_url(parsed: &ParsedVideoResponse) -> VideoSourceResolution {
+fn extract_parsed_video_url(
+    parsed: &ParsedVideoResponse,
+    prefer_short_edge: i64,
+) -> VideoSourceResolution {
     let Some(data) = parsed.root.get("data").and_then(Value::as_object) else {
         return VideoSourceResolution::NotFound;
     };
 
-    let direct = extract_video_info_list_map_url(data);
+    let direct = extract_video_info_list_map_url(data, prefer_short_edge);
     if direct.is_terminal() {
         return direct;
     }
 
     for model in &parsed.models {
-        let source = extract_video_model_url(model);
+        let source = extract_video_model_url(model, prefer_short_edge);
         if source.is_terminal() {
             return source;
         }
@@ -550,7 +565,10 @@ fn extract_parsed_video_url(parsed: &ParsedVideoResponse) -> VideoSourceResoluti
     VideoSourceResolution::NotFound
 }
 
-fn extract_video_info_list_map_url(data: &Map<String, Value>) -> VideoSourceResolution {
+fn extract_video_info_list_map_url(
+    data: &Map<String, Value>,
+    prefer_short_edge: i64,
+) -> VideoSourceResolution {
     let Some(video_map) = data.get("video_info_list_map").and_then(|v| v.as_object()) else {
         return VideoSourceResolution::NotFound;
     };
@@ -573,7 +591,7 @@ fn extract_video_info_list_map_url(data: &Map<String, Value>) -> VideoSourceReso
     let Some(play_info_list) = video_info.get("play_info_list").and_then(|v| v.as_array()) else {
         return VideoSourceResolution::NotFound;
     };
-    extract_video_list_source(play_info_list)
+    extract_video_list_source(play_info_list, prefer_short_edge)
 }
 
 /// The episode's `vertical` flag from a multi_video_model response.
@@ -629,9 +647,13 @@ fn vertical_flag(value: &Value) -> Option<bool> {
     }
 }
 
-async fn resolve_video_source(ctx: &Ctx, parsed: &ParsedVideoResponse) -> VideoSourceResolution {
+async fn resolve_video_source(
+    ctx: &Ctx,
+    parsed: &ParsedVideoResponse,
+    prefer_short_edge: i64,
+) -> VideoSourceResolution {
     for model in &parsed.models {
-        let source = extract_shortplay_video_model_source(model);
+        let source = extract_shortplay_video_model_source(model, prefer_short_edge);
         if source.is_terminal() {
             return source;
         }
@@ -643,17 +665,20 @@ async fn resolve_video_source(ctx: &Ctx, parsed: &ParsedVideoResponse) -> VideoS
             continue;
         }
         if let Some(fallback_data) = fetch_fallback_video_info(ctx, &fallback_url).await {
-            let source = extract_fallback_video_source(&fallback_data);
+            let source = extract_fallback_video_source(&fallback_data, prefer_short_edge);
             if source.is_terminal() {
                 return source;
             }
         }
     }
 
-    extract_parsed_video_url(parsed)
+    extract_parsed_video_url(parsed, prefer_short_edge)
 }
 
-fn extract_shortplay_video_model_source(model: &Map<String, Value>) -> VideoSourceResolution {
+fn extract_shortplay_video_model_source(
+    model: &Map<String, Value>,
+    prefer_short_edge: i64,
+) -> VideoSourceResolution {
     let Some(video_list) = model.get("video_list").and_then(|v| v.as_object()) else {
         return VideoSourceResolution::NotFound;
     };
@@ -663,7 +688,7 @@ fn extract_shortplay_video_model_source(model: &Map<String, Value>) -> VideoSour
         .filter(|s| !s.is_empty())
         .and_then(|s| audio_b64_decode(s).ok());
 
-    select_video_source(video_list.values(), |info| {
+    select_video_source(video_list.values(), prefer_short_edge, |info| {
         // Missing keys may prevent resolution, but must not hide a codec rejection.
         decrypt_variant_entry(info, key_seed.as_deref())
     })
@@ -955,16 +980,22 @@ fn decode_video_model(v: &Value) -> Option<Map<String, Value>> {
     }
 }
 
-fn extract_video_model_url(model: &Map<String, Value>) -> VideoSourceResolution {
+fn extract_video_model_url(
+    model: &Map<String, Value>,
+    prefer_short_edge: i64,
+) -> VideoSourceResolution {
     let Some(video_list) = model.get("video_list").and_then(|v| v.as_array()) else {
         return VideoSourceResolution::NotFound;
     };
-    extract_video_list_source(video_list)
+    extract_video_list_source(video_list, prefer_short_edge)
 }
 
-fn extract_video_list_source(video_list: &[Value]) -> VideoSourceResolution {
+fn extract_video_list_source(
+    video_list: &[Value],
+    prefer_short_edge: i64,
+) -> VideoSourceResolution {
     // Preserve the legacy last-entry preference when quality metadata is absent.
-    select_video_source(video_list.iter().rev(), |info| {
+    select_video_source(video_list.iter().rev(), prefer_short_edge, |info| {
         ["play_url", "main_url"]
             .iter()
             .filter_map(|key| info.get(*key).and_then(|v| v.as_str()))
@@ -1039,7 +1070,10 @@ async fn fetch_fallback_video_info(ctx: &Ctx, u: &str) -> Option<Map<String, Val
         .cloned()
 }
 
-fn extract_fallback_video_source(root: &Map<String, Value>) -> VideoSourceResolution {
+fn extract_fallback_video_source(
+    root: &Map<String, Value>,
+    prefer_short_edge: i64,
+) -> VideoSourceResolution {
     let Some(video_info) = root.get("video_info").and_then(|v| v.as_object()) else {
         return VideoSourceResolution::NotFound;
     };
@@ -1055,15 +1089,23 @@ fn extract_fallback_video_source(root: &Map<String, Value>) -> VideoSourceResolu
         return VideoSourceResolution::NotFound;
     };
 
-    select_video_source(video_list.values(), |info| {
+    select_video_source(video_list.values(), prefer_short_edge, |info| {
         // Same two URL shapes as the primary list (base64-wrapped plain URL or
         // spade ciphertext): use the shared resolver, never a copy (P1-11).
         decrypt_variant_entry(info, key_seed.as_deref())
     })
 }
 
+/// Picks the source to play: `prefer_short_edge > 0` ranks that tier first
+/// (online playback passes 720 so phones spend roughly half the bytes of
+/// 1080P), then falls back to the highest decodable tier in score order. `0`
+/// keeps the legacy highest-quality-first behaviour used by downloads.
+///
+/// Preference never bypasses the codec gate and never causes a resolution
+/// failure: tiers are filtered/sorted, then each is tried in order.
 fn select_video_source<'a>(
     variants: impl Iterator<Item = &'a Value>,
+    prefer_short_edge: i64,
     mut resolve: impl FnMut(&Map<String, Value>) -> Option<(String, Vec<u8>)>,
 ) -> VideoSourceResolution {
     let mut unresolved = VideoSourceResolution::NotFound;
@@ -1077,13 +1119,39 @@ fn select_video_source<'a>(
             }
         })
         .collect();
-    infos.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    if prefer_short_edge > 0 {
+        // 偏好档排最前，同档仍按质量分从高到低；偏好档解不出 url/key 时
+        // 循环自然落到后面的最高档，不会因为偏好把整集变成选流失败。
+        infos.sort_by_key(|(score, info)| {
+            (
+                raw_variant_short_edge(info) != prefer_short_edge,
+                std::cmp::Reverse(*score),
+            )
+        });
+    } else {
+        infos.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    }
     for (_, info) in infos {
         if let Some((url, key)) = resolve(info) {
             return VideoSourceResolution::Found(url, key);
         }
     }
     unresolved
+}
+
+/// 上游档位条目的短边：优先 `vwidth`/`vheight`，缺省时退回 `definition`
+/// 文本（如 `"720p"`）里的数字。0 表示未知。
+fn raw_variant_short_edge(info: &Map<String, Value>) -> i64 {
+    let width = int64_from_any(info.get("vwidth").unwrap_or(&Value::Null));
+    let height = int64_from_any(info.get("vheight").unwrap_or(&Value::Null));
+    let edge = short_edge_of(width, height);
+    if edge > 0 {
+        return edge;
+    }
+    info.get("definition")
+        .and_then(Value::as_str)
+        .map(scan_i64)
+        .unwrap_or(0)
 }
 
 fn video_quality_score(info: &Map<String, Value>) -> Option<i64> {
@@ -3433,9 +3501,7 @@ async fn serve_cached_src(
             }),
         ));
     };
-    let Some(index) = cached_meta.index.clone() else {
-        return None;
-    };
+    let index = cached_meta.index.clone()?;
     let content_type = crate::dispatch::mime_for(&path).to_string();
     let range = crate::static_files::parse_range(req.header("range"), total);
     let is_head = req.method.eq_ignore_ascii_case("HEAD");

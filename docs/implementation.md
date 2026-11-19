@@ -16,6 +16,8 @@
 
 - **推荐**：小红书式顶栏（整行与 tabs 同高 32pt，常驻不随列表收起）——分类 tabs（小说 / 短剧 / 漫剧，整组居中、当前分类带下划线）在左，右侧一个独立的放大镜图标（`search_rounded`，无底色，点击进独立搜索页）；顶栏没有整行搜索框、也没有缓存入口（缓存入口在我的页头）。固定顶部模块带很淡的蓝粉氛围渐变；下划线贴行底，到下方榜单区块/首屏卡片留 8pt。每个分类独立推荐流，翻页、下拉刷新、首屏不足自动补页。搜索不再内联在推荐页（搜索词不会改写推荐流）。
   推荐流是**白底不定高卡片 + 瀑布流**（`SliverMasonryGrid`）：默认双列、设置里可切三列，卡片高度由内容决定（标题 1~2 行、没有元信息就不占行），封面按内容域原生比例出图（小说 240×320、短剧/漫剧 400×571），不再统一裁成 11:8。
+  首屏（含失败重试后的重新加载）不再是整屏转圈，而是铺与真卡**同列宽、同封面比例、同行高**的骨架（`recommend_skeleton.dart`）：按当前布局双列/三列铺开，标题 1 / 2 行与「是否有附加元信息」按确定性规则轮换制造高低差；骨架不可滚动、不做 shimmer（与搜索页 `CompactSkeletonRow` 同一套静态色块），数据到达后原地填色，不整屏跳版。
+  首次安装的联网权限弹窗（国产 ROM 的「允许使用 WLAN 和移动数据」、iOS 的无线数据提示）会挡住第一批请求：启动闸门成功后先打一发 `ApiClient.warmUpNetwork()`（`search/cue` 小请求）把弹窗提前到启动页，而不是首页骨架后面；首屏只对**可重试**失败做两次短退避（400ms / 800ms，加首次最多 3 次请求、约 1.2s），骨架承接等待，`bad_input` / `too_large` / `device_failed` 立刻给错误页；弹窗停留超过这个窗口时，用户点完「允许」回到前台（`resumed`）会把停在错误态的那个分类首屏 invalidate 重拉一次。
   推荐卡元信息：**双列**（默认）时推荐理由做成封面左上角角标，文字区只有「标题 + 作者（短剧为「全 N 集」）左 / 热度右」一行；**三列**卡片太窄，角标放不下，理由/热度退回文字区逐行。热度 = 小说 `rank_score` / 短剧 `rec_text`（如「4691万热度」），推荐理由 = `recommend_reason_list` 第一条（小说是数组元素 `content`，如「巅峰榜No.3」；短剧是 JSON 串里的 `rec_tags[0].content` / `tag_info.text`）。**评分不进元信息行**，而是封面右上角角标（白字 + 半透明深色底 + 轻阴影，`9.3分`），小说与短剧/漫剧一致；短剧详情页也会展示星标评分。
 - **排行榜**：目录取自小说首页 `rank_with_category_data`（`cell_id_str` 是榜列表 id），条目走 `/api/v1/rank/{rankId}`。上游的榜单目录把小说/短剧/漫剧放在同一份 `rank_algo_list` 里，但短剧/漫剧必须额外带 `genre_tab=4/5`（`cell_selector` 的外层分组），否则接口会按小说榜回答。首页小说/短剧/漫剧三个 tab 的瀑布流上方各有一个榜单区块，版式与搜索结果页的分类行一致：榜名（推荐榜/短剧榜/漫剧榜）在卡片外面、右侧「更多」带 `initialAlgo` 进排行榜页并自动定位；下面是 `CompactCardRow` 的一行紧凑卡（与搜索结果同款卡宽/字号，取首屏前 10、无 1/2/3 标号、横向可滑，评分走封面角标，元信息为作者/集数 + 热度；请求失败/空榜重试一次再收起，避免一次抖动让某个分类整场会话都没有榜单）；首次加载先显示同口径骨架；排行榜页二级 tab 按小说（推荐/完本/巅峰/新书）→短剧→漫剧排序、无下划线，内容区用 TabBarView 左右滑切榜；每个 tab 自己请求并 keep-alive，切回不重拉、保留滚动位置；列表行含名次、封面、标题+评分、作者/分类/热度（短剧/漫剧为分类/全N集/热度）、两行简介和题材标签，行间不画分割线，触底按 `next_offset` 翻页；条目的 book_data/video_data 由 `RankEntry` 统一，点击按 kind 进小说/短剧详情；条目行 `RankEntryRow` 与「条目 → 路由/Hero tag」的 `rankEntryRoute()` 由排行榜页与首页榜单卡片共用；列表骨架直接复用首页流的 `FeedView`/`FeedFooter`（下拉刷新、触底翻页、首屏不满自动补页、翻页失败重试与「没有更多了」文案全 App 一致），每个 tab 只保留自己的 `FeedState<RankEntry>` 与分页请求。
 - **搜索页**：独立页面（推荐页顶栏搜索图标点进来）。搜索框占位轮播 cue 热词（`/api/v1/search/cue` 一次给一组词 + `rotate_interval_ms`，无词/失败回退静态提示）；**空输入提交（回车/点搜索）直接用当前占位热词搜索**并把它填回输入框（热词只是 placeholder，不是输入内容）。一次提交**搜小说 / 短剧**，从上到下 小说 / 短剧两行横滑卡片（一屏约 3.5 张），卡片复用首页同款白底卡、按屏宽缩小字号；每行独立 加载骨架（与真卡同宽同高的色块占位）/ 失败重试 / 空态，点卡片按内容域进详情。**不单列漫剧行**：漫剧没有独立搜索 tab，是借短剧搜索 tab 再按 `genre=205` 过滤的，和短剧行是同一份响应，单列会重复请求、重复展示，所以短剧行直接展示上游混排结果；视频卡不展示推荐理由（上游这个字段在搜索响应里是「漫剧」或「上新」这类角标，窄卡上挤占集数/热度），只留「全 N 集 + 热度」；v1 每个分类只取首屏一页，不接 `next_offset`。输入框为空时展示最近搜索历史（最多 10 条、去重置顶、可一键清空），点历史词直接重新搜索；历史下方是热搜榜（官方 472 榜 `/api/v1/search/hot`，最多取前 30 条（接口一次 50 条，超出截断），名次 1–3 标红、标题后展示 `display_tag` 彩色角标，右侧保留 `tag_attached` 的前缀、只把数字换算成整数 `3905w+`，点词直接搜；没有历史时热搜榜仍展示）。
@@ -93,7 +95,8 @@ Android 是 `.so`，FRB 走默认 `DynamicLibrary.open('libfqapi_core.so')`。
 
 - 签名、设备池、限流、重试、正文解密全在 Rust；Dart 只传 `(request_id, method, path, query, body, timeout_ms)`。
 - Rust 侧重试：同一设备对传输错误/429/5xx 退避重试，设备级失败会换设备；`Retry-After` 有上限，
-  请求有总时间预算。Dart **不做自动重试循环**，只决定要不要给用户「重试」入口。
+  请求有总时间预算。Dart **不做通用自动重试循环**，只决定要不要给用户「重试」入口；唯一例外是
+  推荐流首屏的有界重试（见「推荐」节：2 次退避 + 回前台补拉，只为覆盖首次安装的联网权限弹窗）。
 - 错误模型：`ApiException { message, kind }`，`kind` ∈
   `bad_input / device_failed / rate_limited / upstream_5xx / timeout / too_large / unknown`；
   统一文案 `apiErrorCopy()`，只有技术兜底 message 才换成人话。
@@ -308,7 +311,7 @@ loopback `APP_APIS` 白名单限制。全部读接口都是匿名设备签名（
 
 - **只读**：没有发评论/点赞/回复入口（内核只有短剧写接口，小说段评写接口不存在）。
 - **配图只读展示**：评论正文的 `content.image_data_list.image_data[].web_url` 由
-  `parseCommentImages` 归一成 http(s) 绝对 URL（兼容协议相对地址 / `&amp;` / 去重），
+  `parseCommentImageRefs` 归一成 http(s) 绝对 URL（兼容协议相对地址 / `&amp;` / 去重），
   评论与回复都渲染缩略图；点开全屏查看器可左右切图、双指缩放，单击画面任意处（或右上角 x）立即关闭。图片走
   `AppImageCache`（与封面共用磁盘缓存），只做展示，不参与任何写操作。
 - **表情内联渲染**：正文里的 `[微笑]` 等 53 个官方 token 由 `CommentEmojiText`
@@ -420,11 +423,11 @@ _onTick：同页重载时新集 position>0 才释放旧帧；播到尾部自动 
 
 | 步骤 | 说明 |
 |---|---|
-| 参数 | `mode=stream/cached`、`refresh=1`、`variants=0`、`max_height` |
+| 参数 | `mode=stream/cached`、`refresh=1`、`variants=0`、`max_height`（下载清晰度上限）、`prefer_height`（在线播放档位偏好，播放页传 720） |
 | `mode=cached` | 只查 `src/<id>{.mp4,.m4s,.ts}`（>0 字节、密文必须有可读 `.key`），**完全不打上游** |
 | `mode=stream`（M1） | 复用上面的取流/选档结果，启动后台下载到 `src/<id>.mp4.part`，拿到上游响应头（Content-Length）后**立即**返回本地 `/src` 地址（`streaming:true`），不读 body、不等整集落盘；同 id 复用进行中的会话，已有完整缓存直接按 cached 返回；`.m4s/.ts`、拿不到 Content-Length、启动失败 → 退回整集下载（`streaming:false`） |
 | 取上游 | 主取流打 V5 播放门 `multi_video_model/player/v1`（见下）；V5 请求失败 / 解析不出模型 / 选流 `NotFound` 时回落 legacy：播放默认只打 phoenix `multi_video_model`，stream / 带 `max_height` 时并发 shortplay+phoenix 合并档位 |
-| 选档 | 分数 `宽×1e9 + 高×1e6 + 码率 (+h264/avc1 1)`；`bytevc2` 整档排除；从高到低取第一个能解出 url+key 的档 |
+| 选档 | 分数 `宽×1e9 + 高×1e6 + 码率 (+h264/avc1 1)`；`bytevc2` 整档排除；无 `prefer_height` 时按分数从高到低。在线播放传 `prefer_height=720`：短边 720 的档排最前（同档再按分数），**没有 720P 时退回最高可解码档**；按该顺序取第一个能解出 url+key 的档（720 档解不出会自动落到下一档，不会选流失败） |
 | 清晰度上限 | `max_height` → 短边 ≤N 的最高档；没有更低档 → 最低可用档 + `quality_fallback=true` |
 | 整集下载 | 流式写 `.part` → rename `src/<id>.<ext>`（**CENC 密文原样落盘**），密文再写 `.key` sidecar、有档位写 `.variant.json` |
 | 淘汰 | `src/` 总预算 **128 MiB**（与漫画图共享），每次下载后异步按 mtime 最旧删，跳过 `.part/.tmp` |
@@ -766,7 +769,7 @@ flutter drive --profile -d <iPhone UDID> \
    超时/下载失败会 502 并让客户端回退整集下载；不带 Range 的整文件请求等价整集等待（Android ExoPlayer 需真机验证）。
    断网后第一次取流仍可能耗到内核重试预算（黑洞网络约几十秒），之后进入「疑似离线」
    快速失败（见 §5.7），用户手动重试会再试一次完整网络。
-3. 清晰度：在线播放固定「当次上游最高可解码档」；720P 上限只作用于**离线整剧下载**（默认 720P，可设最高/1080P/480P）。
+3. 清晰度：在线播放默认 720P（传 `prefer_height=720`，没有 720P 时退回当次最高可解码档；不可手动切换）；下载清晰度另走 `max_height`，可设**离线整剧下载**的最高/1080P/720P/480P（默认 720P）。
 4. 倍速 3x 在在线源上可能被 AVFoundation 静默 clamp 成 2x（已接受，不 fork 插件）。
 5. 离线下载：仅前台；按章/集粒度续传，无字节级断点；同时一个任务，队列只在内存里；不支持选集下载。
 6. 离线内容明文落盘（小说正文与短剧 mp4），未做加密。
@@ -794,6 +797,7 @@ flutter drive --profile -d <iPhone UDID> \
 | `third_party/README.md` | `video_player_avfoundation` 补丁内容与插件升级时如何重放 |
 | `lib/features/recommend/content_source.dart` | 分类策略（tab_type / 搜索 tab / 漫剧兜底） |
 | `lib/features/recommend/recommend_layout.dart` | 推荐流布局（双列 / 三列）provider 与持久化 |
+| `lib/features/recommend/recommend_skeleton.dart` | 推荐流首屏骨架（与真卡同列宽 / 封面比例 / 行高，静态色块） |
 | `lib/features/feed/feed_staggered_grid.dart` | 推荐流瀑布流（sliver 网格 + 列宽换算，卡片不定高） |
 | `lib/app/widgets/surface_card.dart` | 通用白底卡容器（推荐流先接入，后续列表逐步复用） |
 | `lib/features/cache/offline_downloader.dart` | 离线下载引擎（单任务状态机 + 队列） |

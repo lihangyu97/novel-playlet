@@ -138,6 +138,64 @@ axum 0.8 的 accept 循环对 accept 错误无限重试、永不返回，所以�
 等读接口不受影响。
 
 
+### 3.9 删除无调用者的内核 API 与 raw 端点机制（2026-11-19）
+
+App 只走 16 个读接口（见 §3.1 的 `APP_APIS` 收口），其余兼容面仍在，但内核里
+还有一批**连兼容面都不经过**的死代码：全仓（含 `tests/`）只有声明、没有任何调用点。
+
+| 文件 | 本地改动 | 原因 |
+|---|---|---|
+| `src/endpoints/base.rs` | 删 `HOST_FQNOVELA` / `HOST_READING_SNSSDK` / `HOST_FANQIENOVEL` | 只有听书/书旗/网页链路用，那些链路 App 不调 |
+| `src/endpoints/content_util.rs` | 删 `process_full_content` / `process_content_patterns` 与只被后者使用的 `CLOSE_P_RE` | 调用方都已改为走 `FullContentProcessor` |
+| `src/endpoints/util.rs` | 删 `dechunk` | 分帧由传输层处理，内核不再需要手工解 chunk |
+| `src/endpoints/mod.rs` | 删 `Params::get_int`；删 raw 端点机制（`RawOut` / `RawHandler` / `Server.raw` / `add_raw` / `raw_handler`） | 没有任何端点注册 raw handler，`dispatch` 里那段分支永不命中 |
+| `src/dispatch.rs` | 删 raw handler 分支与 `RawOut` 导入 | 同上 |
+| `src/json.rs` | 删 `as_map_mut` / `first_map_string` / `strip_html_tags` / `web_ok` / `web_err` | 移植自 Go 的助手函数，本仓库没有调用者 |
+| `Cargo.toml`、`Cargo.lock` | 删 `tower-http` 直接依赖 | 实际只作为 `reqwest` 的传递依赖存在 |
+
+与上游同步的影响：这些项上游也可能保留，同步时**不要因为"上游有本地没有"就加回来**；
+`cargo clippy -D warnings` 会在本仓库把它们判为 dead code。
+
+### 3.10 跟 clippy 1.99 对齐的两处告警（2026-11-19）
+
+与业务无关，只是让 `make check` 的 Rust 门禁重新变绿（这两处在基线上就红）。
+
+| 文件 | 本地改动 | 原因 |
+|---|---|---|
+| `src/device/mod.rs` | 文档注释续行缩进两格 | `clippy::doc_lazy_continuation` |
+| `src/endpoints/video.rs` | `let Some(index) = ... else { return None }` 改为 `cached_meta.index.clone()?` | `clippy::question_mark`，行为不变 |
+
+### 3.11 删除 Windows-only 桌面播放器内核（2026-11-19）
+
+本项目只发 iOS / Android，桌面播放器这条路**没有任何调用方**：`fq_desktop_media_*`
+三个 `extern "C"` 符号只给 Windows 桌面宿主用，Dart、Swift、Kotlin 侧都没有引用，
+`Cargo.toml` 里为它单开的 `reqwest/blocking` 也仅被这两个文件使用。
+
+| 文件 | 本地改动 | 原因 |
+|---|---|---|
+| `src/desktop_fetch.rs`、`src/desktop_media.rs` | **删除**（888 行） | `#[cfg(target_os = "windows")]` 的桌面播放器，产品不发 Windows |
+| `src/lib.rs` | 删两个 `#[cfg(target_os = "windows")] mod` 声明 | 同上 |
+| `Cargo.toml`、`Cargo.lock` | 删 `[target.'cfg(windows)'.dependencies]` 的 `reqwest`（`blocking` feature） | 只有被删的两个模块用 |
+
+仍保留：`tests/static_and_loopback.rs` 里的 `#[cfg(windows)] symlink_file` 辅助分支——
+那只是让同一份测试在 Windows 上也能跑，跟产品支持面无关，删了反而降低可移植性。
+
+### 3.12 删除两条只有路由映射、没有 handler 的死路径（2026-11-19）
+
+`router.rs` 里有两条 `api` 名从来没有 `add_route` 注册过，命中后只会拿到
+`404 unsupported api type`：
+
+| 路径 | 原 api 名 | 处理 | 说明 |
+|---|---|---|---|
+| `/api/v1/search/suggest` | `search_predict` | 删映射 | 搜索联想（`/reading/.../search/predict`）。fork 基线里就没实现；同族的 `novel-sound` 也只登记了映射，客户端调用后 404 被 `catch` 吞成空列表，等于静默失效。本 App 的搜索页用 `search/cue` + `search/hot`，不调这条 |
+| `/api/v1/articles/{id}` | `toutiao_article` | 删映射 + `match_articles` | 「按头条文章 id 取正文」，和 `/chapters/{id}/toutiao` 是同一条实现（`fetch_novel_reader_content` → `novel.snssdk.com/.../reader/content/v1`，头条客户端 UA + DH 解密），移植时只注册了 `toutiao` 这个名字 |
+
+`tests/mock_upstream_contract.rs` 里的两条映射断言同步删除。
+
+如果以后要恢复：`/articles/{id}` 只需在 `toutiao.rs` 里补
+`s.add_route("toutiao_article", handle)` 或把路由改指 `"toutiao"`；
+`/search/suggest` 则要先有真正的联想 handler。
+
 ## 4. 不在本文件范围内的部分
 
 - `rust/` 之外的 Dart 侧改动（UI/数据层/存储）由 git 历史管理，不需要和上游对齐；

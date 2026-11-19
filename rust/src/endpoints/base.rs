@@ -9,13 +9,10 @@ use crate::error::{ApiError, ApiResult};
 use crate::upstream::{ClientError, PinnedDevice, TransientKind, UpstreamClient, UpstreamRequest};
 
 pub const HOST_FQNOVEL: &str = "https://api5-normal-sinfonlineb.fqnovel.com";
-pub const HOST_FQNOVELA: &str = "https://api5-normal-sinfonlinea.fqnovel.com";
 pub const HOST_FQNOVELB: &str = "https://api5-normal-sinfonlineb.fqnovel.com";
 // 官方 7.0.9.32 抓包里搜索页走 c 域（plan/v、rank_list）；同集群，返回同构。
 pub const HOST_FQNOVELC: &str = "https://api5-normal-sinfonlinec.fqnovel.com";
 pub const HOST_NOVEL_SNSSDK: &str = "https://novel.snssdk.com";
-pub const HOST_READING_SNSSDK: &str = "https://reading.snssdk.com";
-pub const HOST_FANQIENOVEL: &str = "https://fanqienovel.com";
 pub const UA_DRAGON: &str = "com.dragon.read";
 pub const UA_ANDROID_BROWSER: &str = "Mozilla/5.0 (Linux; Android 13)";
 pub const UA_WINDOWS_BROWSER: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";

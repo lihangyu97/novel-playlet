@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../app/widgets/novel_cover.dart';
-import 'mine_relative_time.dart';
+import '../../../core/relative_time.dart';
 
 /// 「最近阅读 / 最近观看」共用的条目。
 ///
@@ -108,7 +108,7 @@ class MineRecentTile extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              mineRelativeTime(updatedAt),
+              relativeTime(updatedAt),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),

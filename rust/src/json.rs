@@ -10,35 +10,8 @@ pub fn as_map(v: &Value) -> Option<&Map<String, Value>> {
     v.as_object()
 }
 
-pub fn as_map_mut(v: &mut Value) -> Option<&mut Map<String, Value>> {
-    v.as_object_mut()
-}
-
 pub fn as_array(v: &Value) -> Option<&Vec<Value>> {
     v.as_array()
-}
-
-/// Go's `firstMapString`: first usable value across `keys`.
-pub fn first_map_string(m: &Map<String, Value>, keys: &[&str]) -> String {
-    for key in keys {
-        let Some(v) = m.get(*key) else { continue };
-        if v.is_null() {
-            continue;
-        }
-        if let Some(s) = v.as_str() {
-            let t = s.trim();
-            if !t.is_empty() {
-                return t.to_string();
-            }
-            continue;
-        }
-        if let Some(s) = value_to_string(v) {
-            if !s.is_empty() {
-                return s;
-            }
-        }
-    }
-    String::new()
 }
 
 /// Go's `pickStr`: string as-is, integral numbers as decimal text.
@@ -68,47 +41,6 @@ pub fn value_to_string(v: &Value) -> Option<String> {
 /// Go's `webUpstreamFailed` numeric-code check: only numbers count.
 pub fn numeric_code(v: &Value) -> Option<f64> {
     v.as_f64()
-}
-
-/// Go's `stripHTMLTags`, including the entity replacements.
-pub fn strip_html_tags(s: &str) -> String {
-    let mut buf = String::new();
-    let mut in_tag = false;
-    for ch in s.chars() {
-        if ch == '<' {
-            in_tag = true;
-            continue;
-        }
-        if ch == '>' {
-            in_tag = false;
-            continue;
-        }
-        if !in_tag {
-            buf.push(ch);
-        }
-    }
-    buf.replace("&nbsp;", " ")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-        .replace(['<', '>'], "")
-}
-
-/// Go's `webOK`.
-pub fn web_ok(data: Value) -> Value {
-    let mut m = Map::new();
-    m.insert("code".into(), Value::from(200));
-    m.insert("message".into(), Value::from("success"));
-    m.insert("data".into(), data);
-    Value::Object(m)
-}
-
-/// Go's `webErr`.
-pub fn web_err(code: i64, msg: &str) -> Value {
-    let mut m = Map::new();
-    m.insert("code".into(), Value::from(code));
-    m.insert("message".into(), Value::from(msg));
-    Value::Object(m)
 }
 
 /// Go's `extractUpstreamData`.

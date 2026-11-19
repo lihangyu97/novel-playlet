@@ -57,8 +57,12 @@ class FakePreviewTransport extends BackendTransport {
   /// 这些章节的正文接口返回 500（验证「切章失败保留旧正文」）。
   final failingChapterIds = <String>{};
 
-  /// 推荐流首页请求全部返回 500（验证首屏失败立即出错误页）。
+  /// 推荐流首页请求全部返回 500（验证首屏失败的重试与错误页）。
   bool failRecommend = false;
+
+  /// [failRecommend] 回包里的 `kind`（如 `bad_input`）；null = 只给 message，
+  /// 走 unknown（可重试）。用来区分「确定性失败不重试」。
+  String? recommendFailureKind;
 
   /// 详情接口返回的封面；非空时与列表封面不同，用来验证详情页不换图。
   String detailCoverUrl = '';
@@ -131,7 +135,14 @@ class FakePreviewTransport extends BackendTransport {
     if (failed) {
       return BackendResponse(
         500,
-        Uint8List.fromList(utf8.encode(jsonEncode({'message': 'boom'}))),
+        Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'message': 'boom',
+              if (recommendFailureKind != null) 'kind': recommendFailureKind,
+            }),
+          ),
+        ),
         'application/json',
       );
     }

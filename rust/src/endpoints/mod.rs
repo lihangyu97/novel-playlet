@@ -92,13 +92,6 @@ impl Params {
         self.items.retain(|(k, _)| k != key);
     }
 
-    pub fn get_int(&self, key: &str, default: i64) -> i64 {
-        match self.get(key) {
-            Some(v) if !v.is_empty() => v.parse::<i64>().unwrap_or(default),
-            _ => default,
-        }
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = &(String, String)> {
         self.items.iter()
     }
@@ -123,20 +116,10 @@ pub struct Ctx {
 
 pub type Handler = for<'a> fn(&'a Ctx, &'a Params) -> BoxFuture<'a, ApiResult<Value>>;
 
-/// Output of an HTML page endpoint, which bypasses the JSON envelope.
-pub struct RawOut {
-    pub status: u16,
-    pub content_type: String,
-    pub body: Vec<u8>,
-}
-
-pub type RawHandler = for<'a> fn(&'a Ctx, &'a Params) -> BoxFuture<'a, ApiResult<RawOut>>;
-
 pub struct Server {
     pub ctx: Arc<Ctx>,
     pub(crate) lifetime: tokio_util::sync::CancellationToken,
     routes: HashMap<&'static str, Handler>,
-    raw: HashMap<&'static str, RawHandler>,
 }
 
 impl Server {
@@ -145,7 +128,6 @@ impl Server {
             ctx,
             lifetime: tokio_util::sync::CancellationToken::new(),
             routes: HashMap::new(),
-            raw: HashMap::new(),
         };
         server::register_all(&mut s);
         s
@@ -155,16 +137,8 @@ impl Server {
         self.routes.insert(name, handler);
     }
 
-    pub fn add_raw(&mut self, name: &'static str, handler: RawHandler) {
-        self.raw.insert(name, handler);
-    }
-
     pub fn handler(&self, name: &str) -> Option<Handler> {
         self.routes.get(name).copied()
-    }
-
-    pub fn raw_handler(&self, name: &str) -> Option<RawHandler> {
-        self.raw.get(name).copied()
     }
 }
 

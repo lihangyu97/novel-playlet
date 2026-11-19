@@ -83,7 +83,7 @@ Future<BookCommentPage> bookComments(String bookId, {int count = 10, int offset 
 Future<CommentReplyPage> commentReplies(String commentId, {required String bookId, required String groupId, int count = 10}); // 评论回复，groupId = 章节 itemId
 Future<BookCommentPage> seriesComments(String seriesId, {int count = 20, String cursor = '', int sort = 1}); // 短剧整体剧评，cursor 翻页
 Future<BookCommentPage> episodeComments(String seriesId, String vid, {String cursor = ''}); // 某一集评论（官方热评，20 条/页，cursor 翻页）
-Future<VideoSource> videoSource(String episodeId, {bool refresh = false, int? maxHeight}); // refresh=1 删缓存重下；默认带 variants=0；maxHeight=下载清晰度上限
+Future<VideoSource> videoSource(String episodeId, {bool refresh = false, int? maxHeight, int? preferHeight}); // refresh=1 删缓存重下；默认带 variants=0；在线播放传 preferHeight=720（优先 720P，无 720 取最高档）；maxHeight=下载清晰度上限
 Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 /src，不打上游
 // 以上错误统一抛 ApiException（message 可直接展示）
 ```
@@ -105,7 +105,7 @@ Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 
 - 统一文案 `apiErrorCopy(error, fallback:)`（`lib/data/models/json_utils.dart`）：后端给了具体 message 就优先保留，只有 "HTTP 500" 这类技术兜底 message 才换成 `userCopy`；非 `ApiException` 用 `fallback`。
 - 行为策略：翻页失败时 `FeedState.loadMoreRetryable` 决定 footer 是否显示「重试」；`badInput` / `tooLarge` / `deviceFailed` 这类不可重试错误不显示按钮，`retryLoadMore()` 也直接不发请求。
 - B2 超时归一：内核 504 在传输层抛 `BackendTimeoutException`，`ApiClient` 归一成 `ApiException(kind: timeout)`；499 取消仍是 `TimeoutException`（用户不可见，不转成 ApiException）。
-- **仍不做 Dart 自动重试 / 退避循环**：重试与退避在 Rust 内核，Dart 只决定「要不要给用户一个重试入口」。
+- **仍不做通用 Dart 自动重试 / 退避循环**：重试与退避在 Rust 内核，Dart 只决定「要不要给用户一个重试入口」。唯一例外是推荐流首屏：可重试失败做 2 次短退避（400ms / 800ms，覆盖首次安装的联网权限弹窗），App 回前台（`resumed`）时对停在错误态的首屏补拉一次；确定性失败不重试（`lib/features/recommend/recommend_controller.dart`、`recommend_page.dart`）。
 - 回环自愈契约（Apple TN2277）：iOS 长时间挂起可能回收内核回环监听的底层资源（FFI 仍正常，真实 socket 连接被拒）。内核 supervisor 在**同端口**自愈重绑（baseUrl / capability / `/src` 免鉴权面不变，已发出的播放地址继续有效）；Dart 侧 `BackendTransport.waitForLoopbackHealthy()` 用 `dart:io` 真实 HTTP `GET /health` 探活（FFI 请求不经过回环 adapter，探不出来），`BackendService.ensureLoopback()` 在探活失败时串行执行整核 `shutdown`+`init` 兜底；播放页对 -1004 只做**一次**有界恢复重试（恢复，不是通用自动重试循环）。
 
 ## 本地存储 API（已完成）

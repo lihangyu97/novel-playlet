@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/category_tab_bar.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/app/widgets/skeleton.dart';
 import 'package:novel_playlet/app/widgets/surface_card.dart';
 import 'package:novel_playlet/app/widgets/top_glow.dart';
+import 'package:novel_playlet/features/prefetch/app_prefetch.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/recommend/recommend_page.dart';
 import 'package:novel_playlet/features/search/search_page.dart';
@@ -40,6 +43,29 @@ List<double> _firstCardLefts(WidgetTester tester, {required int count}) {
   return {for (final card in cards) tester.getTopLeft(find.byWidget(card)).dx}
       .toList();
 }
+
+/// 骨架第一张卡封面色块的高宽比（骨架按内容域取 3:4 / 7:10）。
+///
+/// 只在骨架所在分类还在前台时调用：finder 默认跳过 offstage。
+double _skeletonCoverAspect(WidgetTester tester, Finder skeleton) {
+  final cover = tester.widget<SkeletonBox>(
+    find.descendant(of: skeleton, matching: find.byType(SkeletonBox)).first,
+  );
+  return cover.height / cover.width;
+}
+
+/// 测试里不跑首屏预热：预热请求也带 responseDelay，在延迟用例里会留下
+/// `pumpAndSettle` 消化不掉的 pending timer，和这些用例要验证的骨架/重试无关。
+class _NoopAppPrefetch extends AppPrefetch {
+  _NoopAppPrefetch(super.ref);
+
+  @override
+  Future<void> warm() async {}
+}
+
+final _noPrefetch = appPrefetchProvider.overrideWith(
+  (ref) => _NoopAppPrefetch(ref),
+);
 
 void main() {
   setUpAll(() async {
@@ -407,6 +433,103 @@ void main() {
     expect(find.byType(AppSurfaceCard), findsWidgets, reason: '推荐卡是白底卡片');
   });
 
+  /// 首屏没有数据时铺和真卡同口径的骨架，而不是整屏转圈：数据回来后只是
+  /// 原地填色，卡片位置/封面比例/行高都对得上，不会整屏跳版。
+  testWidgets('推荐页-首屏加载显示骨架而不是转圈', (tester) async {
+    final fake = FakePreviewTransport()
+      ..responseDelay = const Duration(milliseconds: 300);
+    final semantics = tester.ensureSemantics();
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      transport: fake,
+      settle: false,
+      extraOverrides: [_noPrefetch],
+    );
+    await tester.pump(const Duration(milliseconds: 20));
+
+    final skeleton = find.byKey(const ValueKey('recommend-skeleton-novel'));
+    expect(skeleton, findsOneWidget, reason: '首屏加载中应显示骨架');
+    expect(
+      find.byType(CircularProgressIndicator),
+      findsNothing,
+      reason: '骨架替代原来的整屏转圈',
+    );
+    expect(find.byType(NovelGridCard), findsNothing, reason: '数据还没到，不该有真卡');
+    expect(
+      find.bySemanticsLabel('正在加载小说'),
+      findsOneWidget,
+      reason: '骨架保留加载中的读屏文案',
+    );
+    // 骨架按当前布局铺开（默认双列），列宽与真卡同一套口径。
+    final skeletonLefts = {
+      for (final element
+          in find
+              .descendant(of: skeleton, matching: find.byType(AppSurfaceCard))
+              .evaluate())
+        tester.getTopLeft(find.byWidget(element.widget)).dx,
+    };
+    expect(skeletonLefts, hasLength(2), reason: '骨架同样按双列铺开');
+
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(skeleton, findsNothing, reason: '数据到达后骨架撤掉');
+    expect(find.byType(NovelGridCard), findsWidgets, reason: '换成真卡');
+    semantics.dispose();
+  });
+
+  /// 三个分类各自一条流：首屏还没回来时切到短剧/漫剧，新分类同样是骨架，
+  /// 不会退回整屏转圈；封面比例按各自内容域走（小说 3:4，短剧/漫剧 7:10）。
+  testWidgets('推荐页-首屏未返回时切分类也是骨架', (tester) async {
+    final fake = FakePreviewTransport()
+      ..responseDelay = const Duration(seconds: 3);
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      transport: fake,
+      settle: false,
+      extraOverrides: [_noPrefetch],
+    );
+    await tester.pump(const Duration(milliseconds: 20));
+
+    final novel = find.byKey(const ValueKey('recommend-skeleton-novel'));
+    expect(novel, findsOneWidget, reason: '小说分类首屏加载中');
+
+    await tester.drag(find.byType(TabBarView), const Offset(-320, 0));
+    await tester.pumpAndSettle();
+    final drama = find.byKey(const ValueKey('recommend-skeleton-drama'));
+    expect(drama, findsOneWidget, reason: '短剧分类也在等首屏，给同款骨架');
+    expect(novel, findsNothing, reason: '切走的分类骨架不再露出');
+    expect(
+      find.byType(CircularProgressIndicator),
+      findsNothing,
+      reason: '三个分类都不再退回整屏转圈',
+    );
+
+    // 封面比例跟随分类：短剧是 7:10，不是小说的 3:4。要在短剧页还在前台时
+    // 取色块（finder 默认跳过 offstage，切走之后就查不到短剧骨架了）。
+    expect(
+      _skeletonCoverAspect(tester, drama),
+      closeTo(kVideoCoverAspect, 0.001),
+      reason: '短剧骨架按视频封面比例占位',
+    );
+
+    await tester.drag(find.byType(TabBarView), const Offset(-320, 0));
+    await tester.pumpAndSettle();
+    final anime = find.byKey(const ValueKey('recommend-skeleton-anime'));
+    expect(anime, findsOneWidget, reason: '漫剧分类同样有骨架');
+    expect(
+      _skeletonCoverAspect(tester, anime),
+      closeTo(kVideoCoverAspect, 0.001),
+      reason: '漫剧骨架按视频封面比例占位',
+    );
+
+    // 收尾：每个泵末尾才发起的延迟请求要下一轮才落地（短剧/漫剧首屏各带
+    // 3s responseDelay），多推几轮，别给测试留 pending timer。
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(seconds: 4));
+    }
+  });
+
   /// 布局偏好是全局状态：设置页把布局切成三列后，推荐页立即按三列排版。
   testWidgets('推荐页-三列布局每行三张', (tester) async {
     await pumpPreview(
@@ -510,10 +633,9 @@ void main() {
     );
   });
 
-  testWidgets('推荐页-首屏失败立即显示错误页（不等待自动重试）', (tester) async {
-    // Riverpod 3 默认对异常自动重试 10 次（约 38 秒），期间状态一直是 loading，
-    // 错误页会被推迟。这里不用 pumpAndSettle（会把自动重试跑完），固定时长
-    // 观察：首请求失败后必须马上出现 ErrorView，且只发过一次请求。
+  /// 首屏失败先做两次短退避重试（覆盖首次安装的联网权限弹窗：弹窗期间请求
+  /// 必失败，用户点完「允许」之后的重试才可能成功），重试用尽才给错误页。
+  testWidgets('推荐页-首屏失败先自动重试两次再给错误页', (tester) async {
     final fake = FakePreviewTransport()..failRecommend = true;
     await pumpPreview(
       tester,
@@ -521,15 +643,89 @@ void main() {
       transport: fake,
       settle: false,
     );
+
+    int homepageCalls() => fake.calls
+        .where((call) => call.startsWith('/api/v1/recommend/homepage'))
+        .length;
+
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.pump(const Duration(milliseconds: 700));
+    expect(homepageCalls(), 1);
+    expect(find.text('boom'), findsNothing, reason: '重试窗口里先别闪错误页');
+    expect(
+      find.byKey(const ValueKey('recommend-skeleton-novel')),
+      findsOneWidget,
+      reason: '自动重试期间骨架继续占位',
+    );
+
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(homepageCalls(), 2, reason: '退避 400ms 后自动重试第二次');
+    expect(find.text('boom'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump();
+    expect(homepageCalls(), 3, reason: '再退避 800ms 重试第三次');
+    expect(find.text('boom'), findsOneWidget, reason: '重试用尽才把错误交给用户');
+  });
+
+  /// 确定性失败（bad_input / too_large / device_failed）重试同一个请求也不会
+  /// 变好：首屏必须立刻给错误页，不浪费两次请求。
+  testWidgets('推荐页-确定性失败不自动重试', (tester) async {
+    final fake = FakePreviewTransport()
+      ..failRecommend = true
+      ..recommendFailureKind = 'bad_input';
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      transport: fake,
+      settle: false,
+    );
+    await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('boom'), findsOneWidget);
     expect(
       fake.calls
           .where((call) => call.startsWith('/api/v1/recommend/homepage'))
           .length,
       1,
-      reason: '关闭自动重试后，失败应立即交给用户手动重试',
+      reason: '确定性失败不重试',
     );
   });
+
+  /// 首次安装的联网权限弹窗如果停留超过首屏重试窗口，用户点完「允许」回到
+  /// App（resumed）时应当自动再拉一次，而不是停在错误页等用户点重试。
+  testWidgets('推荐页-首屏失败后回前台自动重试', (tester) async {
+    final fake = FakePreviewTransport()..failRecommend = true;
+    await pumpPreview(
+      tester,
+      const RecommendPage(),
+      transport: fake,
+      settle: false,
+    );
+    // 走完首屏的三次尝试，停在错误页。
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump();
+    expect(find.text('boom'), findsOneWidget);
+
+    // 用户在系统里点了「允许」、回到 App。
+    fake.failRecommend = false;
+    await _dispatchLifecycle(tester, 'AppLifecycleState.paused');
+    await _dispatchLifecycle(tester, 'AppLifecycleState.resumed');
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(find.text('boom'), findsNothing, reason: '回前台后错误页应被重试替换');
+    expect(find.byType(NovelGridCard), findsWidgets, reason: '首屏恢复出内容');
+  });
+}
+
+/// 模拟系统的 lifecycle 消息（暂停 / 回前台）。
+///
+/// 走真实的消息通道，而不是直接调 `binding.handleAppLifecycleStateChanged`
+/// （后者是 `@protected`，测试里调用会触发 analyzer 警告）。
+Future<void> _dispatchLifecycle(WidgetTester tester, String state) async {
+  await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+    'flutter/lifecycle',
+    const StringCodec().encodeMessage(state),
+    (_) {},
+  );
 }

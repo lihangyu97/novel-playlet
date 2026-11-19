@@ -104,6 +104,23 @@ class ApiClient {
     return HotSearch.fromPayload(payload);
   }
 
+  /// 启动期的最小联网请求：只为把系统联网权限弹窗提前到启动页。
+  ///
+  /// 首次安装时（国产 ROM 的「允许使用 WLAN 和移动数据」、iOS 的无线数据
+  /// 提示）系统要等 App 第一次真实联网才弹窗，而弹窗期间的连接会被系统直接
+  /// 拒掉——如果第一次请求就是首页，用户会先看到骨架再看到错误页。启动期先
+  /// 发一次 cue 这种小请求，弹窗就和「正在准备阅读环境…」同时出现。
+  ///
+  /// 结果与失败都不处理：弹窗出来就算达成目的；首屏失败由推荐流的有限重试 +
+  /// 回前台重试兜底，这里不需要也不应该拖住启动。
+  Future<void> warmUpNetwork() async {
+    try {
+      await searchCue();
+    } catch (_) {
+      // 忽略：这次请求只负责触发系统权限弹窗。
+    }
+  }
+
   /// 首页榜单目录（藏在小说首页 payload 的排行榜 cell 里）。
   Future<RankCatalog> rankCatalog() async {
     final payload = await _getJson('/api/v1/recommend/homepage', {
@@ -239,10 +256,15 @@ class ApiClient {
   /// 下载到的字节，播放页因此不用再等整集落盘。内核已有完整缓存时
   /// stream 直接返回完成文件（`streaming: false`）；`.m4s/.ts` 等不支持流式的
   /// 形态也由内核退回整集下载后返回 URL。
+  ///
+  /// [preferHeight] 是这一集的**播放**档位偏好（按短边，720 表示优先 720P）：
+  /// 内核先按该档找，找不到再取最高可解码档。只有在线播放传它；下载链路
+  /// 传 [maxHeight]（清晰度上限），两者的语义不同。
   Future<VideoSource> videoSource(
     String episodeId, {
     bool refresh = false,
     int? maxHeight,
+    int? preferHeight,
     bool stream = false,
   }) async {
     final payload = await _getJson(
@@ -255,6 +277,8 @@ class ApiClient {
       {
         if (refresh) 'refresh': '1',
         if (maxHeight != null && maxHeight > 0) 'max_height': '$maxHeight',
+        if (preferHeight != null && preferHeight > 0)
+          'prefer_height': '$preferHeight',
         if (stream) 'mode': 'stream',
         'variants': '0',
       },

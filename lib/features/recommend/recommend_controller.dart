@@ -6,10 +6,14 @@ import '../../app/providers.dart';
 import '../../data/api/api_client.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/rank.dart';
+import '../feed/feed_state.dart';
 import '../rank/rank_cache.dart';
 import 'recommend_category.dart';
 import 'recommend_item.dart';
-import 'recommend_state.dart';
+
+/// 合并推荐页的列表状态。三类卡片统一成 [RecommendItem]，分页/去重逻辑在
+/// 通用 [FeedState] 里。
+typedef RecommendState = FeedState<RecommendItem>;
 
 /// 一个分类的推荐流。
 ///
@@ -26,9 +30,10 @@ final recommendFeedProvider =
       RecommendCategory
     >(
       RecommendFeedController.new,
-      // 关闭 Riverpod 3 的默认自动重试（10 次、约 38 秒）。重试期间状态是
-      // 「isLoading=true + 上一次的 error」，页面会一直转圈、既看不到错误也点不到
-      // 重试按钮；首屏失败应当立即给 ErrorView，由用户手动重试。
+      // 关闭 Riverpod 3 的默认自动重试（10 次、约 38 秒）：那种长重试会让页面
+      // 一直停在加载态、既看不到错误也点不到重试按钮。首屏只保留两次短退避
+      // 重试（见 [_loadFirstScreen]），只为覆盖首次安装的联网权限弹窗；确定性
+      // 失败和重试用尽后的失败都立刻交给页面的 ErrorView。
       retry: (retryCount, error) => null,
     );
 
@@ -63,7 +68,46 @@ class RecommendFeedController extends AsyncNotifier<RecommendState> {
   @override
   FutureOr<RecommendState> build() {
     _generation += 1;
-    return _loadFeed();
+    return _loadFirstScreen(generation: _generation);
+  }
+
+  /// 首屏重试次数与退避。
+  ///
+  /// 首次安装时系统联网权限弹窗会挡住第一批请求（弹窗期间连接被系统直接
+  /// 拒掉），失败看着像「网络错误」，但用户点完「允许」就能成功。骨架已经能
+  /// 承接等待，所以首屏对**可重试**的失败做两次短退避重试：400ms、800ms，
+  /// 加上首屏本身，最多三次请求（约 1.2s）。
+  ///
+  /// 弹窗停留超过这个窗口时，用户点完「允许」回前台还会再拉一次（见
+  /// `_CategoryFeedPage` 的 resumed 处理），不需要把窗口拉长。
+  static const _firstLoadRetries = 2;
+
+  static Duration _firstLoadBackoff(int attempt) =>
+      Duration(milliseconds: 400 * (attempt + 1));
+
+  /// 带有限重试的首屏加载，只在 [build] 里用（首屏 / 整条流重建）。
+  ///
+  /// 下拉刷新、翻页失败不走这里：那些是用户已经看到内容后的操作，失败应当
+  /// 立刻反馈，不能悄悄重试。
+  ///
+  /// [generation] 是本次 build 的世代号：退避期间 provider 被 invalidate
+  /// 重建过就说明这次结果没人要了，不再发下一次请求。
+  Future<RecommendState> _loadFirstScreen({required int generation}) async {
+    var attempt = 0;
+    while (true) {
+      try {
+        return await _loadFeed();
+      } catch (error) {
+        // 确定性失败（badInput / tooLarge / deviceFailed）重试同一个请求不会
+        // 变好，直接抛出。
+        if (attempt >= _firstLoadRetries || !isRetryableError(error)) {
+          rethrow;
+        }
+        await Future<void>.delayed(_firstLoadBackoff(attempt));
+        if (!ref.mounted || generation != _generation) rethrow;
+        attempt += 1;
+      }
+    }
   }
 
   /// 下拉刷新。

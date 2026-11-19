@@ -62,7 +62,7 @@ fn fallback_list_uses_the_same_base64_plain_url_resolution() {
         } }
     });
 
-    match extract_fallback_video_source(root.as_object().unwrap()) {
+    match extract_fallback_video_source(root.as_object().unwrap(), 0) {
         VideoSourceResolution::Found(url, key) => {
             assert_eq!(
                 url, plain,
@@ -90,7 +90,7 @@ fn fallback_list_still_resolves_spade_ciphertext() {
     });
 
     let seed = audio_b64_decode("AAAA").expect("key_seed");
-    match extract_fallback_video_source(root.as_object().unwrap()) {
+    match extract_fallback_video_source(root.as_object().unwrap(), 0) {
         VideoSourceResolution::Found(url, _) => assert_eq!(
             url,
             decrypt_spade_url(&main_url, &seed),

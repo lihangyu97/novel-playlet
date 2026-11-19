@@ -73,7 +73,7 @@ fn reads_the_embedded_video_model_string() {
     }))
     .unwrap();
     assert_eq!(
-        expect_source(extract_video_url(&raw)).0,
+        expect_source(extract_video_url(&raw, 0)).0,
         "https://example.test/high.mp4"
     );
 }
@@ -92,23 +92,27 @@ fn reads_the_shortplay_shape_and_its_key() {
         }
     });
     let map = model.as_object().unwrap();
-    let (url, key) = expect_source(extract_shortplay_video_model_source(map));
+    let (url, key) = expect_source(extract_shortplay_video_model_source(map, 720));
     assert_eq!(url, "https://v26-reading-video.fqnovelvod.com/example.mp4");
     assert_eq!(key.len(), 16);
 }
 
 #[test]
-fn fallback_source_prefers_the_highest_quality_and_keeps_its_key() {
+fn fallback_source_prefers_720_over_the_highest_tier_and_keeps_its_key() {
+    // 在线播放默认 720P：同一次响应里 720 与 1080 都能解时选 720，并且
+    // 内容密钥必须来自被选中的那一档（不是最高档的 spade_a）。
+    let spade_720 = "orws8mOJLdlTlhnvZZQr32GULuhXkBvtUpAf7GWQKNtUohyPjw==";
     let root = json!({
         "video_info": { "data": {
             "key_seed": "AAAA",
             "video_list": {
                 "video_1": {
-                    "main_url": "https://example.test/low.mp4",
-                    "vwidth": 720, "vheight": 1280
+                    "main_url": "https://example.test/720.mp4",
+                    "vwidth": 720, "vheight": 1280,
+                    "spade_a": spade_720
                 },
                 "video_5": {
-                    "main_url": "https://example.test/high.mp4",
+                    "main_url": "https://example.test/1080.mp4",
                     "vwidth": 1080, "vheight": 1920,
                     "spade_a": "kbwf80+1N+V9nwHQSp431GWvLeBlqizTYJ0o5FOrHuZhqimysg=="
                 }
@@ -116,9 +120,85 @@ fn fallback_source_prefers_the_highest_quality_and_keeps_its_key() {
         } }
     });
     let map = root.as_object().unwrap();
-    let (url, key) = expect_source(extract_fallback_video_source(map));
-    assert_eq!(url, "https://example.test/high.mp4");
-    assert_eq!(hex::encode(key), "4990a92de837e29e18031a370ab744e6");
+    let (url, key) = expect_source(extract_fallback_video_source(map, 720));
+    assert_eq!(url, "https://example.test/720.mp4");
+    assert_eq!(
+        hex::encode(key),
+        hex::encode(derive_spade_content_key(spade_720))
+    );
+}
+
+#[test]
+fn preferred_720_falls_through_when_its_url_cannot_be_resolved() {
+    // 720P 档的地址解不出来时必须继续往下一档走，不能因为偏好把整集变成选流失败。
+    let root = json!({
+        "video_info": { "data": {
+            "key_seed": "AAAA",
+            "video_list": {
+                "video_2": {
+                    "main_url": "",
+                    "vwidth": 720, "vheight": 1280
+                },
+                "video_3": {
+                    "main_url": "https://example.test/1080.mp4",
+                    "vwidth": 1080, "vheight": 1920,
+                    "spade_a": "orws8mOJLdlTlhnvZZQr32GULuhXkBvtUpAf7GWQKNtUohyPjw=="
+                }
+            }
+        } }
+    });
+    let map = root.as_object().unwrap();
+    let (url, _) = expect_source(extract_fallback_video_source(map, 720));
+    assert_eq!(url, "https://example.test/1080.mp4");
+}
+
+#[test]
+fn fallback_source_uses_the_highest_tier_when_720_is_missing() {
+    // 没有 720P 档时保持旧行为：取当次最高可解码档。
+    let root = json!({
+        "video_info": { "data": {
+            "key_seed": "AAAA",
+            "video_list": {
+                "video_1": {
+                    "main_url": "https://example.test/360.mp4",
+                    "vwidth": 360, "vheight": 640
+                },
+                "video_3": {
+                    "main_url": "https://example.test/1080.mp4",
+                    "vwidth": 1080, "vheight": 1920,
+                    "spade_a": "orws8mOJLdlTlhnvZZQr32GULuhXkBvtUpAf7GWQKNtUohyPjw=="
+                }
+            }
+        } }
+    });
+    let map = root.as_object().unwrap();
+    let (url, _) = expect_source(extract_fallback_video_source(map, 720));
+    assert_eq!(url, "https://example.test/1080.mp4");
+}
+
+#[test]
+fn preferred_720_never_overrides_the_bytevc2_gate() {
+    // 720P 档是 bytevc2（没有解码器）时，偏好不能把它放回来：选 1080P h264。
+    let root = json!({
+        "video_info": { "data": {
+            "key_seed": "AAAA",
+            "video_list": {
+                "video_2": {
+                    "main_url": "https://example.test/720-vvc.mp4",
+                    "vwidth": 720, "vheight": 1280,
+                    "codec_type": "bytevc2"
+                },
+                "video_5": {
+                    "main_url": "https://example.test/1080-h264.mp4",
+                    "vwidth": 1080, "vheight": 1920,
+                    "codec_type": "h264"
+                }
+            }
+        } }
+    });
+    let map = root.as_object().unwrap();
+    let (url, _) = expect_source(extract_fallback_video_source(map, 720));
+    assert_eq!(url, "https://example.test/1080-h264.mp4");
 }
 
 #[test]
@@ -141,7 +221,7 @@ fn fallback_source_skips_bytevc2_even_when_it_scores_highest() {
         } }
     });
     let map = root.as_object().unwrap();
-    let (url, _) = expect_source(extract_fallback_video_source(map));
+    let (url, _) = expect_source(extract_fallback_video_source(map, 720));
     assert_eq!(url, "https://example.test/h264.mp4");
 }
 
@@ -161,7 +241,7 @@ fn fallback_source_never_serves_a_bytevc2_only_list() {
     });
     let map = root.as_object().unwrap();
     assert_eq!(
-        extract_fallback_video_source(map),
+        extract_fallback_video_source(map, 720),
         VideoSourceResolution::CodecRejected
     );
 }
@@ -237,6 +317,6 @@ fn fallback_source_prefers_h264_on_equal_quality() {
         } }
     });
     let map = root.as_object().unwrap();
-    let (url, _) = expect_source(extract_fallback_video_source(map));
+    let (url, _) = expect_source(extract_fallback_video_source(map, 720));
     assert_eq!(url, "https://example.test/h264.mp4");
 }

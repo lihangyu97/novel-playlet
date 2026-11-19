@@ -94,6 +94,26 @@ void main() {
     expect(source.isStreaming, isTrue);
   });
 
+  test('在线播放传 prefer_height=720（默认档位偏好）', () async {
+    final transport = _FakeTransport({
+      'code': 0,
+      'data': {'video_url': '/src/e1.mp4'},
+    });
+    await ApiClient(transport)
+        .videoSource('e1', stream: true, preferHeight: 720);
+    expect(transport.calls.single, contains('prefer_height=720'));
+  });
+
+  test('下载取流不传 prefer_height（清晰度另走 max_height）', () async {
+    final transport = _FakeTransport({
+      'code': 0,
+      'data': {'video_url': '/src/e1.mp4'},
+    });
+    await ApiClient(transport).videoSource('e1', maxHeight: 720);
+    expect(transport.calls.single, contains('max_height=720'));
+    expect(transport.calls.single, isNot(contains('prefer_height')));
+  });
+
   test('默认取流不带 mode=stream；streaming 缺省为 false', () async {
     final transport = _FakeTransport({
       'code': 0,

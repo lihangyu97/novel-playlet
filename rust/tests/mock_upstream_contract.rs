@@ -527,12 +527,6 @@ fn rest_paths_match_the_go_route_table() {
             vec![("query", "修仙"), ("search_type", "fanqie")],
         ),
         (
-            "/api/v1/search/suggest",
-            vec![("q", "fantasy")],
-            "search_predict",
-            vec![("keyword", "fantasy")],
-        ),
-        (
             "/api/v1/search/hot",
             vec![("offset", "0")],
             "hot_search",
@@ -618,12 +612,6 @@ fn rest_paths_match_the_go_route_table() {
             vec![("offset", "0")],
             "rank_data",
             vec![("rank_id", "7098235271900037133")],
-        ),
-        (
-            "/api/v1/articles/7276663560427471412",
-            vec![],
-            "toutiao_article",
-            vec![("item_ids", "7276663560427471412")],
         ),
         (
             "/api/v1/items/7507512821328904729,7507960973773242905",
