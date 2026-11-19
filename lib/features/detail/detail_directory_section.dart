@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_section_header.dart';
-
+import '../../app/widgets/detail/detail_common.dart';
 import '../../data/models/chapter.dart';
-import 'detail_style.dart';
 
 /// 目录卡片：先露前 10 章，右上角「共 N 章 · 查看全部」进全部目录弹层。
 class DetailDirectorySection extends StatelessWidget {
