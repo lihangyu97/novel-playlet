@@ -138,6 +138,33 @@ axum 0.8 的 accept 循环对 accept 错误无限重试、永不返回，所以�
 等读接口不受影响。
 
 
+### 3.9 删除无调用者的内核 API 与 raw 端点机制（2026-11-19）
+
+App 只走 16 个读接口（见 §3.1 的 `APP_APIS` 收口），其余兼容面仍在，但内核里
+还有一批**连兼容面都不经过**的死代码：全仓（含 `tests/`）只有声明、没有任何调用点。
+
+| 文件 | 本地改动 | 原因 |
+|---|---|---|
+| `src/endpoints/base.rs` | 删 `HOST_FQNOVELA` / `HOST_READING_SNSSDK` / `HOST_FANQIENOVEL` | 只有听书/书旗/网页链路用，那些链路 App 不调 |
+| `src/endpoints/content_util.rs` | 删 `process_full_content` / `process_content_patterns` 与只被后者使用的 `CLOSE_P_RE` | 调用方都已改为走 `FullContentProcessor` |
+| `src/endpoints/util.rs` | 删 `dechunk` | 分帧由传输层处理，内核不再需要手工解 chunk |
+| `src/endpoints/mod.rs` | 删 `Params::get_int`；删 raw 端点机制（`RawOut` / `RawHandler` / `Server.raw` / `add_raw` / `raw_handler`） | 没有任何端点注册 raw handler，`dispatch` 里那段分支永不命中 |
+| `src/dispatch.rs` | 删 raw handler 分支与 `RawOut` 导入 | 同上 |
+| `src/json.rs` | 删 `as_map_mut` / `first_map_string` / `strip_html_tags` / `web_ok` / `web_err` | 移植自 Go 的助手函数，本仓库没有调用者 |
+| `Cargo.toml`、`Cargo.lock` | 删 `tower-http` 直接依赖 | 实际只作为 `reqwest` 的传递依赖存在 |
+
+与上游同步的影响：这些项上游也可能保留，同步时**不要因为"上游有本地没有"就加回来**；
+`cargo clippy -D warnings` 会在本仓库把它们判为 dead code。
+
+### 3.10 跟 clippy 1.99 对齐的两处告警（2026-11-19）
+
+与业务无关，只是让 `make check` 的 Rust 门禁重新变绿（这两处在基线上就红）。
+
+| 文件 | 本地改动 | 原因 |
+|---|---|---|
+| `src/device/mod.rs` | 文档注释续行缩进两格 | `clippy::doc_lazy_continuation` |
+| `src/endpoints/video.rs` | `let Some(index) = ... else { return None }` 改为 `cached_meta.index.clone()?` | `clippy::question_mark`，行为不变 |
+
 ## 4. 不在本文件范围内的部分
 
 - `rust/` 之外的 Dart 侧改动（UI/数据层/存储）由 git 历史管理，不需要和上游对齐；
