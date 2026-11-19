@@ -256,10 +256,15 @@ class ApiClient {
   /// 下载到的字节，播放页因此不用再等整集落盘。内核已有完整缓存时
   /// stream 直接返回完成文件（`streaming: false`）；`.m4s/.ts` 等不支持流式的
   /// 形态也由内核退回整集下载后返回 URL。
+  ///
+  /// [preferHeight] 是这一集的**播放**档位偏好（按短边，720 表示优先 720P）：
+  /// 内核先按该档找，找不到再取最高可解码档。只有在线播放传它；下载链路
+  /// 传 [maxHeight]（清晰度上限），两者的语义不同。
   Future<VideoSource> videoSource(
     String episodeId, {
     bool refresh = false,
     int? maxHeight,
+    int? preferHeight,
     bool stream = false,
   }) async {
     final payload = await _getJson(
@@ -272,6 +277,8 @@ class ApiClient {
       {
         if (refresh) 'refresh': '1',
         if (maxHeight != null && maxHeight > 0) 'max_height': '$maxHeight',
+        if (preferHeight != null && preferHeight > 0)
+          'prefer_height': '$preferHeight',
         if (stream) 'mode': 'stream',
         'variants': '0',
       },

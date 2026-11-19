@@ -1179,6 +1179,7 @@ class _FakeApi extends ApiClient {
     String episodeId, {
     bool refresh = false,
     int? maxHeight,
+    int? preferHeight,
     bool stream = false,
   }) async {
     if (stream) {

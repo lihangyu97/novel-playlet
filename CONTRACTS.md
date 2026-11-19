@@ -83,7 +83,7 @@ Future<BookCommentPage> bookComments(String bookId, {int count = 10, int offset 
 Future<CommentReplyPage> commentReplies(String commentId, {required String bookId, required String groupId, int count = 10}); // 评论回复，groupId = 章节 itemId
 Future<BookCommentPage> seriesComments(String seriesId, {int count = 20, String cursor = '', int sort = 1}); // 短剧整体剧评，cursor 翻页
 Future<BookCommentPage> episodeComments(String seriesId, String vid, {String cursor = ''}); // 某一集评论（官方热评，20 条/页，cursor 翻页）
-Future<VideoSource> videoSource(String episodeId, {bool refresh = false, int? maxHeight}); // refresh=1 删缓存重下；默认带 variants=0；maxHeight=下载清晰度上限
+Future<VideoSource> videoSource(String episodeId, {bool refresh = false, int? maxHeight, int? preferHeight}); // refresh=1 删缓存重下；默认带 variants=0；在线播放传 preferHeight=720（优先 720P，无 720 取最高档）；maxHeight=下载清晰度上限
 Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 /src，不打上游
 // 以上错误统一抛 ApiException（message 可直接展示）
 ```

@@ -423,11 +423,11 @@ _onTick：同页重载时新集 position>0 才释放旧帧；播到尾部自动 
 
 | 步骤 | 说明 |
 |---|---|
-| 参数 | `mode=stream/cached`、`refresh=1`、`variants=0`、`max_height` |
+| 参数 | `mode=stream/cached`、`refresh=1`、`variants=0`、`max_height`（下载清晰度上限）、`prefer_height`（在线播放档位偏好，播放页传 720） |
 | `mode=cached` | 只查 `src/<id>{.mp4,.m4s,.ts}`（>0 字节、密文必须有可读 `.key`），**完全不打上游** |
 | `mode=stream`（M1） | 复用上面的取流/选档结果，启动后台下载到 `src/<id>.mp4.part`，拿到上游响应头（Content-Length）后**立即**返回本地 `/src` 地址（`streaming:true`），不读 body、不等整集落盘；同 id 复用进行中的会话，已有完整缓存直接按 cached 返回；`.m4s/.ts`、拿不到 Content-Length、启动失败 → 退回整集下载（`streaming:false`） |
 | 取上游 | 主取流打 V5 播放门 `multi_video_model/player/v1`（见下）；V5 请求失败 / 解析不出模型 / 选流 `NotFound` 时回落 legacy：播放默认只打 phoenix `multi_video_model`，stream / 带 `max_height` 时并发 shortplay+phoenix 合并档位 |
-| 选档 | 分数 `宽×1e9 + 高×1e6 + 码率 (+h264/avc1 1)`；`bytevc2` 整档排除；从高到低取第一个能解出 url+key 的档 |
+| 选档 | 分数 `宽×1e9 + 高×1e6 + 码率 (+h264/avc1 1)`；`bytevc2` 整档排除；无 `prefer_height` 时按分数从高到低。在线播放传 `prefer_height=720`：短边 720 的档排最前（同档再按分数），**没有 720P 时退回最高可解码档**；按该顺序取第一个能解出 url+key 的档（720 档解不出会自动落到下一档，不会选流失败） |
 | 清晰度上限 | `max_height` → 短边 ≤N 的最高档；没有更低档 → 最低可用档 + `quality_fallback=true` |
 | 整集下载 | 流式写 `.part` → rename `src/<id>.<ext>`（**CENC 密文原样落盘**），密文再写 `.key` sidecar、有档位写 `.variant.json` |
 | 淘汰 | `src/` 总预算 **128 MiB**（与漫画图共享），每次下载后异步按 mtime 最旧删，跳过 `.part/.tmp` |
@@ -769,7 +769,7 @@ flutter drive --profile -d <iPhone UDID> \
    超时/下载失败会 502 并让客户端回退整集下载；不带 Range 的整文件请求等价整集等待（Android ExoPlayer 需真机验证）。
    断网后第一次取流仍可能耗到内核重试预算（黑洞网络约几十秒），之后进入「疑似离线」
    快速失败（见 §5.7），用户手动重试会再试一次完整网络。
-3. 清晰度：在线播放固定「当次上游最高可解码档」；720P 上限只作用于**离线整剧下载**（默认 720P，可设最高/1080P/480P）。
+3. 清晰度：在线播放默认 720P（传 `prefer_height=720`，没有 720P 时退回当次最高可解码档；不可手动切换）；下载清晰度另走 `max_height`，可设**离线整剧下载**的最高/1080P/720P/480P（默认 720P）。
 4. 倍速 3x 在在线源上可能被 AVFoundation 静默 clamp 成 2x（已接受，不 fork 插件）。
 5. 离线下载：仅前台；按章/集粒度续传，无字节级断点；同时一个任务，队列只在内存里；不支持选集下载。
 6. 离线内容明文落盘（小说正文与短剧 mp4），未做加密。

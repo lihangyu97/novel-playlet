@@ -30,6 +30,13 @@ import 'widgets/playback_speed_menu.dart';
 import 'widgets/player_option_chip.dart';
 import 'widgets/video_comments_sheet.dart';
 
+/// 在线播放默认档位：720P（按短边，竖屏 720×1280 也算 720P）。
+///
+/// 手机屏上 720P 与 1080P 的肉眼差异很小，整集体积却差不多差一倍。内核按
+/// 这个偏好先找同档，没有 720P 的剧仍取最高可解码档；不可解码的档（bytevc2）
+/// 不会因为偏好被放回来。离线下载的清晰度另走 `maxHeight`（设置页默认 720P）。
+const _playbackPreferHeight = 720;
+
 /// controller 工厂：生产环境走 `video_player` 的 platformView，测试可 override
 /// 成 FakeController（不碰平台通道），用于锁「切集保留旧画面/倍速继承」等行为。
 typedef PlaybackControllerFactory = VideoPlayerController Function({
@@ -397,8 +404,16 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       takePrefetchedUrl: (episodeId) => _prefetched.remove(episodeId)?.url,
       probeCachedUrl: api.cachedVideoUrl,
       fetchSource: (episodeId, {required stream, required refresh}) => stream
-          ? api.videoSource(episodeId, stream: true)
-          : api.videoSource(episodeId, refresh: refresh),
+          ? api.videoSource(
+              episodeId,
+              stream: true,
+              preferHeight: _playbackPreferHeight,
+            )
+          : api.videoSource(
+              episodeId,
+              refresh: refresh,
+              preferHeight: _playbackPreferHeight,
+            ),
       isSuspectedOffline: () => health.isSuspectedOffline,
       recordSuccess: health.recordSuccess,
       isCancelled: isCancelled,
