@@ -203,27 +203,11 @@ final class RankRoute extends AppRoute<void> {
   final int? initialAlgo;
 
   @override
-  Route<void> toRoute() => PageRouteBuilder<void>(
-    settings: const RouteSettings(name: 'rank'),
-    transitionDuration: const Duration(milliseconds: 280),
-    reverseTransitionDuration: const Duration(milliseconds: 220),
-    pageBuilder: (context, animation, secondaryAnimation) =>
-        RankPage(initialAlgo: initialAlgo),
-    transitionsBuilder: (context, animation, secondaryAnimation, child) {
-      // 排行榜从左侧滑入（系统默认是从右往左），返回时再滑回左边。
-      final curved = CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOutCubic,
-        reverseCurve: Curves.easeInCubic,
-      );
-      return SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(-1, 0),
-          end: Offset.zero,
-        ).animate(curved),
-        child: child,
-      );
-    },
+  // 必须用 MaterialPageRoute：iOS 的左边缘侧滑返回是
+  // `CupertinoPageTransitionsBuilder` 在 `PageTransitionsTheme` 里装的手势，
+  // 走自定义 `PageRouteBuilder` 就绕过了它，页面只能点返回按钮退出。
+  Route<void> toRoute() => MaterialPageRoute<void>(
+    builder: (_) => RankPage(initialAlgo: initialAlgo),
   );
 }
 
