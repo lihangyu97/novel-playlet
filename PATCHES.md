@@ -165,6 +165,21 @@ App 只走 16 个读接口（见 §3.1 的 `APP_APIS` 收口），其余兼容�
 | `src/device/mod.rs` | 文档注释续行缩进两格 | `clippy::doc_lazy_continuation` |
 | `src/endpoints/video.rs` | `let Some(index) = ... else { return None }` 改为 `cached_meta.index.clone()?` | `clippy::question_mark`，行为不变 |
 
+### 3.11 删除 Windows-only 桌面播放器内核（2026-11-19）
+
+本项目只发 iOS / Android，桌面播放器这条路**没有任何调用方**：`fq_desktop_media_*`
+三个 `extern "C"` 符号只给 Windows 桌面宿主用，Dart、Swift、Kotlin 侧都没有引用，
+`Cargo.toml` 里为它单开的 `reqwest/blocking` 也仅被这两个文件使用。
+
+| 文件 | 本地改动 | 原因 |
+|---|---|---|
+| `src/desktop_fetch.rs`、`src/desktop_media.rs` | **删除**（888 行） | `#[cfg(target_os = "windows")]` 的桌面播放器，产品不发 Windows |
+| `src/lib.rs` | 删两个 `#[cfg(target_os = "windows")] mod` 声明 | 同上 |
+| `Cargo.toml`、`Cargo.lock` | 删 `[target.'cfg(windows)'.dependencies]` 的 `reqwest`（`blocking` feature） | 只有被删的两个模块用 |
+
+仍保留：`tests/static_and_loopback.rs` 里的 `#[cfg(windows)] symlink_file` 辅助分支——
+那只是让同一份测试在 Windows 上也能跑，跟产品支持面无关，删了反而降低可移植性。
+
 ## 4. 不在本文件范围内的部分
 
 - `rust/` 之外的 Dart 侧改动（UI/数据层/存储）由 git 历史管理，不需要和上游对齐；
