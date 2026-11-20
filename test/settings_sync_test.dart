@@ -310,9 +310,14 @@ void main() {
     );
 
     final themeSection = sections.firstWhere((s) => s.id == 'theme');
-    await themeSection.applyRemote({'seed': 0xFF123456, 'mode': 'dark'});
+    await themeSection.applyRemote({
+      'seed': 0xFF123456,
+      'mode': 'dark',
+      'variant': 'vibrant',
+    });
     expect(container.read(themeSeedProvider).toARGB32(), 0xFF123456);
     expect(container.read(themeModeProvider), ThemeMode.dark);
+    expect(container.read(themeVariantProvider), AppThemeVariant.vibrant);
 
     final fontSection = sections.firstWhere((s) => s.id == 'fontWeight');
     await fontSection.applyRemote(999);
@@ -337,6 +342,9 @@ void main() {
     final settings =
         (parsed as SettingsSnapshotOk).snapshot.settings['theme'] as Map;
     expect(settings['seed'], 0xFF123456);
+    // 没主动改过算法时也要写进快照：否则另一台设备读到的 default 可能是
+    // 未来改过的默认档，而不是这台机器实际在用的档位。
+    expect(settings['variant'], AppThemeVariant.standard.name);
     expect(
       container.read(settingsSyncStatusProvider).phase,
       SettingsSyncPhase.success,

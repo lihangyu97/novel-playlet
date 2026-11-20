@@ -22,11 +22,12 @@
 
 ## 2. 现状
 
-设置项当前由 **8 个 provider、17 个 `shared_preferences` key** 分散持有，没有统一对象：
+设置项当前由 **9 个 provider、18 个 `shared_preferences` key** 分散持有，没有统一对象：
 
 | 设置 | provider | prefs key |
 |---|---|---|
 | 主题色 | `themeSeedProvider` | `app_seed_color_v1` |
+| 配色算法 | `themeVariantProvider` | `app_theme_variant_v1` |
 | 自定义色（圆点记忆） | `customThemeSeedProvider` | `app_custom_seed_color_v1` |
 | 深浅色模式 | `themeModeProvider` | `app_theme_mode_v1` |
 | 全局字重（仅 Android 生效） | `appFontWeightProvider` | `app_font_weight_v1` |
@@ -75,7 +76,12 @@ final mergedData = await store.exportSyncData();   // 只产出 {'items': [...]}
   "deviceId": "…",
   "updatedAt": 1763512345678,
   "settings": {
-    "theme": { "seed": 4280391411, "mode": "system", "customSeed": 4286473922 },
+    "theme": {
+      "seed": 4280391411,
+      "variant": "standard",
+      "mode": "system",
+      "customSeed": 4286473922
+    },
     "fontWeight": 400,
     "feed": { "layout": "two" },
     "reader": {
@@ -167,7 +173,7 @@ read-modify-write；重启后仍然能做 LWW。
 
 | 分组 | 字段 | 同步 | 理由 |
 |---|---|---|---|
-| theme | seed / mode / customSeed | ✅ | 跨设备观感一致 |
+| theme | seed / variant / mode / customSeed | ✅ | 跨设备观感一致；variant 缺失时回落 standard（见 [theme-variant-design.md](theme-variant-design.md)） |
 | font | 全局字重 | ✅ | 仅 Android 生效，iOS 拉到无害 |
 | feed | 布局（双列 / 三列） | ✅ | 观感一致 |
 | reader | 10 项排版 | ✅ | 核心场景 |

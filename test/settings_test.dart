@@ -194,6 +194,71 @@ void main() {
     }
   });
 
+  /// 配色算法：同一 seed 换算法必须真的换出不同主色；「标准」档与不传算法
+  /// 的旧调用必须完全一致，否则等于悄悄改了所有老用户的观感。
+  test('配色算法改变主色派生结果，标准档与旧行为一致', () {
+    const seed = Color(0xFFEF5350);
+    for (final brightness in Brightness.values) {
+      final legacy = AppTheme.schemeFor(seed, brightness);
+      expect(
+        AppTheme.schemeFor(seed, brightness, AppThemeVariant.standard).primary,
+        legacy.primary,
+      );
+      final primaries = <int>{
+        for (final variant in AppThemeVariant.values)
+          AppTheme.schemeFor(seed, brightness, variant).primary.toARGB32(),
+      };
+      expect(
+        primaries.length,
+        greaterThan(1),
+        reason: '$brightness 下四档算法派生出同一个主色，切换等于没效果',
+      );
+    }
+  });
+
+  /// 近中性 seed 不吃算法：选了「鲜艳」也必须还是灰阶，否则白/灰主题色会
+  /// 被固定/抬高的彩度染成青、粉。
+  test('近中性主题色在任何算法下都保持灰阶', () {
+    for (final seed in const [
+      Color(0xFFFFFFFF),
+      Color(0xFFFAFAFA),
+      Color(0xFF808080),
+      Color(0xFF000000),
+    ]) {
+      for (final variant in AppThemeVariant.values) {
+        for (final brightness in Brightness.values) {
+          final primary = AppTheme.schemeFor(seed, brightness, variant).primary;
+          expect(
+            HSVColor.fromColor(primary).saturation,
+            lessThan(0.1),
+            reason:
+                'seed=${seed.toARGB32().toRadixString(16)} '
+                'variant=${variant.name} $brightness 的主色被染上了颜色',
+          );
+        }
+      }
+    }
+  });
+
+  test('配色算法落盘为枚举名，认不出的值回落标准', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container
+        .read(themeVariantProvider.notifier)
+        .setVariant(AppThemeVariant.vibrant);
+    await pumpEventQueue();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getString(ThemeVariantController.variantKey),
+      AppThemeVariant.vibrant.name,
+      reason: '存 name 而不是 index：档位调序时旧值才不会串味',
+    );
+    expect(appThemeVariantFromName('vibrant'), AppThemeVariant.vibrant);
+    expect(appThemeVariantFromName('rainbow'), AppThemeVariant.standard);
+    expect(appThemeVariantFromName(null), AppThemeVariant.standard);
+  });
+
   /// 阅读弹层现在用「纸色对应的 scheme.primary」做选中文字/填充色，
   /// 这里把「对比度够」钉死：任何主题色 × 任何纸色组合都要 ≥ 4.5:1。
   test('阅读弹层主色与各阅读纸色的对比度 ≥ 4.5', () {
@@ -278,6 +343,77 @@ void main() {
     expect(
       container.read(themeSeedProvider),
       themeColorOptions.firstWhere((option) => option.name == '绯红').color,
+    );
+  });
+
+  testWidgets('设置页-点配色算法会切换档位', (tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        const SettingsPage(),
+        overrides: [appCacheProvider.overrideWithValue(_FakeAppCache())],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(SettingsPage)),
+    );
+    expect(container.read(themeVariantProvider), AppThemeVariant.standard);
+    // 四档都要在，顺序就是枚举顺序；少了/多了都说明 UI 和枚举脱节。
+    expect(
+      tester
+          .widget<SegmentedButton<AppThemeVariant>>(find.byKey(themeVariantKey))
+          .segments
+          .map((segment) => segment.value),
+      AppThemeVariant.values,
+    );
+
+    await tester.ensureVisible(find.byKey(themeVariantKey));
+    await tester.pump();
+    await tester.tap(
+      find.byKey(themeVariantOptionKey(AppThemeVariant.vibrant)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(container.read(themeVariantProvider), AppThemeVariant.vibrant);
+  });
+
+  /// 根组件接线：只测 provider 是不够的，app.dart 不看 variant 也能过；
+  /// 这里 pump 真实的 NovelPlayletApp，断言 MaterialApp 派生出新配色。
+  testWidgets('根组件 MaterialApp 跟着配色算法重建', (tester) async {
+    final never = Completer<void>();
+    final container = ProviderContainer(
+      overrides: [bootstrapProvider.overrideWith((ref) => never.future)],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const NovelPlayletApp(),
+      ),
+    );
+    await tester.pump();
+
+    final before = tester.element(find.byType(BootstrapGate));
+    expect(AppTheme.variantOf(before), AppThemeVariant.standard);
+
+    container
+        .read(themeVariantProvider.notifier)
+        .setVariant(AppThemeVariant.vibrant);
+    // MaterialApp 用 AnimatedTheme 过渡（默认 200ms），等它跑完再断言终值。
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final context = tester.element(find.byType(BootstrapGate));
+    expect(AppTheme.variantOf(context), AppThemeVariant.vibrant);
+    expect(
+      Theme.of(context).colorScheme.primary,
+      AppTheme.schemeFor(
+        appSeedColor,
+        Brightness.light,
+        AppThemeVariant.vibrant,
+      ).primary,
     );
   });
 

@@ -241,3 +241,80 @@ class ThemeModeController extends Notifier<ThemeMode> {
     }
   }
 }
+
+/// 配色算法（主题色如何展开成整套 M3 配色）。
+///
+/// 与 [themeSeedProvider] 一样，启动时由 `main.dart` 预读，避免首帧先按
+/// 「标准」渲染再跳一档。
+final themeVariantProvider =
+    NotifierProvider<ThemeVariantController, AppThemeVariant>(
+      ThemeVariantController.new,
+    );
+
+/// 配色算法持久化。
+///
+/// 存枚举 name 而不是 index：档位以后可能增删或调序，index 会串味；name
+/// 读不到（旧版本还没有这个键）或认不出（手改过）都回落「标准」。
+class ThemeVariantController extends Notifier<AppThemeVariant> {
+  ThemeVariantController({this.initialVariant});
+
+  /// 由启动流程预读好的档位；为 null 表示需要自己异步恢复。
+  final AppThemeVariant? initialVariant;
+
+  static const variantKey = 'app_theme_variant_v1';
+
+  bool _userChanged = false;
+  Future<void>? _restoreFuture;
+
+  /// 本地恢复完成（或无需恢复）的 Future；设置同步启动前要等它。
+  Future<void> get restoreFuture {
+    if (initialVariant != null) return Future<void>.value();
+    return _restoreFuture ??= _restore();
+  }
+
+  @override
+  AppThemeVariant build() {
+    final initial = initialVariant;
+    if (initial != null) return initial;
+    _restoreFuture = _restore();
+    return AppThemeVariant.standard;
+  }
+
+  /// 应用云端设置：直接改状态并落盘，不经过「用户改过就跳过」的恢复守卫。
+  Future<void> applyRemote(AppThemeVariant variant) async {
+    _userChanged = true;
+    if (variant != state) state = variant;
+    await _persist(variant);
+  }
+
+  void setVariant(AppThemeVariant variant) {
+    if (variant == state) return;
+    _userChanged = true;
+    state = variant;
+    _persist(variant);
+  }
+
+  Future<void> _restore() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // await 期间 provider 可能已经销毁（页面被 pop / 容器 dispose）。
+      if (!ref.mounted || _userChanged) return;
+      final name = prefs.getString(variantKey);
+      if (name == null) return;
+      final restored = appThemeVariantFromName(name);
+      if (restored != state) state = restored;
+    } catch (_) {
+      // 读不到偏好就用「标准」，不影响启动。
+    }
+  }
+
+  Future<void> _persist(AppThemeVariant variant) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted) return;
+      await prefs.setString(variantKey, variant.name);
+    } catch (_) {
+      // 落盘失败只影响下次启动的档位，当前这次切换仍然生效。
+    }
+  }
+}

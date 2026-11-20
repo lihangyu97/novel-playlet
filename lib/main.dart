@@ -36,6 +36,9 @@ Future<void> main() async {
         themeModeProvider.overrideWith(
           () => ThemeModeController(initialMode: preferences.mode),
         ),
+        themeVariantProvider.overrideWith(
+          () => ThemeVariantController(initialVariant: preferences.variant),
+        ),
         recommendLayoutProvider.overrideWith(
           () => RecommendLayoutController(initialLayout: preferences.layout),
         ),
@@ -50,10 +53,16 @@ Future<void> main() async {
   );
 }
 
-/// 一次读盘同时取回主题色、深浅色模式、推荐流布局与全局字重；
+/// 一次读盘同时取回主题色、深浅色模式、配色算法、推荐流布局与全局字重；
 /// 读不到/超时都用默认值。
 Future<
-  ({Color seed, ThemeMode mode, RecommendLayout layout, FontWeight fontWeight})
+  ({
+    Color seed,
+    ThemeMode mode,
+    AppThemeVariant variant,
+    RecommendLayout layout,
+    FontWeight fontWeight
+  })
 >
 _restorePreferences() async {
   try {
@@ -62,6 +71,7 @@ _restorePreferences() async {
     );
     final argb = prefs.getInt(ThemeSeedController.seedKey);
     final modeIndex = prefs.getInt(ThemeModeController.modeKey);
+    final variantName = prefs.getString(ThemeVariantController.variantKey);
     return (
       seed: argb == null ? appSeedColor : Color(argb),
       mode:
@@ -70,6 +80,7 @@ _restorePreferences() async {
               modeIndex >= ThemeMode.values.length
           ? ThemeMode.system
           : ThemeMode.values[modeIndex],
+      variant: appThemeVariantFromName(variantName),
       layout: recommendLayoutFromIndex(
         prefs.getInt(RecommendLayoutController.layoutKey),
       ),
@@ -82,6 +93,7 @@ _restorePreferences() async {
     return (
       seed: appSeedColor,
       mode: ThemeMode.system,
+      variant: AppThemeVariant.standard,
       layout: RecommendLayout.two,
       fontWeight: FontWeight.w400,
     );

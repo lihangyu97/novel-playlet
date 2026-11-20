@@ -32,7 +32,7 @@ final settingsSectionsProvider = Provider<List<SettingsSection>>((ref) {
   ];
 });
 
-/// 主题色 / 深浅色 / 上次自定义色。
+/// 主题色 / 配色算法 / 深浅色 / 上次自定义色。
 class ThemeSettingsSection implements SettingsSection {
   const ThemeSettingsSection(this.ref);
 
@@ -44,6 +44,7 @@ class ThemeSettingsSection implements SettingsSection {
   @override
   Object? capture() => {
     'seed': ref.read(themeSeedProvider).toARGB32(),
+    'variant': ref.read(themeVariantProvider).name,
     'mode': _themeModeName(ref.read(themeModeProvider)),
     'customSeed': ref.read(customThemeSeedProvider).toARGB32(),
   };
@@ -59,6 +60,11 @@ class ThemeSettingsSection implements SettingsSection {
         .applyRemote(
           _color(map['customSeed'], CustomThemeSeedController.fallback),
         );
+    // variant 是后加的字段：老版本快照里没有它，认不出的名字都回落「标准」，
+    // 保证双向兼容（新客户端读旧快照 / 旧客户端读新快照都不会炸）。
+    await ref
+        .read(themeVariantProvider.notifier)
+        .applyRemote(appThemeVariantFromName(map['variant']));
     await ref
         .read(themeModeProvider.notifier)
         .applyRemote(_themeMode(map['mode']));
