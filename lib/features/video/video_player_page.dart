@@ -169,6 +169,22 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   /// 横屏判定：接近 1 的方图不算，避免给错按钮。
   static const double _landscapeAspect = 1.05;
 
+  /// 播放页恒为黑底：状态栏图标固定白色，不能沿用上一页留下的样式。
+  ///
+  /// 框架只在当前帧图层树里找到 `AnnotatedRegion<SystemUiOverlayStyle>` 时才
+  /// 下发状态栏样式（`rendering/view.dart` 的 `_updateSystemChrome`）；找不到
+  /// 就沿用上一页的——详情页在浅色模式下声明的是深色图标，直接进播放页就成了
+  /// 「黑底黑字」，状态栏整条看不见。所以播放页要自己声明。
+  static const SystemUiOverlayStyle _overlayStyle = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    // Android 看 statusBarIconBrightness，iOS 看 statusBarBrightness（语义相
+    // 反：dark = 白色内容），两边都设成白色。
+    statusBarIconBrightness: Brightness.light,
+    statusBarBrightness: Brightness.dark,
+    systemNavigationBarColor: Colors.black,
+    systemNavigationBarIconBrightness: Brightness.light,
+  );
+
   List<Chapter> get _episodes => widget.args.episodes;
 
   Chapter? get _episode =>
@@ -1152,7 +1168,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       // 暂停时也要调：Dart 层只存值不下发，恢复播放时会按旧值 apply。
       unawaited(controller.setPlaybackSpeed(next));
     });
-    return PopScope(
+    final page = PopScope(
       // 全屏时系统返回手势/返回键先退全屏，再返回才是离开播放页。
       canPop: !_fullscreen,
       onPopInvokedWithResult: (didPop, _) {
@@ -1180,6 +1196,17 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                 // 只在竖屏避让安全区——全屏横屏时贴到屏幕最底边，否则 Home 指示条
                 // 那一条会在控件下面留出空隙。
                 Positioned.fill(child: _buildPager(showChrome: showChrome)),
+                // 状态栏底衬：控制条 3.5s 自动隐藏后，画面会直接铺到状态栏
+                // 后面；白色图标叠在亮画面上会看不清。这层渐变不跟控制条一起
+                // 淡出，常驻在状态栏高度上。全屏横屏没有状态栏，不画（否则
+                // 画面顶部会多一条黑带）。
+                if (!_fullscreen)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: IgnorePointer(child: _buildStatusBarScrim(context)),
+                  ),
                 if (showChrome)
                   Positioned(
                     top: 0,
@@ -1216,6 +1243,34 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
               ],
             );
           },
+        ),
+      ),
+    );
+
+    // 状态栏样式由页面自己声明（见 [_overlayStyle]）；页面未声明时由
+    // MaterialApp.builder 的兜底样式接管，避免从这里返回后留下白图标。
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: _overlayStyle,
+      child: page,
+    );
+  }
+
+  /// 状态栏常驻底衬：只盖住状态栏高度，顶部深、向下透明。
+  ///
+  /// 高度用 `padding.top + 8`：多出来的 8 是渐变过渡区，避免渐变在图标下沿
+  /// 切出一条硬边。没有状态栏的窗口里也只是很浅的一条，不影响观感。
+  Widget _buildStatusBarScrim(BuildContext context) {
+    final topInset = MediaQuery.paddingOf(context).top;
+    return Container(
+      key: const ValueKey('video-status-bar-scrim'),
+      height: topInset + 8,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          // 35% 黑：白色图标在亮画面上也读得清，又不至于在画面顶部压出
+          // 一条明显黑带。
+          colors: [Color(0x59000000), Color(0x00000000)],
         ),
       ),
     );

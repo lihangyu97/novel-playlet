@@ -95,6 +95,42 @@ void main() {
     await _disposePlayer(tester);
   });
 
+  testWidgets('状态栏：播放页自己声明白色图标，控制条隐藏后底衬仍在', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    // 播放页整页黑底：必须自己声明白色状态栏图标，不能沿用上一页（详情页在
+    // 浅色模式下是深色图标）留下的样式。
+    final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+      find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+    );
+    expect(region.value.statusBarIconBrightness, Brightness.light);
+    expect(region.value.statusBarBrightness, Brightness.dark);
+    expect(region.value.statusBarColor, Colors.transparent);
+    expect(
+      find.byKey(const ValueKey('video-status-bar-scrim')),
+      findsOneWidget,
+      reason: '竖屏播放要给状态栏垫一层常驻底衬',
+    );
+
+    // 控制条自动隐藏后底衬不能跟着淡出，否则白图标叠在亮画面上读不清。
+    final controller = factory.created.single;
+    controller.value = controller.value.copyWith(isPlaying: true);
+    await tester.pump(const Duration(milliseconds: 3700));
+    await tester.pump();
+    final opacities = tester
+        .widgetList<AnimatedOpacity>(find.byType(AnimatedOpacity))
+        .toList();
+    expect(opacities.every((widget) => widget.opacity == 0), isTrue);
+    expect(
+      find.byKey(const ValueKey('video-status-bar-scrim')),
+      findsOneWidget,
+    );
+
+    await _disposePlayer(tester);
+  });
+
   testWidgets('底栏：选集 / 详情 / 本集评论，收藏缓存移进详情弹层', (tester) async {
     final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
     final factory = _FakeFactory();
@@ -641,6 +677,8 @@ void main() {
 
     // 进全屏：提示隐藏，同时请求横屏。
     expect(find.text('全屏观看'), findsNothing);
+    // 全屏横屏没有状态栏，也不需要状态栏底衬（否则画面顶部多一条黑带）。
+    expect(find.byKey(const ValueKey('video-status-bar-scrim')), findsNothing);
     expect(
       systemCalls.any(
         (call) =>
@@ -658,6 +696,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(VideoPlayerPage), findsOneWidget, reason: '全屏返回只退全屏');
     expect(find.text('全屏观看'), findsOneWidget, reason: '退出全屏后提示重新出现');
+    expect(
+      find.byKey(const ValueKey('video-status-bar-scrim')),
+      findsOneWidget,
+      reason: '退出全屏恢复竖屏后状态栏底衬要回来',
+    );
     expect(find.text('打开播放页'), findsNothing, reason: '播放页不能被 pop 掉');
     expect(
       systemCalls.any(

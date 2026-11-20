@@ -511,6 +511,14 @@ AVPlayer
   隐藏状态栏；退出/返回/离开/切到竖屏视频都恢复竖屏（全屏时顶栏返回键先退全屏）。
   全屏横屏下同样支持上下滑切集；旋转（进出全屏）后按新 viewport 高度把 PageView 拉回当前集，
   避免 pixel offset 不换算导致停在半页。
+- 状态栏：播放页整页黑底，用页面级 `AnnotatedRegion<SystemUiOverlayStyle>` 固定**白色图标**
+  （透明状态栏；Android 看 `statusBarIconBrightness`，iOS 看语义相反的 `statusBarBrightness`）。
+  不能依赖「没声明就沿用上一页」：框架只在图层树里找到 `AnnotatedRegion` 时才下发样式，而详情页在
+  浅色模式下声明的是深色图标，直接从详情进播放页就是黑底黑字、状态栏整条消失。另外竖屏时给状态栏
+  垫一条**常驻顶部渐变**（`video-status-bar-scrim`，不随控制条 3.5s 淡出，全屏横屏不画），保证白
+  图标叠在亮画面上也读得清。`MaterialApp.builder` 用 `AppSystemUiRegion` 给没有自己声明的页面
+  （我的 / 推荐 / 设置等）兜底主题明暗的状态栏图标（只改状态栏，不动系统导航栏），避免从播放页
+  返回后白图标残留在浅色页面上。
 - 进度：**只记到集**，`play()` 成功后才写 `video_progress_v1` + `video_history_v1`（最近 3 条）。
 
 ### 5.6 离线整剧下载（第二条独立链路）
