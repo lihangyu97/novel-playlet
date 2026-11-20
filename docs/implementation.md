@@ -525,7 +525,7 @@ AVPlayer
   CoreTelephony；Android `BatteryManager` + `ConnectivityManager`，没有 `READ_PHONE_STATE` 时
   4G/5G 退化为「蜂窝」）。进入全屏每 5s 读一次、回前台补一次，通道失败只显示时间。顶栏只保留
   返回 + 剧名，标题在 `Expanded` 里省略，右侧预留 220pt，剧名再长也不会挤压状态；当前集号挪到
-  底栏「选集」入口，用 13pt 文字替代原图标，点击行为不变。
+  底栏右侧、倍速左边（选集入口），用 13pt 文字替代原图标，点击行为不变。
 - 进度：**只记到集**，`play()` 成功后才写 `video_progress_v1` + `video_history_v1`（最近 3 条）。
 
 ### 5.6 离线整剧下载（第二条独立链路）

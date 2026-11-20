@@ -1768,7 +1768,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
             icon: const Icon(Icons.arrow_back_ios_new_rounded),
             color: Colors.white,
           ),
-          // 顶栏只留剧名：集号挪到底栏「选集」入口。
+          // 顶栏只留剧名：集号挪到底栏右侧、倍速左边。
           Expanded(
             child: Text(
               widget.args.seriesTitle,
@@ -1833,7 +1833,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       '${now.hour.toString().padLeft(2, '0')}:'
       '${now.minute.toString().padLeft(2, '0')}';
 
-  /// 底栏「选集」入口：显示当前集号，点开选集弹层。
+  /// 底栏右侧的选集入口：显示当前集号（放在倍速左边），点开选集弹层。
   ///
   /// 顶栏现在只留剧名，集号挪到这里——用文字而不是图标，一眼能看到
   /// 当前看到第几集；点击行为与原来的选集图标一致。
@@ -1991,7 +1991,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        _buildEpisodeButton(),
                         if (widget.args.seriesId.isNotEmpty) ...[
                           _barIconButton(
                             icon: Icons.info_outline_rounded,
@@ -2027,6 +2026,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                           ),
                           const SizedBox(width: 8),
                         ],
+                        // 当前集号放在倍速左边；窄屏 + 清晰度同时出现时优先
+                        // 省略集号，不挤倍速。
+                        Flexible(child: _buildEpisodeButton()),
+                        const SizedBox(width: 8),
                         PlaybackSpeedButton(
                           current: speed,
                           onOpenChanged: _handleSpeedMenuToggled,

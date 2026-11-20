@@ -152,7 +152,7 @@ void main() {
       api: api,
     );
 
-    // 底部入口：选集右边是详情，收藏/下载/顶部详情按钮都撤掉了。
+    // 底部入口：左侧详情 / 本集评论，右侧选集文字 + 倍速；收藏/下载/顶部详情按钮都撤掉了。
     expect(find.byTooltip('选集'), findsOneWidget);
     expect(find.byTooltip('详情'), findsOneWidget);
     expect(find.byTooltip('本集评论'), findsOneWidget);
@@ -160,19 +160,22 @@ void main() {
     expect(find.byTooltip('收藏'), findsNothing);
     expect(find.byTooltip('缓存'), findsNothing);
 
-    // 选集入口现在是「第 N 集」文字（原来是一颗图标），左半区三颗入口
-    // 不再等距；只校验顺序、左边距，以及选集确实换成了文字。
+    // 选集入口是「第 N 集」文字，放在倍速左边；左半区是详情 / 本集评论。
     expect(find.byIcon(Icons.video_library_outlined), findsNothing);
     expect(find.text('第 1 集'), findsOneWidget, reason: '选集入口显示当前集号');
 
-    final entryCenters = [
-      tester.getCenter(find.byTooltip('选集')),
-      tester.getCenter(find.byTooltip('详情')),
-      tester.getCenter(find.byTooltip('本集评论')),
-    ];
-    expect(entryCenters[1].dx, greaterThan(entryCenters[0].dx));
-    expect(entryCenters[2].dx, greaterThan(entryCenters[1].dx));
-    expect(entryCenters[0].dx, greaterThan(40), reason: '选集入口不贴屏幕左边缘');
+    final detailCenter = tester.getCenter(find.byTooltip('详情'));
+    final commentsCenter = tester.getCenter(find.byTooltip('本集评论'));
+    final episodeCenter = tester.getCenter(find.byTooltip('选集'));
+    final speedCenter = tester.getCenter(find.byTooltip('播放速度'));
+    expect(detailCenter.dx, greaterThan(40), reason: '详情入口不贴屏幕左边缘');
+    expect(commentsCenter.dx, greaterThan(detailCenter.dx));
+    expect(
+      episodeCenter.dx,
+      greaterThan(commentsCenter.dx),
+      reason: '选集文字在右半区',
+    );
+    expect(speedCenter.dx, greaterThan(episodeCenter.dx), reason: '选集在倍速左边');
     final screenWidth =
         tester.view.physicalSize.width / tester.view.devicePixelRatio;
     final pauseCenter = tester.getCenter(find.byIcon(Icons.pause_rounded));
