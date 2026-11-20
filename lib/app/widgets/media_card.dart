@@ -31,6 +31,7 @@ class MediaCard extends StatelessWidget {
     this.extraMeta = const [],
     this.coverBadge,
     this.coverOverlay,
+    this.coverFooter,
     this.heroTag,
     this.cornerText,
     this.coverPlaceholderColor,
@@ -75,6 +76,13 @@ class MediaCard extends StatelessWidget {
   ///
   /// 与 [coverBadge] 二选一：需要彩色标签这类非文字样式时用这个。
   final Widget? coverOverlay;
+
+  /// 封面左下角的角标（短剧的「第 N 季」）；null = 不显示。
+  ///
+  /// 和左上（[coverBadge] / [coverOverlay]）、右上（[cornerText]）各自独立：
+  /// 推荐理由/类型标签、季角标、评分可以同时出现在一张封面上。底部居中不用
+  /// ——海报自己把剧名和季印在那里。
+  final Widget? coverFooter;
 
   /// 封面 Hero tag；null = 不参与飞入动画（例如深链/无列表来源）。
   final String? heroTag;
@@ -144,6 +152,8 @@ class MediaCard extends StatelessWidget {
             ),
           if (cornerText != null && cornerText!.isNotEmpty)
             Positioned(top: 6, right: 6, child: _CornerBadge(cornerText!)),
+          if (coverFooter != null)
+            Positioned(bottom: 6, left: 6, child: coverFooter!),
         ],
       ),
     );

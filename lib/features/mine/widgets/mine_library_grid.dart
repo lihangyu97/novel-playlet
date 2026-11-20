@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../../app/widgets/media_card.dart';
 import '../../../app/widgets/novel_cover.dart';
+import '../../../app/widgets/season_badge.dart';
 import '../../../app/widgets/states.dart';
+import '../../../core/season_title.dart';
 import '../../../core/storage/library_records.dart';
 import 'library_type_badge.dart';
 import 'shelf_grid.dart';
@@ -45,22 +47,27 @@ class MineLibraryGrid extends StatelessWidget {
         message: '收藏夹还是空的，去推荐页看看',
         icon: Icons.star_border_rounded,
       ),
-      cardBuilder: (item, heroTag) => MediaCard(
-        cover: item.cover,
-        title: item.title,
-        // 小说展示作者、短剧展示集数；两者都空时不留空行。
-        meta: item.type.isPlaylet
-            ? (item.episodeCount > 0 ? '全 ${item.episodeCount} 集' : '')
-            : item.author,
-        coverOverlay: LibraryTypeBadge(type: item.type),
-        width: itemWidth,
-        onTap: () => onOpen(item),
-        heroTag: heroTag,
-        // 混排统一 3:4：短剧封面会被轻微裁切，换来同一行高度一致。
-        coverAspect: kNovelCoverAspect,
-        surface: true,
-        naturalTitleHeight: true,
-      ),
+      cardBuilder: (item, heroTag) {
+        // 收藏里的短剧同样把标题里的季拎到封面左下角；小说标题没有季。
+        final season = item.type.isPlaylet ? seasonOf(item.title) : null;
+        return MediaCard(
+          cover: item.cover,
+          title: item.title,
+          // 小说展示作者、短剧展示集数；两者都空时不留空行。
+          meta: item.type.isPlaylet
+              ? (item.episodeCount > 0 ? '全 ${item.episodeCount} 集' : '')
+              : item.author,
+          coverOverlay: LibraryTypeBadge(type: item.type),
+          coverFooter: season == null ? null : SeasonBadge(season: season),
+          width: itemWidth,
+          onTap: () => onOpen(item),
+          heroTag: heroTag,
+          // 混排统一 3:4：短剧封面会被轻微裁切，换来同一行高度一致。
+          coverAspect: kNovelCoverAspect,
+          surface: true,
+          naturalTitleHeight: true,
+        );
+      },
     );
   }
 }

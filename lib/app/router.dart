@@ -8,7 +8,9 @@ import '../features/cache/cache_center_page.dart';
 import '../features/detail/detail_page.dart';
 import '../features/logs/app_log_page.dart';
 import '../features/rank/rank_page.dart';
+import '../features/recommend/recommend_category.dart';
 import '../features/reader/reader_page.dart';
+import '../features/search/search_all_page.dart';
 import '../features/search/search_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/sync/cloud_sync_data_page.dart';
@@ -221,4 +223,20 @@ final class SearchRoute extends AppRoute<void> {
   @override
   Route<void> toRoute() =>
       MaterialPageRoute<void>(builder: (_) => const SearchPage());
+}
+
+/// 某个分类的完整搜索结果页：搜索页每行「查看全部」进来。
+///
+/// 关键词随路由带过去（与搜索页的 autoDispose 状态解耦）：这一页只负责把
+/// 同一关键词的某一类翻完，返回时搜索页仍停在原来的两行结果。
+final class SearchAllRoute extends AppRoute<void> {
+  const SearchAllRoute({required this.category, required this.query});
+
+  final RecommendCategory category;
+  final String query;
+
+  @override
+  Route<void> toRoute() => MaterialPageRoute<void>(
+    builder: (_) => SearchAllPage(category: category, query: query),
+  );
 }

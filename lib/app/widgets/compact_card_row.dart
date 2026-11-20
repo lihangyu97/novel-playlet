@@ -6,20 +6,30 @@ import 'surface_card.dart';
 
 /// 紧凑卡行：一行横向可滑的小号卡片（搜索结果行、首页榜单预览行共用）。
 ///
-/// 口径与搜索结果页一致：一屏露出 3.5 张卡（第 4 张只露半边，暗示可以往右
-/// 滑），卡片宽度按屏宽算、卡片内部字号整体缩一档（首页同款卡片的「小号
-/// 版」）。卡片本身仍复用 `NovelGridCard` / `VideoCard`（`surface: true`
-/// 白底卡），这里只负责宽度、字号与行内间距——两处各写一套的话，同一张卡在
-/// 搜索页和首页榜单预览里会尺寸不一。
+/// 卡片宽度按屏宽算、卡片内部字号整体缩一档（首页同款卡片的「小号版」）。
+/// 卡片本身仍复用 `NovelGridCard` / `VideoCard`（`surface: true` 白底卡），
+/// 这里只负责宽度、字号与行内间距——两处各写一套的话，同一张卡在搜索页和
+/// 首页榜单预览里会尺寸不一。
 class CompactCardRow extends StatelessWidget {
-  const CompactCardRow({super.key, required this.children});
+  const CompactCardRow({
+    super.key,
+    required this.children,
+    this.visibleCards = defaultVisibleCards,
+  });
 
   /// 卡片行左右留白与卡片间距：与首页推荐流一致（8）。
   static const double rowPadding = 8;
   static const double cardGap = 8;
 
-  /// 一屏露出的卡片数：3 张完整卡 + 半张。
-  static const double visibleCards = 3.5;
+  /// 一屏露出的卡片数（默认 3 张完整卡 + 半张）。
+  static const double defaultVisibleCards = 3.5;
+
+  /// 搜索结果行的口径：2 张完整卡 + 半张。
+  ///
+  /// 搜索卡要在封面上同时放季角标、评分，文字区还有集数/热度：100pt 宽时
+  /// 这些都挤在一起，季角标也只剩 3 个字的位置。放大后卡片≈143pt，季角标
+  /// 和标题都读得开；代价是一屏少露一张。
+  static const double searchVisibleCards = 2.5;
 
   /// 卡片字号相对首页缩小的比例。
   ///
@@ -27,9 +37,17 @@ class CompactCardRow extends StatelessWidget {
   /// 缩一档后标题仍放得下两行，才像「同款卡片的小号版」。
   static const double cardFontScale = 0.88;
 
-  /// 屏幕宽度 → 卡宽：3 张完整卡之间 3 个间距，两侧各 [rowPadding]。
-  static double cardWidthFor(double maxWidth) =>
-      (maxWidth - rowPadding * 2 - cardGap * 3) / visibleCards;
+  /// 屏幕宽度 → 卡宽：`floor(visibleCards)` 个完整卡之间就有同样多个间距，
+  /// 两侧各 [rowPadding]。
+  static double cardWidthFor(
+    double maxWidth, {
+    double visibleCards = defaultVisibleCards,
+  }) =>
+      (maxWidth - rowPadding * 2 - cardGap * visibleCards.floor()) /
+      visibleCards;
+
+  /// 这一行一屏露出多少张卡。
+  final double visibleCards;
 
   /// 整行统一的紧凑字型：卡片宽度变了但字号还是首页尺寸会「字挤满卡」。
   static ThemeData compactTheme(BuildContext context) {
