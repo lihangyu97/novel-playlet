@@ -13,14 +13,16 @@ import 'theme/theme_settings.dart';
 /// 这里不启动任何业务逻辑：内核启动在 [BootstrapGate] 里，保证「先有阅读
 /// 环境，再进首页」。
 ///
-/// 主题色跟着 [themeSeedProvider]：设置页换色后，MaterialApp 直接重建，
-/// 全站（含阅读页/弹层）一起变色，不需要重启。
+/// 主题色跟着 [themeSeedProvider]、配色算法跟着 [themeVariantProvider]：
+/// 设置页换色/换算法后，MaterialApp 直接重建，全站（含阅读页/弹层）一起
+/// 变色，不需要重启。
 class NovelPlayletApp extends ConsumerWidget {
   const NovelPlayletApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final seed = ref.watch(themeSeedProvider);
+    final variant = ref.watch(themeVariantProvider);
     final themeMode = ref.watch(themeModeProvider);
     // iOS 的 effective 值恒为 400，所以这里直接传也不会改变 iOS 观感；
     // Android 才真正跟着设置里的全局字重走。
@@ -28,8 +30,8 @@ class NovelPlayletApp extends ConsumerWidget {
     return MaterialApp(
       title: 'novel-playlet',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(seed, fontWeight),
-      darkTheme: AppTheme.dark(seed, fontWeight),
+      theme: AppTheme.light(seed, fontWeight, variant),
+      darkTheme: AppTheme.dark(seed, fontWeight, variant),
       themeMode: themeMode,
       scrollBehavior: const AppScrollBehavior(),
       locale: const Locale('zh', 'CN'),

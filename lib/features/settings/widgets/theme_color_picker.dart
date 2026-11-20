@@ -27,6 +27,7 @@ Future<Color?> showThemeColorPicker(
   BuildContext context, {
   required Color initial,
   String title = '自定义主题色',
+  AppThemeVariant variant = AppThemeVariant.standard,
   Widget Function(Color color)? previewBuilder,
   Widget? leading,
 }) {
@@ -36,6 +37,7 @@ Future<Color?> showThemeColorPicker(
     builder: (_) => ThemeColorPickerSheet(
       initial: initial,
       title: title,
+      variant: variant,
       previewBuilder: previewBuilder,
       leading: leading,
     ),
@@ -47,12 +49,17 @@ class ThemeColorPickerSheet extends StatefulWidget {
     super.key,
     required this.initial,
     this.title = '自定义主题色',
+    this.variant = AppThemeVariant.standard,
     this.previewBuilder,
     this.leading,
   });
 
   final Color initial;
   final String title;
+
+  /// 预览用的配色算法：跟设置里当前选的那档一致，否则用户会看到「预览是
+  /// 标准款、退出后变成鲜艳款」。
+  final AppThemeVariant variant;
 
   /// 自定义预览区；null = 主题色默认预览（按钮 + 强调色）。
   final Widget Function(Color color)? previewBuilder;
@@ -154,6 +161,7 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
                 _ThemePreview(
                   seed: _previewColor,
                   brightness: theme.brightness,
+                  variant: widget.variant,
                 ),
             const SizedBox(height: 20),
             Row(
@@ -197,13 +205,19 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
 /// 直接给页面换色会太跳（而且取消还要回滚），所以只在这里做局部预览。
 ///
 /// 外层取色弹层每帧都会重建（hex 文本等），而 `AppTheme.themed` 里的
-/// `ColorScheme.fromSeed` 是这条链路里最贵的一步：这里按 (seed, brightness)
-/// memo 住 ThemeData，颜色没变时直接复用，不再重复派生动态配色。
+/// `ColorScheme.fromSeed` 是这条链路里最贵的一步：这里按
+/// (seed, brightness, variant) 三元组 memo 住 ThemeData，颜色或算法没变时
+/// 直接复用，不再重复派生动态配色。
 class _ThemePreview extends StatefulWidget {
-  const _ThemePreview({required this.seed, required this.brightness});
+  const _ThemePreview({
+    required this.seed,
+    required this.brightness,
+    required this.variant,
+  });
 
   final Color seed;
   final Brightness brightness;
+  final AppThemeVariant variant;
 
   @override
   State<_ThemePreview> createState() => _ThemePreviewState();
@@ -213,18 +227,26 @@ class _ThemePreviewState extends State<_ThemePreview> {
   ThemeData? _theme;
   Color? _themeSeed;
   Brightness? _themeBrightness;
+  AppThemeVariant? _themeVariant;
 
   ThemeData get _previewTheme {
     final cached = _theme;
     if (cached != null &&
         _themeSeed == widget.seed &&
-        _themeBrightness == widget.brightness) {
+        _themeBrightness == widget.brightness &&
+        _themeVariant == widget.variant) {
       return cached;
     }
-    final theme = AppTheme.themed(widget.seed, widget.brightness);
+    final theme = AppTheme.themed(
+      widget.seed,
+      widget.brightness,
+      FontWeight.w400,
+      widget.variant,
+    );
     _theme = theme;
     _themeSeed = widget.seed;
     _themeBrightness = widget.brightness;
+    _themeVariant = widget.variant;
     return theme;
   }
 

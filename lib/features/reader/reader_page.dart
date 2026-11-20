@@ -409,9 +409,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         : Brightness.light;
     return Theme.of(context).copyWith(
       colorScheme: AppTheme.schemeFor(
-        // 跟着「设置 → 主题色」走：阅读页的工具栏/目录高亮也要一起换色。
+        // 跟着「设置 → 主题色 / 配色算法」走：阅读页的工具栏/目录高亮也要
+        // 一起换色，否则同一 seed 会在这里和全局派生出两套配色。
         AppTheme.accentOf(context),
         brightness,
+        AppTheme.variantOf(context),
       ),
       scaffoldBackgroundColor: paper.background,
     );

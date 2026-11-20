@@ -66,7 +66,11 @@ class ReaderCommentsSheet extends StatelessWidget {
         ? Brightness.dark
         : Brightness.light;
     final theme = Theme.of(context).copyWith(
-      colorScheme: AppTheme.schemeFor(AppTheme.accentOf(context), brightness),
+      colorScheme: AppTheme.schemeFor(
+        AppTheme.accentOf(context),
+        brightness,
+        AppTheme.variantOf(context),
+      ),
       scaffoldBackgroundColor: paper.background,
     );
     return CommentListSheet(

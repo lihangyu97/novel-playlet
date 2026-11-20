@@ -157,9 +157,12 @@ class _Card extends StatelessWidget {
 
 /// 主题区块：所有外观偏好共用一张卡，卡内不画分割线。
 ///
-/// 顺序按「一眼就能定」排：主题色 → 深浅色 → 推荐流布局 → 全局字重（仅
-/// Android）→ 对话高亮（阅读页局部装饰，放最后）。每行自己带上下 padding，
-/// 卡片只保留 6pt 的外边距，行间留白就是唯一的分组手段。
+/// 顺序按「一眼就能定」排：主题色 → 配色算法 → 深浅色 → 推荐流布局 →
+/// 全局字重（仅 Android）→ 对话高亮（阅读页局部装饰，放最后）。每行自己带
+/// 上下 padding，卡片只保留 6pt 的外边距，行间留白就是唯一的分组手段。
+///
+/// 「主题色」和「配色算法」必须挨着：一个定种子、一个定种子怎么展开，中间
+/// 插别的行会让人以为两者无关。
 class _ThemeCard extends StatelessWidget {
   const _ThemeCard();
 
@@ -173,6 +176,7 @@ class _ThemeCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const _ThemeColorRow(),
+          const _ThemeVariantRow(),
           const _AppearanceRows(),
           const _FeedLayoutRow(),
           if (showFontWeight) const _GlobalFontWeightRow(),
@@ -228,6 +232,9 @@ class _ThemeColorRow extends ConsumerWidget {
                   final picked = await showThemeColorPicker(
                     context,
                     initial: customSeed,
+                    // 预览必须跟当前算法一致：否则用户在「鲜艳」下调色，
+                    // 预览是标准款，确定之后整站观感会突变。
+                    variant: ref.read(themeVariantProvider),
                   );
                   if (picked == null) return;
                   controller.setSeed(picked);
@@ -249,6 +256,83 @@ class _ThemeColorRow extends ConsumerWidget {
                 child: const Text('恢复默认主题色'),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 配色算法
+// ---------------------------------------------------------------------------
+
+/// 配色算法按钮组的 key：测试用它点选档位。
+const Key themeVariantKey = Key('settings-theme-variant');
+
+/// 每个算法档位的 key：测试直接点，不依赖文案。
+///
+/// 用枚举名生成而不是写死三个常量：以后加档位时不会漏 key，也不会让两个
+/// 按钮拿到同一个 key（同一 children 列表里重复 key 会直接抛错）。
+Key themeVariantOptionKey(AppThemeVariant variant) =>
+    ValueKey('settings-theme-variant-${variant.name}');
+
+/// 主题色如何展开成整套配色（M3 dynamic scheme variant）。
+///
+/// 只放 4 档，不暴露 material_color_utilities 的实验变体（rainbow /
+/// fruitSalad）：那两档色相漂移幅度大，给用户选只会显得配色失控。
+///
+/// 副标题点名「近灰主题色始终用灰阶」：否则用户选了「鲜艳」再挑白/灰主题
+/// 色，看到还是灰阶，会以为这项设置坏了。
+class _ThemeVariantRow extends ConsumerWidget {
+  const _ThemeVariantRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final variant = ref.watch(themeVariantProvider);
+    final controller = ref.read(themeVariantProvider.notifier);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '配色算法',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: context.appWeight(FontWeight.w600),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '近灰主题色始终用灰阶',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              height: 1.3,
+            ),
+          ),
+          const SizedBox(height: 8),
+          // 四档两字，一行放得下，不需要横向滚动。
+          SegmentedButton<AppThemeVariant>(
+            key: themeVariantKey,
+            style: _segmentedStyle(theme),
+            segments: [
+              for (final option in AppThemeVariant.values)
+                ButtonSegment(
+                  value: option,
+                  label: Text(
+                    option.label,
+                    key: themeVariantOptionKey(option),
+                  ),
+                  // 长按冒泡一句说明：「标准」和「忠实」光看两个字分不出差别。
+                  tooltip: option.description,
+                ),
+            ],
+            selected: {variant},
+            // 段里只有两个字，打勾会把控件撑宽一倍；选中态靠底色区分。
+            showSelectedIcon: false,
+            onSelectionChanged: (selected) =>
+                controller.setVariant(selected.single),
+          ),
         ],
       ),
     );
