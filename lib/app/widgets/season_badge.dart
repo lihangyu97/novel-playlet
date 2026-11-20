@@ -28,10 +28,18 @@ class SeasonBadge extends StatelessWidget {
       label: label,
       excludeSemantics: true,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        // 和收藏页「书 / 剧」标签同一套形状与字号：圆角 4 的方标签，不是胶囊。
+        // 上下内边距「上多下少」：等距时文字会贴着上沿（实测墨迹上 3.0pt /
+        // 下 3.67pt），上边距多 1pt 后两边都是 3.33pt，视觉上才居中。
+        padding: const EdgeInsets.only(
+          left: 5,
+          right: 5,
+          top: 2.5,
+          bottom: 1.5,
+        ),
         decoration: BoxDecoration(
           color: scheme.primary,
-          borderRadius: BorderRadius.circular(99),
+          borderRadius: BorderRadius.circular(4),
         ),
         child: Text(
           label,
@@ -41,6 +49,7 @@ class SeasonBadge extends StatelessWidget {
             color: scheme.onPrimary,
             fontSize: 10,
             height: 1.15,
+            letterSpacing: 0.2,
             fontWeight: context.appWeight(FontWeight.w600),
           ),
         ),
