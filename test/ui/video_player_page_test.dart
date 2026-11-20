@@ -160,25 +160,19 @@ void main() {
     expect(find.byTooltip('收藏'), findsNothing);
     expect(find.byTooltip('缓存'), findsNothing);
 
-    // 操作行三段：三颗按钮在左半区等距铺开（不再黏成一坨贴左边缘），
-    // 暂停键严格居中，倍速 chip 贴右端。
-    final iconCenters = [
+    // 选集入口现在是「第 N 集」文字（原来是一颗图标），左半区三颗入口
+    // 不再等距；只校验顺序、左边距，以及选集确实换成了文字。
+    expect(find.byIcon(Icons.video_library_outlined), findsNothing);
+    expect(find.text('第 1 集'), findsOneWidget, reason: '选集入口显示当前集号');
+
+    final entryCenters = [
       tester.getCenter(find.byTooltip('选集')),
       tester.getCenter(find.byTooltip('详情')),
       tester.getCenter(find.byTooltip('本集评论')),
     ];
-    final pitch = iconCenters[1].dx - iconCenters[0].dx;
-    expect(
-      pitch,
-      closeTo(iconCenters[2].dx - iconCenters[1].dx, 1),
-      reason: '三颗按钮等距',
-    );
-    expect(pitch, greaterThan(40), reason: '相邻按钮之间留了空隙，不再首尾相接');
-    expect(
-      iconCenters[0].dx,
-      greaterThan(40),
-      reason: '第一颗不贴屏幕左边缘（原来是 0 内边距紧贴左边）',
-    );
+    expect(entryCenters[1].dx, greaterThan(entryCenters[0].dx));
+    expect(entryCenters[2].dx, greaterThan(entryCenters[1].dx));
+    expect(entryCenters[0].dx, greaterThan(40), reason: '选集入口不贴屏幕左边缘');
     final screenWidth =
         tester.view.physicalSize.width / tester.view.devicePixelRatio;
     final pauseCenter = tester.getCenter(find.byIcon(Icons.pause_rounded));

@@ -1214,9 +1214,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
 
   @override
   Widget build(BuildContext context) {
-    final episodeTitle = _episode?.title.isNotEmpty == true
-        ? _episode!.title
-        : '第 ${_index + 1} 集';
     // 加载期间也保留顶栏（返回键/剧名），不要整屏只剩 spinner。
     final showChrome = _error == null;
     // 全屏提示只给横屏视频：视频已经铺满整屏时（全屏）不需要，竖屏视频全屏
@@ -1276,7 +1273,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                     right: 0,
                     child: SafeArea(
                       bottom: false,
-                      child: _chrome(_buildTopBar(episodeTitle)),
+                      child: _chrome(_buildTopBar()),
                     ),
                   ),
                 // 横屏全屏时系统状态栏是隐藏的，右上角常驻一枚「时间 / 电量 /
@@ -1754,7 +1751,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     );
   }
 
-  Widget _buildTopBar(String episodeTitle) {
+  Widget _buildTopBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(4, 4, 12, 24),
       decoration: const BoxDecoration(
@@ -1771,28 +1768,17 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
             icon: const Icon(Icons.arrow_back_ios_new_rounded),
             color: Colors.white,
           ),
+          // 顶栏只留剧名：集号挪到底栏「选集」入口。
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.args.seriesTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: context.appWeight(FontWeight.w600),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  episodeTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ],
+            child: Text(
+              widget.args.seriesTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: context.appWeight(FontWeight.w600),
+              ),
             ),
           ),
           // 横屏时把右上角让给常驻系统状态：标题只在自己的 Expanded 里省略。
@@ -1810,10 +1796,13 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     final battery = _systemStatus.batteryPercent;
     final network = _systemStatus.networkLabel;
     final time = _formatClock(_clockNow);
+    // 14pt 常规字重：比 15pt 剧名小一号、比原来的 12pt 状态字大一点。
+    // 不再铺胶囊底，只靠柔和投影保证亮画面上读得清。
     final style = TextStyle(
       color: Colors.white,
-      fontSize: 12,
-      fontWeight: context.appWeight(FontWeight.w500),
+      fontSize: 14,
+      fontWeight: FontWeight.w400,
+      shadows: const [Shadow(color: Color(0x99000000), blurRadius: 6)],
     );
     return Semantics(
       label: [
@@ -1822,27 +1811,20 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
         if (network != null) '网络 $network',
       ].join('，'),
       excludeSemantics: true,
-      child: Container(
+      child: Row(
         key: const ValueKey('player-system-status'),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: const Color(0x61000000),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(time, style: style, textScaler: TextScaler.noScaling),
-            if (battery != null) ...[
-              const _StatusDot(),
-              Text('$battery%', style: style, textScaler: TextScaler.noScaling),
-            ],
-            if (network != null) ...[
-              const _StatusDot(),
-              Text(network, style: style, textScaler: TextScaler.noScaling),
-            ],
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(time, style: style, textScaler: TextScaler.noScaling),
+          if (battery != null) ...[
+            const _StatusDot(),
+            Text('$battery%', style: style, textScaler: TextScaler.noScaling),
           ],
-        ),
+          if (network != null) ...[
+            const _StatusDot(),
+            Text(network, style: style, textScaler: TextScaler.noScaling),
+          ],
+        ],
       ),
     );
   }
@@ -1850,6 +1832,42 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   static String _formatClock(DateTime now) =>
       '${now.hour.toString().padLeft(2, '0')}:'
       '${now.minute.toString().padLeft(2, '0')}';
+
+  /// 底栏「选集」入口：显示当前集号，点开选集弹层。
+  ///
+  /// 顶栏现在只留剧名，集号挪到这里——用文字而不是图标，一眼能看到
+  /// 当前看到第几集；点击行为与原来的选集图标一致。
+  Widget _buildEpisodeButton() {
+    return Tooltip(
+      message: '选集',
+      child: TextButton(
+        onPressed: () => unawaited(_openEpisodePicker()),
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          minimumSize: const Size(40, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: TextStyle(
+            fontSize: 13,
+            fontWeight: context.appWeight(FontWeight.w500),
+          ),
+        ),
+        child: Text(
+          _episodeChipLabel,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
+
+  /// 底栏只显示集号：分集标题本身就是「第 N 集」时直接复用，否则用序号
+  /// 兜底，避免很长的标题把左半区挤爆。
+  String get _episodeChipLabel {
+    final title = _episode?.title ?? '';
+    return _titleHasEpisodeNumber(title) ? title : '第 ${_index + 1} 集';
+  }
 
   /// 控制条上的纯图标按钮：暗色渐变上用白色，激活态用主题色。
   Widget _barIconButton({
@@ -1973,11 +1991,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        _barIconButton(
-                          icon: Icons.video_library_outlined,
-                          tooltip: '选集',
-                          onTap: () => unawaited(_openEpisodePicker()),
-                        ),
+                        _buildEpisodeButton(),
                         if (widget.args.seriesId.isNotEmpty) ...[
                           _barIconButton(
                             icon: Icons.info_outline_rounded,

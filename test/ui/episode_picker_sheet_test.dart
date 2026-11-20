@@ -20,11 +20,11 @@ void main() {
 
   testWidgets('78 集一个 tab：初始 tab 跟随当前集，切 tab 点集后切到该集', (tester) async {
     await _pumpPlayer(tester);
-    // 当前是第 81 集（固定下标 80），顶栏先确认初始状态。
+    // 当前是第 81 集（固定下标 80），底栏「选集」入口会显示当前集号。
     expect(find.text('第 81 集'), findsOneWidget);
 
-    // 点底栏「选集」打开弹层。
-    await tester.tap(find.byIcon(Icons.video_library_outlined));
+    // 点底栏「选集」文字入口打开弹层（图标已换成当前集号）。
+    await tester.tap(find.byTooltip('选集'));
     await tester.pumpAndSettle();
     expect(find.text('选集'), findsOneWidget);
     expect(find.text('1-78'), findsOneWidget);
@@ -48,7 +48,7 @@ void main() {
     await tester.tap(find.text('157'));
     await tester.pumpAndSettle();
 
-    // 弹层关闭，播放页顶栏切到第 157 集。
+    // 弹层关闭，播放页底栏「选集」切到第 157 集。
     expect(find.text('157-200'), findsNothing);
     expect(find.text('第 157 集'), findsOneWidget);
 
