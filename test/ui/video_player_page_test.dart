@@ -152,7 +152,7 @@ void main() {
       api: api,
     );
 
-    // 底部入口：左侧详情 / 本集评论，右侧选集文字 + 倍速；收藏/下载/顶部详情按钮都撤掉了。
+    // 底部入口：选集（当前集号文字）/ 详情 / 本集评论在左半区；收藏/下载/顶部详情按钮都撤掉了。
     expect(find.byTooltip('选集'), findsOneWidget);
     expect(find.byTooltip('详情'), findsOneWidget);
     expect(find.byTooltip('本集评论'), findsOneWidget);
@@ -160,22 +160,16 @@ void main() {
     expect(find.byTooltip('收藏'), findsNothing);
     expect(find.byTooltip('缓存'), findsNothing);
 
-    // 选集入口是「第 N 集」文字，放在倍速左边；左半区是详情 / 本集评论。
+    // 选集入口是左半区第一颗，显示当前集号；详情、本集评论依次在右。
     expect(find.byIcon(Icons.video_library_outlined), findsNothing);
     expect(find.text('第 1 集'), findsOneWidget, reason: '选集入口显示当前集号');
 
+    final episodeCenter = tester.getCenter(find.byTooltip('选集'));
     final detailCenter = tester.getCenter(find.byTooltip('详情'));
     final commentsCenter = tester.getCenter(find.byTooltip('本集评论'));
-    final episodeCenter = tester.getCenter(find.byTooltip('选集'));
-    final speedCenter = tester.getCenter(find.byTooltip('播放速度'));
-    expect(detailCenter.dx, greaterThan(40), reason: '详情入口不贴屏幕左边缘');
+    expect(episodeCenter.dx, greaterThan(40), reason: '选集入口不贴屏幕左边缘');
+    expect(detailCenter.dx, greaterThan(episodeCenter.dx));
     expect(commentsCenter.dx, greaterThan(detailCenter.dx));
-    expect(
-      episodeCenter.dx,
-      greaterThan(commentsCenter.dx),
-      reason: '选集文字在右半区',
-    );
-    expect(speedCenter.dx, greaterThan(episodeCenter.dx), reason: '选集在倍速左边');
     final screenWidth =
         tester.view.physicalSize.width / tester.view.devicePixelRatio;
     final pauseCenter = tester.getCenter(find.byIcon(Icons.pause_rounded));
@@ -724,7 +718,7 @@ void main() {
     await _disposePlayer(tester);
   });
 
-  testWidgets('横屏全屏：右上角常驻时间/电量/网络，超长标题只省略自己', (tester) async {
+  testWidgets('横屏全屏：系统状态在倍速左边，长标题只省略自己', (tester) async {
     // 与现有全屏用例一致：竖屏 viewport 里点提示进全屏（测试环境不真旋转）。
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -764,14 +758,17 @@ void main() {
       findsOneWidget,
     );
 
-    // 标题在自己的 Expanded 里省略，右边缘不能越过状态胶囊。
-    final titleRect = tester.getRect(find.text(title));
-    final clusterRect = tester.getRect(cluster);
+    // 系统状态在底栏、倍速左边。
+    final speed = find.byTooltip('播放速度');
     expect(
-      titleRect.right,
-      lessThanOrEqualTo(clusterRect.left),
-      reason: '超长剧名不能压到时间/电量/网络',
+      tester.getCenter(cluster).dx,
+      lessThan(tester.getCenter(speed).dx),
+      reason: '时间/电量/网络应该在倍速左边',
     );
+
+    // 顶栏长剧名仍然只在 Expanded 里省略（不会把页面撑破）。
+    expect(find.text(title), findsOneWidget);
+    expect(tester.takeException(), isNull);
 
     await _disposePlayer(tester);
   });

@@ -176,12 +176,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   /// 横屏判定：接近 1 的方图不算，避免给错按钮。
   static const double _landscapeAspect = 1.05;
 
-  /// 横屏右上角系统状态的预留宽度。
-  ///
-  /// 时间 + 电量 + 网络三段（12pt、不随系统字号缩放）实测约 140；这里留
-  /// 220 是为了同时覆盖无障碍大字号/测试字体偏宽的情况，横屏宽度足够。
-  static const double _systemStatusWidth = 220;
-
   /// 播放页恒为黑底：状态栏图标固定白色，不能沿用上一页留下的样式。
   ///
   /// 框架只在当前帧图层树里找到 `AnnotatedRegion<SystemUiOverlayStyle>` 时才
@@ -1276,31 +1270,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                       child: _chrome(_buildTopBar()),
                     ),
                   ),
-                // 横屏全屏时系统状态栏是隐藏的，右上角常驻一枚「时间 / 电量 /
-                // 网络」胶囊。它不放进 `_chrome`：控制条 3.5s 后会淡出，这枚
-                // 状态要一直在。顶栏标题用 Expanded + 右侧预留宽度，剧名再长
-                // 也只省略自己，不会挤压这里。
-                if (_fullscreen && showChrome)
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: SafeArea(
-                      bottom: false,
-                      child: IgnorePointer(
-                        child: SizedBox(
-                          height: 56,
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: Padding(
-                              padding: const EdgeInsets.only(right: 12),
-                              child: _buildSystemStatusCluster(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
                 if (showChrome)
                   Positioned(
                     left: 0,
@@ -1781,14 +1750,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
               ),
             ),
           ),
-          // 横屏时把右上角让给常驻系统状态：标题只在自己的 Expanded 里省略。
-          if (_fullscreen) const SizedBox(width: _systemStatusWidth),
         ],
       ),
     );
   }
 
-  /// 横屏右上角常驻的系统状态：时间 / 电量（百分比）/ 当前网络。
+  /// 横屏全屏底栏的系统状态：时间 / 电量（百分比）/ 当前网络，放在倍速左边。
   ///
   /// 时间本地算，电量与网络走 [PlayerSystemStatusReader]；任何一项读不到就
   /// 不画那一项，只留时间。
@@ -1817,11 +1784,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
         children: [
           Text(time, style: style, textScaler: TextScaler.noScaling),
           if (battery != null) ...[
-            const _StatusDot(),
+            const SizedBox(width: 8),
             Text('$battery%', style: style, textScaler: TextScaler.noScaling),
           ],
           if (network != null) ...[
-            const _StatusDot(),
+            const SizedBox(width: 8),
             Text(network, style: style, textScaler: TextScaler.noScaling),
           ],
         ],
@@ -1833,7 +1800,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       '${now.hour.toString().padLeft(2, '0')}:'
       '${now.minute.toString().padLeft(2, '0')}';
 
-  /// 底栏右侧的选集入口：显示当前集号（放在倍速左边），点开选集弹层。
+  /// 底栏左侧的选集入口：显示当前集号，点开选集弹层。
   ///
   /// 顶栏现在只留剧名，集号挪到这里——用文字而不是图标，一眼能看到
   /// 当前看到第几集；点击行为与原来的选集图标一致。
@@ -1991,6 +1958,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
+                        _buildEpisodeButton(),
                         if (widget.args.seriesId.isNotEmpty) ...[
                           _barIconButton(
                             icon: Icons.info_outline_rounded,
@@ -2019,17 +1987,26 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        if (quality.isNotEmpty) ...[
+                        // 全屏时系统状态栏隐藏，状态放倍速左边；清晰度档
+                        // 只是展示信息，全屏先让位给状态（竖屏照常显示）。
+                        if (!_fullscreen && quality.isNotEmpty) ...[
                           PlayerOptionChip(
                             label: quality,
                             tooltip: '当前清晰度（暂不支持切换）',
                           ),
                           const SizedBox(width: 8),
                         ],
-                        // 当前集号放在倍速左边；窄屏 + 清晰度同时出现时优先
-                        // 省略集号，不挤倍速。
-                        Flexible(child: _buildEpisodeButton()),
-                        const SizedBox(width: 8),
+                        if (_fullscreen) ...[
+                          // 窄屏上整体等比缩放，宁可变小也不挤压倍速。
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerRight,
+                              child: _buildSystemStatusCluster(),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
                         PlaybackSpeedButton(
                           current: speed,
                           onOpenChanged: _handleSpeedMenuToggled,
@@ -2043,23 +2020,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-class _StatusDot extends StatelessWidget {
-  const _StatusDot();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 3,
-      height: 3,
-      margin: const EdgeInsets.symmetric(horizontal: 7),
-      decoration: const BoxDecoration(
-        color: Color(0x66FFFFFF),
-        shape: BoxShape.circle,
       ),
     );
   }
