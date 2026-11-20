@@ -161,6 +161,27 @@ void main() {
     expect(find.text('太奶奶的短剧'), findsOneWidget);
   });
 
+  testWidgets('我的页-收藏里的短剧把标题里的季标在封面左下角', (tester) async {
+    final store = ReadingStore();
+    await store.addVideoToShelf(
+      const VideoSeries(
+        id: 'p7',
+        title: '反差大佬：我家小师妹超正经第七季',
+        episodeCount: 177,
+      ),
+    );
+    // 小说标题里就算出现「第 N 季」字样也不加季角标：季角标只属于短剧。
+    await store.addToShelf(
+      const NovelItem(id: 'n1', title: '第二季的雨', author: '作者'),
+    );
+
+    await pumpPreview(tester, const MinePage(), store: store);
+
+    // 精确位置由 video_card_test 断言（这里只验证收藏卡也接上了季角标）。
+    expect(find.text('第7季'), findsOneWidget);
+    expect(find.text('第2季'), findsNothing, reason: '小说卡不显示季角标');
+  });
+
   testWidgets('我的页-页头固定贴顶不随列表滚动', (tester) async {
     final store = ReadingStore();
     for (var i = 12; i >= 1; i--) {

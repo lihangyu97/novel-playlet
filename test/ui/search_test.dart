@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/widgets/compact_card_row.dart';
 import 'package:novel_playlet/app/widgets/novel_card.dart';
+import 'package:novel_playlet/app/widgets/season_badge.dart';
 import 'package:novel_playlet/app/widgets/states.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
 import 'package:novel_playlet/features/search/search_page.dart';
@@ -241,6 +242,30 @@ void main() {
     expect(videos.any((card) => !card.item.isManju), isTrue, reason: '混排里有短剧');
     expect(videos.any((card) => card.item.isManju), isTrue, reason: '混排里有漫剧卡片');
     expect(find.text('漫剧'), findsNothing, reason: '卡面也不再出现分类名标签');
+  });
+
+  testWidgets('搜索页-短剧卡把标题里的季标在封面左下角', (tester) async {
+    final fake = FakePreviewTransport()..dramaSeasonSuffix = true;
+    await pumpPreview(tester, const SearchPage(), transport: fake);
+    await _submit(tester, '反差大佬');
+
+    // 标题里带季的短剧卡才有角标；同页漫剧卡标题没有季，不显示。
+    final badges = tester
+        .widgetList<SeasonBadge>(find.byType(SeasonBadge))
+        .toList();
+    expect(badges, hasLength(6), reason: '6 张短剧卡各一条季角标');
+    expect(find.text('第1季'), findsWidgets);
+    expect(find.text('第6季'), findsOneWidget);
+    final dramaCards = tester
+        .widgetList<VideoCard>(find.byType(VideoCard))
+        .where((card) => !card.item.isManju)
+        .length;
+    expect(badges, hasLength(dramaCards), reason: '漫剧卡不加季角标');
+
+    await expectLater(
+      find.byType(SearchPage),
+      matchesGoldenFile('../goldens/search_seasons.png'),
+    );
   });
 
   testWidgets('搜索页-一屏露出约 3.5 张卡片', (tester) async {

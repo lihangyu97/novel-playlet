@@ -96,6 +96,12 @@ class FakePreviewTransport extends BackendTransport {
   /// 搜索结果条数（默认 6；调大用于验证「搜索态滚动」等场景）。
   int searchItemCount = 6;
 
+  /// 短剧搜索结果的标题是否带上「第 N 季」后缀（默认关，保持既有 golden）。
+  ///
+  /// 真实上游把季只写在标题里（`…第七季`），季角标就是从标题解析的；打开后
+  /// 第 i 条短剧标题追加「第i季」，用来验证搜索结果卡左下角的季角标。
+  bool dramaSeasonSuffix = false;
+
   /// 搜索框轮播热词（cue）；默认空 = 接口没给词，搜索框回退静态提示语。
   List<String> cueWords = const [];
 
@@ -357,7 +363,8 @@ class FakePreviewTransport extends BackendTransport {
               {
                 'series_id_str': 'vs$i',
                 'series_title':
-                    '搜索结果 $keyword ${_dramaTitles[(i - 1) % _dramaTitles.length]}',
+                    '搜索结果 $keyword ${_dramaTitles[(i - 1) % _dramaTitles.length]}'
+                    '${dramaSeasonSuffix ? '第$i季' : ''}',
                 'series_intro': '这是第 $i 条短剧搜索结果的简介，用来验证横向卡片排版。',
                 'episode_cnt': '${40 + i}',
                 'series_cover': '',

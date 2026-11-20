@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../app/widgets/media_card.dart';
 import '../../../app/widgets/novel_cover.dart';
+import '../../../app/widgets/season_badge.dart';
+import '../../../core/season_title.dart';
 import '../../../data/models/video_series.dart';
 
 /// 视频列表的卡片：竖版封面 + 标题 + 集数。
@@ -59,10 +61,13 @@ class VideoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final season = seasonOf(item.title);
     return MediaCard(
       cover: item.cover,
       title: item.title,
       meta: _episodesOf(),
+      // 季只写在标题里、又会被两行省略吃掉，角标把它拎到封面左下角。
+      coverFooter: season == null ? null : SeasonBadge(season: season),
       // 双列：理由上封面角标、热度右对齐到集数行尾。
       coverBadge: reasonOnCover && showReason ? _reasonOf() : null,
       metaTrailing: reasonOnCover ? _heatOf() : null,

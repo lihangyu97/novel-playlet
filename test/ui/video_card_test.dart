@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_playlet/app/widgets/novel_cover.dart';
+import 'package:novel_playlet/app/widgets/season_badge.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
 
@@ -13,6 +15,7 @@ void main() {
   );
 
   VideoCard card({
+    String title = '剧名',
     String reason = '',
     String rank = '',
     String score = '',
@@ -23,7 +26,7 @@ void main() {
     return VideoCard(
       item: VideoSeries(
         id: 'v1',
-        title: '剧名',
+        title: title,
         episodeCount: episodeCount,
         score: score,
         recommendReason: reason,
@@ -104,5 +107,42 @@ void main() {
     expect(find.text('全 40 集'), findsOneWidget);
     expect(find.text('系列剧·40万人在追'), findsNothing);
     expect(find.text('8.2分'), findsNothing, reason: '书架等入口不显示评分角标');
+  });
+  testWidgets('标题里有「第 N 季」：封面左下角标出季，标题保持原样', (tester) async {
+    await tester.pumpWidget(
+      wrap(card(title: '反差大佬：我家小师妹超正经第七季', score: '8.2')),
+    );
+    expect(find.text('第7季'), findsOneWidget);
+    // 位置：封面左下角（距左 6、距底 6），不占用左上理由位和右上评分位。
+    final cover = tester.getRect(find.byType(NovelCover));
+    final badge = tester.getRect(find.byType(SeasonBadge));
+    expect(badge.left, closeTo(cover.left + 6, 0.5));
+    expect(badge.bottom, closeTo(cover.bottom - 6, 0.5));
+    // 角标不替代标题：标题仍是上游原文（季被两行省略是卡片自身的事）。
+    expect(find.text('反差大佬：我家小师妹超正经第七季'), findsOneWidget);
+    expect(find.text('8.2分'), findsOneWidget);
+  });
+
+  testWidgets('季角标与推荐理由、评分同时出现时互不遮挡', (tester) async {
+    await tester.pumpWidget(
+      wrap(
+        card(
+          title: '某剧第五季：副标题',
+          reason: '上新',
+          score: '8.2',
+          reasonOnCover: true,
+        ),
+      ),
+    );
+    final season = tester.getRect(find.text('第5季'));
+    final reason = tester.getRect(find.text('上新'));
+    final score = tester.getRect(find.text('8.2分'));
+    expect(season.top, greaterThan(reason.bottom));
+    expect(season.top, greaterThan(score.bottom));
+  });
+
+  testWidgets('标题没有季标记：不显示季角标', (tester) async {
+    await tester.pumpWidget(wrap(card(title: '逾矩', score: '8.2')));
+    expect(find.textContaining('季'), findsNothing);
   });
 }
