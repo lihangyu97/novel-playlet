@@ -34,10 +34,18 @@ import 'package:video_player/video_player.dart';
 void main() {
   /// 记录页面下发的 SystemChrome 调用（全屏方向切换/状态栏显隐）。
   final systemCalls = <MethodCall>[];
+  const systemStatusChannel = MethodChannel('novel_playlet/system_status');
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     systemCalls.clear();
+    // 横屏右上角状态：电量 86% + WiFi。真实读取链路见
+    // player_system_status_test.dart；这里只关心展示。
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(systemStatusChannel, (call) async {
+          if (call.method != 'read') return null;
+          return <String, Object?>{'batteryPercent': 86, 'networkType': 'wifi'};
+        });
     // 全屏会调 SystemChrome.setPreferredOrientations / setEnabledSystemUIMode；
     // widget test 下没有平台实现，统一在这里吞掉并记录，避免抛 MissingPlugin。
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -50,6 +58,8 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(systemStatusChannel, null);
   });
 
   testWidgets('进入播放页：控制条可见，倍速应用到 controller，改速实时下发', (tester) async {
@@ -717,6 +727,58 @@ void main() {
     await _disposePlayer(tester);
   });
 
+  testWidgets('横屏全屏：右上角常驻时间/电量/网络，超长标题只省略自己', (tester) async {
+    // 与现有全屏用例一致：竖屏 viewport 里点提示进全屏（测试环境不真旋转）。
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    const title = '这是一个非常非常非常长的短剧标题用来测试右上角状态不被挤压';
+    await _pumpPushedPlayer(
+      tester,
+      store: store,
+      factory: factory,
+      seriesTitle: title,
+    );
+
+    await tester.tap(find.text('全屏观看'));
+    await tester.pumpAndSettle();
+
+    final cluster = find.byKey(const ValueKey('player-system-status'));
+    expect(cluster, findsOneWidget);
+    expect(
+      find.descendant(of: cluster, matching: find.text('86%')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: cluster, matching: find.text('WiFi')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: cluster,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is Text &&
+              RegExp(r'^\d{2}:\d{2}$').hasMatch(widget.data ?? ''),
+        ),
+      ),
+      findsOneWidget,
+    );
+
+    // 标题在自己的 Expanded 里省略，右边缘不能越过状态胶囊。
+    final titleRect = tester.getRect(find.text(title));
+    final clusterRect = tester.getRect(cluster);
+    expect(
+      titleRect.right,
+      lessThanOrEqualTo(clusterRect.left),
+      reason: '超长剧名不能压到时间/电量/网络',
+    );
+
+    await _disposePlayer(tester);
+  });
+
   testWidgets('竖屏视频：不显示「全屏观看」提示', (tester) async {
     final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
     final factory = _FakeFactory(size: const Size(720, 1280));
@@ -1111,6 +1173,7 @@ Future<ProviderContainer> _pumpPushedPlayer(
   WidgetTester tester, {
   required _FakeSeriesStore store,
   required _ControllerFactory factory,
+  String seriesTitle = '测试短剧',
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -1125,9 +1188,9 @@ Future<ProviderContainer> _pumpPushedPlayer(
               child: TextButton(
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (_) => const VideoPlayerPage(
+                    builder: (_) => VideoPlayerPage(
                       args: VideoPlayArgs(
-                        seriesTitle: '测试短剧',
+                        seriesTitle: seriesTitle,
                         episodes: _episodes,
                         index: 0,
                         seriesId: 's1',

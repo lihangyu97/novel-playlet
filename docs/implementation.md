@@ -519,6 +519,12 @@ AVPlayer
   图标叠在亮画面上也读得清。`MaterialApp.builder` 用 `AppSystemUiRegion` 给没有自己声明的页面
   （我的 / 推荐 / 设置等）兜底主题明暗的状态栏图标（只改状态栏，不动系统导航栏），避免从播放页
   返回后白图标残留在浅色页面上。
+- 横屏全屏右上角系统状态：全屏时系统状态栏被隐藏，顶栏右侧常驻一枚「时间 / 电量% / 当前网络」
+  胶囊（`player-system-status`），不随控制条 3.5s 淡出。时间本地按分钟刷新；电量与网络走
+  `novel_playlet/system_status` 通道（iOS `UIDevice` + `NWPathMonitor` + CoreTelephony；Android
+  `BatteryManager` + `ConnectivityManager`，没有 `READ_PHONE_STATE` 时 4G/5G 退化为「蜂窝」）。
+  进入全屏每 5s 读一次、回前台补一次，通道失败只显示时间。顶栏标题在 `Expanded` 里省略，右侧预留
+  220pt，剧名再长也不会挤压状态胶囊。
 - 进度：**只记到集**，`play()` 成功后才写 `video_progress_v1` + `video_history_v1`（最近 3 条）。
 
 ### 5.6 离线整剧下载（第二条独立链路）
