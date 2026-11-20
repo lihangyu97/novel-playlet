@@ -3,6 +3,11 @@
          注意：Flutter 模板只在 debug/profile 清单里声明这条权限，release 包必须在这里显式声明，
          否则首次启动的设备注册会失败，App 会一直停在启动失败页。 -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- 播放页横屏状态（WiFi / 蜂窝）用 ConnectivityManager 判断当前网络；
+         普通权限，不弹授权框。电量和蜂窝制式分别走 BatteryManager /
+         TelephonyManager，不需要额外权限（没有 READ_PHONE_STATE 时 4G/5G
+         会退化成「蜂窝」）。 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
     <!-- targetSdk 36 默认开启 Android 16 预测性返回：返回手势会接管页面，
          跟着手指做系统缩放动画。这里显式关掉，统一交给 Flutter 自己的路由转场。 -->

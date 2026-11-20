@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -32,6 +33,10 @@ class NovelPlayletApp extends ConsumerWidget {
       darkTheme: AppTheme.dark(seed, fontWeight),
       themeMode: themeMode,
       scrollBehavior: const AppScrollBehavior(),
+      // 状态栏兜底：没有页面级声明的页面（我的 / 推荐 / 设置等）跟随主题
+      // 明暗。详见 [AppSystemUiRegion]。
+      builder: (context, child) =>
+          AppSystemUiRegion(child: child ?? const SizedBox.shrink()),
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
       localizationsDelegates: const [
@@ -40,6 +45,35 @@ class NovelPlayletApp extends ConsumerWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       home: const BootstrapGate(),
+    );
+  }
+}
+
+/// 没有页面级状态栏声明时的兜底：跟随主题明暗。
+///
+/// 框架只在图层树里找到 `AnnotatedRegion<SystemUiOverlayStyle>` 时才更新
+/// 状态栏样式，找不到就沿用上一页的。播放页把状态栏固定成白色后，若返回到
+/// 「我的」这类没有自己声明的页面，白色图标会留在浅色背景上直接看不见。
+/// 这层兜底挂在 Navigator 外面，详情页 / 阅读页 / 播放页自己的声明仍会
+/// 优先命中（图层树里离状态栏更近、更靠上）。只声明状态栏（透明底 + 图标
+/// 明暗），系统导航栏维持原样。
+class AppSystemUiRegion extends StatelessWidget {
+  const AppSystemUiRegion({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      // 只管状态栏，不碰系统导航栏：阅读页会自己设导航栏底色，Android 15+
+      // 的导航栏颜色也已由系统接管，这里不该覆盖。
+      value: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+      ),
+      child: child,
     );
   }
 }

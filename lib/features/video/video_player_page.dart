@@ -24,6 +24,7 @@ import 'network_health.dart';
 import 'offline_playback.dart';
 import 'playback_failure.dart';
 import 'playback_speed.dart';
+import 'player_system_status.dart';
 import 'video_detail_page.dart';
 import 'widgets/episode_picker_sheet.dart';
 import 'widgets/playback_speed_menu.dart';
@@ -119,6 +120,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   /// 是否处于横屏全屏。只有横屏内容才给入口：竖屏视频全屏只会更小。
   bool _fullscreen = false;
 
+  /// 横屏全屏顶栏右上角的系统状态（电量 + 网络）。时间本地算，不走通道。
+  PlayerSystemStatus _systemStatus = const PlayerSystemStatus();
+  DateTime _clockNow = DateTime.now();
+  Timer? _systemStatusTimer;
+  Timer? _clockTimer;
+
   /// 同页重载（重试 / 重新下载）时垫底的上一帧：暂停留着画面，等新 controller
   /// 真正出画面再释放，避免黑一下。翻页切集不用它（见 [_pending]）。
   VideoPlayerController? _retained;
@@ -169,6 +176,22 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   /// 横屏判定：接近 1 的方图不算，避免给错按钮。
   static const double _landscapeAspect = 1.05;
 
+  /// 播放页恒为黑底：状态栏图标固定白色，不能沿用上一页留下的样式。
+  ///
+  /// 框架只在当前帧图层树里找到 `AnnotatedRegion<SystemUiOverlayStyle>` 时才
+  /// 下发状态栏样式（`rendering/view.dart` 的 `_updateSystemChrome`）；找不到
+  /// 就沿用上一页的——详情页在浅色模式下声明的是深色图标，直接进播放页就成了
+  /// 「黑底黑字」，状态栏整条看不见。所以播放页要自己声明。
+  static const SystemUiOverlayStyle _overlayStyle = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    // Android 看 statusBarIconBrightness，iOS 看 statusBarBrightness（语义相
+    // 反：dark = 白色内容），两边都设成白色。
+    statusBarIconBrightness: Brightness.light,
+    statusBarBrightness: Brightness.dark,
+    systemNavigationBarColor: Colors.black,
+    systemNavigationBarIconBrightness: Brightness.light,
+  );
+
   List<Chapter> get _episodes => widget.args.episodes;
 
   Chapter? get _episode =>
@@ -193,6 +216,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     _hideTimer?.cancel();
     _spinnerTimer?.cancel();
     _prefetchTimer?.cancel();
+    _stopSystemStatusTicker();
     _cancelSpeedReapplyTimers();
     _cancelPending();
     _disposeController();
@@ -717,7 +741,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
 
   Future<void> _enterFullscreen() async {
     if (!_canFullscreen) return;
-    setState(() => _fullscreen = true);
+    setState(() {
+      _fullscreen = true;
+      _clockNow = DateTime.now();
+      _systemStatus = const PlayerSystemStatus();
+    });
     _hideTimer?.cancel();
     // 只在横屏视频、且用户主动点按钮时放开横屏；App 其余时间都是竖屏。
     await SystemChrome.setPreferredOrientations(const [
@@ -731,17 +759,61 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       overlays: const <SystemUiOverlay>[],
     );
     if (!mounted) return;
+    if (_fullscreen) _startSystemStatusTicker();
     setState(() => _controlsVisible = true);
     _scheduleHide();
   }
 
   Future<void> _exitFullscreen() async {
     if (!mounted) return;
-    setState(() => _fullscreen = false);
+    setState(() {
+      _fullscreen = false;
+      _systemStatus = const PlayerSystemStatus();
+    });
+    _stopSystemStatusTicker();
     await _restorePortrait();
     if (!mounted) return;
     setState(() => _controlsVisible = true);
     _scheduleHide();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // 回前台时网络/电量可能已经变了；正在横屏全屏才需要补一次。
+    if (state == AppLifecycleState.resumed && _fullscreen) {
+      unawaited(_refreshSystemStatus());
+    }
+  }
+
+  /// 横屏全屏期间每 5s 读一次电量/网络；时间按分钟变化才重建。
+  void _startSystemStatusTicker() {
+    _stopSystemStatusTicker();
+    unawaited(_refreshSystemStatus());
+    _systemStatusTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => unawaited(_refreshSystemStatus()),
+    );
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final now = DateTime.now();
+      if (now.hour == _clockNow.hour && now.minute == _clockNow.minute) return;
+      setState(() => _clockNow = now);
+    });
+  }
+
+  void _stopSystemStatusTicker() {
+    _systemStatusTimer?.cancel();
+    _systemStatusTimer = null;
+    _clockTimer?.cancel();
+    _clockTimer = null;
+  }
+
+  Future<void> _refreshSystemStatus() async {
+    if (!mounted || !_fullscreen) return;
+    final status = await ref.read(playerSystemStatusReaderProvider).read();
+    if (!mounted || !_fullscreen || status == _systemStatus) return;
+    setState(() => _systemStatus = status);
   }
 
   /// 恢复全局竖屏 + 正常状态栏。dispose 里也走这里。
@@ -1136,9 +1208,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
 
   @override
   Widget build(BuildContext context) {
-    final episodeTitle = _episode?.title.isNotEmpty == true
-        ? _episode!.title
-        : '第 ${_index + 1} 集';
     // 加载期间也保留顶栏（返回键/剧名），不要整屏只剩 spinner。
     final showChrome = _error == null;
     // 全屏提示只给横屏视频：视频已经铺满整屏时（全屏）不需要，竖屏视频全屏
@@ -1152,7 +1221,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       // 暂停时也要调：Dart 层只存值不下发，恢复播放时会按旧值 apply。
       unawaited(controller.setPlaybackSpeed(next));
     });
-    return PopScope(
+    final page = PopScope(
       // 全屏时系统返回手势/返回键先退全屏，再返回才是离开播放页。
       canPop: !_fullscreen,
       onPopInvokedWithResult: (didPop, _) {
@@ -1180,6 +1249,17 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                 // 只在竖屏避让安全区——全屏横屏时贴到屏幕最底边，否则 Home 指示条
                 // 那一条会在控件下面留出空隙。
                 Positioned.fill(child: _buildPager(showChrome: showChrome)),
+                // 状态栏底衬：控制条 3.5s 自动隐藏后，画面会直接铺到状态栏
+                // 后面；白色图标叠在亮画面上会看不清。这层渐变不跟控制条一起
+                // 淡出，常驻在状态栏高度上。全屏横屏没有状态栏，不画（否则
+                // 画面顶部会多一条黑带）。
+                if (!_fullscreen)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: IgnorePointer(child: _buildStatusBarScrim(context)),
+                  ),
                 if (showChrome)
                   Positioned(
                     top: 0,
@@ -1187,7 +1267,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                     right: 0,
                     child: SafeArea(
                       bottom: false,
-                      child: _chrome(_buildTopBar(episodeTitle)),
+                      child: _chrome(_buildTopBar()),
                     ),
                   ),
                 if (showChrome)
@@ -1216,6 +1296,34 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
               ],
             );
           },
+        ),
+      ),
+    );
+
+    // 状态栏样式由页面自己声明（见 [_overlayStyle]）；页面未声明时由
+    // MaterialApp.builder 的兜底样式接管，避免从这里返回后留下白图标。
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: _overlayStyle,
+      child: page,
+    );
+  }
+
+  /// 状态栏常驻底衬：只盖住状态栏高度，顶部深、向下透明。
+  ///
+  /// 高度用 `padding.top + 8`：多出来的 8 是渐变过渡区，避免渐变在图标下沿
+  /// 切出一条硬边。没有状态栏的窗口里也只是很浅的一条，不影响观感。
+  Widget _buildStatusBarScrim(BuildContext context) {
+    final topInset = MediaQuery.paddingOf(context).top;
+    return Container(
+      key: const ValueKey('video-status-bar-scrim'),
+      height: topInset + 8,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          // 35% 黑：白色图标在亮画面上也读得清，又不至于在画面顶部压出
+          // 一条明显黑带。
+          colors: [Color(0x59000000), Color(0x00000000)],
         ),
       ),
     );
@@ -1612,7 +1720,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     );
   }
 
-  Widget _buildTopBar(String episodeTitle) {
+  Widget _buildTopBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(4, 4, 12, 24),
       decoration: const BoxDecoration(
@@ -1629,33 +1737,103 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
             icon: const Icon(Icons.arrow_back_ios_new_rounded),
             color: Colors.white,
           ),
+          // 顶栏只留剧名：集号挪到底栏右侧、倍速左边。
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.args.seriesTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: context.appWeight(FontWeight.w600),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  episodeTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ],
+            child: Text(
+              widget.args.seriesTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: context.appWeight(FontWeight.w600),
+              ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// 横屏全屏底栏的系统状态：时间 / 电量（百分比）/ 当前网络，放在倍速左边。
+  ///
+  /// 时间本地算，电量与网络走 [PlayerSystemStatusReader]；任何一项读不到就
+  /// 不画那一项，只留时间。
+  Widget _buildSystemStatusCluster() {
+    final battery = _systemStatus.batteryPercent;
+    final network = _systemStatus.networkLabel;
+    final time = _formatClock(_clockNow);
+    // 14pt 常规字重：比 15pt 剧名小一号、比原来的 12pt 状态字大一点。
+    // 不再铺胶囊底，只靠柔和投影保证亮画面上读得清。
+    final style = TextStyle(
+      color: Colors.white,
+      fontSize: 14,
+      fontWeight: FontWeight.w400,
+      shadows: const [Shadow(color: Color(0x99000000), blurRadius: 6)],
+    );
+    return Semantics(
+      label: [
+        '时间 $time',
+        if (battery != null) '电量 $battery%',
+        if (network != null) '网络 $network',
+      ].join('，'),
+      excludeSemantics: true,
+      child: Row(
+        key: const ValueKey('player-system-status'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(time, style: style, textScaler: TextScaler.noScaling),
+          if (battery != null) ...[
+            const SizedBox(width: 8),
+            Text('$battery%', style: style, textScaler: TextScaler.noScaling),
+          ],
+          if (network != null) ...[
+            const SizedBox(width: 8),
+            Text(network, style: style, textScaler: TextScaler.noScaling),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _formatClock(DateTime now) =>
+      '${now.hour.toString().padLeft(2, '0')}:'
+      '${now.minute.toString().padLeft(2, '0')}';
+
+  /// 底栏左侧的选集入口：显示当前集号，点开选集弹层。
+  ///
+  /// 顶栏现在只留剧名，集号挪到这里——用文字而不是图标，一眼能看到
+  /// 当前看到第几集；点击行为与原来的选集图标一致。
+  Widget _buildEpisodeButton() {
+    return Tooltip(
+      message: '选集',
+      child: TextButton(
+        onPressed: () => unawaited(_openEpisodePicker()),
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          minimumSize: const Size(40, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: TextStyle(
+            fontSize: 13,
+            fontWeight: context.appWeight(FontWeight.w500),
+          ),
+        ),
+        child: Text(
+          _episodeChipLabel,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
+
+  /// 底栏只显示集号：分集标题本身就是「第 N 集」时直接复用，否则用序号
+  /// 兜底，避免很长的标题把左半区挤爆。
+  String get _episodeChipLabel {
+    final title = _episode?.title ?? '';
+    return _titleHasEpisodeNumber(title) ? title : '第 ${_index + 1} 集';
   }
 
   /// 控制条上的纯图标按钮：暗色渐变上用白色，激活态用主题色。
@@ -1780,11 +1958,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        _barIconButton(
-                          icon: Icons.video_library_outlined,
-                          tooltip: '选集',
-                          onTap: () => unawaited(_openEpisodePicker()),
-                        ),
+                        _buildEpisodeButton(),
                         if (widget.args.seriesId.isNotEmpty) ...[
                           _barIconButton(
                             icon: Icons.info_outline_rounded,
@@ -1813,10 +1987,23 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        if (quality.isNotEmpty) ...[
+                        // 全屏时系统状态栏隐藏，状态放倍速左边；清晰度档
+                        // 只是展示信息，全屏先让位给状态（竖屏照常显示）。
+                        if (!_fullscreen && quality.isNotEmpty) ...[
                           PlayerOptionChip(
                             label: quality,
                             tooltip: '当前清晰度（暂不支持切换）',
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        if (_fullscreen) ...[
+                          // 窄屏上整体等比缩放，宁可变小也不挤压倍速。
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerRight,
+                              child: _buildSystemStatusCluster(),
+                            ),
                           ),
                           const SizedBox(width: 8),
                         ],

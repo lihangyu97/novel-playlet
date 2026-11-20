@@ -34,10 +34,18 @@ import 'package:video_player/video_player.dart';
 void main() {
   /// 记录页面下发的 SystemChrome 调用（全屏方向切换/状态栏显隐）。
   final systemCalls = <MethodCall>[];
+  const systemStatusChannel = MethodChannel('novel_playlet/system_status');
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     systemCalls.clear();
+    // 横屏右上角状态：电量 86% + WiFi。真实读取链路见
+    // player_system_status_test.dart；这里只关心展示。
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(systemStatusChannel, (call) async {
+          if (call.method != 'read') return null;
+          return <String, Object?>{'batteryPercent': 86, 'networkType': 'wifi'};
+        });
     // 全屏会调 SystemChrome.setPreferredOrientations / setEnabledSystemUIMode；
     // widget test 下没有平台实现，统一在这里吞掉并记录，避免抛 MissingPlugin。
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -50,6 +58,8 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(systemStatusChannel, null);
   });
 
   testWidgets('进入播放页：控制条可见，倍速应用到 controller，改速实时下发', (tester) async {
@@ -95,6 +105,42 @@ void main() {
     await _disposePlayer(tester);
   });
 
+  testWidgets('状态栏：播放页自己声明白色图标，控制条隐藏后底衬仍在', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    // 播放页整页黑底：必须自己声明白色状态栏图标，不能沿用上一页（详情页在
+    // 浅色模式下是深色图标）留下的样式。
+    final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+      find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+    );
+    expect(region.value.statusBarIconBrightness, Brightness.light);
+    expect(region.value.statusBarBrightness, Brightness.dark);
+    expect(region.value.statusBarColor, Colors.transparent);
+    expect(
+      find.byKey(const ValueKey('video-status-bar-scrim')),
+      findsOneWidget,
+      reason: '竖屏播放要给状态栏垫一层常驻底衬',
+    );
+
+    // 控制条自动隐藏后底衬不能跟着淡出，否则白图标叠在亮画面上读不清。
+    final controller = factory.created.single;
+    controller.value = controller.value.copyWith(isPlaying: true);
+    await tester.pump(const Duration(milliseconds: 3700));
+    await tester.pump();
+    final opacities = tester
+        .widgetList<AnimatedOpacity>(find.byType(AnimatedOpacity))
+        .toList();
+    expect(opacities.every((widget) => widget.opacity == 0), isTrue);
+    expect(
+      find.byKey(const ValueKey('video-status-bar-scrim')),
+      findsOneWidget,
+    );
+
+    await _disposePlayer(tester);
+  });
+
   testWidgets('底栏：选集 / 详情 / 本集评论，收藏缓存移进详情弹层', (tester) async {
     final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
     final factory = _FakeFactory();
@@ -106,7 +152,7 @@ void main() {
       api: api,
     );
 
-    // 底部入口：选集右边是详情，收藏/下载/顶部详情按钮都撤掉了。
+    // 底部入口：选集（当前集号文字）/ 详情 / 本集评论在左半区；收藏/下载/顶部详情按钮都撤掉了。
     expect(find.byTooltip('选集'), findsOneWidget);
     expect(find.byTooltip('详情'), findsOneWidget);
     expect(find.byTooltip('本集评论'), findsOneWidget);
@@ -114,25 +160,16 @@ void main() {
     expect(find.byTooltip('收藏'), findsNothing);
     expect(find.byTooltip('缓存'), findsNothing);
 
-    // 操作行三段：三颗按钮在左半区等距铺开（不再黏成一坨贴左边缘），
-    // 暂停键严格居中，倍速 chip 贴右端。
-    final iconCenters = [
-      tester.getCenter(find.byTooltip('选集')),
-      tester.getCenter(find.byTooltip('详情')),
-      tester.getCenter(find.byTooltip('本集评论')),
-    ];
-    final pitch = iconCenters[1].dx - iconCenters[0].dx;
-    expect(
-      pitch,
-      closeTo(iconCenters[2].dx - iconCenters[1].dx, 1),
-      reason: '三颗按钮等距',
-    );
-    expect(pitch, greaterThan(40), reason: '相邻按钮之间留了空隙，不再首尾相接');
-    expect(
-      iconCenters[0].dx,
-      greaterThan(40),
-      reason: '第一颗不贴屏幕左边缘（原来是 0 内边距紧贴左边）',
-    );
+    // 选集入口是左半区第一颗，显示当前集号；详情、本集评论依次在右。
+    expect(find.byIcon(Icons.video_library_outlined), findsNothing);
+    expect(find.text('第 1 集'), findsOneWidget, reason: '选集入口显示当前集号');
+
+    final episodeCenter = tester.getCenter(find.byTooltip('选集'));
+    final detailCenter = tester.getCenter(find.byTooltip('详情'));
+    final commentsCenter = tester.getCenter(find.byTooltip('本集评论'));
+    expect(episodeCenter.dx, greaterThan(40), reason: '选集入口不贴屏幕左边缘');
+    expect(detailCenter.dx, greaterThan(episodeCenter.dx));
+    expect(commentsCenter.dx, greaterThan(detailCenter.dx));
     final screenWidth =
         tester.view.physicalSize.width / tester.view.devicePixelRatio;
     final pauseCenter = tester.getCenter(find.byIcon(Icons.pause_rounded));
@@ -641,6 +678,8 @@ void main() {
 
     // 进全屏：提示隐藏，同时请求横屏。
     expect(find.text('全屏观看'), findsNothing);
+    // 全屏横屏没有状态栏，也不需要状态栏底衬（否则画面顶部多一条黑带）。
+    expect(find.byKey(const ValueKey('video-status-bar-scrim')), findsNothing);
     expect(
       systemCalls.any(
         (call) =>
@@ -658,6 +697,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(VideoPlayerPage), findsOneWidget, reason: '全屏返回只退全屏');
     expect(find.text('全屏观看'), findsOneWidget, reason: '退出全屏后提示重新出现');
+    expect(
+      find.byKey(const ValueKey('video-status-bar-scrim')),
+      findsOneWidget,
+      reason: '退出全屏恢复竖屏后状态栏底衬要回来',
+    );
     expect(find.text('打开播放页'), findsNothing, reason: '播放页不能被 pop 掉');
     expect(
       systemCalls.any(
@@ -670,6 +714,61 @@ void main() {
       isTrue,
       reason: '退出全屏应恢复竖屏',
     );
+
+    await _disposePlayer(tester);
+  });
+
+  testWidgets('横屏全屏：系统状态在倍速左边，长标题只省略自己', (tester) async {
+    // 与现有全屏用例一致：竖屏 viewport 里点提示进全屏（测试环境不真旋转）。
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    const title = '这是一个非常非常非常长的短剧标题用来测试右上角状态不被挤压';
+    await _pumpPushedPlayer(
+      tester,
+      store: store,
+      factory: factory,
+      seriesTitle: title,
+    );
+
+    await tester.tap(find.text('全屏观看'));
+    await tester.pumpAndSettle();
+
+    final cluster = find.byKey(const ValueKey('player-system-status'));
+    expect(cluster, findsOneWidget);
+    expect(
+      find.descendant(of: cluster, matching: find.text('86%')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: cluster, matching: find.text('WiFi')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: cluster,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is Text &&
+              RegExp(r'^\d{2}:\d{2}$').hasMatch(widget.data ?? ''),
+        ),
+      ),
+      findsOneWidget,
+    );
+
+    // 系统状态在底栏、倍速左边。
+    final speed = find.byTooltip('播放速度');
+    expect(
+      tester.getCenter(cluster).dx,
+      lessThan(tester.getCenter(speed).dx),
+      reason: '时间/电量/网络应该在倍速左边',
+    );
+
+    // 顶栏长剧名仍然只在 Expanded 里省略（不会把页面撑破）。
+    expect(find.text(title), findsOneWidget);
+    expect(tester.takeException(), isNull);
 
     await _disposePlayer(tester);
   });
@@ -1068,6 +1167,7 @@ Future<ProviderContainer> _pumpPushedPlayer(
   WidgetTester tester, {
   required _FakeSeriesStore store,
   required _ControllerFactory factory,
+  String seriesTitle = '测试短剧',
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -1082,9 +1182,9 @@ Future<ProviderContainer> _pumpPushedPlayer(
               child: TextButton(
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (_) => const VideoPlayerPage(
+                    builder: (_) => VideoPlayerPage(
                       args: VideoPlayArgs(
-                        seriesTitle: '测试短剧',
+                        seriesTitle: seriesTitle,
                         episodes: _episodes,
                         index: 0,
                         seriesId: 's1',
