@@ -164,11 +164,7 @@ void main() {
   testWidgets('我的页-收藏里的短剧把标题里的季标在封面左下角', (tester) async {
     final store = ReadingStore();
     await store.addVideoToShelf(
-      const VideoSeries(
-        id: 'p7',
-        title: '反差大佬：我家小师妹超正经第七季',
-        episodeCount: 177,
-      ),
+      const VideoSeries(id: 'p7', title: '反差大佬：我家小师妹超正经第七季', episodeCount: 177),
     );
     // 小说标题里就算出现「第 N 季」字样也不加季角标：季角标只属于短剧。
     await store.addToShelf(

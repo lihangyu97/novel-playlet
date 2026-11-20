@@ -5,6 +5,7 @@ import 'package:novel_playlet/app/widgets/novel_card.dart';
 import 'package:novel_playlet/app/widgets/season_badge.dart';
 import 'package:novel_playlet/app/widgets/states.dart';
 import 'package:novel_playlet/features/detail/detail_page.dart';
+import 'package:novel_playlet/features/search/search_all_page.dart';
 import 'package:novel_playlet/features/search/search_page.dart';
 import 'package:novel_playlet/features/video/video_detail_page.dart';
 import 'package:novel_playlet/features/video/widgets/video_card.dart';
@@ -268,23 +269,78 @@ void main() {
     );
   });
 
-  testWidgets('搜索页-一屏露出约 3.5 张卡片', (tester) async {
+  testWidgets('搜索页-一屏露出约 2.5 张卡片（比首页榜单预览大一号）', (tester) async {
     await pumpPreview(tester, const SearchPage());
     await _submit(tester, '剑来');
 
-    // 卡宽 = (屏宽 - 两侧留白 - 3 个卡间距) / 3.5。
+    // 卡宽 = (屏宽 - 两侧留白 - 2 个卡间距) / 2.5。
     final screenWidth = _screenWidth(tester);
-    final expected = CompactCardRow.cardWidthFor(screenWidth);
-    expect(expected, closeTo(100, 0.01));
+    final expected = CompactCardRow.cardWidthFor(
+      screenWidth,
+      visibleCards: CompactCardRow.searchVisibleCards,
+    );
+    expect(expected, closeTo(143.2, 0.1));
     final card = tester.getSize(find.byType(NovelGridCard).first);
     expect(card.width, closeTo(expected, 0.01));
 
-    // 第 4 张卡右边缘已经超出屏幕：一屏只完整露出 3 张 + 半张。
-    final fourth = find.byType(NovelGridCard).at(3);
-    final fourthLeft =
-        CompactCardRow.rowPadding + 3 * (expected + CompactCardRow.cardGap);
-    expect(tester.getTopLeft(fourth).dx, closeTo(fourthLeft, 0.01));
-    expect(tester.getTopLeft(fourth).dx + expected, greaterThan(screenWidth));
+    // 第 3 张卡右边缘已经超出屏幕：一屏只完整露出 2 张 + 半张。
+    final third = find.byType(NovelGridCard).at(2);
+    final thirdLeft =
+        CompactCardRow.rowPadding + 2 * (expected + CompactCardRow.cardGap);
+    expect(tester.getTopLeft(third).dx, closeTo(thirdLeft, 0.01));
+    expect(tester.getTopLeft(third).dx + expected, greaterThan(screenWidth));
+  });
+
+  testWidgets('搜索页-有下一页时显示「查看全部」，点进该分类的完整结果页', (tester) async {
+    // 每页 2 条：完整结果页首屏撑不满一屏，FeedView 会自动补第 2 页。
+    final fake = FakePreviewTransport()..searchItemCount = 2;
+    await pumpPreview(tester, const SearchPage(), transport: fake);
+    await _submit(tester, '剑来');
+
+    expect(find.text('查看全部'), findsNWidgets(2), reason: '两行都还有下一页');
+    // 入口不能贴屏幕边：图标右侧至少留 4pt。
+    final chevron = tester.getRect(
+      find.byIcon(Icons.chevron_right_rounded).first,
+    );
+    expect(chevron.right, lessThanOrEqualTo(_screenWidth(tester) - 4));
+
+    // 点短剧行的「查看全部」：进完整结果页，首屏之后自动补第 2 页。
+    await tester.tap(find.text('查看全部').last);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.byType(SearchAllPage), findsOneWidget);
+    expect(
+      fake.calls.any(
+        (call) => call.contains('tab_type=11') && call.contains('offset=10'),
+      ),
+      isTrue,
+      reason: '完整结果页要继续用 offset=10 翻页',
+    );
+    expect(find.textContaining('第2页'), findsWidgets, reason: '触底后追加下一页');
+
+    await expectLater(
+      find.byType(SearchAllPage),
+      matchesGoldenFile('../goldens/search_all.png'),
+    );
+  });
+
+  testWidgets('搜索页-完整结果页翻页时按 id 去重（上游会跨页重复）', (tester) async {
+    final fake = FakePreviewTransport()
+      ..searchItemCount = 2
+      ..searchDuplicateAcrossPages = true;
+    await pumpPreview(tester, const SearchPage(), transport: fake);
+    await _submit(tester, '剑来');
+    await tester.tap(find.text('查看全部').last);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(find.textContaining('第2页'), findsWidgets, reason: '第 2 页确实加载了');
+    expect(find.text('重复条目'), findsNothing, reason: '与第 1 页重复的条目必须被丢掉');
+  });
+
+  testWidgets('搜索页-首屏就是全部结果时不给「查看全部」假入口', (tester) async {
+    final fake = FakePreviewTransport()..searchNoMore = true;
+    await pumpPreview(tester, const SearchPage(), transport: fake);
+    await _submit(tester, '剑来');
+    expect(find.text('查看全部'), findsNothing);
   });
 
   testWidgets('搜索页-卡片行可以左右滑', (tester) async {

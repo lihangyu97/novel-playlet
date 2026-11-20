@@ -96,6 +96,17 @@ class FakePreviewTransport extends BackendTransport {
   /// 搜索结果条数（默认 6；调大用于验证「搜索态滚动」等场景）。
   int searchItemCount = 6;
 
+  /// 第 2 页起是否混入一条和第 1 页重复的短剧（真实上游会跨页重复）。
+  ///
+  /// 用来验证「查看全部」页按 id 去重：重复条目的标题是「重复条目」，去重
+  /// 生效时它不会出现在列表里。
+  bool searchDuplicateAcrossPages = false;
+
+  /// 搜索结果是否已经没有下一页（默认有：`next_offset` 前进 10）。
+  ///
+  /// 用来验证搜索页只在还有下一页时才给「查看全部」入口。
+  bool searchNoMore = false;
+
   /// 短剧搜索结果的标题是否带上「第 N 季」后缀（默认关，保持既有 golden）。
   ///
   /// 真实上游把季只写在标题里（`…第七季`），季角标就是从标题解析的；打开后
@@ -338,63 +349,83 @@ class FakePreviewTransport extends BackendTransport {
       // 关键词写进卡片标题：搜索页的「换词后旧结果不能回来」这类用例要能从
       // 文案上区分是哪个关键词的结果。
       final keyword = params['query'] ?? '';
+      // 搜索翻页：offset=0 保持既有数据不变，offset>0 换一批 id 并在标题里
+      // 标出页号，用来验证「查看全部」页的触底翻页与去重。
+      final offset = int.tryParse(params['offset'] ?? '') ?? 0;
+      String pagePrefix() => offset == 0 ? '' : '第${offset ~/ 10 + 1}页 ';
+      final nextOffset = searchNoMore || offset >= 20 ? null : offset + 10;
       // 漫剧的搜索与翻页兜底：上游没有漫剧搜索 tab，卡片混在短剧搜索 tab
       // 里，靠 genre=205 / 「漫剧」标签区分（见 lib/features/recommend/content_source.dart 的 ManjuSource）。
       if (params['query'] == '漫剧') {
-        return _videoSearchPayload(11, [
-          for (var i = 1; i <= searchItemCount; i++)
-            {
-              'pseries_id': 'p$i',
-              'series_name': _animeTitles[(i - 1) % _animeTitles.length],
-              'series_intro': '这是第 $i 条漫剧搜索结果的简介，用来验证翻页兜底与横向列表排版。',
-              'episode_cnt': '${12 + i * 2}',
-              'series_cover': '',
-              'genre': 205,
-            },
-        ]);
+        return _videoSearchPayload(
+          11,
+          cards: [
+            for (var i = 1; i <= searchItemCount; i++)
+              {
+                'pseries_id': 'p$i',
+                'series_name': _animeTitles[(i - 1) % _animeTitles.length],
+                'series_intro': '这是第 $i 条漫剧搜索结果的简介，用来验证翻页兜底与横向列表排版。',
+                'episode_cnt': '${12 + i * 2}',
+                'series_cover': '',
+                'genre': 205,
+              },
+          ],
+        );
       }
       // 搜索接口的 tab_type 与首页流不同：3 = 书籍、11 = 短剧。
       switch (params['tab_type']) {
         case '11':
           // 短剧搜索 tab 里混着漫剧卡片（真实上游就是这样，漫剧搜索靠它过滤）；
           // 这里按 1:1 混排，让搜索页的短剧行同时有短剧和漫剧卡片（漫剧不再单列一行）。
-          return _videoSearchPayload(11, [
-            for (var i = 1; i <= searchItemCount; i++)
-              {
-                'series_id_str': 'vs$i',
-                'series_title':
-                    '搜索结果 $keyword ${_dramaTitles[(i - 1) % _dramaTitles.length]}'
-                    '${dramaSeasonSuffix ? '第$i季' : ''}',
-                'series_intro': '这是第 $i 条短剧搜索结果的简介，用来验证横向卡片排版。',
-                'episode_cnt': '${40 + i}',
-                'series_cover': '',
-                'score': '8.0',
-                'color_dominate': _coverColors[(i - 1) % _coverColors.length],
-                // i=1 带「上新」这类推荐理由：搜索页整体隐藏该字段（与漫剧卡的
-                // 「漫剧」理由同源），只保留集数+热度。
-                if (i == 1)
-                  'recommend_reason_list': '{"tag_info":{"text":"上新"}}',
-                'rec_text': '${i * 10}万热度',
-                'show_rec_text': true,
-              },
-            for (var i = 1; i <= searchItemCount; i++)
-              {
-                'pseries_id': 'ps$i',
-                'series_name':
-                    '搜索结果 $keyword ${_animeTitles[(i - 1) % _animeTitles.length]}',
-                'series_intro': '这是第 $i 条漫剧搜索结果的简介。',
-                'episode_cnt': '${12 + i * 2}',
-                'series_cover': '',
-                'genre': 205,
-                'score': '8.0',
-                'color_dominate': _coverColors[(i + 2) % _coverColors.length],
-                // 上游把分类名塞进推荐理由：搜索页和「漫剧」行标题重复，应隐藏；
-                // 热度（rec_text）要保留。
-                'recommend_reason_list': '{"tag_info":{"text":"漫剧"}}',
-                'rec_text': '4105万热度',
-                'show_rec_text': true,
-              },
-          ]);
+          return _videoSearchPayload(
+            11,
+            nextOffset: nextOffset,
+            cards: [
+              if (offset > 0 && searchDuplicateAcrossPages)
+                {
+                  'series_id_str': 'vs1',
+                  'series_title': '重复条目',
+                  'episode_cnt': '40',
+                  'series_cover': '',
+                  'score': '8.0',
+                },
+              for (var i = 1; i <= searchItemCount; i++)
+                {
+                  'series_id_str': 'vs${offset + i}',
+                  'series_title':
+                      '${pagePrefix()}搜索结果 $keyword ${_dramaTitles[(i - 1) % _dramaTitles.length]}'
+                      '${dramaSeasonSuffix ? '第$i季' : ''}',
+                  'series_intro': '这是第 $i 条短剧搜索结果的简介，用来验证横向卡片排版。',
+                  'episode_cnt': '${40 + i}',
+                  'series_cover': '',
+                  'score': '8.0',
+                  'color_dominate': _coverColors[(i - 1) % _coverColors.length],
+                  // i=1 带「上新」这类推荐理由：搜索页整体隐藏该字段（与漫剧卡的
+                  // 「漫剧」理由同源），只保留集数+热度。
+                  if (i == 1)
+                    'recommend_reason_list': '{"tag_info":{"text":"上新"}}',
+                  'rec_text': '${i * 10}万热度',
+                  'show_rec_text': true,
+                },
+              for (var i = 1; i <= searchItemCount; i++)
+                {
+                  'pseries_id': 'ps${offset + i}',
+                  'series_name':
+                      '${pagePrefix()}搜索结果 $keyword ${_animeTitles[(i - 1) % _animeTitles.length]}',
+                  'series_intro': '这是第 $i 条漫剧搜索结果的简介。',
+                  'episode_cnt': '${12 + i * 2}',
+                  'series_cover': '',
+                  'genre': 205,
+                  'score': '8.0',
+                  'color_dominate': _coverColors[(i + 2) % _coverColors.length],
+                  // 上游把分类名塞进推荐理由：搜索页和「漫剧」行标题重复，应隐藏；
+                  // 热度（rec_text）要保留。
+                  'recommend_reason_list': '{"tag_info":{"text":"漫剧"}}',
+                  'rec_text': '4105万热度',
+                  'show_rec_text': true,
+                },
+            ],
+          );
         default:
           return {
             'code': 0,
@@ -403,14 +434,14 @@ class FakePreviewTransport extends BackendTransport {
                 {
                   'tab_type': 3,
                   'title': '书籍',
-                  'next_offset': 10,
+                  'next_offset': nextOffset,
                   'data': [
                     for (var i = 1; i <= searchItemCount; i++)
                       {
                         'book_data': {
-                          'book_id': 's$i',
+                          'book_id': 's${offset + i}',
                           'book_name':
-                              '搜索结果 $keyword ${titles[(i - 1) % titles.length]}',
+                              '${pagePrefix()}搜索结果 $keyword ${titles[(i - 1) % titles.length]}',
                           'author': '作者$i',
                           'abstract': '这是第 $i 条搜索结果的简介，用来验证两行省略与排版。',
                           'thumb_url': '',
@@ -661,16 +692,17 @@ class FakePreviewTransport extends BackendTransport {
   ];
 
   Map<String, dynamic> _videoSearchPayload(
-    int tabType,
-    List<Map<String, dynamic>> cards,
-  ) => {
+    int tabType, {
+    required List<Map<String, dynamic>> cards,
+    int? nextOffset = 10,
+  }) => {
     'code': 0,
     'data': {
       'search_tabs': [
         {
           'tab_type': tabType,
           'title': tabType == 11 ? '短剧' : '漫画',
-          'next_offset': 10,
+          'next_offset': nextOffset,
           'data': [
             for (final card in cards) {'video_data': card},
           ],
@@ -808,6 +840,13 @@ ThemeData previewTheme(
     textTheme: base.textTheme.apply(fontFamily: previewFontFamily),
     primaryTextTheme: base.primaryTextTheme.apply(
       fontFamily: previewFontFamily,
+    ),
+    // AppBar 的标题样式在 AppTheme 里就用当时的 textTheme.titleLarge 固化了
+    // （copyWith 不会回填字体），不单独换字体的话 golden 里标题全是豆腐块。
+    appBarTheme: base.appBarTheme.copyWith(
+      titleTextStyle: base.appBarTheme.titleTextStyle?.copyWith(
+        fontFamily: previewFontFamily,
+      ),
     ),
   );
 }

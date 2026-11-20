@@ -10,9 +10,7 @@ import '../../app/router.dart';
 import '../../app/widgets/app_pill.dart';
 import '../../app/widgets/app_section_header.dart';
 import '../../app/widgets/compact_card_row.dart';
-import '../../app/widgets/cover_hero.dart';
 import '../../app/widgets/inline_error_row.dart';
-import '../../app/widgets/novel_card.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../app/widgets/states.dart';
 import '../../app/widgets/top_glow.dart';
@@ -21,10 +19,10 @@ import '../feed/feed_search_field.dart';
 import '../feed/feed_state.dart';
 import '../recommend/recommend_category.dart';
 import '../recommend/recommend_item.dart';
-import '../video/widgets/video_card.dart';
 import 'search_cue_hint.dart';
 import 'search_history.dart';
 import 'search_providers.dart';
+import 'search_result_card.dart';
 
 /// 独立搜索页：一次提交同时搜小说 / 短剧，从上到下各一行横向卡片。
 ///
@@ -526,7 +524,7 @@ class _SearchResults extends StatelessWidget {
   }
 }
 
-/// 单个分类的一行：分类标题 + 横向卡片列表（或加载/失败/空态）。
+/// 单个分类的一行：分类标题（右侧「查看全部」）+ 横向卡片列表（或加载/失败/空态）。
 class _SearchSection extends ConsumerWidget {
   const _SearchSection({required this.category, required this.query});
 
@@ -537,7 +535,10 @@ class _SearchSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final request = SearchRequest(category: category, query: query);
     final async = ref.watch(searchResultsProvider(request));
-    final items = async.value?.items ?? const <RecommendItem>[];
+    final page = async.value;
+    final items = page?.items ?? const <RecommendItem>[];
+    // 这一行只铺首屏一页；上游还有下一页时给「查看全部」进竖向结果页翻完。
+    final hasMore = page?.nextOffset != null;
     // 封面原生比例：小说 3:4，短剧/漫剧 7:10（骨架卡和真卡同一口径）。
     final coverAspect = category == RecommendCategory.novel
         ? kNovelCoverAspect
@@ -545,18 +546,31 @@ class _SearchSection extends ConsumerWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = CompactCardRow.cardWidthFor(constraints.maxWidth);
+        // 搜索结果行放大到 2.5 张卡：卡片要同时放季角标、评分、集数与热度。
+        final width = CompactCardRow.cardWidthFor(
+          constraints.maxWidth,
+          visibleCards: CompactCardRow.searchVisibleCards,
+        );
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             AppSectionHeader(
               title: category.label,
+              // 右侧留给「查看全部」按钮自己的内边距：标题与卡片左边缘对齐，
+              // 按钮文字比卡片右边缘再收 8pt，不和屏幕边贴住。
               padding: const EdgeInsets.fromLTRB(
                 CompactCardRow.rowPadding,
                 16,
-                CompactCardRow.rowPadding,
+                CompactCardRow.rowPadding - 8,
                 8,
               ),
+              trailing: hasMore
+                  ? _ShowAllButton(
+                      onTap: () => context.pushAppRoute(
+                        SearchAllRoute(category: category, query: query),
+                      ),
+                    )
+                  : null,
             ),
             if (items.isNotEmpty)
               _CardRow(category: category, items: items, width: width)
@@ -590,6 +604,45 @@ class _SearchSection extends ConsumerWidget {
   }
 }
 
+/// 分类行标题右侧的「查看全部」：只有当行内还有下一页时才出现。
+///
+/// 不用 `hint` 文案而用可点按钮：这是搜索页唯一的翻页入口，用户要能一眼看出
+/// 「点进去还有」。样式与详情页目录的「查看全部」保持一致（bodySmall + 主色 +
+/// 紧凑点击区），右侧留白比标题少 8，按钮自带的 8pt 内边距正好补齐。
+class _ShowAllButton extends StatelessWidget {
+  const _ShowAllButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        minimumSize: Size.zero,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        foregroundColor: scheme.primary,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '查看全部',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall,
+          ),
+          const Icon(Icons.chevron_right_rounded, size: 16),
+        ],
+      ),
+    );
+  }
+}
+
 /// 一行的横向卡片列表：左右可滑，行高由最高的那张卡撑开（不同分类封面比例
 /// 不同，小说行的卡比短剧行矮一点，属预期）。
 class _CardRow extends StatelessWidget {
@@ -603,86 +656,25 @@ class _CardRow extends StatelessWidget {
   final List<RecommendItem> items;
   final double width;
 
-  @override
-  Widget build(BuildContext context) {
-    return CompactCardRow(
-      children: [
-        for (final item in items)
-          _CompactCard(category: category, item: item, width: width),
-      ],
-    );
-  }
-}
-
-/// 搜索结果卡：封面 + 标题 + 元信息，复用首页同款卡片。
-class _CompactCard extends StatelessWidget {
-  const _CompactCard({
-    required this.category,
-    required this.item,
-    required this.width,
-  });
-
-  final RecommendCategory category;
-  final RecommendItem item;
-  final double width;
-
   /// Hero tag 的来源维度：同一本书可能同时出现在搜索页与推荐页，tag 必须带
   /// 页面与分类，否则两个路由里的 Hero 会撞 tag。
   String get _heroSource => 'search-${category.name}';
 
-  void _open(BuildContext context) {
-    switch (item) {
-      case NovelRecommendItem(:final novel):
-        context.pushAppRoute(
-          DetailRoute(
-            bookId: novel.id,
-            preview: novel,
-            heroTag: CoverHeroTag.novel(_heroSource, novel.id),
-          ),
-        );
-      case VideoRecommendItem(:final video):
-        context.pushAppRoute(
-          VideoDetailRoute(
-            seriesId: video.id,
-            preview: video,
-            heroTag: CoverHeroTag.video(_heroSource, video.id),
-          ),
-        );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    void onTap() => _open(context);
-    // 搜索结果里作者 / 集数固定一行，评分走封面右上角角标；理由/热度这类
-    // 推荐字段搜索一般没有，有就按首页三列规则各占一行。
-    final card = switch (item) {
-      NovelRecommendItem(:final novel) => NovelGridCard(
-        key: ValueKey('search-novel-${novel.id}'),
-        item: novel,
-        width: width,
-        onTap: onTap,
-        heroTag: CoverHeroTag.novel(_heroSource, novel.id),
-        showRecommendMeta: true,
-        coverAspect: kNovelCoverAspect,
-        surface: true,
-      ),
-      VideoRecommendItem(:final video) => VideoCard(
-        key: ValueKey('search-video-${video.id}'),
-        item: video,
-        width: width,
-        onTap: onTap,
-        heroTag: CoverHeroTag.video(_heroSource, video.id),
-        showRecommendMeta: true,
-        // 搜索卡不展示推荐理由：这个字段（`recommend_reason_list` 第一条）在
-        // 搜索响应里不是分类名（「漫剧」）就是「上新/热门」这类角标，和卡片上
-        // 的集数/热度重复且挤占窄卡；只留「全 N 集 + 热度」。
-        showReason: false,
-        coverAspect: kVideoCoverAspect,
-        surface: true,
-      ),
-    };
-    return card;
+    return CompactCardRow(
+      visibleCards: CompactCardRow.searchVisibleCards,
+      children: [
+        for (final item in items)
+          SearchResultCard(
+            item: item,
+            width: width,
+            heroSource: _heroSource,
+            onTap: () =>
+                openSearchResult(context, item, heroSource: _heroSource),
+          ),
+      ],
+    );
   }
 }
 
