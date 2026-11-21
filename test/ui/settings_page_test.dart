@@ -190,6 +190,46 @@ void main() {
     }
   });
 
+  testWidgets('设置页-底部安全区不裁切最后一行', (tester) async {
+    // 真机反馈：滚到「诊断」时「运行日志」正好被底部安全区切掉一半，看起来
+    // 像有个固定黑条盖住设置项。修法是让 ListView 铺到屏幕底，把安全区高度
+    // 加进列表自己的 bottom padding；内容在滚动中可以经过 Home 指示条，
+    // 但滚完后最后一行整体在安全区上方。
+    const bottomInset = 34.0;
+    tester.view.padding = const FakeViewPadding(bottom: bottomInset);
+    addTearDown(tester.view.resetPadding);
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
+
+    final list = tester.widget<ListView>(find.byType(ListView));
+    final padding = list.padding as EdgeInsets;
+    expect(
+      padding.bottom,
+      28 + bottomInset,
+      reason: '安全区高度要由列表 padding 承担，而不是把列表裁在安全区上方',
+    );
+    expect(
+      tester.getRect(find.byType(ListView)).bottom,
+      tester.view.physicalSize.height,
+      reason: '列表要铺到屏幕底边，不能停在底部安全区上沿',
+    );
+
+    final scrollable = tester.state<ScrollableState>(
+      find.byType(Scrollable).first,
+    );
+    scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    final runLog = tester.getRect(find.text('运行日志'));
+    expect(
+      runLog.bottom,
+      lessThanOrEqualTo(tester.view.physicalSize.height - bottomInset),
+      reason: '滚到底后「运行日志」整行要在 Home 指示条上方',
+    );
+  });
+
   testWidgets('设置页-只有三个预设色 + 一个自定义入口', (tester) async {
     await pumpPreview(
       tester,

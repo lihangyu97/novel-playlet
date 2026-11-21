@@ -30,13 +30,20 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 底部安全区当作列表自己的留白，而不是把 ListView 裁在安全区上方：
+    // 后者滚到一半时，最后一行会正好被那条黑色安全区「切一半」，看起来像
+    // 有个固定底栏盖住设置项（真机反馈「运行日志被盖住一半」）。
+    // 这也是推荐 / 搜索 / 我的页的统一做法：内容铺到屏幕底，末行靠 padding
+    // 躲开 Home 指示条。
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: SafeArea(
         top: false,
+        bottom: false,
         child: ListView(
           physics: const ClampingScrollPhysics(),
-          padding: const EdgeInsets.only(bottom: 28),
+          padding: EdgeInsets.only(bottom: 28 + bottomInset),
           children: [
             const AppSectionHeader(
               title: '主题',
