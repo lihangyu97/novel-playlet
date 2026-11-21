@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.os.Build
 import android.telephony.TelephonyManager
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -35,6 +36,32 @@ class MainActivity : FlutterActivity() {
                 )
             }
         registerSystemStatusChannel(flutterEngine)
+        registerScreenAwakeChannel(flutterEngine)
+    }
+
+    // 播放页保持屏幕常亮：只加窗口 flag，不改亮度。
+    // 只在实际播放时打开；暂停 / 退后台 / 离开播放页由 Dart 侧释放。
+    private fun registerScreenAwakeChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "novel_playlet/screen_awake")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "set") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val enabled = call.arguments as? Boolean
+                if (enabled == null) {
+                    result.error("bad_args", "set 需要 bool 参数", null)
+                    return@setMethodCallHandler
+                }
+                runOnUiThread {
+                    if (enabled) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                }
+                result.success(null)
+            }
     }
 
     // 播放页横屏全屏右上角的状态通道。字段与

@@ -35,10 +35,13 @@ void main() {
   /// 记录页面下发的 SystemChrome 调用（全屏方向切换/状态栏显隐）。
   final systemCalls = <MethodCall>[];
   const systemStatusChannel = MethodChannel('novel_playlet/system_status');
+  const screenAwakeChannel = MethodChannel('novel_playlet/screen_awake');
+  final screenAwakeCalls = <bool>[];
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     systemCalls.clear();
+    screenAwakeCalls.clear();
     // 横屏右上角状态：电量 86% + WiFi。真实读取链路见
     // player_system_status_test.dart；这里只关心展示。
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -53,6 +56,14 @@ void main() {
           systemCalls.add(call);
           return null;
         });
+    // 播放页保持屏幕常亮：记录 true/false，验证播放/暂停/退后台的同步。
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(screenAwakeChannel, (call) async {
+          if (call.method == 'set') {
+            screenAwakeCalls.add(call.arguments as bool);
+          }
+          return null;
+        });
   });
 
   tearDown(() {
@@ -60,6 +71,8 @@ void main() {
         .setMockMethodCallHandler(SystemChannels.platform, null);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(systemStatusChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(screenAwakeChannel, null);
   });
 
   testWidgets('进入播放页：控制条可见，倍速应用到 controller，改速实时下发', (tester) async {
@@ -103,6 +116,47 @@ void main() {
     expect(find.byKey(speedOptionKey(1.5)), findsNothing, reason: '选完即关');
 
     await _disposePlayer(tester);
+  });
+
+  testWidgets('播放页：播放中保持屏幕常亮，暂停/退后台/退出释放', (tester) async {
+    final store = _FakeSeriesStore(cachedFile: File('/tmp/episode.mp4'));
+    final factory = _FakeFactory();
+    await _pumpPlayer(tester, store: store, factory: factory);
+
+    final controller = factory.created.single;
+    expect(screenAwakeCalls.last, isTrue, reason: '起播后应申请屏幕常亮');
+
+    await controller.pause();
+    await tester.pump();
+    expect(screenAwakeCalls.last, isFalse, reason: '暂停后释放');
+
+    await controller.play();
+    await tester.pump();
+    expect(screenAwakeCalls.last, isTrue, reason: '继续播放后重新申请');
+
+    await _dispatchLifecycle(tester, 'AppLifecycleState.paused');
+    await tester.pump();
+    expect(screenAwakeCalls.last, isFalse, reason: '退后台释放，避免后台一直亮屏');
+
+    // 后台里 controller 可能还在报 isPlaying（平台不一定立刻暂停），
+    // position tick 不能把常亮又申请回来。
+    final callsInBackground = screenAwakeCalls.length;
+    controller.value = controller.value.copyWith(
+      position: const Duration(seconds: 1),
+    );
+    await tester.pump();
+    expect(
+      screenAwakeCalls.length,
+      callsInBackground,
+      reason: '后台 tick 不能重新申请常亮',
+    );
+
+    await _dispatchLifecycle(tester, 'AppLifecycleState.resumed');
+    await tester.pump();
+    expect(screenAwakeCalls.last, isTrue, reason: '回前台仍在播，要恢复常亮');
+
+    await _disposePlayer(tester);
+    expect(screenAwakeCalls.last, isFalse, reason: '离开播放页释放');
   });
 
   testWidgets('状态栏：播放页自己声明白色图标，控制条隐藏后底衬仍在', (tester) async {
@@ -1211,6 +1265,16 @@ Future<void> _disposePlayer(WidgetTester tester) async {
   // 主动卸载页面，取消 _hideTimer / _prefetchTimer / _spinnerTimer。
   await tester.pumpWidget(const SizedBox());
   await tester.pump();
+}
+
+/// 模拟系统 lifecycle 消息（走真实通道；`handleAppLifecycleStateChanged`
+/// 是 protected，测试里直接调会触发 analyzer 警告）。
+Future<void> _dispatchLifecycle(WidgetTester tester, String state) async {
+  await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+    'flutter/lifecycle',
+    const StringCodec().encodeMessage(state),
+    (_) {},
+  );
 }
 
 /// 离线 store 的测试替身：固定返回一个存在的「离线文件」。

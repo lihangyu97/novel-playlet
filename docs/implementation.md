@@ -527,6 +527,9 @@ AVPlayer
   一次、回前台补一次，通道失败只显示时间。顶栏只保留返回 + 剧名，标题在 `Expanded` 里省略；
   当前集号在底栏左侧选集入口，用 13pt 文字替代原图标，点击行为不变；清晰度 chip 在全屏让位给
   状态（竖屏照常显示）。
+- 屏幕常亮：播放中通过 `novel_playlet/screen_awake` 通道设置 iOS `isIdleTimerDisabled` /
+  Android `FLAG_KEEP_SCREEN_ON`，只在实际 `isPlaying` 时开启；暂停、加载中、退后台、离开播放页
+  释放，回前台仍在播则恢复。通道失败静默，系统 Auto-Lock 仍按用户设置生效。
 - 进度：**只记到集**，`play()` 成功后才写 `video_progress_v1` + `video_history_v1`（最近 3 条）。
 
 ### 5.6 离线整剧下载（第二条独立链路）

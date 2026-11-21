@@ -25,6 +25,7 @@ import 'offline_playback.dart';
 import 'playback_failure.dart';
 import 'playback_speed.dart';
 import 'player_system_status.dart';
+import 'screen_awake.dart';
 import 'video_detail_page.dart';
 import 'widgets/episode_picker_sheet.dart';
 import 'widgets/playback_speed_menu.dart';
@@ -120,6 +121,15 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   /// 是否处于横屏全屏。只有横屏内容才给入口：竖屏视频全屏只会更小。
   bool _fullscreen = false;
 
+  /// 是否已经向原生申请了屏幕常亮（避免每帧都打一次平台通道）。
+  bool _keepAwake = false;
+
+  /// 退后台期间不申请常亮；回前台按当前播放状态恢复。
+  bool _appActive = true;
+
+  /// 屏幕常亮通道。播放页卸载后不能再读 ref，所以提前缓存一份。
+  late final ScreenAwakeController _screenAwake;
+
   /// 横屏全屏顶栏右上角的系统状态（电量 + 网络）。时间本地算，不走通道。
   PlayerSystemStatus _systemStatus = const PlayerSystemStatus();
   DateTime _clockNow = DateTime.now();
@@ -200,6 +210,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   @override
   void initState() {
     super.initState();
+    _screenAwake = ref.read(screenAwakeControllerProvider);
     WidgetsBinding.instance.addObserver(this);
     final lastIndex = _episodes.isEmpty ? 0 : _episodes.length - 1;
     _index = widget.args.index < 0
@@ -221,6 +232,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     _cancelPending();
     _disposeController();
     _disposeRetained();
+    _setKeepAwake(false);
     _pageController.dispose();
     // 带着全屏状态退出播放页时，下一次进别的页面还在横屏就糟了。
     if (_fullscreen) unawaited(_restorePortrait());
@@ -250,6 +262,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   void _disposeController() {
     final controller = _controller;
     _controller = null;
+    _syncKeepAwake();
     if (controller != null) {
       unawaited(controller.dispose());
     }
@@ -262,6 +275,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   void _retainCurrentController() {
     final controller = _controller;
     _controller = null;
+    _syncKeepAwake();
     if (controller == null) return;
     if (!controller.value.isInitialized) {
       unawaited(controller.dispose());
@@ -527,6 +541,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     }
     controller.addListener(_onTick);
     await controller.play();
+    _syncKeepAwake();
     // 自动续播不弹控制条，自然也不需要自动隐藏计时（它本来就是隐藏的）。
     if (!autoAdvance) _scheduleHide();
     // 当前集播起来后再预取下一集：此时整集下载不占关键路径，也不至于
@@ -578,10 +593,25 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     return null;
   }
 
+  /// 按「前台 + 当前 controller 正在播」同步屏幕常亮。
+  ///
+  /// 只看 `isPlaying`：加载中、暂停、失败、换集空窗都释放；播放恢复再申请。
+  void _syncKeepAwake() {
+    final playing = _appActive && (_controller?.value.isPlaying ?? false);
+    _setKeepAwake(playing);
+  }
+
+  void _setKeepAwake(bool enabled) {
+    if (_keepAwake == enabled) return;
+    _keepAwake = enabled;
+    unawaited(_screenAwake.setKeepAwake(enabled));
+  }
+
   void _onTick() {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
     final value = controller.value;
+    _syncKeepAwake();
     // 起播 / 缓冲恢复时重新补一次倍速（见 _speedReapplyPending 注释）。
     if (value.isPlaying != _wasPlaying) {
       _wasPlaying = value.isPlaying;
@@ -780,9 +810,23 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    // 回前台时网络/电量可能已经变了；正在横屏全屏才需要补一次。
-    if (state == AppLifecycleState.resumed && _fullscreen) {
-      unawaited(_refreshSystemStatus());
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _appActive = true;
+        _syncKeepAwake();
+        // 回前台时网络/电量可能已经变了；正在横屏全屏才需要补一次。
+        if (_fullscreen) unawaited(_refreshSystemStatus());
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        // 后台不保持常亮；回前台时若还在播，_syncKeepAwake 会重新申请。
+        _appActive = false;
+        _setKeepAwake(false);
+        break;
+      case AppLifecycleState.inactive:
+        // 控制中心 / 来电横幅等短暂失焦：不释放，真正退后台会进 paused。
+        break;
     }
   }
 
