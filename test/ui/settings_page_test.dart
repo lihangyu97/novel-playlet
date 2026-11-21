@@ -6,6 +6,7 @@ import 'package:novel_playlet/app/app_version.dart';
 import 'package:novel_playlet/app/theme/app_font_weight.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
+import 'package:novel_playlet/core/cache/app_cache.dart';
 import 'package:novel_playlet/features/settings/widgets/dialogue_highlight_preview.dart';
 import 'package:novel_playlet/features/cache/download_quality.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
@@ -188,6 +189,46 @@ void main() {
         reason: '$title 与按钮组之间留出间隔，不是各占一半',
       );
     }
+  });
+
+  testWidgets('设置页-底部安全区不裁切最后一行', (tester) async {
+    // 真机反馈：滚到「诊断」时「运行日志」正好被底部安全区切掉一半，看起来
+    // 像有个固定黑条盖住设置项。修法是让 ListView 铺到屏幕底，把安全区高度
+    // 加进列表自己的 bottom padding；内容在滚动中可以经过 Home 指示条，
+    // 但滚完后最后一行整体在安全区上方。
+    const bottomInset = 34.0;
+    tester.view.padding = const FakeViewPadding(bottom: bottomInset);
+    addTearDown(tester.view.resetPadding);
+    await pumpPreview(
+      tester,
+      const SettingsPage(),
+      platform: TargetPlatform.iOS,
+    );
+
+    final list = tester.widget<ListView>(find.byType(ListView));
+    final padding = list.padding as EdgeInsets;
+    expect(
+      padding.bottom,
+      28 + bottomInset,
+      reason: '安全区高度要由列表 padding 承担，而不是把列表裁在安全区上方',
+    );
+    expect(
+      tester.getRect(find.byType(ListView)).bottom,
+      tester.view.physicalSize.height,
+      reason: '列表要铺到屏幕底边，不能停在底部安全区上沿',
+    );
+
+    final scrollable = tester.state<ScrollableState>(
+      find.byType(Scrollable).first,
+    );
+    scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    final runLog = tester.getRect(find.text('运行日志'));
+    expect(
+      runLog.bottom,
+      lessThanOrEqualTo(tester.view.physicalSize.height - bottomInset),
+      reason: '滚到底后「运行日志」整行要在 Home 指示条上方',
+    );
   });
 
   testWidgets('设置页-只有三个预设色 + 一个自定义入口', (tester) async {
@@ -447,9 +488,19 @@ void main() {
       reason: '自定义圆点右沿应对齐内容右边界',
     );
 
-    // 存储明细：label 贴内容左边界、数值贴内容右边界（不再有行首图标）。
+    // 存储明细：label 贴内容左边界；数值在清理按钮左侧，按钮贴内容右边界。
     expect(tester.getTopLeft(find.text('视频缓存')).dx, inset);
-    expect(tester.getRect(find.text('339 MB')).right, 390 - inset);
+    final videoClear = find.byKey(clearCacheButtonKey(CacheKind.video));
+    expect(
+      tester.getRect(videoClear).right,
+      390 - inset,
+      reason: '行尾清理按钮贴住内容右边界',
+    );
+    expect(
+      tester.getRect(find.text('339 MB')).right,
+      lessThan(tester.getRect(videoClear).left),
+      reason: '数值在清理按钮左侧',
+    );
   });
 
   /// 明细与清理共用一张卡，缓存质量单独一张卡；明细无行首图标、无分割线。
@@ -465,7 +516,7 @@ void main() {
     final clearCard = tester.widget<Card>(
       find
           .ancestor(
-            of: find.byKey(clearCacheButtonKey),
+            of: find.byKey(clearCacheButtonKey(CacheKind.video)),
             matching: find.byType(Card),
           )
           .first,
@@ -496,19 +547,29 @@ void main() {
     expect(find.byType(Divider), findsNothing, reason: '主题/同步/存储卡片都不再画分割线');
   });
 
-  testWidgets('设置页-范围说明收在存储卡片里', (tester) async {
+  testWidgets('设置页-存储卡不再显示总计和范围说明', (tester) async {
     await pumpPreview(tester, const SettingsPage());
+    await tester.scrollUntilVisible(find.text('章节缓存'), 300);
+    await tester.pumpAndSettle();
 
-    final hint = find.text('不包括主动下载');
-    expect(hint, findsOneWidget);
     expect(
-      find.ancestor(of: hint, matching: find.byType(Card)),
-      findsOneWidget,
-      reason: '说明是卡片内部最后一行，不再单挂在页面下方',
+      find.textContaining('380 MB'),
+      findsNothing,
+      reason: '不再显示「共 x MB」总计',
     );
-    expect(find.textContaining('主动缓存的小说、短剧'), findsNothing);
-    expect(find.textContaining('离线缓存不在此列'), findsNothing);
-    expect(find.textContaining('请到「我的 → 缓存」页清理'), findsNothing);
+    expect(find.text('不包括主动下载'), findsNothing);
+    for (final kind in [CacheKind.video, CacheKind.image, CacheKind.chapter]) {
+      expect(
+        find.byKey(clearCacheButtonKey(kind)),
+        findsOneWidget,
+        reason: '${kind.name} 行尾应有单独的清理按钮',
+      );
+    }
+    expect(
+      find.byKey(clearCacheButtonKey(CacheKind.legacyLog)),
+      findsOneWidget,
+      reason: 'preview 有遗留日志，也应给单独入口',
+    );
   });
 
   /// 主题区块顺序：常用外观项在前，阅读页局部的「对话高亮」收在最后。
@@ -598,26 +659,31 @@ void main() {
     );
   });
 
-  /// 清理入口只留图标（与详情页「复制 ID」同款小图标按钮），不再占一整行。
-  testWidgets('设置页-清理缓存只留图标按钮', (tester) async {
+  /// 每类缓存行尾各有一个小清理图标，不再有整卡清空按钮。
+  testWidgets('设置页-每类缓存行尾各有清理图标', (tester) async {
     await pumpPreview(tester, const SettingsPage());
+    await tester.scrollUntilVisible(find.text('章节缓存'), 300);
+    await tester.pumpAndSettle();
 
-    final clear = find.byTooltip('清理缓存');
-    expect(clear, findsOneWidget);
-    expect(find.text('清理缓存'), findsNothing, reason: '按钮不再带文案');
-    expect(find.byIcon(Icons.cleaning_services_outlined), findsOneWidget);
-    expect(
-      tester.getSize(clear),
-      const Size(24, 24),
-      reason: '与详情页复制 ID 同档的小图标按钮（原来是一整个 44pt 胶囊）',
-    );
+    expect(find.byTooltip('清理缓存'), findsNothing, reason: '不再有整卡清空入口');
+    for (final (kind, tooltip) in [
+      (CacheKind.video, '清理视频缓存'),
+      (CacheKind.image, '清理封面缓存'),
+      (CacheKind.chapter, '清理章节缓存'),
+    ]) {
+      final clear = find.byKey(clearCacheButtonKey(kind));
+      expect(clear, findsOneWidget);
+      expect(find.byTooltip(tooltip), findsOneWidget);
+      expect(
+        tester.getSize(clear).width,
+        lessThanOrEqualTo(32),
+        reason: '行尾图标保持紧凑，不把行高撑开',
+      );
+    }
 
-    // 仍然可点：点开确认框。
-    await tester.ensureVisible(clear);
-    await tester.pump();
-    await tester.tap(clear);
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.text('清理缓存？'), findsOneWidget);
+    // preview 有 116 KB 遗留日志；它也只给单独清理入口，不并进三类缓存。
+    expect(find.byTooltip('清理遗留日志'), findsOneWidget);
+    expect(find.byIcon(Icons.cleaning_services_outlined), findsNWidgets(4));
   });
 
   testWidgets('设置页-跟随时隐藏深色模式，关闭跟随后可手动切换', (tester) async {

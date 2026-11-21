@@ -163,6 +163,63 @@ void main() {
     );
   });
 
+  test('clearKind 只清对应缓存，其他缓存与设备池不动', () async {
+    final root = Directory.systemTemp.createTempSync('app_cache_kind_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+
+    final support = Directory('${root.path}/support')..createSync();
+    final tmp = Directory('${root.path}/tmp')..createSync();
+    final docs = Directory('${root.path}/docs')..createSync();
+
+    final videoDir = Directory('${support.path}/backend/src')
+      ..createSync(recursive: true);
+    File('${videoDir.path}/a.mp4').writeAsBytesSync(List.filled(1000, 1));
+    final configDir = Directory('${support.path}/backend/config')
+      ..createSync(recursive: true);
+    File('${configDir.path}/device_pool.json').writeAsStringSync('{}');
+
+    final imageDir = Directory('${tmp.path}/libCachedImageData')
+      ..createSync(recursive: true);
+    File('${imageDir.path}/img').writeAsBytesSync(List.filled(300, 2));
+
+    final chapterDir = Directory('${support.path}/reader_chapters')
+      ..createSync(recursive: true);
+    File('${chapterDir.path}/c1.json').writeAsStringSync('{}');
+
+    final legacyLog = File('${docs.path}/diag.log')..writeAsStringSync('x');
+
+    final cache = AppCache(
+      supportDirectory: () async => support,
+      temporaryDirectory: () async => tmp,
+      documentsDirectory: () async => docs,
+      clearImageCache: () async {},
+    );
+
+    expect((await cache.measure()).total, 1000 + 300 + 2 + 1);
+
+    expect(await cache.clearKind(CacheKind.video), 1000);
+    var usage = await cache.measure();
+    expect(usage.video, 0);
+    expect(usage.image, 300, reason: '清视频不能碰封面');
+    expect(usage.chapter, 2, reason: '清视频不能碰章节');
+    expect(usage.legacyLog, 1, reason: '清视频不能碰遗留日志');
+    expect(File('${configDir.path}/device_pool.json').existsSync(), isTrue);
+
+    expect(await cache.clearKind(CacheKind.image), 300);
+    usage = await cache.measure();
+    expect(usage.image, 0);
+    expect(usage.chapter, 2);
+    expect(usage.legacyLog, 1);
+
+    expect(await cache.clearKind(CacheKind.chapter), 2);
+    expect(await cache.clearKind(CacheKind.legacyLog), 1);
+    usage = await cache.measure();
+    expect(usage.total, 0);
+    expect(legacyLog.existsSync(), isFalse);
+    expect(File('${configDir.path}/device_pool.json').existsSync(), isTrue);
+    expect(videoDir.existsSync(), isTrue, reason: '目录本身保留，内核还要往里写');
+  });
+
   test('formatBytes 展示口径', () {
     expect(formatBytes(0), '0 B');
     expect(formatBytes(1023), '1023 B');
