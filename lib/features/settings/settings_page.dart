@@ -620,14 +620,28 @@ class _VideoDownloadQualityCard extends ConsumerWidget {
 // 存储
 // ---------------------------------------------------------------------------
 
-/// 清理卡右侧的清理入口：测试用它点，不依赖图标/文案。
-const Key clearCacheButtonKey = Key('settings-clear-cache');
+/// 每个缓存行尾清理按钮的 key：测试直接点，不依赖图标/文案。
+Key clearCacheButtonKey(CacheKind kind) =>
+    ValueKey('settings-clear-cache-${kind.name}');
 
-/// 存储区块：占用明细一张卡，清理单独一张卡。
+/// [CacheKind] 在设置页的显示文案。
+extension on CacheKind {
+  String get label => switch (this) {
+    CacheKind.video => '视频缓存',
+    CacheKind.image => '封面缓存',
+    CacheKind.chapter => '章节缓存',
+    CacheKind.legacyLog => '遗留日志',
+  };
+}
+
+/// 存储区块：每一类缓存一行，行尾一个清理图标，点谁只清谁。
 ///
-/// 拆两张卡是为了把「纯信息」和「破坏性动作」分开：明细不再画行间分割线、
-/// 也不带每行图标（三行短文本本来就是一列数据，图标只会把行高撑散），
-/// 清理那张卡里放「共 x MB」+ 适用范围说明 + 右侧图标按钮。
+/// 不再有「共 x MB」总计和一次性清空按钮：用户反馈那样只能整块清，想只清
+/// 视频 / 封面 / 章节时没有入口。三行明细不带行首图标（图标会把行高撑散），
+/// 行尾的清理按钮才是有意义的动作。
+///
+/// 「遗留日志」只在真有文件时出现；它不是自动缓存，但删掉总清入口后必须给它
+/// 留一个单独的清理入口，否则这份旧文件永远清不掉。
 class _StorageSection extends ConsumerStatefulWidget {
   const _StorageSection();
 
@@ -636,58 +650,33 @@ class _StorageSection extends ConsumerStatefulWidget {
 }
 
 class _StorageSectionState extends ConsumerState<_StorageSection> {
-  bool _clearing = false;
+  /// 正在清理的缓存种类；null = 空闲。
+  ///
+  /// 清理期间所有行尾按钮都禁用：同一时刻只允许一个清理动作，避免两行同时
+  /// 删文件、统计与刷新互相打架。
+  CacheKind? _clearing;
 
-  /// 确认框还开着时再点按钮不能叠出第二个框（两个都点确定会并发清理）。
-  bool _confirming = false;
-
-  Future<void> _clear(CacheUsage usage) async {
-    if (_clearing || _confirming) return;
-    _confirming = true;
-    final bool? confirmed;
+  Future<void> _clear(CacheKind kind) async {
+    if (_clearing != null) return;
+    setState(() => _clearing = kind);
     try {
-      confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('清理缓存？'),
-          content: Text(
-            '将删除视频、封面、章节等缓存共 ${formatBytes(usage.total)}，'
-            '需要时会自动重新下载。书架与阅读进度不受影响。',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('清理'),
-            ),
-          ],
-        ),
-      );
-    } finally {
-      _confirming = false;
-    }
-    if (confirmed != true || !mounted) return;
-
-    setState(() => _clearing = true);
-    try {
-      final freed = await ref.read(appCacheProvider).clear();
+      final freed = await ref.read(appCacheProvider).clearKind(kind);
       if (!mounted) return;
       ref.invalidate(cacheUsageProvider);
       showAppSnackBar(
         context,
-        freed > 0 ? '已清理 ${formatBytes(freed)} 缓存' : '没有可清理的缓存',
+        freed > 0
+            ? '已清理${kind.label} ${formatBytes(freed)}'
+            : '${kind.label}没有可清理的内容',
       );
     } catch (error) {
       // 缓存统计/删除碰到文件系统或 path_provider 异常时不能让按钮永远停在
-      // 「清理中…」：兜底复位并提示，用户还能再试一次。
-      debugPrint('[settings] clear cache failed: $error');
+      // 「清理中」：兜底复位并提示，用户还能再试一次。
+      debugPrint('[settings] clear ${kind.name} failed: $error');
       if (!mounted) return;
-      showAppSnackBar(context, '清理失败，请重试');
+      showAppSnackBar(context, '清理${kind.label}失败，请重试');
     } finally {
-      if (mounted) setState(() => _clearing = false);
+      if (mounted) setState(() => _clearing = null);
     }
   }
 
@@ -695,156 +684,137 @@ class _StorageSectionState extends ConsumerState<_StorageSection> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final usageAsync = ref.watch(cacheUsageProvider);
-    final usage = usageAsync.value;
     return _Card(
-      // 明细、清理、缓存质量都在一张卡里：行间靠留白分组，不画分割线。
+      // 明细都在一张卡里：行间靠留白分组，不画分割线。
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          usageAsync.when(
-            loading: () => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    '正在统计缓存占用…',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            error: (error, _) => Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '缓存占用统计失败',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.error,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => ref.invalidate(cacheUsageProvider),
-                  child: const Text('重试'),
-                ),
-              ],
-            ),
-            data: (usage) => Column(
-              children: [
-                _UsageRow(label: '视频缓存', bytes: usage.video),
-                _UsageRow(label: '封面缓存', bytes: usage.image),
-                _UsageRow(label: '章节缓存', bytes: usage.chapter),
-                if (usage.legacyLog > 0)
-                  _UsageRow(label: '遗留日志', bytes: usage.legacyLog),
-              ],
-            ),
-          ),
-          const SizedBox(height: 4),
-          _buildClearRow(
-            theme,
-            usage == null ? null : '共 ${formatBytes(usage.total)}',
-            // 只有真正拿到统计、且还有东西可清时才允许点；loading / 失败
-            // 期间按钮置灰，避免对着「共 —」弹确认框。
-            onClear: usage == null || usage.isEmpty || _clearing
-                ? null
-                : () => _clear(usage),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildClearRow(
-    ThemeData theme,
-    String? total, {
-    required VoidCallback? onClear,
-  }) {
-    final scheme = theme.colorScheme;
-    return Row(
-      // 整行按中线对齐：按钮的触控区比文字高，若也按底边对齐，文字会被
-      // 压在卡片底部、上方空出一截（截图里像「卡片高度不对」）。
-      children: [
-        Expanded(
+      child: usageAsync.when(
+        loading: () => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
           child: Row(
-            // 「共 x MB」与副标题字号不同，这两段之间按底边对齐。
-            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(
-                total ?? '共 —',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: context.appWeight(FontWeight.w600),
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  '不包括主动下载',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                    height: 1.3,
-                  ),
+              const SizedBox(width: 12),
+              Text(
+                '正在统计缓存占用…',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
           ),
         ),
-        IconButton(
-          key: clearCacheButtonKey,
-          tooltip: '清理缓存',
-          onPressed: onClear,
-          icon: _clearing
-              ? const SizedBox(
-                  width: 15,
-                  height: 15,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.cleaning_services_outlined, size: 18),
-          color: scheme.onSurfaceVariant,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-          visualDensity: VisualDensity.compact,
-          // 不 shrinkWrap 的话 M3 会把触控区撑到 40，卡片跟着变高。
-          style: IconButton.styleFrom(
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        error: (error, _) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '缓存占用统计失败',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => ref.invalidate(cacheUsageProvider),
+                child: const Text('重试'),
+              ),
+            ],
           ),
         ),
-      ],
+        data: (usage) => Column(
+          children: [
+            _UsageRow(
+              kind: CacheKind.video,
+              bytes: usage.video,
+              clearing: _clearing,
+              onClear: () => _clear(CacheKind.video),
+            ),
+            _UsageRow(
+              kind: CacheKind.image,
+              bytes: usage.image,
+              clearing: _clearing,
+              onClear: () => _clear(CacheKind.image),
+            ),
+            _UsageRow(
+              kind: CacheKind.chapter,
+              bytes: usage.chapter,
+              clearing: _clearing,
+              onClear: () => _clear(CacheKind.chapter),
+            ),
+            if (usage.legacyLog > 0)
+              _UsageRow(
+                kind: CacheKind.legacyLog,
+                bytes: usage.legacyLog,
+                clearing: _clearing,
+                onClear: () => _clear(CacheKind.legacyLog),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
 
+/// 一类缓存的占用行：左侧名称、中间大小、右侧单独的清理按钮。
 class _UsageRow extends StatelessWidget {
-  const _UsageRow({required this.label, required this.bytes});
+  const _UsageRow({
+    required this.kind,
+    required this.bytes,
+    required this.clearing,
+    required this.onClear,
+  });
 
-  final String label;
+  final CacheKind kind;
   final int bytes;
+
+  /// 当前正在清理的种类（区别于本条是否正在清）。
+  final CacheKind? clearing;
+
+  final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isClearing = clearing == kind;
+    final enabled = bytes > 0 && clearing == null;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
+          Expanded(child: Text(kind.label, style: theme.textTheme.bodyMedium)),
           Text(
             formatBytes(bytes),
             style: theme.textTheme.bodySmall?.copyWith(
               color: scheme.onSurfaceVariant,
               fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(width: 6),
+          IconButton(
+            key: clearCacheButtonKey(kind),
+            tooltip: '清理${kind.label}',
+            onPressed: enabled ? onClear : null,
+            icon: isClearing
+                ? const SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.cleaning_services_outlined, size: 18),
+            color: scheme.onSurfaceVariant,
+            disabledColor: scheme.onSurfaceVariant.withValues(alpha: 0.38),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+            // 不 shrinkWrap 的话 M3 会把触控区撑到 48，卡片跟着变高；
+            // 32 是「紧凑但还能点准」的折中，比旧整卡清理按钮更小。
+            style: IconButton.styleFrom(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ),
         ],

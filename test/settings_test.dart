@@ -19,8 +19,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// 内存版缓存：settings 页测试不碰真实沙盒目录。
 ///
-/// [clear] 会把占用清成 0，方便断言「清理后页面真的刷新了」，而不是只断言
-/// 调用了 clear。
+/// [clearKind] 只把对应那一类清成 0，方便断言「点哪行只清哪类」，而不是只
+/// 断言调用了清理。
 class _FakeAppCache extends AppCache {
   _FakeAppCache({this._usage = const CacheUsage()})
     : super(
@@ -32,12 +32,12 @@ class _FakeAppCache extends AppCache {
 
   CacheUsage _usage;
   int measureCount = 0;
-  int clearCount = 0;
+  final clearedKinds = <CacheKind>[];
 
-  /// clear 抛错：验证按钮不会永远卡在「清理中…」。
+  /// 清理抛错：验证按钮不会永远卡在「清理中」。
   bool throwOnClear = false;
 
-  /// clear 挂起：验证清理期间按钮禁用。
+  /// 清理挂起：验证清理期间按钮禁用。
   Completer<void>? clearGate;
 
   @override
@@ -47,12 +47,33 @@ class _FakeAppCache extends AppCache {
   }
 
   @override
-  Future<int> clear() async {
-    clearCount++;
+  Future<int> clearKind(CacheKind kind) async {
+    clearedKinds.add(kind);
     if (clearGate != null) await clearGate!.future;
     if (throwOnClear) throw StateError('fake disk failure');
-    final freed = _usage.total;
-    _usage = const CacheUsage();
+    final freed = _usage.of(kind);
+    _usage = switch (kind) {
+      CacheKind.video => CacheUsage(
+        image: _usage.image,
+        chapter: _usage.chapter,
+        legacyLog: _usage.legacyLog,
+      ),
+      CacheKind.image => CacheUsage(
+        video: _usage.video,
+        chapter: _usage.chapter,
+        legacyLog: _usage.legacyLog,
+      ),
+      CacheKind.chapter => CacheUsage(
+        video: _usage.video,
+        image: _usage.image,
+        legacyLog: _usage.legacyLog,
+      ),
+      CacheKind.legacyLog => CacheUsage(
+        video: _usage.video,
+        image: _usage.image,
+        chapter: _usage.chapter,
+      ),
+    };
     return freed;
   }
 
@@ -67,14 +88,15 @@ Widget _wrap(Widget child, {List<Override> overrides = const []}) {
   );
 }
 
-/// 清理入口现在是存储卡片右下角的图标按钮（tooltip 仍为「清理缓存」）。
-final _clearCacheButton = find.byKey(clearCacheButtonKey);
+/// 某一类缓存行尾的清理按钮；tooltip 为「清理视频缓存」这类文案。
+Finder _clearCacheButton(CacheKind kind) =>
+    find.byKey(clearCacheButtonKey(kind));
 
-/// 设置页新增「推荐流布局」卡片后内容变长，「清理缓存」会落到 800×600 的
-/// 测试首屏外：点击前先把它滚到可见，否则 tap 会因命中不到而静默失败。
-Future<void> _scrollToClearCache(WidgetTester tester) async {
+/// 设置页内容较长，清理入口可能在 800×600 测试首屏外：点击前先滚到可见，
+/// 否则 tap 会因命中不到而静默失败。
+Future<void> _scrollToClearCache(WidgetTester tester, CacheKind kind) async {
   await tester.scrollUntilVisible(
-    _clearCacheButton,
+    _clearCacheButton(kind),
     200,
     scrollable: find.byType(Scrollable).first,
   );
@@ -82,8 +104,8 @@ Future<void> _scrollToClearCache(WidgetTester tester) async {
 }
 
 /// 清理入口的 IconButton（禁用态/进行中态都靠它断言）。
-IconButton _clearCacheIconButton(WidgetTester tester) =>
-    tester.widget<IconButton>(_clearCacheButton);
+IconButton _clearCacheIconButton(WidgetTester tester, CacheKind kind) =>
+    tester.widget<IconButton>(_clearCacheButton(kind));
 
 final _hexFinder = find.byWidgetPredicate(
   (widget) =>
@@ -331,9 +353,13 @@ void main() {
     expect(tester.widget<Text>(_hexFinder).data!, isNot(before));
   });
 
-  testWidgets('清理缓存需要确认，清理后占用归零、按钮禁用', (tester) async {
+  testWidgets('清理单类缓存只清对应项', (tester) async {
     final cache = _FakeAppCache(
-      usage: const CacheUsage(video: 10 * 1024 * 1024, image: 2 * 1024 * 1024),
+      usage: const CacheUsage(
+        video: 10 * 1024 * 1024,
+        image: 2 * 1024 * 1024,
+        chapter: 1024,
+      ),
     );
     await tester.pumpWidget(
       _wrap(
@@ -343,30 +369,37 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await _scrollToClearCache(tester);
-    expect(find.textContaining('12 MB'), findsOneWidget);
-    await tester.tap(_clearCacheButton);
-    await tester.pumpAndSettle();
-    expect(find.text('清理缓存？'), findsOneWidget);
-
-    // 先取消：不能有任何清理动作。
-    await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle();
-    expect(cache.clearCount, 0);
-
-    await tester.tap(_clearCacheButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('清理'));
+    await _scrollToClearCache(tester, CacheKind.video);
+    // 不再有「共 12 MB」总计行。
+    expect(find.textContaining('12 MB'), findsNothing);
+    await tester.tap(_clearCacheButton(CacheKind.video));
     await tester.pumpAndSettle();
 
-    expect(cache.clearCount, 1);
-    expect(find.textContaining('已清理 12 MB 缓存'), findsOneWidget);
-    // 清理后重新统计，页面上的占用必须真的变成 0。
-    expect(find.textContaining('共 0 B'), findsOneWidget);
-    expect(_clearCacheIconButton(tester).onPressed, isNull);
+    expect(cache.clearedKinds, [CacheKind.video]);
+    expect(find.textContaining('已清理视频缓存 10 MB'), findsOneWidget);
+    expect(find.text('0 B'), findsOneWidget, reason: '视频缓存被清成 0');
+    expect(find.text('2.0 MB'), findsOneWidget, reason: '封面缓存不受影响');
+    expect(find.text('1.0 KB'), findsOneWidget, reason: '章节缓存不受影响');
+    expect(
+      _clearCacheIconButton(tester, CacheKind.video).onPressed,
+      isNull,
+      reason: '视频缓存已空，按钮禁用',
+    );
+    expect(
+      _clearCacheIconButton(tester, CacheKind.image).onPressed,
+      isNotNull,
+      reason: '封面缓存还有占用，按钮仍可点',
+    );
+
+    // 再清封面：只清封面，章节不动。
+    await tester.tap(_clearCacheButton(CacheKind.image));
+    await tester.pumpAndSettle();
+    expect(cache.clearedKinds, [CacheKind.video, CacheKind.image]);
+    expect(find.text('2.0 MB'), findsNothing);
+    expect(find.text('1.0 KB'), findsOneWidget);
   });
 
-  testWidgets('清理失败不会卡在「清理中…」', (tester) async {
+  testWidgets('清理失败不会卡在「清理中」', (tester) async {
     final cache = _FakeAppCache(usage: const CacheUsage(video: 1024 * 1024))
       ..throwOnClear = true;
     await tester.pumpWidget(
@@ -377,24 +410,23 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await _scrollToClearCache(tester);
-    await tester.tap(_clearCacheButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('清理'));
+    await _scrollToClearCache(tester, CacheKind.video);
+    await tester.tap(_clearCacheButton(CacheKind.video));
     await tester.pumpAndSettle();
 
-    expect(find.text('清理失败，请重试'), findsOneWidget);
+    expect(find.text('清理视频缓存失败，请重试'), findsOneWidget);
     expect(
-      _clearCacheIconButton(tester).onPressed,
+      _clearCacheIconButton(tester, CacheKind.video).onPressed,
       isNotNull,
       reason: '失败后按钮要恢复可点',
     );
   });
 
-  testWidgets('清理进行中按钮禁用（不会并发清理）', (tester) async {
+  testWidgets('清理进行中所有清理按钮禁用（不会并发清理）', (tester) async {
     final gate = Completer<void>();
-    final cache = _FakeAppCache(usage: const CacheUsage(video: 1024 * 1024))
-      ..clearGate = gate;
+    final cache = _FakeAppCache(
+      usage: const CacheUsage(video: 1024 * 1024, image: 1024),
+    )..clearGate = gate;
     await tester.pumpWidget(
       _wrap(
         const SettingsPage(),
@@ -403,35 +435,43 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await _scrollToClearCache(tester);
-    await tester.tap(_clearCacheButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('清理'));
+    await _scrollToClearCache(tester, CacheKind.video);
+    await tester.tap(_clearCacheButton(CacheKind.video));
     await tester.pump();
 
-    // 进行中：图标换成小转圈，按钮禁用。
+    // 进行中：只有正在清的那一行换成小转圈，但所有行都禁用。
     expect(
       find.descendant(
-        of: _clearCacheButton,
+        of: _clearCacheButton(CacheKind.video),
         matching: find.byType(CircularProgressIndicator),
       ),
       findsOneWidget,
       reason: '清理中把小图标换成转圈（不再有「清理中…」文案）',
     );
-    expect(_clearCacheIconButton(tester).onPressed, isNull);
+    expect(_clearCacheIconButton(tester, CacheKind.video).onPressed, isNull);
+    expect(
+      _clearCacheIconButton(tester, CacheKind.image).onPressed,
+      isNull,
+      reason: '清理期间其它行也不能点',
+    );
 
     gate.complete();
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: _clearCacheButton,
+        of: _clearCacheButton(CacheKind.video),
         matching: find.byIcon(Icons.cleaning_services_outlined),
       ),
       findsOneWidget,
     );
+    expect(
+      _clearCacheIconButton(tester, CacheKind.image).onPressed,
+      isNotNull,
+      reason: '清理结束后其它行恢复可点',
+    );
   });
 
-  testWidgets('无缓存时清理按钮禁用', (tester) async {
+  testWidgets('无缓存时三行清理按钮都禁用', (tester) async {
     await tester.pumpWidget(
       _wrap(
         const SettingsPage(),
@@ -440,9 +480,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await _scrollToClearCache(tester);
-    expect(find.text('0 B'), findsWidgets);
-    expect(_clearCacheIconButton(tester).onPressed, isNull);
+    await _scrollToClearCache(tester, CacheKind.video);
+    expect(find.text('0 B'), findsNWidgets(3));
+    for (final kind in [CacheKind.video, CacheKind.image, CacheKind.chapter]) {
+      expect(
+        _clearCacheIconButton(tester, kind).onPressed,
+        isNull,
+        reason: '${kind.name} 无占用时清理按钮禁用',
+      );
+    }
   });
 
   testWidgets('我的页右上角入口能打开设置页', (tester) async {

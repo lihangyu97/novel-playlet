@@ -6,6 +6,7 @@ import 'package:novel_playlet/app/app_version.dart';
 import 'package:novel_playlet/app/theme/app_font_weight.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
+import 'package:novel_playlet/core/cache/app_cache.dart';
 import 'package:novel_playlet/features/settings/widgets/dialogue_highlight_preview.dart';
 import 'package:novel_playlet/features/cache/download_quality.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
@@ -487,9 +488,19 @@ void main() {
       reason: '自定义圆点右沿应对齐内容右边界',
     );
 
-    // 存储明细：label 贴内容左边界、数值贴内容右边界（不再有行首图标）。
+    // 存储明细：label 贴内容左边界；数值在清理按钮左侧，按钮贴内容右边界。
     expect(tester.getTopLeft(find.text('视频缓存')).dx, inset);
-    expect(tester.getRect(find.text('339 MB')).right, 390 - inset);
+    final videoClear = find.byKey(clearCacheButtonKey(CacheKind.video));
+    expect(
+      tester.getRect(videoClear).right,
+      390 - inset,
+      reason: '行尾清理按钮贴住内容右边界',
+    );
+    expect(
+      tester.getRect(find.text('339 MB')).right,
+      lessThan(tester.getRect(videoClear).left),
+      reason: '数值在清理按钮左侧',
+    );
   });
 
   /// 明细与清理共用一张卡，缓存质量单独一张卡；明细无行首图标、无分割线。
@@ -505,7 +516,7 @@ void main() {
     final clearCard = tester.widget<Card>(
       find
           .ancestor(
-            of: find.byKey(clearCacheButtonKey),
+            of: find.byKey(clearCacheButtonKey(CacheKind.video)),
             matching: find.byType(Card),
           )
           .first,
@@ -536,19 +547,29 @@ void main() {
     expect(find.byType(Divider), findsNothing, reason: '主题/同步/存储卡片都不再画分割线');
   });
 
-  testWidgets('设置页-范围说明收在存储卡片里', (tester) async {
+  testWidgets('设置页-存储卡不再显示总计和范围说明', (tester) async {
     await pumpPreview(tester, const SettingsPage());
+    await tester.scrollUntilVisible(find.text('章节缓存'), 300);
+    await tester.pumpAndSettle();
 
-    final hint = find.text('不包括主动下载');
-    expect(hint, findsOneWidget);
     expect(
-      find.ancestor(of: hint, matching: find.byType(Card)),
-      findsOneWidget,
-      reason: '说明是卡片内部最后一行，不再单挂在页面下方',
+      find.textContaining('380 MB'),
+      findsNothing,
+      reason: '不再显示「共 x MB」总计',
     );
-    expect(find.textContaining('主动缓存的小说、短剧'), findsNothing);
-    expect(find.textContaining('离线缓存不在此列'), findsNothing);
-    expect(find.textContaining('请到「我的 → 缓存」页清理'), findsNothing);
+    expect(find.text('不包括主动下载'), findsNothing);
+    for (final kind in [CacheKind.video, CacheKind.image, CacheKind.chapter]) {
+      expect(
+        find.byKey(clearCacheButtonKey(kind)),
+        findsOneWidget,
+        reason: '${kind.name} 行尾应有单独的清理按钮',
+      );
+    }
+    expect(
+      find.byKey(clearCacheButtonKey(CacheKind.legacyLog)),
+      findsOneWidget,
+      reason: 'preview 有遗留日志，也应给单独入口',
+    );
   });
 
   /// 主题区块顺序：常用外观项在前，阅读页局部的「对话高亮」收在最后。
@@ -638,26 +659,31 @@ void main() {
     );
   });
 
-  /// 清理入口只留图标（与详情页「复制 ID」同款小图标按钮），不再占一整行。
-  testWidgets('设置页-清理缓存只留图标按钮', (tester) async {
+  /// 每类缓存行尾各有一个小清理图标，不再有整卡清空按钮。
+  testWidgets('设置页-每类缓存行尾各有清理图标', (tester) async {
     await pumpPreview(tester, const SettingsPage());
+    await tester.scrollUntilVisible(find.text('章节缓存'), 300);
+    await tester.pumpAndSettle();
 
-    final clear = find.byTooltip('清理缓存');
-    expect(clear, findsOneWidget);
-    expect(find.text('清理缓存'), findsNothing, reason: '按钮不再带文案');
-    expect(find.byIcon(Icons.cleaning_services_outlined), findsOneWidget);
-    expect(
-      tester.getSize(clear),
-      const Size(24, 24),
-      reason: '与详情页复制 ID 同档的小图标按钮（原来是一整个 44pt 胶囊）',
-    );
+    expect(find.byTooltip('清理缓存'), findsNothing, reason: '不再有整卡清空入口');
+    for (final (kind, tooltip) in [
+      (CacheKind.video, '清理视频缓存'),
+      (CacheKind.image, '清理封面缓存'),
+      (CacheKind.chapter, '清理章节缓存'),
+    ]) {
+      final clear = find.byKey(clearCacheButtonKey(kind));
+      expect(clear, findsOneWidget);
+      expect(find.byTooltip(tooltip), findsOneWidget);
+      expect(
+        tester.getSize(clear).width,
+        lessThanOrEqualTo(32),
+        reason: '行尾图标保持紧凑，不把行高撑开',
+      );
+    }
 
-    // 仍然可点：点开确认框。
-    await tester.ensureVisible(clear);
-    await tester.pump();
-    await tester.tap(clear);
-    await tester.pumpAndSettle(const Duration(milliseconds: 300));
-    expect(find.text('清理缓存？'), findsOneWidget);
+    // preview 有 116 KB 遗留日志；它也只给单独清理入口，不并进三类缓存。
+    expect(find.byTooltip('清理遗留日志'), findsOneWidget);
+    expect(find.byIcon(Icons.cleaning_services_outlined), findsNWidgets(4));
   });
 
   testWidgets('设置页-跟随时隐藏深色模式，关闭跟随后可手动切换', (tester) async {

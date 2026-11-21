@@ -5,6 +5,12 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app_image_cache.dart';
 
+/// 可独立清理的缓存种类。
+///
+/// 与 [CacheUsage] 的四个字段一一对应：前三种是自动缓存，`legacyLog` 是早期
+/// 调试探针遗留的单个日志文件（当前代码不再写入，但可能占几百 KB）。
+enum CacheKind { video, image, chapter, legacyLog }
+
 /// 各类「可重建缓存」的占用（字节）。
 ///
 /// 只统计缓存，不包含书架/阅读进度（`shared_preferences`）、内核的设备注册池
@@ -35,6 +41,14 @@ class CacheUsage {
   int get total => video + image + chapter + legacyLog;
 
   bool get isEmpty => total == 0;
+
+  /// 某一种缓存的占用，用于「只清这一类」时算释放量。
+  int of(CacheKind kind) => switch (kind) {
+    CacheKind.video => video,
+    CacheKind.image => image,
+    CacheKind.chapter => chapter,
+    CacheKind.legacyLog => legacyLog,
+  };
 }
 
 /// 缓存的位置、占用统计与清理。
@@ -140,6 +154,18 @@ class AppCache {
     );
   }
 
+  /// 只清某一种缓存，返回实际释放的字节数。
+  ///
+  /// 设置页存储区每行一个清理图标，点谁只清谁；`backend/config/`、书架/进度
+  /// 和离线缓存区都不动。
+  Future<int> clearKind(CacheKind kind) async {
+    final before = (await measure()).of(kind);
+    await _clearKind(kind);
+    final after = (await measure()).of(kind);
+    final freed = before - after;
+    return freed > 0 ? freed : 0;
+  }
+
   /// 清空所有可重建缓存，返回释放的字节数。
   ///
   /// 只删缓存文件：`backend/config/`（设备池、过滤配置）与书架/进度都不动。
@@ -148,26 +174,42 @@ class AppCache {
   Future<int> clear() async {
     final before = await measure();
 
-    try {
-      await _clearImageCache();
-    } catch (error) {
-      debugPrint('[cache] empty image cache failed: $error');
+    for (final kind in CacheKind.values) {
+      await _clearKind(kind);
     }
-    for (final dir in await _imageDirs()) {
-      await _clearDir(dir);
-    }
-    for (final file in await _imageIndexFiles()) {
-      await _deleteFile(file);
-    }
-    await _clearDir(await _videoDir());
-    await _clearDir(await _chapterDir());
-    await _deleteFile(
-      File('${(await _documentsDirectory()).path}/$_legacyLogName'),
-    );
 
     final after = await measure();
     final freed = before.total - after.total;
     return freed > 0 ? freed : 0;
+  }
+
+  Future<void> _clearKind(CacheKind kind) async {
+    switch (kind) {
+      case CacheKind.video:
+        await _clearDir(await _videoDir());
+        return;
+      case CacheKind.image:
+        try {
+          await _clearImageCache();
+        } catch (error) {
+          debugPrint('[cache] empty image cache failed: $error');
+        }
+        for (final dir in await _imageDirs()) {
+          await _clearDir(dir);
+        }
+        for (final file in await _imageIndexFiles()) {
+          await _deleteFile(file);
+        }
+        return;
+      case CacheKind.chapter:
+        await _clearDir(await _chapterDir());
+        return;
+      case CacheKind.legacyLog:
+        await _deleteFile(
+          File('${(await _documentsDirectory()).path}/$_legacyLogName'),
+        );
+        return;
+    }
   }
 
   /// 一批并发 stat 的文件数。
