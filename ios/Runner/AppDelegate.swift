@@ -16,6 +16,11 @@ import UIKit
   /// `android/.../MainActivity.kt` 保持一致。
   private var systemStatusChannel: FlutterMethodChannel?
 
+  /// 播放页保持屏幕常亮：iOS 用 `isIdleTimerDisabled`，Android 用
+  /// `FLAG_KEEP_SCREEN_ON`。通道名/方法与 `lib/features/video/screen_awake.dart`、
+  /// `android/.../MainActivity.kt` 保持一致。
+  private var screenAwakeChannel: FlutterMethodChannel?
+
   /// 网络路径（WiFi / 蜂窝）用它判断；后台常驻一个 monitor 即可。
   private let pathMonitor = NWPathMonitor()
   private let pathMonitorQueue = DispatchQueue(
@@ -37,6 +42,7 @@ import UIKit
     let messenger = engineBridge.applicationRegistrar.messenger()
     registerAppVersionChannel(messenger: messenger)
     registerSystemStatusChannel(messenger: messenger)
+    registerScreenAwakeChannel(messenger: messenger)
   }
 
   private func registerAppVersionChannel(messenger: FlutterBinaryMessenger) {
@@ -73,6 +79,35 @@ import UIKit
       result(self?.systemStatusPayload() ?? ["networkType": "unknown"])
     }
     systemStatusChannel = channel
+  }
+
+  /// 播放页保持屏幕常亮：只改系统空闲计时器，不改亮度。
+  ///
+  /// 只在实际播放时打开；暂停 / 退后台 / 离开播放页由 Dart 侧释放。
+  private func registerScreenAwakeChannel(messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(
+      name: "novel_playlet/screen_awake",
+      binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "set" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let enabled = call.arguments as? Bool else {
+        result(
+          FlutterError(
+            code: "bad_args",
+            message: "set 需要 bool 参数",
+            details: nil
+          )
+        )
+        return
+      }
+      UIApplication.shared.isIdleTimerDisabled = enabled
+      result(nil)
+    }
+    screenAwakeChannel = channel
   }
 
   /// 读一次电量/网络。任何一项拿不到就不放这个 key，Dart 侧对应项不展示。
