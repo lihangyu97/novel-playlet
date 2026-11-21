@@ -184,10 +184,14 @@ class LibraryDb {
   }
 
   /// 在架条目（书架 / 收藏），按加架时间倒序。
+  ///
+  /// [limit] 为空时取全部；我的页预览只取前几个，全量列表弹窗再放开。
   static Future<List<LibraryRecord>> readShelf(
     DatabaseExecutor db, {
     LibraryType? type,
+    int? limit,
   }) async {
+    if (limit != null && limit <= 0) return const [];
     final where = StringBuffer('shelf_at > 0 AND shelf_at > shelf_removed_at');
     final args = <Object?>[];
     if (type != null) {
@@ -199,20 +203,40 @@ class LibraryDb {
       where: where.toString(),
       whereArgs: args,
       orderBy: 'shelf_at DESC, key ASC',
+      limit: limit,
     );
     return rows.map(_fromRow).toList();
+  }
+
+  /// 在架条数（书架 / 收藏）。只算个数、不取行。
+  static Future<int> countShelf(
+    DatabaseExecutor db, {
+    LibraryType? type,
+  }) async {
+    final where = StringBuffer('shelf_at > 0 AND shelf_at > shelf_removed_at');
+    final args = <Object?>[];
+    if (type != null) {
+      where.write(' AND type = ?');
+      args.add(type.wire);
+    }
+    final count = Sqflite.firstIntValue(
+      await db.rawQuery('SELECT COUNT(*) FROM $table WHERE $where', args),
+    );
+    return count ?? 0;
   }
 
   /// 「历史」：读过且当前不是墓碑（移出书架的不再出现在历史里）。
   ///
   /// 例外是"移出后又读过"的行：`last_read_at > shelf_removed_at` 说明用户还在
   /// 追这本书，要留在历史里（[LibraryRecord.normalized] 也会为它保留快照）。
+  ///
+  /// [limit] 为空时取全部。
   static Future<List<LibraryRecord>> readHistory(
     DatabaseExecutor db, {
-    required int limit,
+    int? limit,
     LibraryType? type,
   }) async {
-    if (limit <= 0) return const [];
+    if (limit != null && limit <= 0) return const [];
     final where = StringBuffer(_historyWhere);
     final args = <Object?>[];
     if (type != null) {

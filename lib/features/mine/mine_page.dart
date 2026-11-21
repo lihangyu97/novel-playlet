@@ -11,6 +11,7 @@ import '../../app/widgets/top_glow.dart';
 import '../../core/storage/library_records.dart';
 import 'mine_providers.dart';
 import 'widgets/media_manage_sheet.dart';
+import 'widgets/mine_all_sheet.dart';
 import 'widgets/mine_grid_metrics.dart';
 import 'widgets/mine_header.dart';
 import 'widgets/mine_history_list.dart';
@@ -40,6 +41,8 @@ class MinePage extends ConsumerWidget {
   /// 测试/无障碍定位用。
   static const historyKey = Key('mine-history');
   static const collectionKey = Key('mine-collection');
+  static const historyAllKey = Key('mine-history-all');
+  static const collectionAllKey = Key('mine-collection-all');
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -91,11 +94,6 @@ class MinePage extends ConsumerWidget {
   }
 }
 
-Widget _sectionHeader(String title) => AppSectionHeader(
-  title: title,
-  padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-);
-
 /// 数据没就绪时的统一占位（加载中 / 读取失败）。
 Widget _sectionPlaceholder(Widget child) => SizedBox(height: 140, child: child);
 
@@ -108,7 +106,22 @@ class _MineHistorySection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mineHistoryProvider);
-    return Column(children: [_sectionHeader('历史'), _body(context, ref, async)]);
+    final count = ref.watch(mineHistoryCountProvider).value;
+    return Column(
+      children: [
+        _MineSectionHeader(
+          title: '历史',
+          count: count,
+          allKey: MinePage.historyAllKey,
+          onShowAll: () => showMineAllSheet(
+            context: context,
+            scope: MineAllScope.history,
+            onOpen: (item) => _openHistory(context, ref, item),
+          ),
+        ),
+        _body(context, ref, async),
+      ],
+    );
   }
 
   Widget _body(
@@ -197,8 +210,23 @@ class _MineCollectionSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(mineCollectionProvider);
-    return Column(children: [_sectionHeader('收藏'), _body(context, ref, async)]);
+    final async = ref.watch(mineCollectionPreviewProvider);
+    final count = ref.watch(mineCollectionCountProvider).value;
+    return Column(
+      children: [
+        _MineSectionHeader(
+          title: '收藏',
+          count: count,
+          allKey: MinePage.collectionAllKey,
+          onShowAll: () => showMineAllSheet(
+            context: context,
+            scope: MineAllScope.collection,
+            onOpen: (item) => _openDetail(context, item),
+          ),
+        ),
+        _body(context, ref, async),
+      ],
+    );
   }
 
   Widget _body(
@@ -212,7 +240,7 @@ class _MineCollectionSection extends ConsumerWidget {
         async.hasError
             ? ErrorView(
                 message: _readFailed,
-                onRetry: () => ref.invalidate(mineCollectionProvider),
+                onRetry: () => ref.invalidate(mineCollectionPreviewProvider),
               )
             : const LoadingView(label: '正在读取本地数据…'),
       );
@@ -289,6 +317,67 @@ class _MineCollectionSection extends ConsumerWidget {
   }
 }
 
+/// 区块标题：左侧标题，右侧「N 条 + 全部 ›」。
+///
+/// 条数由区块自己 watch 计数 provider；[onShowAll] 只在有条目时出现，
+/// 没条目时右侧只留 0 条，和空态文案对应。
+class _MineSectionHeader extends StatelessWidget {
+  const _MineSectionHeader({
+    required this.title,
+    required this.count,
+    required this.allKey,
+    required this.onShowAll,
+  });
+
+  final String title;
+  final int? count;
+  final Key allKey;
+  final VoidCallback onShowAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final total = count;
+    return AppSectionHeader(
+      title: title,
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+      titleSuffix: total == null
+          ? null
+          : Text(
+              '$total 条',
+              maxLines: 1,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+      trailing: total == null || total == 0
+          ? null
+          : Tooltip(
+              message: '查看全部$title',
+              child: TextButton(
+                key: allKey,
+                onPressed: onShowAll,
+                style: TextButton.styleFrom(
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.fromLTRB(6, 4, 4, 4),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: scheme.primary,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('全部', style: theme.textTheme.bodySmall),
+                    const Icon(Icons.chevron_right_rounded, size: 16),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+}
+
 /// 页头统计行：只订阅「历史条数 / 收藏条数」。
 ///
 /// 单独做成 ConsumerWidget，[MinePage] 根节点自己不 watch 任何数据 provider：
@@ -299,9 +388,9 @@ class _MineStats extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(mineHistoryCountProvider);
-    final collection = ref.watch(mineCollectionProvider);
+    final collection = ref.watch(mineCollectionCountProvider);
     final historyCount = history.value;
-    final collectionCount = collection.value?.length;
+    final collectionCount = collection.value;
     final String text;
     if (historyCount != null && collectionCount != null) {
       text = '历史 $historyCount · 收藏 $collectionCount';
