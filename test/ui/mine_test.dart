@@ -7,6 +7,7 @@ import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
 import 'package:novel_playlet/features/mine/widgets/library_type_badge.dart';
+import 'package:novel_playlet/features/mine/widgets/mine_all_sheet.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
 
 import 'preview_harness.dart';
@@ -39,6 +40,9 @@ void main() {
     expect(find.text('历史 0 · 收藏 0'), findsOneWidget);
     expect(find.text('历史'), findsOneWidget);
     expect(find.text('收藏'), findsOneWidget);
+    expect(find.text('0 条'), findsNWidgets(2), reason: '两个区块头都显示条数');
+    expect(find.byKey(MinePage.historyAllKey), findsNothing);
+    expect(find.byKey(MinePage.collectionAllKey), findsNothing);
     expect(find.text('还没有阅读记录，去推荐页逛逛'), findsOneWidget);
     expect(find.text('收藏夹还是空的，去推荐页看看'), findsOneWidget);
 
@@ -161,6 +165,120 @@ void main() {
     expect(find.text('太奶奶的短剧'), findsOneWidget);
   });
 
+  testWidgets('我的页-收藏预览最多 6 个，全部弹窗列表可左滑移出', (tester) async {
+    final store = ReadingStore();
+    for (var i = 1; i <= 8; i++) {
+      await store.addToShelf(
+        NovelItem(id: 'b$i', title: '书$i', author: '作者$i'),
+      );
+    }
+
+    await pumpPreview(tester, const MinePage(), store: store);
+
+    // 预览只铺最新 6 个（3 列正好两排），更早的条目只在全部弹窗里。
+    expect(find.text('书8'), findsOneWidget);
+    expect(find.text('书3'), findsOneWidget);
+    expect(find.text('书2'), findsNothing);
+    expect(find.text('书1'), findsNothing);
+    expect(find.text('8 条'), findsOneWidget);
+
+    await tester.tap(find.byKey(MinePage.collectionAllKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+
+    expect(find.byKey(mineAllSheetKey), findsOneWidget);
+    expect(find.text('全部收藏'), findsOneWidget);
+    expect(find.text('共 8 条'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(mineAllSheetKey),
+        matching: find.text('书1'),
+      ),
+      findsOneWidget,
+      reason: '全部弹窗要能看到预览外的收藏',
+    );
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('../goldens/mine_all_sheet.png'),
+    );
+
+    await tester.drag(
+      find.descendant(
+        of: find.byKey(mineAllSheetKey),
+        matching: find.text('书1'),
+      ),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(find.text('移出收藏？'), findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('移出收藏'),
+      ),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(
+      find.descendant(
+        of: find.byKey(mineAllSheetKey),
+        matching: find.text('书1'),
+      ),
+      findsNothing,
+    );
+    expect(find.text('共 7 条'), findsOneWidget);
+    expect(await store.shelfCount(), 7);
+  });
+
+  testWidgets('我的页-全部历史左滑删除只清进度，收藏保留', (tester) async {
+    final store = ReadingStore();
+    await store.addToShelf(
+      const NovelItem(id: 'n1', title: '收藏中的历史', author: '作者'),
+    );
+    for (var i = 1; i <= 5; i++) {
+      await store.saveProgress(
+        bookId: 'n$i',
+        bookTitle: i == 1 ? '收藏中的历史' : '历史$i',
+        cover: '',
+        chapterId: 'c$i',
+        chapterIndex: i,
+      );
+    }
+
+    await pumpPreview(tester, const MinePage(), store: store);
+
+    // 页面上历史只露最新 3 条。
+    expect(find.text('历史5'), findsOneWidget);
+    expect(find.text('历史3'), findsOneWidget);
+    expect(find.text('历史2'), findsNothing);
+
+    await tester.tap(find.byKey(MinePage.historyAllKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+
+    expect(find.text('全部历史'), findsOneWidget);
+    expect(find.text('共 5 条'), findsOneWidget);
+    final sheetItem = find.descendant(
+      of: find.byKey(mineAllSheetKey),
+      matching: find.text('收藏中的历史'),
+    );
+    expect(sheetItem, findsOneWidget);
+
+    await tester.drag(sheetItem, const Offset(-500, 0));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(find.text('删除这条历史？'), findsOneWidget);
+    await tester.tap(
+      find.descendant(of: find.byType(AlertDialog), matching: find.text('删除')),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(sheetItem, findsNothing);
+    expect(find.text('共 4 条'), findsOneWidget);
+    expect(await store.historyCount(), 4);
+    expect(await store.progress('n1'), isNull);
+    expect(await store.isOnShelf('n1'), isTrue, reason: '删历史不能把收藏一起删掉');
+    expect(find.text('收藏中的历史'), findsOneWidget, reason: '页面上的收藏卡仍在');
+  });
+
   testWidgets('我的页-收藏里的短剧把标题里的季标在封面左下角', (tester) async {
     final store = ReadingStore();
     await store.addVideoToShelf(
@@ -187,6 +305,11 @@ void main() {
     }
 
     await pumpPreview(tester, const MinePage(), store: store);
+    // 预览条数有上限（收藏最多 6 个），正常手机高度下整页可能已经放得下；
+    // 这里把窗口压矮，验证固定页头与可滚动内容是分开的两层。
+    tester.view.physicalSize = const Size(390, 620);
+    tester.view.devicePixelRatio = 1;
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
 
     final header = find.text('我的');
     final headerBefore = tester.getTopLeft(header);

@@ -6,6 +6,7 @@ import '../../../app/widgets/season_badge.dart';
 import '../../../app/widgets/states.dart';
 import '../../../core/season_title.dart';
 import '../../../core/storage/library_records.dart';
+import '../mine_record_copy.dart';
 import 'library_type_badge.dart';
 import 'shelf_grid.dart';
 
@@ -54,9 +55,7 @@ class MineLibraryGrid extends StatelessWidget {
           cover: item.cover,
           title: item.title,
           // 小说展示作者、短剧展示集数；两者都空时不留空行。
-          meta: item.type.isPlaylet
-              ? (item.episodeCount > 0 ? '全 ${item.episodeCount} 集' : '')
-              : item.author,
+          meta: mineCollectionMeta(item),
           coverOverlay: LibraryTypeBadge(type: item.type),
           coverFooter: season == null ? null : SeasonBadge(season: season),
           width: itemWidth,

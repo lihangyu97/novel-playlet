@@ -7,6 +7,12 @@ import '../../core/storage/reading_store.dart';
 /// 「历史」列表最多展示的条数（小说与短剧混排，按最近一次阅读/观看倒序）。
 const mineHistoryLimit = 3;
 
+/// 「收藏」预览最多展示的条数：手机 3 列时正好两排。
+///
+/// 宽屏列数会变多，这里仍然按「最多 6 个」截断：预览只是入口，全部条目在
+/// 底部弹窗里看。
+const mineCollectionPreviewLimit = 6;
+
 // ---------------------------------------------------------------------------
 // revision 桥接：把 store 的 ValueNotifier 计数变成可 watch 的 provider
 // ---------------------------------------------------------------------------
@@ -101,13 +107,20 @@ class VideoRevision extends Notifier<int> {
 // 「我的」页数据：历史 / 收藏（小说与短剧混排）
 // ---------------------------------------------------------------------------
 
-/// 历史（跨小说与短剧，按最近阅读/观看倒序）。
+/// 历史（跨小说与短剧，按最近阅读/观看倒序）：我的页只取前 3 条预览。
 ///
 /// 订阅两个进度通道：任意一侧写进度都会让这一块刷新，收藏变更则不影响。
 final mineHistoryProvider = FutureProvider<List<LibraryRecord>>((ref) async {
   ref.watch(recentRevisionProvider);
   ref.watch(videoHistoryRevisionProvider);
   return ref.watch(readingStoreProvider).history(limit: mineHistoryLimit);
+});
+
+/// 全部历史（弹窗列表用）：不截断，按最近阅读/观看倒序。
+final mineHistoryAllProvider = FutureProvider<List<LibraryRecord>>((ref) async {
+  ref.watch(recentRevisionProvider);
+  ref.watch(videoHistoryRevisionProvider);
+  return ref.watch(readingStoreProvider).history(limit: null);
 });
 
 /// 页头的「历史 N」：只算条数，不取行。
@@ -117,11 +130,29 @@ final mineHistoryCountProvider = FutureProvider<int>((ref) async {
   return ref.watch(readingStoreProvider).historyCount();
 });
 
-/// 收藏（跨小说与短剧，按加入时间倒序）。
+/// 收藏预览（跨小说与短剧，按加入时间倒序）：最多 [mineCollectionPreviewLimit] 个。
 ///
 /// 订阅两个收藏通道：任意一侧加/移收藏都会刷新，阅读进度则不影响。
+final mineCollectionPreviewProvider = FutureProvider<List<LibraryRecord>>((
+  ref,
+) async {
+  ref.watch(shelfRevisionProvider);
+  ref.watch(videoShelfRevisionProvider);
+  return ref
+      .watch(readingStoreProvider)
+      .shelfRecords(limit: mineCollectionPreviewLimit);
+});
+
+/// 收藏（全部条目，弹窗列表用）。
 final mineCollectionProvider = FutureProvider<List<LibraryRecord>>((ref) async {
   ref.watch(shelfRevisionProvider);
   ref.watch(videoShelfRevisionProvider);
   return ref.watch(readingStoreProvider).shelfRecords();
+});
+
+/// 「收藏 N」：只算条数，不为了计数把整个收藏夹读出来。
+final mineCollectionCountProvider = FutureProvider<int>((ref) async {
+  ref.watch(shelfRevisionProvider);
+  ref.watch(videoShelfRevisionProvider);
+  return ref.watch(readingStoreProvider).shelfCount();
 });

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/storage/library_records.dart';
+import '../mine_record_copy.dart';
 import 'library_type_badge.dart';
 import 'mine_recent_tile.dart';
 import 'recent_list.dart';
@@ -23,18 +24,10 @@ class MineHistoryList extends StatelessWidget {
         cover: item.cover,
         title: item.title.isEmpty ? '未命名作品' : item.title,
         label: LibraryTypeBadge(type: item.type),
-        subtitle: _subtitleOf(item),
+        subtitle: mineHistorySubtitle(item),
         updatedAt: DateTime.fromMillisecondsSinceEpoch(item.lastReadAt),
         onTap: () => onOpen(item),
       ),
     );
-  }
-
-  static String _subtitleOf(LibraryRecord item) {
-    if (item.type.isPlaylet) {
-      return '看到第 ${item.progressIndex + 1} 集';
-    }
-    if (item.progressRef.isEmpty) return '尚未开始阅读';
-    return '读到第 ${item.progressIndex + 1} 章';
   }
 }

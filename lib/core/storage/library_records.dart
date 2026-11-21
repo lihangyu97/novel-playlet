@@ -122,7 +122,10 @@ class LibraryRecord {
   /// 真正需要"删掉"这个事实时仍然靠 `shelfRemovedAt`，行本身不删。
   LibraryRecord normalized() {
     // 被淘汰的进度行只留 id / 裁剪时间：快照与进度列都没有意义了。
-    if (progressPrunedAt > 0 && lastReadAt == 0) {
+    //
+    // 例外是在架条目：用户在「历史」里删掉一条时，只清进度、不取消收藏，
+    // 收藏页仍要显示书名封面；这时候快照必须留着。
+    if (progressPrunedAt > 0 && lastReadAt == 0 && !onShelf) {
       return copyWith(
         title: '',
         author: '',

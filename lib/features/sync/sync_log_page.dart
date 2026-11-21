@@ -269,6 +269,7 @@ class _RunTileState extends State<_RunTile> {
         SyncTrigger.lifecycle => '前后台',
         SyncTrigger.config => '保存配置',
         SyncTrigger.settings => '设置变更',
+        SyncTrigger.library => '本地删除',
       }}',
       if (run.remoteUpdatedAt > 0)
         '云端：${logTimeLabel(DateTime.fromMillisecondsSinceEpoch(run.remoteUpdatedAt))} 生成',

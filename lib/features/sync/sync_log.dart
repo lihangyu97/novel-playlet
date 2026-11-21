@@ -13,7 +13,10 @@ enum SyncTrigger {
   manual('manual'),
   lifecycle('lifecycle'),
   config('config'),
-  settings('settings');
+  settings('settings'),
+
+  /// 我的页里删除历史 / 移出收藏后立刻补推一次。
+  library('library');
 
   const SyncTrigger(this.wire);
 

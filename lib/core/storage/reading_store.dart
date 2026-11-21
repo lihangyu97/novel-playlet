@@ -113,20 +113,66 @@ class ReadingStore {
   // ---------------------------------------------------------------------
 
   /// 「历史」：读过且不是墓碑，按最近阅读倒序。`type` 为空时两类混排。
+  ///
+  /// [limit] 为空时取全部；我的页只取前几条预览，全量列表弹窗再放开。
   Future<List<LibraryRecord>> history({
-    int limit = 20,
+    int? limit = 20,
     LibraryType? type,
   }) async {
     return LibraryDb.readHistory(await _db, limit: limit, type: type);
   }
 
   /// 「收藏」：当前在架条目，按加入时间倒序。`type` 为空时两类混排。
-  Future<List<LibraryRecord>> shelfRecords({LibraryType? type}) async {
-    return LibraryDb.readShelf(await _db, type: type);
+  ///
+  /// [limit] 为空时取全部；我的页预览只取前几个，全量列表弹窗再放开。
+  Future<List<LibraryRecord>> shelfRecords({
+    LibraryType? type,
+    int? limit,
+  }) async {
+    return LibraryDb.readShelf(await _db, type: type, limit: limit);
   }
 
   /// 历史条数（不含墓碑），页头统计用。
   Future<int> historyCount() async => LibraryDb.countHistory(await _db);
+
+  /// 收藏条数，页头 / 区块头统计用。
+  Future<int> shelfCount() async => LibraryDb.countShelf(await _db);
+
+  /// 从「历史」里删掉一条：清空阅读进度并写裁剪墓碑，收藏状态不变。
+  ///
+  /// 和 500 条上限的淘汰一样不删行：远端旧进度会在下次同步回来，只有
+  /// `progressPrunedAt` 晚于对方 `lastReadAt` 才算真删除（见
+  /// [mergeLibraryRecords]）。如果这条还在收藏里，只清进度、保留快照，
+  /// 收藏页照样能显示书名封面。
+  Future<void> removeHistory(LibraryType type, String sourceId) async {
+    if (sourceId.isEmpty) return;
+    final db = await _db;
+    final now = _now();
+    var written = false;
+    await db.transaction((txn) async {
+      final existing = await LibraryDb.read(txn, type, sourceId);
+      if (existing == null || !existing.hasProgress) return;
+      await LibraryDb.write(
+        txn,
+        existing.copyWith(
+          lastReadAt: 0,
+          progressRef: '',
+          progressIndex: 0,
+          progressSub: 0,
+          progressPrunedAt: now,
+        ),
+      );
+      written = true;
+    });
+    if (!written) return;
+    if (type == LibraryType.novel) {
+      recentRevision.value++;
+      novelRevision.value++;
+    } else {
+      videoHistoryRevision.value++;
+      videoRevision.value++;
+    }
+  }
 
   // ---------------------------------------------------------------------
   // 小说

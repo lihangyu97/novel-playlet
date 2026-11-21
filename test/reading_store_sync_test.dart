@@ -318,4 +318,121 @@ void main() {
       reason: '最新一条保留进度',
     );
   });
+
+  group('从历史里删除一条', () {
+    test('未收藏：清进度、写裁剪墓碑、快照瘦身', () async {
+      final store = ReadingStore();
+      await store.saveProgress(
+        bookId: 'a',
+        bookTitle: 'A',
+        cover: 'https://example.com/a.jpg',
+        chapterId: 'c1',
+        chapterIndex: 2,
+      );
+
+      await store.removeHistory(LibraryType.novel, 'a');
+
+      expect(await store.history(type: LibraryType.novel), isEmpty);
+      expect(await store.progress('a'), isNull);
+      final record = recordOf(await store.exportSyncData());
+      expect(record['progressPrunedAt'], greaterThan(0));
+      expect(record.containsKey('lastReadAt'), isFalse);
+      expect(record.containsKey('title'), isFalse, reason: '不在收藏里的行不留快照');
+    });
+
+    test('在收藏里：只清历史，收藏快照保留', () async {
+      final store = ReadingStore();
+      await store.addToShelf(
+        const NovelItem(
+          id: 'a',
+          title: 'A',
+          cover: 'https://example.com/a.jpg',
+        ),
+      );
+      await store.saveProgress(
+        bookId: 'a',
+        bookTitle: 'A',
+        cover: 'https://example.com/a.jpg',
+        chapterId: 'c1',
+        chapterIndex: 2,
+      );
+
+      await store.removeHistory(LibraryType.novel, 'a');
+
+      expect(await store.history(type: LibraryType.novel), isEmpty);
+      final shelf = await store.shelfRecords(type: LibraryType.novel);
+      expect(shelf.single.title, 'A');
+      expect(shelf.single.cover, 'https://example.com/a.jpg');
+      final record = recordOf(await store.exportSyncData());
+      expect(record['progressPrunedAt'], greaterThan(0));
+      expect(record['title'], 'A');
+      expect(record['shelfAt'], greaterThan(0));
+    });
+
+    test('同步后远端旧进度不复活，裁剪之后的新进度才复活', () async {
+      final store = ReadingStore();
+      await store.saveProgress(
+        bookId: 'a',
+        bookTitle: 'A',
+        cover: '',
+        chapterId: 'c1',
+        chapterIndex: 1,
+      );
+      await store.removeHistory(LibraryType.novel, 'a');
+      final prunedAt =
+          recordOf(await store.exportSyncData())['progressPrunedAt'] as int;
+
+      await store.applySyncData({
+        'items': [
+          {
+            'type': 'novel',
+            'id': 'a',
+            'title': 'A',
+            'lastReadAt': prunedAt - 1000,
+            'chapterId': 'old',
+            'chapterIndex': 0,
+          },
+        ],
+      });
+      expect(
+        await store.history(type: LibraryType.novel),
+        isEmpty,
+        reason: '删除历史是比旧进度更新的裁剪事实',
+      );
+
+      await store.applySyncData({
+        'items': [
+          {
+            'type': 'novel',
+            'id': 'a',
+            'title': 'A',
+            'lastReadAt': prunedAt + 1000,
+            'chapterId': 'new',
+            'chapterIndex': 8,
+          },
+        ],
+      });
+      final history = await store.history(type: LibraryType.novel);
+      expect(history.single.progressRef, 'new', reason: '另一台设备裁剪后读过，应当复活');
+    });
+
+    test('短剧历史删除只 bump 短剧进度通道，不动收藏计数', () async {
+      final store = ReadingStore();
+      await store.addVideoToShelf(const VideoSeries(id: 'v1', title: '剧一'));
+      await store.saveVideoProgress(
+        seriesId: 'v1',
+        title: '剧一',
+        episodeIndex: 3,
+      );
+
+      final recentBefore = store.videoHistoryRevision.value;
+      final shelfBefore = store.videoShelfRevision.value;
+      await store.removeHistory(LibraryType.playlet, 'v1');
+
+      expect(store.videoHistoryRevision.value, recentBefore + 1);
+      expect(store.videoShelfRevision.value, shelfBefore);
+      expect(await store.history(type: LibraryType.playlet), isEmpty);
+      expect(await store.shelfRecords(type: LibraryType.playlet), hasLength(1));
+    });
+  });
 }
