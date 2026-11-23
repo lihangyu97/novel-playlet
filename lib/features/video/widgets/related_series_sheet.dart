@@ -32,11 +32,15 @@ String relatedSearchQuery(String seriesTitle) {
   return fallback.isEmpty ? seriesTitle.trim() : fallback;
 }
 
-String _cleanQuery(String raw) => raw
-    .replaceAll(RegExp(r'\s+'), ' ')
-    .replaceAll(RegExp(r'^[·\-—_|：:]+'), '')
-    .replaceAll(RegExp(r'[·\-—_|：:]+$'), '')
-    .trim();
+String _cleanQuery(String raw) {
+  // 先收掉空白再裁标点：否则「某剧· 第2期」去掉集号后末尾是空格，
+  // 尾部的「·」不在字符串末尾，最后 trim 只吃掉空格，搜索词会带个「·」。
+  final collapsed = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return collapsed
+      .replaceAll(RegExp(r'^[·\-—_|：:]+'), '')
+      .replaceAll(RegExp(r'[·\-—_|：:]+$'), '')
+      .trim();
+}
 
 /// 播放页「相关」底部弹层，点一条返回 [VideoSeries]。
 ///
