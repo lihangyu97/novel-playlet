@@ -245,6 +245,20 @@ class ApiClient {
     return VideoDetail.fromPayload(payload);
   }
 
+  /// 短剧相关系列：内核 `/api/v1/series/{id}/related` 对应官方
+  /// `scene=10 / from=series_short_play_info`，返回同系列其它季 + 相关推荐。
+  ///
+  /// 与按标题搜索不同，这个接口只认 `series_id`，不依赖标题里有没有写季号；
+  /// 结果复用 `parseVideoSeries`（`data[].video_data[]` 会被递归展开并按 id 去重）。
+  Future<List<VideoSeries>> seriesRelated(String seriesId) async {
+    if (seriesId.isEmpty) return const [];
+    final payload = await _getJson(
+      '/api/v1/series/${Uri.encodeComponent(seriesId)}/related',
+      const {},
+    );
+    return parseVideoSeries(payload);
+  }
+
   /// 短剧选集：与小说目录同一条路由，上游按剧集 id 返回分集列表。
   Future<List<Chapter>> videoEpisodes(String seriesId) => directory(seriesId);
 
