@@ -377,7 +377,7 @@ void main() {
     expect(
       group.segments.map((segment) => segment.value),
       DialogueHighlightStyle.values,
-      reason: '荧光笔 / 下划线 / 波浪线三种画法',
+      reason: '荧光笔 / 下划线 / 波浪线 / 文本四种画法',
     );
 
     // 布局：样式按钮组在色板上方，十六进制缩到色相条右边（同一行）。

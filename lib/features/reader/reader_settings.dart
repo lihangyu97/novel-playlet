@@ -5,14 +5,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/theme/app_font_weight.dart';
 import '../../app/theme/app_theme.dart';
 
-/// 对话高亮的画法：荧光笔底纹 / 下划线 / 波浪线。
+/// 对话高亮的画法：荧光笔底纹 / 下划线 / 波浪线 / 文字着色。
 ///
-/// 三种都只画在正文之上、不参与排版：换样式只触发一次重绘，不重排、不丢阅读
-/// 位置（分页缓存 key 里没有它）。
+/// 前三种只画在正文之上，最后一种直接给命中区间的文字换颜色；四种都不参与
+/// 排版：换样式只触发一次重绘/重着色，不重排、不丢阅读位置（分页缓存 key
+/// 里没有它）。
 enum DialogueHighlightStyle {
   marker('荧光笔'),
   underline('下划线'),
-  wavy('波浪线');
+  wavy('波浪线'),
+  text('文本');
 
   const DialogueHighlightStyle(this.label);
 

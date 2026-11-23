@@ -114,7 +114,7 @@ class _ThemeColorPickerSheetState extends State<ThemeColorPickerSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 样式/模式类选项放最上面（对话高亮用它放三种画法），下面是调色区。
+            // 样式/模式类选项放最上面（对话高亮用它放画法按钮组），下面是调色区。
             if (widget.leading != null) ...[
               widget.leading!,
               const SizedBox(height: 14),
