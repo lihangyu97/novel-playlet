@@ -686,6 +686,8 @@ flutter build apk --release --target-platform android-arm64
 ```
 
 - Manifest 已补 `INTERNET`、`network_security_config`（只放行 127.0.0.1 明文回环）、备份排除规则、图标与显示名。
+- 自适应图标（API 26+）：前景层透明，番茄内容宽按 108dp 画布的 46.5% 放置（可见 72dp 圆内约占 70%，与 iOS 图标
+  视觉占比一致）；legacy mipmap 的内容宽度保持 70%。改图时不要按满画布铺，否则会被系统遮罩裁得比 iOS 大一圈。
 - 正式签名读 `android/key.properties`（仓库外，git 忽略）；没有配置时回退 debug 签名，只能自测、不能覆盖升级。
 - 常见问题：启动报 `UnsatisfiedLinkError` → `.so` 没编或 ABI 不对；release 包接口全失败 → 缺 `INTERNET`；
   播放报 `PanicException(... rustls-platform-verifier ...)` → 旧包，重新构建；装不上 → 签名不一致，先卸载。
