@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/backend/backend_service.dart';
 import '../core/diagnostics/diagnostic_log.dart';
+import '../core/storage/library_records.dart';
 import '../core/storage/reading_store.dart';
 import '../data/api/api_client.dart';
 
@@ -31,6 +32,30 @@ final backendEnsureLoopbackProvider = Provider<Future<bool> Function()>(
 
 /// 书架与阅读进度。
 final readingStoreProvider = Provider<ReadingStore>((ref) => ReadingStore());
+
+/// 「在看」变更计数：阅读页 / 播放页的悬浮按钮与「我的」页共用。
+final pinRevisionProvider = NotifierProvider<PinRevision, int>(PinRevision.new);
+
+class PinRevision extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(readingStoreProvider);
+    void onChanged() => state = store.pinRevision.value;
+    store.pinRevision.addListener(onChanged);
+    ref.onDispose(() => store.pinRevision.removeListener(onChanged));
+    return store.pinRevision.value;
+  }
+}
+
+/// 某条内容当前是否在「在看」里。
+///
+/// 阅读页 / 播放页的悬浮按钮订阅它；切换 pin 后 [pinRevisionProvider] 变化，
+/// 按钮图标自动跟着切换。
+final libraryPinnedProvider = FutureProvider.autoDispose
+    .family<bool, ({LibraryType type, String id})>((ref, key) async {
+      ref.watch(pinRevisionProvider);
+      return ref.watch(readingStoreProvider).isPinned(key.type, key.id);
+    });
 
 /// 启动闸门：部署运行时文件并启动 Rust 核。
 ///

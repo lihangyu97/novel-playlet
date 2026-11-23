@@ -10,9 +10,11 @@ import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/widgets/app_bottom_sheet.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
+import 'package:novel_playlet/core/storage/library_records.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book_store.dart';
 import 'package:novel_playlet/core/storage/offline/offline_paths.dart';
+import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/chapter.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
@@ -411,6 +413,42 @@ void main() {
     await tester.tap(find.text('日间'));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(container.read(readerSettingsProvider).paper, ReaderPaper.green);
+  });
+
+  /// 工具栏右下角的「在看」悬浮按钮：工具栏收起时不可见、不拦点击；
+  /// 展开后点一下 pin、再点一下取消。
+  testWidgets('阅读页-在看悬浮按钮可 pin 与取消', (tester) async {
+    final store = ReadingStore();
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      store: store,
+    );
+
+    double buttonOpacity() => tester
+        .widget<AnimatedOpacity>(
+          find.ancestor(
+            of: find.byKey(ReaderPinButton.buttonKey),
+            matching: find.byType(AnimatedOpacity),
+          ),
+        )
+        .opacity;
+    expect(buttonOpacity(), 0, reason: '工具栏收起时不显示在看按钮');
+
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(buttonOpacity(), 1);
+
+    await tester.tap(find.byKey(ReaderPinButton.buttonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(await store.isPinned(LibraryType.novel, '1'), isTrue);
+    expect((await store.pinnedRecords()).single.title, '剑来');
+
+    await tester.tap(find.byKey(ReaderPinButton.buttonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(await store.isPinned(LibraryType.novel, '1'), isFalse);
   });
 
   testWidgets('阅读页-缓存状态：未缓存显示缓存小说', (tester) async {

@@ -12,7 +12,7 @@ import 'package:novel_playlet/features/video/video_player_page.dart';
 
 import 'preview_harness.dart';
 
-/// 我的页：历史 + 收藏（小说与短剧混排）。
+/// 我的页：在看 + 收藏 + 历史（小说与短剧混排）。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/mine_test.dart`。
 void main() {
@@ -37,7 +37,7 @@ void main() {
     await pumpPreview(tester, const MinePage());
 
     expect(find.text('我的'), findsOneWidget, reason: '统一页头标题');
-    expect(find.text('历史 0 · 收藏 0'), findsOneWidget);
+    expect(find.text('在看'), findsNothing, reason: '没有 pin 时整块隐藏');
     expect(find.text('历史'), findsOneWidget);
     expect(find.text('收藏'), findsOneWidget);
     expect(find.text('0 条'), findsNWidgets(2), reason: '两个区块头都显示条数');
@@ -123,6 +123,53 @@ void main() {
     await tester.tap(find.text('看到第 5 集'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(find.byType(VideoPlayerPage), findsOneWidget);
+  });
+
+  testWidgets('我的页-在看：一排卡片、区块顺序在看/收藏/历史', (tester) async {
+    final store = ReadingStore();
+    await store.saveProgress(
+      bookId: 'n1',
+      bookTitle: '剑来',
+      cover: '',
+      chapterId: 'c3',
+      chapterIndex: 2,
+    );
+    await store.togglePin(
+      type: LibraryType.novel,
+      sourceId: 'n1',
+      title: '剑来',
+    );
+    await store.saveVideoProgress(
+      seriesId: 'p1',
+      title: '太奶奶的短剧',
+      episodeIndex: 4,
+    );
+    await store.togglePin(
+      type: LibraryType.playlet,
+      sourceId: 'p1',
+      title: '太奶奶的短剧',
+    );
+
+    await pumpPreview(tester, const MinePage(), store: store);
+
+    expect(find.text('在看'), findsOneWidget);
+    expect(find.text('读到第 3 章'), findsNWidgets(2), reason: '在看卡片 + 历史行');
+
+    // 页面顺序：在看 → 收藏 → 历史。
+    final pinTop = tester.getTopLeft(find.byKey(MinePage.pinKey)).dy;
+    final collectionTop = tester
+        .getTopLeft(find.byKey(MinePage.collectionKey))
+        .dy;
+    final historyTop = tester.getTopLeft(find.byKey(MinePage.historyKey)).dy;
+    expect(pinTop, lessThan(collectionTop));
+    expect(collectionTop, lessThan(historyTop));
+
+    // 全量弹窗能看到两条在看，并可直接取消。
+    await tester.tap(find.byKey(MinePage.pinAllKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(find.byKey(mineAllSheetKey), findsOneWidget);
+    expect(find.text('全部在看'), findsOneWidget);
+    expect(find.text('共 2 条'), findsOneWidget);
   });
 
   testWidgets('我的页-收藏混排：统一 3:4 封面 + 标签 + 长按移出', (tester) async {

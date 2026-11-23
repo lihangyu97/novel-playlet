@@ -355,6 +355,29 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               bottom: 0,
               child: _buildBottomBar(settings),
             ),
+            // 「在看」悬浮按钮：跟着工具栏一起出现/消失，避免常驻时压住正文、
+            // 抢走右下角「下一页」的点击。位置在底部工具栏上方。
+            Positioned(
+              right: 16,
+              bottom: MediaQuery.paddingOf(context).bottom + 72,
+              child: IgnorePointer(
+                ignoring: !_toolbarVisible,
+                child: AnimatedOpacity(
+                  opacity: _toolbarVisible ? 1 : 0,
+                  duration: _toolbarDuration,
+                  child: ReaderPinButton(
+                    bookId: widget.args.bookId,
+                    title: session.bookTitle.isNotEmpty
+                        ? session.bookTitle
+                        : widget.args.bookTitle,
+                    cover: session.cover.isNotEmpty
+                        ? session.cover
+                        : widget.args.cover,
+                    paper: paper,
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),

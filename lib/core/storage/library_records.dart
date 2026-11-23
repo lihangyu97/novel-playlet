@@ -27,10 +27,11 @@ enum LibraryType {
 /// 主键是 [key]（`'$type/$id'`）——小说用 `book_id`、短剧用 `series_id`，
 /// 两者来自不同上游域，裸 id 可能撞号，所以不能拿 id 当主键。
 ///
-/// 字段分三组，合并规则见 [mergeLibraryRecords]：
+/// 字段分四组，合并规则见 [mergeLibraryRecords]：
 /// - 上游快照：整组按 [metaFetchedAt] 取新；
 /// - 进度：整组按 [lastReadAt] 取新；
-/// - 书架：`shelfAt` / `shelfRemovedAt` 各取 max，`shelfAt > shelfRemovedAt` 才算在架。
+/// - 书架：`shelfAt` / `shelfRemovedAt` 各取 max，`shelfAt > shelfRemovedAt` 才算在架；
+/// - 在看：`pinnedAt` / `unpinnedAt` 各取 max，`pinnedAt > unpinnedAt` 才算在看。
 class LibraryRecord {
   const LibraryRecord({
     required this.type,
@@ -49,6 +50,8 @@ class LibraryRecord {
     this.progressPrunedAt = 0,
     this.shelfAt = 0,
     this.shelfRemovedAt = 0,
+    this.pinnedAt = 0,
+    this.unpinnedAt = 0,
   });
 
   final LibraryType type;
@@ -94,9 +97,22 @@ class LibraryRecord {
   final int shelfAt;
   final int shelfRemovedAt;
 
+  // ---- 在看（pin）----
+  /// 最近一次加入「在看」的时间；0 = 从没 pin 过。
+  final int pinnedAt;
+
+  /// 最近一次取消「在看」的时间。
+  ///
+  /// 和书架墓碑同一套规则：取消不把 [pinnedAt] 清 0，而是写这个时间戳，
+  /// 这样云同步能靠 max 合并表达"取消"，不会被远端旧值复活。
+  final int unpinnedAt;
+
   String get key => '${type.wire}/$sourceId';
 
   bool get onShelf => shelfAt > 0 && shelfAt > shelfRemovedAt;
+
+  /// 是否在「在看」列表里：pin 过、且之后没有取消。
+  bool get isPinned => pinnedAt > 0 && pinnedAt > unpinnedAt;
 
   /// 移出过书架且没再加回来 = 墓碑行。
   ///
@@ -125,7 +141,7 @@ class LibraryRecord {
     //
     // 例外是在架条目：用户在「历史」里删掉一条时，只清进度、不取消收藏，
     // 收藏页仍要显示书名封面；这时候快照必须留着。
-    if (progressPrunedAt > 0 && lastReadAt == 0 && !onShelf) {
+    if (progressPrunedAt > 0 && lastReadAt == 0 && !onShelf && !isPinned) {
       return copyWith(
         title: '',
         author: '',
@@ -139,7 +155,8 @@ class LibraryRecord {
         progressSub: 0,
       );
     }
-    if (!isTombstone || hasProgressAfterRemoval) return this;
+    // 在看的行要留快照：pin 卡片还要显示标题，不能因为移出书架/淘汰变空。
+    if (!isTombstone || hasProgressAfterRemoval || isPinned) return this;
     return copyWith(
       title: '',
       author: '',
@@ -173,6 +190,8 @@ class LibraryRecord {
     if (progressPrunedAt > 0) 'progressPrunedAt': progressPrunedAt,
     if (shelfAt > 0) 'shelfAt': shelfAt,
     if (shelfRemovedAt > 0) 'shelfRemovedAt': shelfRemovedAt,
+    if (pinnedAt > 0) 'pinnedAt': pinnedAt,
+    if (unpinnedAt > 0) 'unpinnedAt': unpinnedAt,
   };
 
   static LibraryRecord? tryFromJson(Object? raw) {
@@ -200,6 +219,8 @@ class LibraryRecord {
       progressPrunedAt: asInt(json['progressPrunedAt']),
       shelfAt: asInt(json['shelfAt']),
       shelfRemovedAt: asInt(json['shelfRemovedAt']),
+      pinnedAt: asInt(json['pinnedAt']),
+      unpinnedAt: asInt(json['unpinnedAt']),
     );
   }
 
@@ -218,6 +239,8 @@ class LibraryRecord {
     int? progressPrunedAt,
     int? shelfAt,
     int? shelfRemovedAt,
+    int? pinnedAt,
+    int? unpinnedAt,
   }) => LibraryRecord(
     type: type,
     sourceId: sourceId,
@@ -235,6 +258,8 @@ class LibraryRecord {
     progressPrunedAt: progressPrunedAt ?? this.progressPrunedAt,
     shelfAt: shelfAt ?? this.shelfAt,
     shelfRemovedAt: shelfRemovedAt ?? this.shelfRemovedAt,
+    pinnedAt: pinnedAt ?? this.pinnedAt,
+    unpinnedAt: unpinnedAt ?? this.unpinnedAt,
   );
 
   /// 任何一个参与合并的字段是否不同（决定要不要落盘、要不要 bump revision）。
@@ -255,7 +280,9 @@ class LibraryRecord {
       progressSub != other.progressSub ||
       progressPrunedAt != other.progressPrunedAt ||
       shelfAt != other.shelfAt ||
-      shelfRemovedAt != other.shelfRemovedAt;
+      shelfRemovedAt != other.shelfRemovedAt ||
+      pinnedAt != other.pinnedAt ||
+      unpinnedAt != other.unpinnedAt;
 
   /// 书架状态是否变化（用于 bump shelfRevision）。
   bool shelfDiffersFrom(LibraryRecord other) =>
@@ -326,5 +353,8 @@ LibraryRecord mergeLibraryRecords(LibraryRecord local, LibraryRecord remote) {
     progressPrunedAt: progressPrunedAt,
     shelfAt: math.max(local.shelfAt, remote.shelfAt),
     shelfRemovedAt: math.max(local.shelfRemovedAt, remote.shelfRemovedAt),
+    // 在看：两列各取 max，本地 pin / 取消都能压过远端旧值。
+    pinnedAt: math.max(local.pinnedAt, remote.pinnedAt),
+    unpinnedAt: math.max(local.unpinnedAt, remote.unpinnedAt),
   ).normalized();
 }

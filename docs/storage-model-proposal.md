@@ -111,6 +111,8 @@ CREATE TABLE library_novel_meta (
 | `last_read_at` + `chapter_id` + `chapter_index` + `block_index` | **整组**按 `last_read_at` 取大；相等时取远端 | 不能各带时间戳，否则出现"时间取自 A、位置取自 B"的混搭 |
 | `shelf_at` | max | 加入时间单调前进 |
 | `shelf_removed_at` | max；相等时取远端 | 删除可表达，且不会被旧值复活 |
+| `pinned_at` | max | 「在看」加入时间单调前进 |
+| `unpinned_at` | max；相等时取远端 | 取消在看可表达，且不会被旧值复活 |
 | `title` / `author` / `cover` / `color_dominate` | 整组按 `meta_fetched_at` 取大；相等时取远端 | 收敛；且为将来"详情页刷新元信息"留出口子 |
 
 ### 4.3 为什么 `是否在书架` 不能是裸布尔

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -5,11 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/providers.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_bottom_sheet.dart';
 import '../../app/widgets/app_snack_bar.dart';
 import '../../app/widgets/color_swatch_dot.dart';
 import '../../app/widgets/setting_switch_row.dart';
+import '../../core/storage/library_records.dart';
 import 'reader_background.dart';
 import 'reader_pagination.dart';
 import 'reader_settings.dart';
@@ -922,5 +925,81 @@ class _ReaderBackgroundRowState extends ConsumerState<_ReaderBackgroundRow> {
           ),
       ],
     );
+  }
+}
+
+/// 阅读页右下角的「在看」悬浮按钮。
+///
+/// 只在工具栏展开时显示（由阅读页控制显隐与点击穿透）：阅读页整屏都是翻页
+/// 点击区，常驻按钮会吃掉右下角"下一页"的手势。点一下 pin、再点取消，
+/// 状态来自 [libraryPinnedProvider]，和「我的 → 在看」是同一份数据。
+class ReaderPinButton extends ConsumerWidget {
+  const ReaderPinButton({
+    super.key,
+    required this.bookId,
+    required this.title,
+    required this.cover,
+    required this.paper,
+  });
+
+  /// 测试 / 无障碍定位。
+  static const Key buttonKey = Key('reader-pin-button');
+
+  final String bookId;
+  final String title;
+  final String cover;
+  final ReaderPaper paper;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pinnedState = ref.watch(
+      libraryPinnedProvider((type: LibraryType.novel, id: bookId)),
+    );
+    final pinned = pinnedState.value ?? false;
+    final foreground = paper.foreground;
+    return Tooltip(
+      message: pinned ? '取消在看' : '加入在看',
+      child: Material(
+        key: buttonKey,
+        color: paper.background.withValues(alpha: 0.92),
+        shape: const CircleBorder(),
+        elevation: 2,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => unawaited(_toggle(context, ref, pinned: pinned)),
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Icon(
+              pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+              size: 21,
+              color: pinned
+                  ? Theme.of(context).colorScheme.primary
+                  : foreground.withValues(alpha: 0.72),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggle(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool pinned,
+  }) async {
+    try {
+      await ref
+          .read(readingStoreProvider)
+          .togglePin(
+            type: LibraryType.novel,
+            sourceId: bookId,
+            title: title,
+            cover: cover,
+          );
+    } catch (_) {
+      if (!context.mounted) return;
+      showAppSnackBar(context, pinned ? '取消在看失败，请重试' : '加入在看失败，请重试');
+    }
   }
 }

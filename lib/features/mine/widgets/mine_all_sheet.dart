@@ -16,7 +16,7 @@ import 'library_type_badge.dart';
 import 'mine_recent_tile.dart';
 
 /// 「全部」弹窗看的是哪一类数据。
-enum MineAllScope { history, collection }
+enum MineAllScope { pin, history, collection }
 
 /// 全量列表弹窗的定位 key（测试 / 无障碍）。
 const Key mineAllSheetKey = Key('mine-all-sheet');
@@ -55,11 +55,29 @@ class _MineAllSheetState extends ConsumerState<MineAllSheet> {
 
   bool get _isHistory => widget.scope == MineAllScope.history;
 
-  FutureProvider<List<LibraryRecord>> get _itemsProvider =>
-      _isHistory ? mineHistoryAllProvider : mineCollectionProvider;
+  bool get _isPin => widget.scope == MineAllScope.pin;
 
-  FutureProvider<int> get _countProvider =>
-      _isHistory ? mineHistoryCountProvider : mineCollectionCountProvider;
+  FutureProvider<List<LibraryRecord>> get _itemsProvider {
+    switch (widget.scope) {
+      case MineAllScope.pin:
+        return minePinsProvider;
+      case MineAllScope.history:
+        return mineHistoryAllProvider;
+      case MineAllScope.collection:
+        return mineCollectionProvider;
+    }
+  }
+
+  FutureProvider<int> get _countProvider {
+    switch (widget.scope) {
+      case MineAllScope.pin:
+        return minePinCountProvider;
+      case MineAllScope.history:
+        return mineHistoryCountProvider;
+      case MineAllScope.collection:
+        return mineCollectionCountProvider;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,7 +91,11 @@ class _MineAllSheetState extends ConsumerState<MineAllSheet> {
     final total = visible?.length ?? count;
     return AppBottomSheet(
       key: mineAllSheetKey,
-      title: _isHistory ? '全部历史' : '全部收藏',
+      title: switch (widget.scope) {
+        MineAllScope.pin => '全部在看',
+        MineAllScope.history => '全部历史',
+        MineAllScope.collection => '全部收藏',
+      },
       subtitle: total == null ? null : '共 $total 条',
       heightFactor: 0.72,
       child: _body(async, visible),
@@ -94,8 +116,16 @@ class _MineAllSheetState extends ConsumerState<MineAllSheet> {
     }
     if (items.isEmpty) {
       return EmptyView(
-        message: _isHistory ? '还没有阅读记录，去推荐页逛逛' : '收藏夹还是空的，去推荐页看看',
-        icon: _isHistory ? Icons.history_rounded : Icons.star_border_rounded,
+        message: switch (widget.scope) {
+          MineAllScope.pin => '还没有在看的内容，去阅读页或播放页点 pin 试试',
+          MineAllScope.history => '还没有阅读记录，去推荐页逛逛',
+          MineAllScope.collection => '收藏夹还是空的，去推荐页看看',
+        },
+        icon: switch (widget.scope) {
+          MineAllScope.pin => Icons.push_pin_outlined,
+          MineAllScope.history => Icons.history_rounded,
+          MineAllScope.collection => Icons.star_border_rounded,
+        },
       );
     }
     return ListView.builder(
@@ -106,18 +136,28 @@ class _MineAllSheetState extends ConsumerState<MineAllSheet> {
         return Dismissible(
           key: ValueKey('mine-all-${widget.scope.name}/${item.key}'),
           direction: DismissDirection.endToStart,
-          background: _SwipeDeleteBackground(label: _isHistory ? '删除' : '移出收藏'),
+          background: _SwipeDeleteBackground(
+            label: switch (widget.scope) {
+              MineAllScope.pin => '取消在看',
+              MineAllScope.history => '删除',
+              MineAllScope.collection => '移出收藏',
+            },
+          ),
           confirmDismiss: (_) => _confirmDelete(item),
           onDismissed: (_) => _delete(item),
           child: MineRecentTile(
             cover: item.cover,
             title: item.title.isEmpty ? '未命名作品' : item.title,
             label: LibraryTypeBadge(type: item.type),
-            subtitle: _isHistory
+            subtitle: _isHistory || _isPin
                 ? mineHistorySubtitle(item)
                 : mineCollectionSubtitle(item),
             updatedAt: DateTime.fromMillisecondsSinceEpoch(
-              _isHistory ? item.lastReadAt : item.shelfAt,
+              switch (widget.scope) {
+                MineAllScope.pin => item.pinnedAt,
+                MineAllScope.history => item.lastReadAt,
+                MineAllScope.collection => item.shelfAt,
+              },
             ),
             onTap: () => widget.onOpen(item),
           ),
@@ -133,9 +173,18 @@ class _MineAllSheetState extends ConsumerState<MineAllSheet> {
       builder: (dialogContext) {
         final scheme = Theme.of(dialogContext).colorScheme;
         return AlertDialog(
-          title: Text(_isHistory ? '删除这条历史？' : '移出收藏？'),
+          title: Text(
+            _isPin
+                ? '取消在看？'
+                : _isHistory
+                ? '删除这条历史？'
+                : '移出收藏？',
+          ),
           content: Text(
-            _isHistory
+            _isPin
+                ? '《$title》会从「在看」列表移除，阅读/观看进度不受影响。'
+                      '操作会同步到 WebDAV。'
+                : _isHistory
                 ? '会清掉本机的阅读进度；如果《$title》还在收藏里，收藏不受影响。'
                       '删除会同步到 WebDAV。'
                 : '《$title》会从收藏里移除，阅读/观看记录也会一并清掉。'
@@ -149,7 +198,7 @@ class _MineAllSheetState extends ConsumerState<MineAllSheet> {
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
               style: TextButton.styleFrom(foregroundColor: scheme.error),
-              child: Text(_isHistory ? '删除' : '移出收藏'),
+              child: Text(_isPin ? '取消在看' : (_isHistory ? '删除' : '移出收藏')),
             ),
           ],
         );
@@ -167,7 +216,9 @@ class _MineAllSheetState extends ConsumerState<MineAllSheet> {
     final store = ref.read(readingStoreProvider);
     setState(() => _removedKeys.add(item.key));
     try {
-      if (_isHistory) {
+      if (_isPin) {
+        await store.unpin(item.type, item.sourceId);
+      } else if (_isHistory) {
         await store.removeHistory(item.type, item.sourceId);
       } else if (item.type.isPlaylet) {
         await store.removeVideoFromShelf(item.sourceId);
