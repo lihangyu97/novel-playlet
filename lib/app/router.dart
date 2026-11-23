@@ -39,6 +39,13 @@ sealed class AppRoute<T> {
 extension AppRouteContext on BuildContext {
   Future<T?> pushAppRoute<T>(AppRoute<T> route) =>
       Navigator.of(this).push(route.toRoute());
+
+  /// 用新页面替换当前页面：返回时直接回到当前页的上一页，不再经过被替换的页。
+  ///
+  /// 播放页「相关」连续跳剧用它：A → B → C 之后返回应回到进播放页之前那层，
+  /// 而不是沿 C → B → A 一层层退。
+  Future<T?> replaceAppRoute<T>(AppRoute<T> route) =>
+      Navigator.of(this).pushReplacement<T, Object?>(route.toRoute());
 }
 
 /// 小说详情页。[preview] 是列表里点进来的卡片，用来在详情接口返回前先把
