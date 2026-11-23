@@ -6,24 +6,37 @@ import '../../../app/theme/app_theme.dart';
 import '../../../app/widgets/app_bottom_sheet.dart';
 import '../../../app/widgets/novel_cover.dart';
 import '../../../app/widgets/states.dart';
+import '../../../core/season_title.dart';
 import '../../../data/models/video_series.dart';
 
-/// 把「剧名 + 第 x 集」清洗成搜索词。
+/// 把「剧名 + 第 x 集 / 第 x 季」清洗成搜索词。
 ///
-/// 上游有些剧名本身带集号（`某剧 第12集`、`某剧（第 3 集）`、`某剧 [第9话]`），
-/// 直接拿去搜会把集号也算进关键词；这里把集号连同两侧括号一起去掉。
+/// 上游有些剧名本身带季/集号（`某剧 第12集`、`某剧（第二季）`、`某剧 [第9话]`、
+/// `某剧 第2季 第3集`），直接拿去搜会把序号也算进关键词。季和集都去掉：
+/// 每季是独立 `series_id`，去掉季号才能搜到同系列其它季与相近短剧。
 /// 清洗后为空（标题只有「第 1 集」）时退回原剧名，避免发空查询。
 String relatedSearchQuery(String seriesTitle) {
-  final stripped = seriesTitle
-      .replaceAll(RegExp(r'[\[\(（【]?\s*第\s*\d+\s*[集话期]\s*[\]\)）】]?'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  final cleaned = stripped
-      .replaceAll(RegExp(r'^[·\-—_|]+'), '')
-      .replaceAll(RegExp(r'[·\-—_|]+$'), '')
-      .trim();
-  return cleaned.isEmpty ? seriesTitle.trim() : cleaned;
+  final withoutSeason = stripSeasonMarker(seriesTitle);
+  final withoutNumbers = withoutSeason.replaceAll(
+    RegExp(
+      r'[\[\(（【]?\s*第\s*'
+      r'(?:[0-9]+|[零一二两三四五六七八九十百千]{1,4})'
+      r'\s*[集话期]\s*[\]\)）】]?',
+    ),
+    ' ',
+  );
+  final cleaned = _cleanQuery(withoutNumbers);
+  if (cleaned.isNotEmpty) return cleaned;
+  // 标题本身只有序号时退回原剧名，避免拿空串去搜。
+  final fallback = _cleanQuery(seriesTitle);
+  return fallback.isEmpty ? seriesTitle.trim() : fallback;
 }
+
+String _cleanQuery(String raw) => raw
+    .replaceAll(RegExp(r'\s+'), ' ')
+    .replaceAll(RegExp(r'^[·\-—_|：:]+'), '')
+    .replaceAll(RegExp(r'[·\-—_|：:]+$'), '')
+    .trim();
 
 /// 播放页「相关」底部弹层：用当前剧名搜短剧/漫剧，点一条返回 [VideoSeries]。
 ///
