@@ -14,19 +14,30 @@ import '../../app/theme/app_theme.dart';
 /// 设备没有这份文件，同步过去只会得到一张坏图。换机后回退到纸色即可。
 @immutable
 class ReaderBackground {
-  const ReaderBackground({this.filePath});
+  const ReaderBackground({this.filePath, this.active = false});
 
   /// 已落盘的绝对路径；null = 没设背景图（或文件已丢失）。
   final String? filePath;
 
+  /// 这张图是否正作为「自定义底色」生效。
+  ///
+  /// 有图不等于生效：用户可以从自定义切回白/纸/护眼/夜间，图片留着下次再用；
+  /// 夜间也不铺图，但 [active] 保留，切回日间会自动恢复。
+  final bool active;
+
   bool get hasImage => filePath != null;
+
+  /// 当前是否真的应该把图画出来（日间 + 已启用 + 有文件）。
+  bool get showsImage => active && hasImage;
 
   @override
   bool operator ==(Object other) =>
-      other is ReaderBackground && other.filePath == filePath;
+      other is ReaderBackground &&
+      other.filePath == filePath &&
+      other.active == active;
 
   @override
-  int get hashCode => filePath.hashCode;
+  int get hashCode => Object.hash(filePath, active);
 }
 
 final readerBackgroundProvider =
@@ -40,6 +51,7 @@ final readerBackgroundProvider =
 /// 后会变，存绝对路径下次启动就是一张坏图。
 class ReaderBackgroundController extends Notifier<ReaderBackground> {
   static const String prefsKey = 'reader_background_image_v1';
+  static const String activeKey = 'reader_background_active_v1';
   static const String _dirName = 'reader';
 
   /// 相册原图动辄几 MB，按屏幕需要的上限压一道再落盘。
@@ -72,11 +84,16 @@ class ReaderBackgroundController extends Notifier<ReaderBackground> {
       // 文件被用户/系统清理掉时顺手清掉悬空偏好，下次照常走纸色。
       // 恢复期间用户刚选过图就不要再动偏好，否则会把新文件名删掉。
       if (!await file.exists()) {
-        if (!_userChanged) await prefs.remove(prefsKey);
+        if (!_userChanged) {
+          await prefs.remove(prefsKey);
+          await prefs.remove(activeKey);
+        }
         return;
       }
       if (_userChanged) return;
-      state = ReaderBackground(filePath: file.path);
+      // 老版本没有 active 键：当时有图就会直接铺，迁移时按启用处理。
+      final active = prefs.getBool(activeKey) ?? true;
+      state = ReaderBackground(filePath: file.path, active: active);
     } catch (_) {
       // 平台通道/磁盘不可用（Widget 测试、首次启动）时静默回退纸色。
       return;
@@ -103,13 +120,30 @@ class ReaderBackgroundController extends Notifier<ReaderBackground> {
     final previous = state.filePath;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(prefsKey, name);
+    await prefs.setBool(activeKey, true);
     _userChanged = true;
-    state = ReaderBackground(filePath: target.path);
+    state = ReaderBackground(filePath: target.path, active: true);
     // 旧图只留一份，避免每次更换都多占几百 KB。
     if (previous != null && previous != target.path) {
       await _deleteQuietly(File(previous));
     }
     return true;
+  }
+
+  /// 把已保存的图设为当前底色（日间）。没有图时是 no-op。
+  Future<void> activate() async {
+    if (!state.hasImage || state.active) return;
+    _userChanged = true;
+    state = ReaderBackground(filePath: state.filePath, active: true);
+    await _persistActive(true);
+  }
+
+  /// 退出自定义底色，回白/纸/护眼/夜间；图片文件保留。
+  Future<void> deactivate() async {
+    if (!state.active) return;
+    _userChanged = true;
+    state = ReaderBackground(filePath: state.filePath, active: false);
+    await _persistActive(false);
   }
 
   Future<void> clear() async {
@@ -119,10 +153,21 @@ class ReaderBackgroundController extends Notifier<ReaderBackground> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(prefsKey);
+      await prefs.remove(activeKey);
     } catch (_) {
       return;
     }
     if (previous != null) await _deleteQuietly(File(previous));
+  }
+
+  Future<void> _persistActive(bool active) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(activeKey, active);
+    } catch (_) {
+      // 测试/平台通道不可用时只保留内存状态。
+      return;
+    }
   }
 
   Future<Directory> _directory() async {
@@ -158,8 +203,8 @@ class ReaderBackgroundLayer extends StatelessWidget {
   /// 背景图绝对路径；null 时只画纸色（用于状态页兜底）。
   final String? filePath;
 
-  /// 纸色遮罩透明度：0.55 意味着图片只贡献 45%，正文仍是"纸上的字"。
-  static const double scrimAlpha = 0.55;
+  /// 纸色遮罩透明度：0.45 意味着图片贡献约 55%，仍保留足够的文字对比度。
+  static const double scrimAlpha = 0.45;
 
   @override
   Widget build(BuildContext context) {

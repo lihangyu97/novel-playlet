@@ -268,7 +268,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final paper = settings.paper;
     // 夜间纸不铺背景图：直接回退到纯夜间底色，避免"黑纸上再压一层黑"。
     final background = ref.watch(readerBackgroundProvider);
-    final showBackground = paper != ReaderPaper.night && background.hasImage;
+    final showBackground = paper != ReaderPaper.night && background.showsImage;
 
     // 正文真正换了（contentIndex 变化）才播过渡：向前翻从右侧滑入、向后翻
     // 从左侧滑入。加载态切换不播，避免"先淡入 loading 再淡入正文"两次闪。
@@ -430,7 +430,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   Widget _buildStatus(ReaderPaper paper, Widget child) {
     // 有背景图时状态页也保持透明，让图透上来；没图才铺纸色。
     final background = ref.read(readerBackgroundProvider);
-    final hasBackdrop = paper != ReaderPaper.night && background.hasImage;
+    final hasBackdrop = paper != ReaderPaper.night && background.showsImage;
     return ColoredBox(
       color: hasBackdrop ? Colors.transparent : paper.background,
       child: Theme(data: _readerTheme(paper), child: child),
@@ -528,7 +528,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final foreground = paper.foreground;
     // 背景图是否生效：夜间纸直接不铺图（回退纯夜间底色）。
     final background = ref.read(readerBackgroundProvider);
-    final hasBackdrop = paper != ReaderPaper.night && background.hasImage;
+    final hasBackdrop = paper != ReaderPaper.night && background.showsImage;
     // 在 build 阶段取一次主题字体，避免在 LayoutBuilder 的布局阶段做
     // InheritedWidget 查找；测量与渲染用同一个值。
     final fontFamily = Theme.of(context).textTheme.bodyMedium?.fontFamily;

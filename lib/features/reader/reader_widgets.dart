@@ -531,6 +531,10 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
     final fontWeight =
         _previewFontWeight ?? effectiveFontWeight.value.toDouble();
     final paper = settings.paper;
+    // 自定义图启用且当前是日间时，第五个圆球才是当前底色，纸色不显示选中；
+    // 夜间实际底色是纯黑，夜间色块照常选中，图片圆球只变暗。
+    final customActive = ref.watch(readerBackgroundProvider).active;
+    final customSelected = customActive && paper != ReaderPaper.night;
     final foreground = paper.foreground;
     final muted = foreground.withValues(alpha: 0.55);
     // 弹层由阅读页用「纸色对应的 Theme」包着（reader_page._readerTheme），
@@ -640,14 +644,23 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
                                 color: option.background,
                                 size: dotSize,
                                 tooltip: option.label,
-                                selected: option == paper,
+                                selected: option == paper && !customSelected,
                                 ringColor: highlight,
                                 iconColor: option.foreground,
                                 unselectedBorder: foreground.withValues(
                                   alpha: 0.2,
                                 ),
                                 unselectedBorderWidth: 0.8,
-                                onTap: () => controller.setPaper(option),
+                                onTap: () {
+                                  controller.setPaper(option);
+                                  // 选纸色 = 退出自定义图；图片保留，点第五个
+                                  // 圆球可以再设回来。
+                                  unawaited(
+                                    ref
+                                        .read(readerBackgroundProvider.notifier)
+                                        .deactivate(),
+                                  );
+                                },
                               ),
                             ],
                             const SizedBox(width: gap),
@@ -826,10 +839,11 @@ class _DialogueHighlightPainter extends CustomPainter {
       oldDelegate.rects != rects;
 }
 
-/// 底色行末尾的「背景图」圆球：点击从相册选图/换图，长按移除。
+/// 底色行末尾的「背景图」圆球：未启用时点一下设为底色，已启用时点一下换图，
+/// 长按移除。
 ///
 /// 不单独占一行、不画删除按钮；有图时直接显示圆形缩略图。夜间纸不铺背景图，
-/// 所以夜间圆球会变暗，但仍可点开相册换图（换完切回日间才看得到）。
+/// 但「已启用」会保留，圆球变暗，切回日间自动恢复。
 class _ReaderBackgroundSwatch extends ConsumerStatefulWidget {
   const _ReaderBackgroundSwatch({
     required this.size,
@@ -851,11 +865,54 @@ class _ReaderBackgroundSwatchState
   /// 相册弹层打开期间禁用按钮，避免连点起两个 picker。
   bool _picking = false;
 
+  /// 启用/停用是异步落盘，防连点。
+  bool _activating = false;
+
+  /// 没图先选图；有图但未启用就设成底色；已经启用则换图。
+  Future<void> _handleTap() async {
+    if (_picking || _activating) return;
+    final background = ref.read(readerBackgroundProvider);
+    if (!background.hasImage) {
+      await _pick();
+    } else if (!background.active) {
+      await _activate();
+    } else {
+      await _pick();
+    }
+  }
+
+  Future<void> _activate() async {
+    if (_activating) return;
+    _activating = true;
+    try {
+      await ref.read(readerBackgroundProvider.notifier).activate();
+      // 等落盘期间用户可能又点了夜间/纸色，只有仍然启用才切日间。
+      if (mounted && ref.read(readerBackgroundProvider).active) {
+        _showInDayIfNight();
+      }
+    } finally {
+      _activating = false;
+    }
+  }
+
+  /// 夜间选图/启用后自动切回日间，否则图看不见，用户会以为没生效。
+  void _showInDayIfNight() {
+    final settings = ref.read(readerSettingsProvider);
+    if (settings.paper == ReaderPaper.night) {
+      ref.read(readerSettingsProvider.notifier).setPaper(settings.dayPaper);
+    }
+  }
+
   Future<void> _pick() async {
     if (_picking) return;
     setState(() => _picking = true);
     try {
-      await ref.read(readerBackgroundProvider.notifier).pickFromGallery();
+      final picked = await ref
+          .read(readerBackgroundProvider.notifier)
+          .pickFromGallery();
+      if (picked && mounted && ref.read(readerBackgroundProvider).active) {
+        _showInDayIfNight();
+      }
     } on PlatformException catch (error) {
       if (!mounted) return;
       showAppSnackBar(
@@ -891,6 +948,9 @@ class _ReaderBackgroundSwatchState
     final isNight =
         ref.watch(readerSettingsProvider).paper == ReaderPaper.night;
     final hasImage = background.hasImage;
+    final active = background.active && hasImage;
+    // 夜间实际底色是纯黑，图片圆球不显示选中环（但仍保留启用状态）。
+    final selected = active && !isNight;
     final size = widget.size;
 
     Widget content;
@@ -926,23 +986,29 @@ class _ReaderBackgroundSwatchState
       );
     }
 
-    final borderColor = hasImage
-        ? (isNight
-              ? widget.foreground.withValues(alpha: 0.18)
-              : widget.ringColor)
+    final borderColor = selected
+        ? widget.ringColor
         : widget.foreground.withValues(alpha: 0.2);
+    final message = !hasImage
+        ? '从相册选择背景图'
+        : active
+        ? (isNight ? '背景图（夜间不显示）· 点击更换 · 长按移除' : '背景图 · 点击更换 · 长按移除')
+        : '已保存的背景图 · 点击设为底色 · 长按移除';
+    final semanticLabel = !hasImage
+        ? '选择背景图'
+        : active
+        ? '更换背景图，长按移除'
+        : '把已保存的背景图设为底色，长按移除';
     return Tooltip(
       // 长按要留给「移除」；Tooltip 默认也抢长按，这里改成手动触发。
       triggerMode: TooltipTriggerMode.manual,
-      message: hasImage
-          ? (isNight ? '背景图（夜间不显示）· 点击更换 · 长按移除' : '背景图 · 点击更换 · 长按移除')
-          : '从相册选择背景图',
+      message: message,
       child: Semantics(
         button: true,
-        label: hasImage ? '更换背景图，长按移除' : '选择背景图',
+        label: semanticLabel,
         child: InkResponse(
-          onTap: _picking ? null : _pick,
-          onLongPress: hasImage && !_picking ? _clear : null,
+          onTap: _picking ? null : _handleTap,
+          onLongPress: hasImage && !_picking && !_activating ? _clear : null,
           radius: size * 0.68,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
@@ -958,13 +1024,10 @@ class _ReaderBackgroundSwatchState
             // 描边画在前景：否则圆形缩略图会把 border 整个盖住。
             foregroundDecoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(
-                color: borderColor,
-                width: hasImage && !isNight ? 2 : 0.8,
-              ),
+              border: Border.all(color: borderColor, width: selected ? 2 : 0.8),
             ),
             child: Opacity(
-              opacity: hasImage && isNight ? 0.45 : 1,
+              opacity: active && isNight ? 0.45 : 1,
               child: content,
             ),
           ),

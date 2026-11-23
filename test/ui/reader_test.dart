@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/app/widgets/color_swatch_dot.dart';
 import 'package:novel_playlet/app/widgets/app_bottom_sheet.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
 import 'package:novel_playlet/core/storage/library_records.dart';
@@ -949,6 +950,85 @@ void main() {
     expect(find.byTooltip('从相册选择背景图'), findsOneWidget);
   });
 
+  testWidgets('阅读页-点纸色退出自定义图，点圆球再设回', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('reader-bg-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final image = File('${dir.path}/bg.png')
+      ..writeAsBytesSync(
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        ),
+      );
+
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      extraOverrides: [
+        readerBackgroundProvider.overrideWith(
+          () => _FakeReaderBackground(image.path),
+        ),
+      ],
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    expect(container.read(readerBackgroundProvider).active, isTrue);
+    expect(
+      tester
+          .widgetList<ColorSwatchDot>(find.byType(ColorSwatchDot))
+          .where((dot) => dot.selected),
+      isEmpty,
+      reason: '自定义图启用时，四个纸色圆点都不该显示选中',
+    );
+
+    // 选纸色 = 退出自定义图，图片还留着（圆球变成「设为底色」）。
+    await tester.tap(find.byTooltip('白'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(container.read(readerBackgroundProvider).active, isFalse);
+    expect(container.read(readerSettingsProvider).paper, ReaderPaper.white);
+    final inactive = find.byTooltip('已保存的背景图 · 点击设为底色 · 长按移除');
+    expect(inactive, findsOneWidget);
+
+    // 再点圆球 = 重新设为底色，不需要重新选图。
+    await tester.tap(inactive);
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(container.read(readerBackgroundProvider).active, isTrue);
+    expect(find.byTooltip('背景图 · 点击更换 · 长按移除'), findsOneWidget);
+
+    // 工具栏日/夜是临时切换：夜间纯黑并选中夜间色块，但「已启用」保留。
+    final settings = container.read(readerSettingsProvider.notifier);
+    settings.toggleDayNight();
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(container.read(readerSettingsProvider).paper, ReaderPaper.night);
+    expect(container.read(readerBackgroundProvider).active, isTrue);
+    final nightDot = tester
+        .widgetList<ColorSwatchDot>(find.byType(ColorSwatchDot))
+        .singleWhere((dot) => dot.selected);
+    expect(nightDot.tooltip, '夜间');
+    expect(find.byTooltip('背景图（夜间不显示）· 点击更换 · 长按移除'), findsOneWidget);
+
+    settings.toggleDayNight();
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(container.read(readerSettingsProvider).paper, ReaderPaper.white);
+    expect(container.read(readerBackgroundProvider).active, isTrue);
+    expect(
+      tester
+          .widgetList<ColorSwatchDot>(find.byType(ColorSwatchDot))
+          .where((dot) => dot.selected),
+      isEmpty,
+      reason: '切回日间后自定义图重新成为当前底色，纸色不应选中',
+    );
+  });
+
   testWidgets('阅读页-切章失败保留旧正文，错误降级为可重试提示条', (tester) async {
     final transport = FakePreviewTransport();
     transport.failingChapterIds.add('c2');
@@ -1540,10 +1620,20 @@ class _FakeReaderBackground extends ReaderBackgroundController {
   final String path;
 
   @override
-  ReaderBackground build() => ReaderBackground(filePath: path);
+  ReaderBackground build() => ReaderBackground(filePath: path, active: true);
 
-  /// UI 测试只关心长按是否接到移除动作；不在这里跑 prefs/删文件的真实 IO
+  /// UI 测试只关心动作接线；不在这里跑 prefs/删文件的真实 IO
   /// （widget test 的 fake async 会卡住）。
+  @override
+  Future<void> activate() async {
+    state = ReaderBackground(filePath: state.filePath, active: true);
+  }
+
+  @override
+  Future<void> deactivate() async {
+    state = ReaderBackground(filePath: state.filePath, active: false);
+  }
+
   @override
   Future<void> clear() async {
     state = const ReaderBackground();
