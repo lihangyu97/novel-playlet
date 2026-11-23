@@ -665,7 +665,9 @@ App ID 不同，iOS 会分配独立的沙盒容器与 keychain，互不影响；
 ```
 
   脚本会改未签名包的 `CFBundleIdentifier` / `CFBundleDisplayName`（beta 加 Beta
-  后缀），签名仍由 ios-sideload 按目标 App ID 完成。
+  后缀），签名仍由 ios-sideload 按目标 App ID 完成。beta 构建前还会临时把
+  `AppIcon.appiconset` 换成 `AppIconBeta.appiconset`（番茄 + 右下角绿色 BETA），
+  `trap` 保证构建完成/失败/中断后恢复正式图标；release 始终用 `AppIcon`。
 - **签名**：两个 App ID 各有自己的描述文件。切换版本签名前先确认
   `~/workspace/ios-sideload/build/signer.mobileprovision` 的 App ID 与之匹配，
   不匹配就 `BUNDLE_ID=<app id> ./profile.sh --mint` 重新签发（免费账号 7 天一轮，
