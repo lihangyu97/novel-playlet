@@ -26,8 +26,9 @@ class AppVersion {
   int get hashCode => Object.hash(name, build);
 }
 
-/// 构建渠道：beta 包由 `scripts/build_ios_app.sh --flavor beta` 通过
-/// `--dart-define=APP_FLAVOR=beta` 标记，其余（含 release / debug）按 Release。
+/// 构建渠道：beta 包由 `scripts/build_ios_app.sh` / `scripts/build_android_app.sh`
+/// 的 `--flavor beta` 通过 `--dart-define=APP_FLAVOR=beta` 标记，其余（含
+/// release / debug）按 Release。
 const String appFlavor = String.fromEnvironment(
   'APP_FLAVOR',
   defaultValue: 'release',

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- beta 渠道（com.lihangyu.novel_playlet.beta）的桌面显示名，与正式包区分。 -->
+    <string name="app_name">摆烂盒子 Beta</string>
+</resources>
