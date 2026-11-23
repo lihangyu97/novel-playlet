@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -27,6 +28,7 @@ import 'package:novel_playlet/features/cache/cache_providers.dart';
 import 'package:novel_playlet/features/cache/offline_downloader.dart';
 import 'package:novel_playlet/features/cache/offline_queue.dart';
 import 'package:novel_playlet/features/cache/offline_task.dart';
+import 'package:novel_playlet/features/reader/reader_background.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_controller.dart';
 import 'package:novel_playlet/features/reader/reader_bubble.dart';
@@ -901,6 +903,52 @@ void main() {
     );
   });
 
+  testWidgets('阅读页-背景图圆球整合进底色行，长按移除', (tester) async {
+    // widget test 的 fake async 里 await 真实文件 IO 会卡住，这里用同步版本。
+    final dir = Directory.systemTemp.createTempSync('reader-bg-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final image = File('${dir.path}/bg.png')
+      ..writeAsBytesSync(
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        ),
+      );
+
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      extraOverrides: [
+        readerBackgroundProvider.overrideWith(
+          () => _FakeReaderBackground(image.path),
+        ),
+      ],
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    // 不再有独立的「背景图」行：圆球排在夜间（黑）色块右边。
+    expect(find.text('背景图'), findsNothing);
+    final swatch = find.byTooltip('背景图 · 点击更换 · 长按移除');
+    expect(swatch, findsOneWidget);
+    final night = tester.getCenter(find.byTooltip('夜间'));
+    expect(
+      tester.getCenter(swatch).dx,
+      greaterThan(night.dx),
+      reason: '背景图圆球应该在黑色（夜间）色块右边',
+    );
+
+    await tester.longPress(swatch);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('已移除背景图'), findsOneWidget);
+    expect(find.byTooltip('从相册选择背景图'), findsOneWidget);
+  });
+
   testWidgets('阅读页-切章失败保留旧正文，错误降级为可重试提示条', (tester) async {
     final transport = FakePreviewTransport();
     transport.failingChapterIds.add('c2');
@@ -1482,5 +1530,22 @@ class _LongChapterTitleTransport extends FakePreviewTransport {
       );
     }
     return super.send(method, path, query: query, body: body, timeout: timeout);
+  }
+}
+
+/// 预览用：直接给出一个已落盘的背景图路径，不碰 SharedPreferences / 相册。
+class _FakeReaderBackground extends ReaderBackgroundController {
+  _FakeReaderBackground(this.path);
+
+  final String path;
+
+  @override
+  ReaderBackground build() => ReaderBackground(filePath: path);
+
+  /// UI 测试只关心长按是否接到移除动作；不在这里跑 prefs/删文件的真实 IO
+  /// （widget test 的 fake async 会卡住）。
+  @override
+  Future<void> clear() async {
+    state = const ReaderBackground();
   }
 }

@@ -472,7 +472,7 @@ class ReaderLoadingPill extends StatelessWidget {
   }
 }
 
-/// 阅读设置弹层：字号、行距、底色、背景图、对话高亮、段评气泡。
+/// 阅读设置弹层：字号、行距、底色（含背景图）、对话高亮、段评气泡。
 ///
 /// 字号/行距是分页输入。拖动过程中只更新**本地预览值**（滑块与文案立即跟手，
 /// 不碰 provider），松手（`onChangeEnd`）才提交一次：一次整章重排 + 一次落盘。
@@ -614,38 +614,55 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
                   muted: muted,
                 ),
               const SizedBox(height: 4),
-              // 底色标题与四个色块同一行；文案（白/纸/护眼/夜间）去掉，
-              // 只保留色块 + 选中勾，读屏仍播报底色名。
+              // 底色标题 + 四个纸色圆点 + 末尾的背景图圆点同一行；文案
+              // （白/纸/护眼/夜间）去掉，只留色块 + 选中勾，读屏仍播报底色名。
+              // 窄屏按可用宽度收一点圆点尺寸，避免第五个圆点把行撑破。
               Row(
                 children: [
                   Text('底色', style: TextStyle(fontSize: 13, color: muted)),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        for (final option in ReaderPaper.values) ...[
-                          if (option != ReaderPaper.values.first)
-                            const SizedBox(width: 10),
-                          ColorSwatchDot(
-                            color: option.background,
-                            size: 42,
-                            tooltip: option.label,
-                            selected: option == paper,
-                            ringColor: Theme.of(context).colorScheme.primary,
-                            iconColor: option.foreground,
-                            unselectedBorder: foreground.withValues(alpha: 0.2),
-                            unselectedBorderWidth: 0.8,
-                            onTap: () => controller.setPaper(option),
-                          ),
-                        ],
-                      ],
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        const gap = 10.0;
+                        final slots = ReaderPaper.values.length + 1;
+                        final dotSize =
+                            ((constraints.maxWidth - gap * (slots - 1)) / slots)
+                                .clamp(32.0, 42.0)
+                                .toDouble();
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            for (final option in ReaderPaper.values) ...[
+                              if (option != ReaderPaper.values.first)
+                                const SizedBox(width: gap),
+                              ColorSwatchDot(
+                                color: option.background,
+                                size: dotSize,
+                                tooltip: option.label,
+                                selected: option == paper,
+                                ringColor: highlight,
+                                iconColor: option.foreground,
+                                unselectedBorder: foreground.withValues(
+                                  alpha: 0.2,
+                                ),
+                                unselectedBorderWidth: 0.8,
+                                onTap: () => controller.setPaper(option),
+                              ),
+                            ],
+                            const SizedBox(width: gap),
+                            _ReaderBackgroundSwatch(
+                              size: dotSize,
+                              foreground: foreground,
+                              ringColor: highlight,
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
-              _ReaderBackgroundRow(foreground: foreground, muted: muted),
               const SizedBox(height: 14),
               SettingSwitchRow(
                 title: '对话高亮',
@@ -809,22 +826,28 @@ class _DialogueHighlightPainter extends CustomPainter {
       oldDelegate.rects != rects;
 }
 
-/// 阅读设置里的「背景图」入口：相册选图 / 更换 / 移除。
+/// 底色行末尾的「背景图」圆球：点击从相册选图/换图，长按移除。
 ///
-/// 图只存本机，不写进阅读设置也不参与云同步；夜间纸不显示（渲染层直接
-/// 不挂背景层），这里只负责给入口和状态文案。
-class _ReaderBackgroundRow extends ConsumerStatefulWidget {
-  const _ReaderBackgroundRow({required this.foreground, required this.muted});
+/// 不单独占一行、不画删除按钮；有图时直接显示圆形缩略图。夜间纸不铺背景图，
+/// 所以夜间圆球会变暗，但仍可点开相册换图（换完切回日间才看得到）。
+class _ReaderBackgroundSwatch extends ConsumerStatefulWidget {
+  const _ReaderBackgroundSwatch({
+    required this.size,
+    required this.foreground,
+    required this.ringColor,
+  });
 
+  final double size;
   final Color foreground;
-  final Color muted;
+  final Color ringColor;
 
   @override
-  ConsumerState<_ReaderBackgroundRow> createState() =>
-      _ReaderBackgroundRowState();
+  ConsumerState<_ReaderBackgroundSwatch> createState() =>
+      _ReaderBackgroundSwatchState();
 }
 
-class _ReaderBackgroundRowState extends ConsumerState<_ReaderBackgroundRow> {
+class _ReaderBackgroundSwatchState
+    extends ConsumerState<_ReaderBackgroundSwatch> {
   /// 相册弹层打开期间禁用按钮，避免连点起两个 picker。
   bool _picking = false;
 
@@ -849,81 +872,104 @@ class _ReaderBackgroundRowState extends ConsumerState<_ReaderBackgroundRow> {
     }
   }
 
+  Future<void> _clear() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      await ref.read(readerBackgroundProvider.notifier).clear();
+      if (mounted) showAppSnackBar(context, '已移除背景图');
+    } catch (_) {
+      if (mounted) showAppSnackBar(context, '移除背景图失败，请重试');
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final background = ref.watch(readerBackgroundProvider);
     final isNight =
         ref.watch(readerSettingsProvider).paper == ReaderPaper.night;
-    final subtitle = background.hasImage
-        ? (isNight ? '夜间不显示，切回日间恢复' : '已选图片，仅保存在本机')
-        : '从相册选一张图，夜间自动隐藏';
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '背景图',
-                style: TextStyle(fontSize: 13, color: widget.foreground),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 11,
-                  height: 1.3,
-                  color: widget.muted,
-                ),
-              ),
-            ],
+    final hasImage = background.hasImage;
+    final size = widget.size;
+
+    Widget content;
+    if (_picking) {
+      content = SizedBox(
+        width: size * 0.4,
+        height: size * 0.4,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: widget.foreground,
+        ),
+      );
+    } else if (hasImage) {
+      content = ClipOval(
+        child: Image.file(
+          File(background.filePath!),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          cacheWidth: (size * 3).round(),
+          errorBuilder: (context, error, stackTrace) => Icon(
+            Icons.broken_image_outlined,
+            size: size * 0.45,
+            color: widget.foreground.withValues(alpha: 0.7),
           ),
         ),
-        const SizedBox(width: 12),
-        if (background.hasImage) ...[
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Image.file(
-              File(background.filePath!),
-              width: 38,
-              height: 38,
-              fit: BoxFit.cover,
-              cacheWidth: 114,
-              errorBuilder: (context, error, stackTrace) => Container(
-                width: 38,
-                height: 38,
-                color: widget.foreground.withValues(alpha: 0.08),
-                child: Icon(
-                  Icons.broken_image_outlined,
-                  size: 18,
-                  color: widget.muted,
-                ),
+      );
+    } else {
+      content = Icon(
+        Icons.add_photo_alternate_outlined,
+        size: size * 0.45,
+        color: widget.foreground.withValues(alpha: 0.7),
+      );
+    }
+
+    final borderColor = hasImage
+        ? (isNight
+              ? widget.foreground.withValues(alpha: 0.18)
+              : widget.ringColor)
+        : widget.foreground.withValues(alpha: 0.2);
+    return Tooltip(
+      // 长按要留给「移除」；Tooltip 默认也抢长按，这里改成手动触发。
+      triggerMode: TooltipTriggerMode.manual,
+      message: hasImage
+          ? (isNight ? '背景图（夜间不显示）· 点击更换 · 长按移除' : '背景图 · 点击更换 · 长按移除')
+          : '从相册选择背景图',
+      child: Semantics(
+        button: true,
+        label: hasImage ? '更换背景图，长按移除' : '选择背景图',
+        child: InkResponse(
+          onTap: _picking ? null : _pick,
+          onLongPress: hasImage && !_picking ? _clear : null,
+          radius: size * 0.68,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: hasImage
+                  ? null
+                  : widget.foreground.withValues(alpha: 0.06),
+              shape: BoxShape.circle,
+            ),
+            // 描边画在前景：否则圆形缩略图会把 border 整个盖住。
+            foregroundDecoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: borderColor,
+                width: hasImage && !isNight ? 2 : 0.8,
               ),
             ),
+            child: Opacity(
+              opacity: hasImage && isNight ? 0.45 : 1,
+              child: content,
+            ),
           ),
-          const SizedBox(width: 8),
-        ],
-        TextButton(
-          onPressed: _picking ? null : _pick,
-          style: TextButton.styleFrom(
-            foregroundColor: widget.foreground,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            minimumSize: const Size(0, 36),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          child: Text(background.hasImage ? '更换' : '选择'),
         ),
-        if (background.hasImage)
-          IconButton(
-            onPressed: _picking
-                ? null
-                : () => ref.read(readerBackgroundProvider.notifier).clear(),
-            icon: const Icon(Icons.delete_outline_rounded, size: 20),
-            color: widget.muted,
-            tooltip: '移除背景图',
-            visualDensity: VisualDensity.compact,
-          ),
-      ],
+      ),
     );
   }
 }

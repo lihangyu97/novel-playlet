@@ -287,9 +287,10 @@ ChapterContent{id,title,paragraphs}
   `reader_font_size_v1 / reader_line_height_v1 / reader_font_weight_v1 / reader_paper_v1 / reader_day_paper_v1 / reader_show_dialogue_highlight_v1 / reader_dialogue_highlight_color_v1 / reader_show_bubbles_v1`；
   `reader_day_paper_v1` 记住最近一次浅色纸，供工具栏日/夜切换切回；已落盘偏好优先，
   默认值只影响无历史偏好的用户。
-- 背景图：阅读设置弹层「底色」下方，从系统相册选图（`image_picker`；按 1800×2700 长边、
-  质量 85 压一遍再落 `<AppSupport>/reader/reader_bg_<ts>.jpg`，文件名存
-  `reader_background_image_v1`，换图时删旧文件）。**只存本机**：不进 `ReaderSettings`、
+- 背景图：阅读设置弹层「底色」色块行末尾（夜间黑色块右边）的圆形入口，点一下从系统相册
+  选图/换图，长按移除；不单独占一行、不画删除按钮，有图时直接显示圆形缩略图
+  （`image_picker`；按 1800×2700 长边、质量 85 压一遍再落 `<AppSupport>/reader/reader_bg_<ts>.jpg`，
+  文件名存 `reader_background_image_v1`，换图时删旧文件）。**只存本机**：不进 `ReaderSettings`、
   不参与 WebDAV 同步（另一台设备没有这份文件，换机回退纸色）。渲染层铺在 `PageView`
   下面整屏一张，纸色遮罩 55% + 底部渐变保证正文/页码对比度；夜间纸不挂背景层，直接
   显示纯夜间底色。
