@@ -34,7 +34,7 @@ final readerBackgroundProvider =
       ReaderBackgroundController.new,
     );
 
-/// 背景图的本地存储：AppSupport/reader/reader_bg_<ts>.jpg。
+/// 背景图的本地存储：`AppSupport/reader/reader_bg_<ts>.jpg`。
 ///
 /// 只存文件名到 SharedPreferences，不存绝对路径：iOS 的容器路径在重装/升级
 /// 后会变，存绝对路径下次启动就是一张坏图。
