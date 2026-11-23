@@ -14,17 +14,35 @@
 #   ./scripts/build_ios_app.sh --flavor beta --skip-rust   # 内核静态库已构建过
 #   ./scripts/build_ios_app.sh --flavor release --out /tmp/ipa
 #
-# 产物：build/ios/ipa/novel_playlet_<flavor>_<git短哈希>_unsigned.ipa
+# 产物：output/ipa/novel_playlet_<flavor>_<git短哈希>_unsigned.ipa（output/ 已 git 忽略）
 # 签名/安装走 ios-sideload（bundle id 要与构建时一致），见 docs/implementation.md §7.2。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(dirname "$SCRIPT_DIR")"
-OUT_DIR="$APP_DIR/build/ios/ipa"
+# 产物统一落在仓库根的 output/（已 git 忽略），构建中间物仍留在 Flutter 的 build/。
+OUT_DIR="$APP_DIR/output/ipa"
 FLAVOR=""
 SKIP_RUST=0
 
-usage() { sed -n '2,22p' "$0"; }
+ASSETS_DIR="$APP_DIR/ios/Runner/Assets.xcassets"
+RELEASE_ICON_SET="$ASSETS_DIR/AppIcon.appiconset"
+BETA_ICON_SET="$ASSETS_DIR/AppIconBeta.appiconset"
+ICON_BACKUP_DIR=""
+
+# beta 构建会临时把 AppIcon.appiconset 换成 AppIconBeta.appiconset；
+# 无论成功、失败还是 Ctrl-C，退出时都要把正式图标换回来。
+restore_icon_set() {
+  if [[ -n "$ICON_BACKUP_DIR" && -d "$ICON_BACKUP_DIR/AppIcon.appiconset" ]]; then
+    rm -rf "$RELEASE_ICON_SET"
+    mv "$ICON_BACKUP_DIR/AppIcon.appiconset" "$RELEASE_ICON_SET"
+    rmdir "$ICON_BACKUP_DIR" 2>/dev/null || true
+    ICON_BACKUP_DIR=""
+  fi
+}
+trap restore_icon_set EXIT
+
+usage() { awk 'NR > 1 && /^set -euo/{exit} NR > 1{print}' "$0"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -72,6 +90,17 @@ fi
 if (( SKIP_RUST == 0 )); then
   echo "==> 构建 Rust 内核静态库"
   "$SCRIPT_DIR/build_rust_ios.sh"
+fi
+
+if [[ "$FLAVOR" == "beta" ]]; then
+  if [[ ! -d "$BETA_ICON_SET" ]]; then
+    echo "错误：缺少 Beta 图标目录 $BETA_ICON_SET" >&2
+    exit 1
+  fi
+  ICON_BACKUP_DIR="$(mktemp -d)"
+  mv "$RELEASE_ICON_SET" "$ICON_BACKUP_DIR/AppIcon.appiconset"
+  cp -R "$BETA_ICON_SET" "$RELEASE_ICON_SET"
+  echo "==> 已切换 Beta 图标（构建结束后自动恢复）"
 fi
 
 echo "==> flutter build ios --release --no-codesign（flavor=${FLAVOR}）"

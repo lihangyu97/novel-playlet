@@ -101,6 +101,14 @@ void main() {
       expect(withDialogue.dialogueRects, isNotEmpty);
       expect(pagination.blocks[1].dialogueRects, isEmpty);
       expect(pagination.blocks[2].dialogueRects, isNotEmpty);
+      // 「文本」画法按区间给文字着色，区间必须和矩形一起留在 block 上。
+      expect(withDialogue.dialogueRanges, const [
+        TextRange(start: 1, end: 5),
+      ], reason: '“你来了。”只把引号内的 4 个字算对话');
+      expect(pagination.blocks[1].dialogueRanges, isEmpty);
+      expect(pagination.blocks[2].dialogueRanges, const [
+        TextRange(start: 1, end: 2),
+      ]);
       for (final rect in withDialogue.dialogueRects) {
         expect(rect.left, greaterThanOrEqualTo(0));
         expect(rect.right, lessThanOrEqualTo(300 + 1));

@@ -80,6 +80,12 @@ class ReadingStore {
   /// 最近观看变更计数。
   final ValueNotifier<int> videoHistoryRevision = ValueNotifier<int>(0);
 
+  /// 「在看」变更计数：pin / 取消 pin（小说与短剧共用一条通道）。
+  ///
+  /// 独立于收藏/历史：切换 pin 只影响「在看」区块和按钮状态，不该让收藏
+  /// 网格或历史列表跟着重查。
+  final ValueNotifier<int> pinRevision = ValueNotifier<int>(0);
+
   /// 小说与短剧**共用**的纯进度行上限（读过但没上过架的行）。
   ///
   /// 书架条目与墓碑不计入、也不淘汰：墓碑是删除能同步出去的唯一依据，删早了
@@ -138,6 +144,77 @@ class ReadingStore {
   /// 收藏条数，页头 / 区块头统计用。
   Future<int> shelfCount() async => LibraryDb.countShelf(await _db);
 
+  /// 「在看」列表：pin 过且没取消，按 pin 时间倒序。
+  Future<List<LibraryRecord>> pinnedRecords({int? limit}) async {
+    return LibraryDb.readPinned(await _db, limit: limit);
+  }
+
+  /// 「在看」条数。
+  Future<int> pinnedCount() async => LibraryDb.countPinned(await _db);
+
+  /// 某条内容当前是否在「在看」列表里。
+  Future<bool> isPinned(LibraryType type, String sourceId) async {
+    if (sourceId.isEmpty) return false;
+    final record = await LibraryDb.read(await _db, type, sourceId);
+    return record?.isPinned ?? false;
+  }
+
+  /// 切换「在看」：不在则 pin，在则取消。返回切换后的状态。
+  ///
+  /// 从阅读页/播放页直接调用时记录可能还不存在（刚打开、还没落过进度），
+  /// 这里用标题/封面 upsert 一条最小记录；已有记录不会覆盖标题与进度。
+  Future<bool> togglePin({
+    required LibraryType type,
+    required String sourceId,
+    String title = '',
+    String cover = '',
+  }) async {
+    if (sourceId.isEmpty) return false;
+    final db = await _db;
+    final now = _now();
+    var pinned = false;
+    await db.transaction((txn) async {
+      final existing = await LibraryDb.read(txn, type, sourceId);
+      final base = existing ?? LibraryRecord(type: type, sourceId: sourceId);
+      if (base.isPinned) {
+        await LibraryDb.write(txn, base.copyWith(unpinnedAt: now));
+        pinned = false;
+        return;
+      }
+      final hasMeta = title.isNotEmpty || cover.isNotEmpty;
+      await LibraryDb.write(
+        txn,
+        base.copyWith(
+          pinnedAt: now,
+          title: base.title.isEmpty ? title : base.title,
+          cover: base.cover.isEmpty ? cover : base.cover,
+          metaFetchedAt: base.metaFetchedAt == 0 && hasMeta
+              ? now
+              : base.metaFetchedAt,
+        ),
+      );
+      pinned = true;
+    });
+    pinRevision.value++;
+    return pinned;
+  }
+
+  /// 直接取消「在看」（不切换）。全量列表左滑取消时用它。
+  Future<void> unpin(LibraryType type, String sourceId) async {
+    if (sourceId.isEmpty) return;
+    final db = await _db;
+    final now = _now();
+    var written = false;
+    await db.transaction((txn) async {
+      final existing = await LibraryDb.read(txn, type, sourceId);
+      if (existing == null || !existing.isPinned) return;
+      await LibraryDb.write(txn, existing.copyWith(unpinnedAt: now));
+      written = true;
+    });
+    if (!written) return;
+    pinRevision.value++;
+  }
+
   /// 从「历史」里删掉一条：清空阅读进度并写裁剪墓碑，收藏状态不变。
   ///
   /// 和 500 条上限的淘汰一样不删行：远端旧进度会在下次同步回来，只有
@@ -149,9 +226,11 @@ class ReadingStore {
     final db = await _db;
     final now = _now();
     var written = false;
+    var wasPinned = false;
     await db.transaction((txn) async {
       final existing = await LibraryDb.read(txn, type, sourceId);
       if (existing == null || !existing.hasProgress) return;
+      wasPinned = existing.isPinned;
       await LibraryDb.write(
         txn,
         existing.copyWith(
@@ -160,6 +239,8 @@ class ReadingStore {
           progressIndex: 0,
           progressSub: 0,
           progressPrunedAt: now,
+          // 删历史顺手取消在看：留在看列表里会显示成一条没有进度的空记录。
+          unpinnedAt: existing.isPinned ? now : existing.unpinnedAt,
         ),
       );
       written = true;
@@ -172,6 +253,8 @@ class ReadingStore {
       videoHistoryRevision.value++;
       videoRevision.value++;
     }
+    // 删的正好是「在看」里那条时，pin 区也要跟着消失。
+    if (wasPinned) pinRevision.value++;
   }
 
   // ---------------------------------------------------------------------
@@ -431,6 +514,7 @@ class ReadingStore {
     var historyChanged = false;
     var videoShelfChanged = false;
     var videoHistoryChanged = false;
+    var pinChanged = false;
 
     final pruneAt = _now();
     final incoming = <LibraryRecord>[];
@@ -460,6 +544,10 @@ class ReadingStore {
             videoShelfChanged = true;
           }
         }
+        if (merged.pinnedAt != local.pinnedAt ||
+            merged.unpinnedAt != local.unpinnedAt) {
+          pinChanged = true;
+        }
         if (merged.progressDiffersFrom(local)) {
           if (merged.type == LibraryType.novel) {
             historyChanged = true;
@@ -480,6 +568,7 @@ class ReadingStore {
       if (historyChanged) recentRevision.value++;
       if (videoShelfChanged) videoShelfRevision.value++;
       if (videoHistoryChanged) videoHistoryRevision.value++;
+      if (pinChanged) pinRevision.value++;
     }
     return changed;
   }

@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/features/video/playback_speed.dart';
 import 'package:novel_playlet/features/video/widgets/playback_speed_menu.dart';
-import 'package:novel_playlet/features/video/widgets/player_option_chip.dart';
+import 'package:novel_playlet/features/video/widgets/player_bar_text.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -65,16 +65,15 @@ void main() {
       expect(playbackSpeedLabel(3.0), '3.0x');
     });
 
-    testWidgets('倍速 chip 显示当前值并响应点击', (tester) async {
+    testWidgets('倍速文字显示当前值并响应点击', (tester) async {
       var taps = 0;
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             backgroundColor: Colors.black,
             body: Center(
-              child: PlayerOptionChip(
+              child: PlayerBarText(
                 label: '1.5x',
-                active: true,
                 tooltip: '播放速度',
                 onTap: () => taps++,
               ),

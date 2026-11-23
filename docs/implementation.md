@@ -22,11 +22,11 @@
 - **排行榜**：目录取自小说首页 `rank_with_category_data`（`cell_id_str` 是榜列表 id），条目走 `/api/v1/rank/{rankId}`。上游的榜单目录把小说/短剧/漫剧放在同一份 `rank_algo_list` 里，但短剧/漫剧必须额外带 `genre_tab=4/5`（`cell_selector` 的外层分组），否则接口会按小说榜回答。首页小说/短剧/漫剧三个 tab 的瀑布流上方各有一个榜单区块，版式与搜索结果页的分类行一致：榜名（推荐榜/短剧榜/漫剧榜）在卡片外面、右侧「更多」带 `initialAlgo` 进排行榜页并自动定位；下面是 `CompactCardRow` 的一行紧凑卡（与搜索结果同款卡宽/字号，取首屏前 10、无 1/2/3 标号、横向可滑，评分走封面角标，元信息为作者/集数 + 热度；请求失败/空榜重试一次再收起，避免一次抖动让某个分类整场会话都没有榜单）；首次加载先显示同口径骨架；排行榜页二级 tab 按小说（推荐/完本/巅峰/新书）→短剧→漫剧排序、无下划线，内容区用 TabBarView 左右滑切榜；每个 tab 自己请求并 keep-alive，切回不重拉、保留滚动位置；列表行含名次、封面、标题+评分、作者/分类/热度（短剧/漫剧为分类/全N集/热度）、两行简介和题材标签，行间不画分割线，触底按 `next_offset` 翻页；条目的 book_data/video_data 由 `RankEntry` 统一，点击按 kind 进小说/短剧详情；条目行 `RankEntryRow` 与「条目 → 路由/Hero tag」的 `rankEntryRoute()` 由排行榜页与首页榜单卡片共用；列表骨架直接复用首页流的 `FeedView`/`FeedFooter`（下拉刷新、触底翻页、首屏不满自动补页、翻页失败重试与「没有更多了」文案全 App 一致），每个 tab 只保留自己的 `FeedState<RankEntry>` 与分页请求。
 - **搜索页**：独立页面（推荐页顶栏搜索图标点进来）。搜索框占位轮播 cue 热词（`/api/v1/search/cue` 一次给一组词 + `rotate_interval_ms`，无词/失败回退静态提示）；**空输入提交（回车/点搜索）直接用当前占位热词搜索**并把它填回输入框（热词只是 placeholder，不是输入内容）。一次提交**搜小说 / 短剧**，从上到下 小说 / 短剧两行横滑卡片（一屏约 2.5 张，比首页榜单预览的 3.5 张放大一档，卡片要同时放季角标、评分、集数与热度），卡片复用首页同款白底卡、按屏宽缩小字号；每行独立 加载骨架（与真卡同宽同高的色块占位）/ 失败重试 / 空态，点卡片按内容域进详情。**行内只铺首屏一页（10 条）**：上游还有下一页时行标题右侧出现「查看全部 ›」，进 `SearchAllPage`——该分类的竖向瀑布流（列数跟推荐布局设置），用 `FeedView` + `FeedStaggeredGrid` 接 `offset` 触底翻页（`searchAllProvider`：`next_offset` 前进才继续、页间按 id 去重、失败只在底部给重试、首屏不满自动补页）；首屏就是全部结果时不给这个入口。**不单列漫剧行**：漫剧没有独立搜索 tab，是借短剧搜索 tab 再按 `genre=205` 过滤的，和短剧行是同一份响应，单列会重复请求、重复展示，所以短剧行直接展示上游混排结果；视频卡不展示推荐理由（上游这个字段在搜索响应里是「漫剧」或「上新」这类角标，窄卡上挤占集数/热度），只留「全 N 集 + 热度」；短剧卡把标题里的「第 N 季」拎到**封面左下角**（`SeasonBadge`，主色**方标签**（圆角 4，与收藏页「书 / 剧」标签同一套）、跟主题色走；季只存在于标题里——上游每季独立 `series_id`、详情也没有其他季的列表——而标题两行省略正好把尾部的季吃掉，所以不靠标题读季），推荐流双列/三列与收藏卡同一规则，小说卡不显示；输入框为空时展示最近搜索历史（最多 10 条、去重置顶、可一键清空），点历史词直接重新搜索；历史下方是热搜榜（官方 472 榜 `/api/v1/search/hot`，最多取前 30 条（接口一次 50 条，超出截断），名次 1–3 标红、标题后展示 `display_tag` 彩色角标，右侧保留 `tag_attached` 的前缀、只把数字换算成整数 `3905w+`，点词直接搜；没有历史时热搜榜仍展示）。
 - **详情**：小说与短剧共用一套「封面头 + 简介卡 + 标签」版式；小说有目录 + 书评卡片（首条 + 弹窗看全部），短剧有剧评卡片（首条 + 弹窗看全部）与选集（36 集/组）。目录卡片行间不画分割线；「查看全部」直接复用阅读器的目录弹层（`ChapterDirectorySheet`：右侧常驻可拖动滚动条、当前章左侧主色竖条 + 「读到这里」、打开时定位到进度所在章，详情页额外插卷标题）。选集集数按钮与播放页选集弹层共用 `EpisodeTile`：无描边、未选中一层淡底色、选中主色实心。底部是「收藏 / 缓存 / 播放·阅读」三颗圆形悬浮按钮（`DetailActionBar` + `DetailCircleButton`）：按钮只有图标、靠右排列、固定间距，文案只交给读屏；按钮盖在正文上方（`extendBody`），页面末尾按 `totalHeight` 留白。
-- **阅读页**：`TextPainter` 真实分页、左右翻页、点击分区、工具栏（顶部「加入书架/已在书架 + 缓存小说/缓存中/已缓存」文本动作，底部目录/详情/评论/日间·夜间/设置；「详情」以无标题底部弹层打开小说详情，不画关闭叉号、不重复目录，只留收藏/缓存；左上圆角裁切内容，下滑/点遮罩关闭）、字号/行距/字重/4 种底色（色块与标题同行）、日/夜切换、段评气泡、工具栏「评论」/评论面板（只读）、目录跳章（目录弹层与详情页「查看全部」共用 `ChapterDirectorySheet`，右侧常驻可拖动滚动条）、邻章预取、进度保存。
-- **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下滑切集（竖向翻页）/播完自动下一集、选集弹层、横屏全屏、在线 MP4 边下边播、失败分类与「重新下载这一集」；底排左侧「选集 + 详情 + 本集评论」、中间播放/暂停、右侧「清晰度（拿得到才展示，只读）+ 倍速」；倍速**点开是贴着 chip 的小浮窗**（M3 `MenuAnchor` + `MenuItemButton`，竖排 1.0/1.25/1.5/2.0/3.0x，当前档打勾，选完即关；浮窗打开期间控制条的 3.5s 自动隐藏被冻结），不再是遮大半屏的底部弹层；收藏/缓存统一收进「详情」底部弹层（历史「最近观看」直进播放页也从这里操作；详情弹层不重复选集、无关闭叉号）。进度条左右分别显示当前时间/总时长，外沿与下方按钮、倍速 chip 对齐。收藏**只加不移**（与阅读页加入书架一致，已收藏后只读，成功不弹提示条）；缓存三态与详情页同一份 `offlineEntryStatusProvider`。
-- **我的**：统一页头（图标 + 「我的」 + 合并统计 + 右上角缓存中心与设置两枚线性图标按钮（缓存在左、设置在右），固定贴顶、不随内容滚动，带一套蓝粉氛围渐变）+「历史」「收藏」两个混排区块（小说/短剧挂彩色类型标签，不再分 tab）：历史按最近阅读/观看倒序、预览 3 条；收藏按加入时间倒序、预览最多 6 个（手机 3 列正好两排），卡片与首页同款白底不定高卡片（小说只展示书名+作者、短剧只展示剧名+集数）。两个区块标题右侧都显示总条数 +「全部 ›」，点开底部弹窗看全量列表（列表版式与历史行一致）；弹窗列表左滑删除（二次确认），历史只清进度、收藏走墓碑，删除落库后立刻尝试一次 WebDAV 同步（`SyncTrigger.library`）。
+- **阅读页**：`TextPainter` 真实分页、左右翻页、点击分区、工具栏（顶部「加入书架/已在书架 + 缓存小说/缓存中/已缓存」文本动作，底部目录/详情/评论/日间·夜间/设置；「详情」以无标题底部弹层打开小说详情，不画关闭叉号、不重复目录，只留收藏/缓存；左上圆角裁切内容，下滑/点遮罩关闭）、字号/行距/字重/4 种底色（色块与标题同行）、自定义背景图（第五种底色，45% 纸色遮罩，夜间自动隐藏）、日/夜切换、段评气泡、工具栏「评论」/评论面板（只读）、目录跳章（目录弹层与详情页「查看全部」共用 `ChapterDirectorySheet`，右侧常驻可拖动滚动条）、邻章预取、进度保存。工具栏展开时右下角出现「在看」悬浮按钮（点一下 pin / 再点取消，收藏/工具栏收起时隐藏，避免抢翻页手势）。
+- **播放页**：`video_player`（iOS AVPlayer / Android ExoPlayer）、1.0–3.0x 倍速、控制条自动隐藏、上下滑切集（竖向翻页）/播完自动下一集、选集弹层、横屏全屏、在线 MP4 边下边播、失败分类与「重新下载这一集」；底排除播放/暂停外统一为纯文字（和第 N 集同款：13pt/w500/白色、无 chip 底色与高亮）：左侧「第 N 集 + 详情 + 评论」、中间播放/暂停、右侧「相关 + 清晰度（拿得到才展示，只读）+ 倍速」；倍速**点开是贴着文字的小浮窗**（M3 `MenuAnchor` + `MenuItemButton`，竖排 1.0/1.25/1.5/2.0/3.0x，当前档打勾，选完即关；浮窗打开期间控制条的 3.5s 自动隐藏被冻结），不再是遮大半屏的底部弹层；「相关」优先用当前 `series_id` 调内核 `/api/v1/series/{id}/related`（官方 `scene=10 / from=series_short_play_info`，返回同系列其它季 + 相关推荐），为空/失败再退回用剧名（去掉第 x 集 / 第 x 季）搜短剧（`tab_type=11`）；底部弹层列相关剧，点一条拉分集后 **pushReplacement** 到该剧第 1 集（连续相关跳转不会堆返回栈，返回直接回进播放页之前那层）；弹层打开期间暂停，取消后恢复；收藏/缓存统一收进「详情」底部弹层（历史「最近观看」直进播放页也从这里操作；详情弹层不重复选集、无关闭叉号）。进度条左右分别显示当前时间/总时长，外沿与下方按钮、倍速文字对齐。收藏**只加不移**（与阅读页加入书架一致，已收藏后只读，成功不弹提示条）；缓存三态与详情页同一份 `offlineEntryStatusProvider`。
+- **我的**：统一页头（图标 + 「我的」 + 右上角缓存中心与设置两枚线性图标按钮（缓存在左、设置在右），固定贴顶、不随内容滚动，带一套蓝粉氛围渐变；不再有「历史 x · 收藏 x」合并统计行，条数交给各区块头）+「在看」「收藏」「历史」三个混排区块（小说/短剧挂彩色类型标签，不再分 tab）：**在看**（最上面）按 pin 时间倒序、一排卡片横向滑动，卡片只放标题与「读到第 N 章 / 看到第 N 集」，没有 pin 时整块隐藏；**收藏**按加入时间倒序、预览最多 6 个（手机 3 列正好两排），卡片与首页同款白底不定高卡片（小说只展示书名+作者、短剧只展示剧名+集数）；**历史**移到最下面，按最近阅读/观看倒序、预览 3 条。各区块标题右侧都显示总条数 +「全部 ›」，点开底部弹窗看全量列表（列表版式与历史行一致）；弹窗列表左滑删除（二次确认），在看只取消 pin、历史只清进度、收藏走墓碑，删除落库后立刻尝试一次 WebDAV 同步（`SyncTrigger.library`）。pin 入口在阅读页 / 播放页的悬浮按钮上。
 - **缓存中心**：离线整本 / 整剧下载的进度、网速、排队、暂停/继续/删除/清空；入口在我的页头右上角「缓存」图标（在设置左边；推荐页顶栏已无缓存入口）。
-- **设置**：每个区块共用一张卡、卡内不画分割线（行间留白分组）。主题卡：主题色（天蓝 / 草绿 / 绯红 + 自定义取色，自定义圆点显示上次自定义色）→ 深浅色模式（跟随系统 / 手动）→ 推荐流布局（双列 / 三列，M3 按钮组 `SegmentedButton`，默认双列）→ 全局字重（仅 Android；300 / 400 / 500 三档按钮组，阅读器默认跟随，可在阅读器内覆盖）→ 对话高亮（收在最后：卡片右侧圆形色块打开弹层，弹层里先选样式按钮组——荧光笔 / 下划线 / 波浪线——再用 HSV 取色，示例正文按当前样式与颜色实时预览）。同步卡：WebDAV / 同步记录 / 云端数据三个入口。存储卡：视频 / 封面 / 章节（有遗留日志时再加一行）逐行展示占用，每行右侧一个清理图标，只清对应那一类；不再有「共 x MB」总计和一次性清空入口；「缓存质量」单独一张卡（Max / 1080P / 720P / 480P 四档按钮组，默认 720P）。
+- **设置**：每个区块共用一张卡、卡内不画分割线（行间留白分组）。主题卡：主题色（天蓝 / 草绿 / 绯红 + 自定义取色，自定义圆点显示上次自定义色）→ 深浅色模式（跟随系统 / 手动）→ 推荐流布局（双列 / 三列，M3 按钮组 `SegmentedButton`，默认双列）→ 全局字重（仅 Android；300 / 400 / 500 三档按钮组，阅读器默认跟随，可在阅读器内覆盖）→ 对话高亮（收在最后：卡片右侧圆形色块打开弹层，弹层里先选样式按钮组——荧光笔 / 下划线 / 波浪线 / 文本——再用 HSV 取色，示例正文按当前样式与颜色实时预览）。同步卡：WebDAV / 同步记录 / 云端数据三个入口。存储卡：视频 / 封面 / 章节（有遗留日志时再加一行）逐行展示占用，每行右侧一个清理图标，只清对应那一类；不再有「共 x MB」总计和一次性清空入口；「缓存质量」单独一张卡（Max / 1080P / 720P / 480P 四档按钮组，默认 720P）。
 
 两个内容链路：
 
@@ -250,14 +250,17 @@ ChapterContent{id,title,paragraphs}
 - 分页进度存「本页真正开头的段落下标」，不是跨页段落号；恢复时找包含该段的第一页。
 - 字号/行距/字重/系统缩放变化 → 进 key，重新分页并按旧页锚点回位；换底色只改颜色，不重排。
 - 对话高亮：`“…”` / `「…」` / `『…』` 引号内的说话内容（不含引号）在测量阶段
-  用 `getBoxesForSelection` 算出段内矩形，渲染时在文字下方画标记。三种画法由
+  用 `getBoxesForSelection` 算出段内矩形，渲染时在文字下方画标记。四种画法由
   `DialogueHighlightStyle` 决定：**荧光笔**（矩形下半段圆角色带，透明度浅色纸
   34% / 夜间纸 22%）、**下划线**、**波浪线**（后两者都是贴着行盒 88% 处的线，
   透明度 85% / 90%，因为「线」比「面」需要更实的颜色；波浪线半波 3.2、峰谷
-  ±2.4）。颜色与样式都在设置页「主题 → 对话高亮」的同一个弹层里选（默认琥珀黄
-  + 荧光笔；样式点完立即生效，颜色等「确定」）；**换样式只重绘、不重新分页**
-  （样式不进 `_PaginationKey`），矩形来自这次 TextPainter 测量，渲染期不额外排版，
-  也不影响分页、选中和复制。
+  ±2.4）、**文本**（不画标记，把命中区间的文字 `TextSpan` 直接染成所选颜色，
+  用户选什么色就是什么色，不做对比度补偿）。区间在测量阶段随 `ReaderBlock`
+  一起留下（`dialogueRanges`），文本画法渲染时按它拆 span；着色不改变度量，
+  所以和另外三种一样**换样式只重绘、不重新分页**。颜色与样式都在设置页
+  「主题 → 对话高亮」的同一个弹层里选（默认琥珀黄 + 荧光笔；样式点完立即生效，
+  颜色等「确定」）；样式不进 `_PaginationKey`，矩形/区间来自这次 TextPainter
+  测量，渲染期不额外排版，也不影响分页、选中和复制。
   真实源常把一句话拆成多个 `<p>`，扫描器
   （`ReaderDialogueScanner`）按整章顺序保留未闭合引号，跨段对话/每段重复左引号
   的排版都能连起来；状态不跨章。可在阅读设置里关闭（只影响渲染、不触发重排）。
@@ -279,11 +282,20 @@ ChapterContent{id,title,paragraphs}
   App 切前后台（`inactive`/`paused`）再兜一次；同一本书的重复落点复用同一行 UPDATE。
 - 表：与书架/收藏同表，`library` 里一行（`type='novel'` + `source_id`），进度落
   `progress_ref / progress_index / progress_sub`，看过的书就是「历史」的来源。
-- 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、字重 300–800（默认 **400**，整百档）、4 种底色（色块与「底色」标题同一行，不显示文字）、对话高亮开关
+- 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、字重 300–800（默认 **400**，整百档）、4 种纸色 + 自定义图（色块与「底色」标题同一行，不显示文字；自定义图有图才显示圆形缩略图）、对话高亮开关
   （默认开）与颜色（默认 `#FFD54F`，设置页主题模块自定义）、段评气泡开关（默认开），落
   `reader_font_size_v1 / reader_line_height_v1 / reader_font_weight_v1 / reader_paper_v1 / reader_day_paper_v1 / reader_show_dialogue_highlight_v1 / reader_dialogue_highlight_color_v1 / reader_show_bubbles_v1`；
   `reader_day_paper_v1` 记住最近一次浅色纸，供工具栏日/夜切换切回；已落盘偏好优先，
   默认值只影响无历史偏好的用户。
+- 背景图：等价于第五种底色。阅读设置「底色」行末尾（夜间黑色块右边）的圆形入口：
+  无图时点击进相册；有图但未启用时点击设为底色；已启用时点击换图；长按移除。不单独
+  占一行、不画删除按钮，有图时显示圆形缩略图。启用后铺图 + 当前纸色 45% 遮罩（底部
+  渐变保证正文/页码对比度），正文仍用当前纸色前景；点白/纸/护眼/夜间即退出自定义
+  （图片保留），夜间纯黑但记住「已启用」，切回日间恢复。
+  （`image_picker`；按 1800×2700 长边、质量 85 压一遍再落 `<AppSupport>/reader/reader_bg_<ts>.jpg`，
+  文件名存 `reader_background_image_v1`，启用标记存 `reader_background_active_v1`，老版本
+  有图默认按启用迁移，换图时删旧文件）。**只存本机**：图片和启用标记都不进 `ReaderSettings`、
+  不参与 WebDAV 同步（另一台设备没有这份文件，换机回退纸色）。
 
 ### 4.7 评论 / 段评（只读）
 
@@ -501,9 +513,9 @@ AVPlayer
   （LRU 2 条 `/src`，不预建 controller）；磁盘侧由内核 `src/` 128 MiB 预算按 mtime 自动淘汰，
   离线 pinned 区不受影响；离开播放页 dispose 所有 controller 与定时器。
 - 倍速：1.0–3.0x 全局持久化（`video_playback_speed_v1`）；`_startController` 统一 apply，首帧/seek/恢复再补设一次；
-  iOS 根因修复在 `third_party/video_player_avfoundation`（补 `AVPlayer.defaultRate`）。chip 放在
-  操作行最右（右下角）；时间行只留「当前位置 — 总时长」。点 chip 弹出**贴着它展开的小浮窗**
-  （`PlaybackSpeedButton`，M3 `MenuAnchor`；平时向下展开，控制条贴底放不下时自动翻到 chip 上方），
+  iOS 根因修复在 `third_party/video_player_avfoundation`（补 `AVPlayer.defaultRate`）。倍速文字放在
+  操作行最右（右下角）；时间行只留「当前位置 — 总时长」。点文字弹出**贴着它展开的小浮窗**
+  （`PlaybackSpeedButton`，M3 `MenuAnchor`；平时向下展开，控制条贴底放不下时自动翻到文字上方），
   只列 `playbackSpeeds` 那一份档位、不写说明文案；菜单开/关通过 `onOpenChanged` 冻结自动隐藏，
   避免选到一半控制条淡出。
 - 全屏：只有横屏视频（aspectRatio > 1.05）才给入口，且**不在控制条里**——入口是视频画面下方 8px 的
@@ -525,8 +537,8 @@ AVPlayer
   （iOS `UIDevice` + `NWPathMonitor` + CoreTelephony；Android `BatteryManager` +
   `ConnectivityManager`，没有 `READ_PHONE_STATE` 时 4G/5G 退化为「蜂窝」）。进入全屏每 5s 读
   一次、回前台补一次，通道失败只显示时间。顶栏只保留返回 + 剧名，标题在 `Expanded` 里省略；
-  当前集号在底栏左侧选集入口，用 13pt 文字替代原图标，点击行为不变；清晰度 chip 在全屏让位给
-  状态（竖屏照常显示）。
+  当前集号在底栏左侧选集入口；底栏除播放/暂停外全部是 13pt 纯文字（详情 / 评论 / 相关 /
+  清晰度 / 倍速），不再有图标与 chip 底色；清晰度在全屏让位给状态（竖屏照常显示）。
 - 屏幕常亮：播放中通过 `novel_playlet/screen_awake` 通道设置 iOS `isIdleTimerDisabled` /
   Android `FLAG_KEEP_SCREEN_ON`，只在实际 `isPlaying` 时开启；暂停、加载中、退后台、离开播放页
   释放，回前台仍在播则恢复。通道失败静默，系统 Auto-Lock 仍按用户设置生效。
@@ -575,7 +587,7 @@ cached miss 时第一次取流仍会按内核重试预算耗一段时间，失�
 |---|---|---|---|
 | **pinned 离线区** | `<AppSupport>/offline/novel/`、`offline/video/` | 用户主动下载的正文 / 明文 mp4 | **永不自动淘汰**，只能用户删 |
 | **自动加速层** | `<AppSupport>/reader_chapters/`、`backend/src/` | 章节 JSON、CENC 密文视频 + `.key` | 各自有上限，自动淘汰 |
-| **用户库** | `<AppSupport>/library.db`（SQLite） | 书架、收藏、阅读/观看进度 | 每条内容一行；纯进度行上限 500（小说+短剧共享），淘汰写 `progress_pruned_at` 不删行 |
+| **用户库** | `<AppSupport>/library.db`（SQLite） | 书架、收藏、在看、阅读/观看进度 | 每条内容一行；纯进度行上限 500（小说+短剧共享），淘汰写 `progress_pruned_at` 不删行，在看的行不参与淘汰 |
 | **偏好** | `SharedPreferences` | 主题、阅读设置、同步元数据 | 表级 LRU |
 
 ### 6.1 清单
@@ -627,8 +639,8 @@ flutter pub get
 ./scripts/build_rust_ios.sh              # 编真机 arm64 静态库 → ios/Frameworks/libfqapi_core.a
 ./scripts/build_rust_ios.sh --simulator  # 需要模拟器时额外编两片并打 xcframework
 pod install                              # 新增/更新插件后
-flutter build ios --release --no-codesign
-# 产物 build/ios/iphoneos/Runner.app，打成未签名 IPA 后走 ios-sideload 自签安装
+./scripts/build_ios_app.sh --flavor release   # 构建 + 打未签名 IPA（内部跑 flutter build ios --no-codesign）
+# 产物 output/ipa/novel_playlet_<flavor>_<sha>_unsigned.ipa，走 ios-sideload 自签安装
 ```
 
 Bundle ID `com.lihangyu.novelPlaylet`，显示名「摆烂盒子」。`Info.plist` 已为 `127.0.0.1`
@@ -661,11 +673,13 @@ App ID 不同，iOS 会分配独立的沙盒容器与 keychain，互不影响；
 ```bash
 ./scripts/build_ios_app.sh --flavor release   # 建议在 main 上跑
 ./scripts/build_ios_app.sh --flavor beta      # 开发分支的包
-# 产物 build/ios/ipa/novel_playlet_<flavor>_<sha>_unsigned.ipa
+# 产物 output/ipa/novel_playlet_<flavor>_<sha>_unsigned.ipa
 ```
 
   脚本会改未签名包的 `CFBundleIdentifier` / `CFBundleDisplayName`（beta 加 Beta
-  后缀），签名仍由 ios-sideload 按目标 App ID 完成。
+  后缀），签名仍由 ios-sideload 按目标 App ID 完成。beta 构建前还会临时把
+  `AppIcon.appiconset` 换成 `AppIconBeta.appiconset`（番茄 + 右下角绿色 BETA），
+  `trap` 保证构建完成/失败/中断后恢复正式图标；release 始终用 `AppIcon`。
 - **签名**：两个 App ID 各有自己的描述文件。切换版本签名前先确认
   `~/workspace/ios-sideload/build/signer.mobileprovision` 的 App ID 与之匹配，
   不匹配就 `BUNDLE_ID=<app id> ./profile.sh --mint` 重新签发（免费账号 7 天一轮，
@@ -679,14 +693,26 @@ App ID 不同，iOS 会分配独立的沙盒容器与 keychain，互不影响；
 ### 7.3 Android
 
 ```bash
-./scripts/build_rust_android.sh                         # 内核 .so → jniLibs/arm64-v8a
-./scripts/build_rust_android.sh --abis all              # 需要 32 位时
-flutter build apk --release --target-platform android-arm64
-# 产物 build/app/outputs/flutter-apk/app-release.apk
+./scripts/build_android_app.sh --flavor release          # 正式包（内部先编内核 .so）
+./scripts/build_android_app.sh --flavor beta             # beta 包，可与正式包共存
+./scripts/build_android_app.sh --flavor beta --skip-rust # 内核 .so 已编过
+./scripts/build_android_app.sh --flavor release --abis all   # 需要 32 位时
+# 产物 output/apk/novel_playlet_<flavor>_<sha>.apk
 ```
 
-- Manifest 已补 `INTERNET`、`network_security_config`（只放行 127.0.0.1 明文回环）、备份排除规则、图标与显示名。
+- 双渠道走 Gradle `productFlavors`（`android/app/build.gradle.kts`）：内部名 `prod` / `beta`
+  （避免与 build type 同名造成 variant/task 命名歧义，正式渠道不叫 release）。beta 的
+  `applicationId` 是 `com.lihangyu.novel_playlet.beta`、显示名「摆烂盒子 Beta」、回环端口
+  18932（`--dart-define=BACKEND_PORT=18932`），与 iOS 的 beta 一一对应。
+- 加了渠道后**所有** APK 构建都要带 `--flavor prod|beta`（例如 `flutter run --flavor beta`、
+  `flutter build apk --flavor prod`）：不带渠道时 Flutter 找不到 `app-<flavor>-<type>.apk`。
+  日常直接用上面的脚本。
+- Manifest 已补 `INTERNET`、`network_security_config`（只放行 127.0.0.1 明文回环）、备份排除规则、
+  图标与显示名（`@string/app_name`，beta 由 `android/app/src/beta/res/values/strings.xml` 覆盖）。
+- 自适应图标（API 26+）：前景层透明，番茄内容宽按 108dp 画布的 46.5% 放置（可见 72dp 圆内约占 70%，与 iOS 图标
+  视觉占比一致）；legacy mipmap 的内容宽度保持 70%。改图时不要按满画布铺，否则会被系统遮罩裁得比 iOS 大一圈。
 - 正式签名读 `android/key.properties`（仓库外，git 忽略）；没有配置时回退 debug 签名，只能自测、不能覆盖升级。
+  两个渠道共用同一份签名配置。
 - 常见问题：启动报 `UnsatisfiedLinkError` → `.so` 没编或 ABI 不对；release 包接口全失败 → 缺 `INTERNET`；
   播放报 `PanicException(... rustls-platform-verifier ...)` → 旧包，重新构建；装不上 → 签名不一致，先卸载。
 
@@ -749,7 +775,7 @@ xcrun devicectl device copy from --device <UDID> \
 ./scripts/bump_version.sh             # 1.0.0+15 → 1.0.1+16
 ```
 
-- 发版顺序：在 main 上 bump → 构建 release（`flutter build ios --release --no-codesign`，双版本构建脚本见 §7.2）→ 自签覆盖安装。不要手改 Info.plist / Android 的版本号。
+- 发版顺序：在 main 上 bump → `./scripts/build_ios_app.sh --flavor release` 出 IPA（§7.2）、`./scripts/build_android_app.sh --flavor release` 出 APK（§7.3）→ 自签覆盖安装。不要手改 Info.plist / Android 的版本号。
 - 构建号必须递增（Apple 的 `CFBundleVersion` 规则，覆盖安装和安全回滚都靠它），不要回退。
 
 ## 8. 性能记录：阅读页整章分页
@@ -826,6 +852,7 @@ flutter drive --profile -d <iPhone UDID> \
 | `lib/app/widgets/comment_emoji_text.dart` | 评论/回复方括号表情：token 解析、包内 webp 内联渲染 |
 | `assets/images/emoji/` | 官方 53 个表情 token 对应的 120×120 webp（约 126 KB） |
 | `lib/features/settings/widgets/dialogue_highlight_preview.dart` | 对话高亮取色弹层里的阅读页示例预览 |
+| `lib/features/reader/reader_background.dart` | 阅读页背景图：相册选图、本机存储、启用状态、背景层渲染 |
 | `lib/features/sync/{webdav_config,webdav_client,sync_service,sync_status}.dart` | WebDAV 云同步：配置安全存储、HTTP 客户端（ETag/If-Match）、合并上传、状态机 |
 | `lib/features/sync/{sync_log,sync_log_page}.dart` | 同步日志：本机 50 次记录（双向 diff）、记录页 |
 | `lib/features/sync/widgets/webdav_{sync_card,config_sheet}.dart` | 设置页云同步卡片与配置/测试连接表单 |
@@ -967,11 +994,13 @@ flutter drive --profile -d <iPhone UDID> \
   **云端数据**（只读展示云端 `sync.json` 的元信息与 500 条上限内的记录列表）。
 - **文件**：`novel-playlet/<release|beta|dev>/sync.json`。渠道由 `appFlavor` 与构建模式决定：
   release 包用 `release`，beta 包用 `beta`，debug 包用 `dev`，互不覆盖。文件只有书架、收藏、
-  阅读/观看进度，封面只存 URL，不存正文/图片/密码，通常小于 100 KB。
+  阅读/观看进度与「在看」，封面只存 URL，不存正文/图片/密码，通常小于 100 KB。
 - **合并**：单表 `library` 的记录直接进载荷（`{'items': [...]}`，`schemaVersion = 3`）：
   - 快照整组按 `metaFetchedAt` 取新；进度整组按 `lastReadAt` 取新；
   - 书架/收藏用 `shelfAt` / `shelfRemovedAt` 两列各取 max，`shelfAt > shelfRemovedAt` 才算在架，
     删除也能同步；
+  - 在看用 `pinnedAt` / `unpinnedAt` 两列各取 max，`pinnedAt > unpinnedAt` 才算在看，取消也能同步
+    （字段是后加的，老版本会忽略，不升 `schemaVersion`）；
   - 进度淘汰墓碑：`progressPrunedAt` 晚于对方 `lastReadAt` 才丢弃，之后又读过会复活。
 - **条件请求**：先 `PROPFIND Depth:0` 取 ETag，与本机 `SyncMeta.remoteEtag` + 本地载荷指纹
   （FNV-1a）比对，都命中就整轮跳过（不发 GET/PUT）。PROPFIND 不可用时用上次的 ETag 发条件

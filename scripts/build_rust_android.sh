@@ -188,4 +188,4 @@ else
   esac
 fi
 
-echo "==> 完成。打包命令：flutter build apk --release --target-platform android-arm64"
+echo "==> 完成。打包命令：./scripts/build_android_app.sh --flavor release|beta"

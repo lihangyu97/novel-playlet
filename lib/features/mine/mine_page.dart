@@ -15,23 +15,24 @@ import 'widgets/mine_all_sheet.dart';
 import 'widgets/mine_grid_metrics.dart';
 import 'widgets/mine_header.dart';
 import 'widgets/mine_history_list.dart';
+import 'widgets/mine_pin_card.dart';
 import 'widgets/mine_library_grid.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/novel_item.dart';
 import '../../data/models/video_series.dart';
 
-/// 我的：统一页头 + 「历史」+「收藏」两个区块。
+/// 我的：统一页头 + 「在看」+「收藏」+「历史」三个区块。
 ///
-/// 小说与短剧不再分 tab，而是**同一条时间线 / 同一个收藏夹**：历史按最近
-/// 阅读（或观看）时间倒序混排，收藏按加入时间倒序混排，条目上挂彩色标签
-/// 区分类型（绿=小说、橙=短剧）。
+/// 小说与短剧不再分 tab：在看按 pin 时间倒序、收藏按加入时间倒序、历史按
+/// 最近阅读（或观看）时间倒序，三类都混排，条目上挂彩色标签区分类型
+/// （绿=小说、橙=短剧）。
 ///
-/// 页头（图标 + 「我的」 + 合并统计 + 缓存 / 设置）固定贴顶、不随内容滚动；
-/// 顶部氛围渐变整页一套。
+/// 页头（图标 + 「我的」 + 缓存 / 设置）固定贴顶、不随内容滚动；顶部氛围
+/// 渐变整页一套。区块顺序固定为「在看 → 收藏 → 历史」。
 ///
-/// 页面根节点**不订阅任何数据 provider**：页头统计由 [_MineStats] 叶子自己
-/// watch，阅读页落一次进度时只有「历史」那一块重建（CODE_REVIEW
-/// P1-5）。两个区块各自订阅自己的通道，互不牵连。
+/// 页面根节点**不订阅任何数据 provider**：三个区块各自 watch 自己的通道，
+/// 阅读页落一次进度只重建「历史」，切换 pin 只重建「在看」，收藏变更只重建
+/// 「收藏」（CODE_REVIEW P1-5）。
 class MinePage extends ConsumerWidget {
   const MinePage({super.key, this.bottomInset = 0});
 
@@ -39,8 +40,10 @@ class MinePage extends ConsumerWidget {
   final double bottomInset;
 
   /// 测试/无障碍定位用。
+  static const pinKey = Key('mine-pin');
   static const historyKey = Key('mine-history');
   static const collectionKey = Key('mine-collection');
+  static const pinAllKey = Key('mine-pin-all');
   static const historyAllKey = Key('mine-history-all');
   static const collectionAllKey = Key('mine-collection-all');
 
@@ -65,7 +68,6 @@ class MinePage extends ConsumerWidget {
                 MineHeader(
                   title: '我的',
                   icon: Icons.person_rounded,
-                  stats: const _MineStats(),
                   onCache: () => context.pushAppRoute(const CacheCenterRoute()),
                   onSettings: () => context.pushAppRoute(const SettingsRoute()),
                 ),
@@ -73,11 +75,12 @@ class MinePage extends ConsumerWidget {
                   child: CustomScrollView(
                     physics: const ClampingScrollPhysics(),
                     slivers: [
-                      SliverToBoxAdapter(
-                        child: _MineHistorySection(key: historyKey),
-                      ),
+                      SliverToBoxAdapter(child: _MinePinSection(key: pinKey)),
                       SliverToBoxAdapter(
                         child: _MineCollectionSection(key: collectionKey),
+                      ),
+                      SliverToBoxAdapter(
+                        child: _MineHistorySection(key: historyKey),
                       ),
                       SliverToBoxAdapter(
                         child: SizedBox(height: 28 + bottomInset),
@@ -99,6 +102,46 @@ Widget _sectionPlaceholder(Widget child) => SizedBox(height: 140, child: child);
 
 const _readFailed = '读取本地数据失败，请重试';
 
+/// 「在看」：pin 过的内容排在页面最上面，横向一排卡片，可左右滑。
+///
+/// 没有 pin 时整块隐藏；加载中/失败也不占位（历史与收藏各自有错误态）。
+class _MinePinSection extends ConsumerWidget {
+  const _MinePinSection({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final items = ref.watch(minePinsProvider).value;
+    if (items == null || items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      children: [
+        _MineSectionHeader(
+          title: '在看',
+          count: items.length,
+          allKey: MinePage.pinAllKey,
+          onShowAll: () => showMineAllSheet(
+            context: context,
+            scope: MineAllScope.pin,
+            onOpen: (item) => openLibraryRecord(context, ref, item),
+          ),
+        ),
+        SizedBox(
+          height: MinePinCard.heightFor(context),
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            itemCount: items.length,
+            separatorBuilder: (context, index) => const SizedBox(width: 8),
+            itemBuilder: (context, index) => MinePinCard(
+              item: items[index],
+              onTap: () => openLibraryRecord(context, ref, items[index]),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// 「历史」：读过的小说与看过的短剧混排，按最近一次阅读/观看倒序。
 class _MineHistorySection extends ConsumerWidget {
   const _MineHistorySection({super.key});
@@ -116,7 +159,7 @@ class _MineHistorySection extends ConsumerWidget {
           onShowAll: () => showMineAllSheet(
             context: context,
             scope: MineAllScope.history,
-            onOpen: (item) => _openHistory(context, ref, item),
+            onOpen: (item) => openLibraryRecord(context, ref, item),
           ),
         ),
         _body(context, ref, async),
@@ -147,15 +190,20 @@ class _MineHistorySection extends ConsumerWidget {
     }
     return MineHistoryList(
       items: items,
-      onOpen: (item) => _openHistory(context, ref, item),
+      onOpen: (item) => openLibraryRecord(context, ref, item),
     );
   }
+}
 
-  void _openHistory(BuildContext context, WidgetRef ref, LibraryRecord item) {
-    if (item.type.isPlaylet) {
-      _resumeVideo(context, ref, item);
-      return;
-    }
+/// 打开一条本地记录：小说进阅读页续读，短剧拉分集后续播。
+///
+/// 「在看」「历史」和全量弹窗都走这里，避免续读逻辑各写一份。
+Future<void> openLibraryRecord(
+  BuildContext context,
+  WidgetRef ref,
+  LibraryRecord item,
+) async {
+  if (!item.type.isPlaylet) {
     context.pushAppRoute(
       ReaderRoute(
         ReaderArgs(
@@ -168,39 +216,39 @@ class _MineHistorySection extends ConsumerWidget {
         ),
       ),
     );
+    return;
   }
+  await _resumeVideo(context, ref, item);
+}
 
-  /// 历史里的短剧点击续播：先拉分集列表，再直接进播放页对应集。
-  Future<void> _resumeVideo(
-    BuildContext context,
-    WidgetRef ref,
-    LibraryRecord item,
-  ) async {
-    try {
-      final api = ref.read(apiClientProvider);
-      final episodes = await api.videoEpisodes(item.sourceId);
-      if (episodes.isEmpty) {
-        throw ApiException('这部剧暂时没有可播放的集数');
-      }
-      if (!context.mounted) return;
-      final index = item.progressIndex < episodes.length
-          ? item.progressIndex
-          : 0;
-      context.pushAppRoute(
-        VideoPlayRoute(
-          VideoPlayArgs(
-            seriesTitle: item.title,
-            episodes: episodes,
-            index: index,
-            seriesId: item.sourceId,
-            cover: item.cover,
-          ),
-        ),
-      );
-    } catch (error) {
-      if (!context.mounted) return;
-      showAppSnackBar(context, apiErrorCopy(error, fallback: '打开播放失败，请重试'));
+/// 短剧点击续播：先拉分集列表，再直接进播放页对应集。
+Future<void> _resumeVideo(
+  BuildContext context,
+  WidgetRef ref,
+  LibraryRecord item,
+) async {
+  try {
+    final api = ref.read(apiClientProvider);
+    final episodes = await api.videoEpisodes(item.sourceId);
+    if (episodes.isEmpty) {
+      throw ApiException('这部剧暂时没有可播放的集数');
     }
+    if (!context.mounted) return;
+    final index = item.progressIndex < episodes.length ? item.progressIndex : 0;
+    context.pushAppRoute(
+      VideoPlayRoute(
+        VideoPlayArgs(
+          seriesTitle: item.title,
+          episodes: episodes,
+          index: index,
+          seriesId: item.sourceId,
+          cover: item.cover,
+        ),
+      ),
+    );
+  } catch (error) {
+    if (!context.mounted) return;
+    showAppSnackBar(context, apiErrorCopy(error, fallback: '打开播放失败，请重试'));
   }
 }
 
@@ -374,37 +422,6 @@ class _MineSectionHeader extends StatelessWidget {
                 ),
               ),
             ),
-    );
-  }
-}
-
-/// 页头统计行：只订阅「历史条数 / 收藏条数」。
-///
-/// 单独做成 ConsumerWidget，[MinePage] 根节点自己不 watch 任何数据 provider：
-/// 阅读进度落盘（历史变化）不该让固定页头之外的区块跟着重建。
-class _MineStats extends ConsumerWidget {
-  const _MineStats();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final history = ref.watch(mineHistoryCountProvider);
-    final collection = ref.watch(mineCollectionCountProvider);
-    final historyCount = history.value;
-    final collectionCount = collection.value;
-    final String text;
-    if (historyCount != null && collectionCount != null) {
-      text = '历史 $historyCount · 收藏 $collectionCount';
-    } else if (history.hasError || collection.hasError) {
-      text = '本地数据暂时读不出来';
-    } else {
-      text = '正在读取本地数据…';
-    }
-    final theme = Theme.of(context);
-    return Text(
-      text,
-      style: theme.textTheme.bodyMedium?.copyWith(
-        color: theme.colorScheme.onSurfaceVariant,
-      ),
     );
   }
 }

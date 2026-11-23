@@ -1,12 +1,19 @@
+import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/providers.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_bottom_sheet.dart';
+import '../../app/widgets/app_snack_bar.dart';
 import '../../app/widgets/color_swatch_dot.dart';
 import '../../app/widgets/setting_switch_row.dart';
+import '../../core/storage/library_records.dart';
+import 'reader_background.dart';
 import 'reader_pagination.dart';
 import 'reader_settings.dart';
 
@@ -52,13 +59,15 @@ class ReaderPageContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // 对话标记色：荧光笔是「面」，浅色纸/夜间纸叠不同透明度；下划线与波浪线
-    // 是「线」，要实一些才看得清（线的透明度太低会糊成纸色）。
+    // 是「线」，要实一些才看得清（线的透明度太低会糊成纸色）。「文本」直接把
+    // 命中文字染成用户选的颜色，不叠透明度。
     final isDark = Theme.of(context).colorScheme.brightness == Brightness.dark;
     final highlightColor = dialogueHighlightColor.withValues(
       alpha: switch (dialogueHighlightStyle) {
         DialogueHighlightStyle.marker => isDark ? 0.22 : 0.34,
         DialogueHighlightStyle.underline ||
         DialogueHighlightStyle.wavy => isDark ? 0.90 : 0.85,
+        DialogueHighlightStyle.text => 1.0,
       },
     );
     return Padding(
@@ -75,6 +84,12 @@ class ReaderPageContent extends StatelessWidget {
   Widget _buildFragment(ReaderFragment fragment, Color highlightColor) {
     // 与分页测量共用同一个 span 构建函数：首行缩进 / 段评气泡的占位度量
     // 在测量与渲染两侧完全一致，不能各自实现一套。
+    //
+    // 「文本」画法在 span 里给命中区间着色；其余画法仍在文字下面画 CustomPaint。
+    // 两种都只改颜色、不改度量，样式切换不会重新分页。
+    final useTextColor =
+        showDialogueHighlight &&
+        dialogueHighlightStyle == DialogueHighlightStyle.text;
     final block = fragment.block;
     final paraIndex = block.paraIndex;
     final paragraph = buildReaderParagraphSpan(
@@ -87,6 +102,10 @@ class ReaderPageContent extends StatelessWidget {
       onBubbleTap: paraIndex == null || onBubbleTap == null
           ? null
           : () => onBubbleTap!(paraIndex),
+      highlightRanges: useTextColor
+          ? block.dialogueRanges
+          : const <TextRange>[],
+      highlightColor: useTextColor ? highlightColor : null,
     );
     return Positioned(
       top: fragment.top,
@@ -106,6 +125,7 @@ class ReaderPageContent extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 if (showDialogueHighlight &&
+                    !useTextColor &&
                     fragment.block.dialogueRects.isNotEmpty)
                   CustomPaint(
                     key: const ValueKey('reader-dialogue-highlight'),
@@ -452,12 +472,12 @@ class ReaderLoadingPill extends StatelessWidget {
   }
 }
 
-/// 阅读设置弹层：字号、行距、底色、对话高亮、段评气泡。
+/// 阅读设置弹层：字号、行距、底色（含背景图）、对话高亮、段评气泡。
 ///
 /// 字号/行距是分页输入。拖动过程中只更新**本地预览值**（滑块与文案立即跟手，
 /// 不碰 provider），松手（`onChangeEnd`）才提交一次：一次整章重排 + 一次落盘。
 /// 否则滑块每个 tick 都会让 `_PaginationKey` 失效、整章 TextPainter 重排一次，
-/// 并写 7 个 SharedPreferences key。
+/// 并写一整组 SharedPreferences key。
 class ReaderSettingsSheet extends ConsumerStatefulWidget {
   const ReaderSettingsSheet({super.key});
 
@@ -511,6 +531,10 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
     final fontWeight =
         _previewFontWeight ?? effectiveFontWeight.value.toDouble();
     final paper = settings.paper;
+    // 自定义图启用且当前是日间时，第五个圆球才是当前底色，纸色不显示选中；
+    // 夜间实际底色是纯黑，夜间色块照常选中，图片圆球只变暗。
+    final customActive = ref.watch(readerBackgroundProvider).active;
+    final customSelected = customActive && paper != ReaderPaper.night;
     final foreground = paper.foreground;
     final muted = foreground.withValues(alpha: 0.55);
     // 弹层由阅读页用「纸色对应的 Theme」包着（reader_page._readerTheme），
@@ -594,32 +618,60 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
                   muted: muted,
                 ),
               const SizedBox(height: 4),
-              // 底色标题与四个色块同一行；文案（白/纸/护眼/夜间）去掉，
-              // 只保留色块 + 选中勾，读屏仍播报底色名。
+              // 底色标题 + 四个纸色圆点 + 末尾的背景图圆点同一行；文案
+              // （白/纸/护眼/夜间）去掉，只留色块 + 选中勾，读屏仍播报底色名。
+              // 窄屏按可用宽度收一点圆点尺寸，避免第五个圆点把行撑破。
               Row(
                 children: [
                   Text('底色', style: TextStyle(fontSize: 13, color: muted)),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        for (final option in ReaderPaper.values) ...[
-                          if (option != ReaderPaper.values.first)
-                            const SizedBox(width: 10),
-                          ColorSwatchDot(
-                            color: option.background,
-                            size: 42,
-                            tooltip: option.label,
-                            selected: option == paper,
-                            ringColor: Theme.of(context).colorScheme.primary,
-                            iconColor: option.foreground,
-                            unselectedBorder: foreground.withValues(alpha: 0.2),
-                            unselectedBorderWidth: 0.8,
-                            onTap: () => controller.setPaper(option),
-                          ),
-                        ],
-                      ],
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        const gap = 10.0;
+                        final slots = ReaderPaper.values.length + 1;
+                        final dotSize =
+                            ((constraints.maxWidth - gap * (slots - 1)) / slots)
+                                .clamp(32.0, 42.0)
+                                .toDouble();
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            for (final option in ReaderPaper.values) ...[
+                              if (option != ReaderPaper.values.first)
+                                const SizedBox(width: gap),
+                              ColorSwatchDot(
+                                color: option.background,
+                                size: dotSize,
+                                tooltip: option.label,
+                                selected: option == paper && !customSelected,
+                                ringColor: highlight,
+                                iconColor: option.foreground,
+                                unselectedBorder: foreground.withValues(
+                                  alpha: 0.2,
+                                ),
+                                unselectedBorderWidth: 0.8,
+                                onTap: () {
+                                  controller.setPaper(option);
+                                  // 选纸色 = 退出自定义图；图片保留，点第五个
+                                  // 圆球可以再设回来。
+                                  unawaited(
+                                    ref
+                                        .read(readerBackgroundProvider.notifier)
+                                        .deactivate(),
+                                  );
+                                },
+                              ),
+                            ],
+                            const SizedBox(width: gap),
+                            _ReaderBackgroundSwatch(
+                              size: dotSize,
+                              foreground: foreground,
+                              ringColor: highlight,
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -627,7 +679,7 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
               const SizedBox(height: 14),
               SettingSwitchRow(
                 title: '对话高亮',
-                subtitle: '给双引号里的人物说话内容加荧光笔',
+                subtitle: '给双引号里的人物说话内容加标记',
                 value: settings.showDialogueHighlight,
                 onChanged: controller.setShowDialogueHighlight,
                 foreground: foreground,
@@ -714,6 +766,10 @@ class _DialogueHighlightPainter extends CustomPainter {
         _paintLine(canvas, wavy: false);
       case DialogueHighlightStyle.wavy:
         _paintLine(canvas, wavy: true);
+      case DialogueHighlightStyle.text:
+        // 「文本」画法把命中区间的文字直接染色（见 ReaderPageContent），
+        // 不在文字下面再画标记。
+        break;
     }
   }
 
@@ -781,4 +837,278 @@ class _DialogueHighlightPainter extends CustomPainter {
       oldDelegate.color != color ||
       oldDelegate.style != style ||
       oldDelegate.rects != rects;
+}
+
+/// 底色行末尾的「背景图」圆球：未启用时点一下设为底色，已启用时点一下换图，
+/// 长按移除。
+///
+/// 不单独占一行、不画删除按钮；有图时直接显示圆形缩略图。夜间纸不铺背景图，
+/// 但「已启用」会保留，圆球变暗，切回日间自动恢复。
+class _ReaderBackgroundSwatch extends ConsumerStatefulWidget {
+  const _ReaderBackgroundSwatch({
+    required this.size,
+    required this.foreground,
+    required this.ringColor,
+  });
+
+  final double size;
+  final Color foreground;
+  final Color ringColor;
+
+  @override
+  ConsumerState<_ReaderBackgroundSwatch> createState() =>
+      _ReaderBackgroundSwatchState();
+}
+
+class _ReaderBackgroundSwatchState
+    extends ConsumerState<_ReaderBackgroundSwatch> {
+  /// 相册弹层打开期间禁用按钮，避免连点起两个 picker。
+  bool _picking = false;
+
+  /// 启用/停用是异步落盘，防连点。
+  bool _activating = false;
+
+  /// 没图先选图；有图但未启用就设成底色；已经启用则换图。
+  Future<void> _handleTap() async {
+    if (_picking || _activating) return;
+    final background = ref.read(readerBackgroundProvider);
+    if (!background.hasImage) {
+      await _pick();
+    } else if (!background.active) {
+      await _activate();
+    } else {
+      await _pick();
+    }
+  }
+
+  Future<void> _activate() async {
+    if (_activating) return;
+    _activating = true;
+    try {
+      await ref.read(readerBackgroundProvider.notifier).activate();
+      // 等落盘期间用户可能又点了夜间/纸色，只有仍然启用才切日间。
+      if (mounted && ref.read(readerBackgroundProvider).active) {
+        _showInDayIfNight();
+      }
+    } finally {
+      _activating = false;
+    }
+  }
+
+  /// 夜间选图/启用后自动切回日间，否则图看不见，用户会以为没生效。
+  void _showInDayIfNight() {
+    final settings = ref.read(readerSettingsProvider);
+    if (settings.paper == ReaderPaper.night) {
+      ref.read(readerSettingsProvider.notifier).setPaper(settings.dayPaper);
+    }
+  }
+
+  Future<void> _pick() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final picked = await ref
+          .read(readerBackgroundProvider.notifier)
+          .pickFromGallery();
+      if (picked && mounted && ref.read(readerBackgroundProvider).active) {
+        _showInDayIfNight();
+      }
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        error.code == 'photo_access_denied'
+            ? '没有相册权限，请到系统设置里允许访问照片'
+            : '打开相册失败，请重试',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      showAppSnackBar(context, '选择背景图失败，请重试');
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _clear() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      await ref.read(readerBackgroundProvider.notifier).clear();
+      if (mounted) showAppSnackBar(context, '已移除背景图');
+    } catch (_) {
+      if (mounted) showAppSnackBar(context, '移除背景图失败，请重试');
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final background = ref.watch(readerBackgroundProvider);
+    final isNight =
+        ref.watch(readerSettingsProvider).paper == ReaderPaper.night;
+    final hasImage = background.hasImage;
+    final active = background.active && hasImage;
+    // 夜间实际底色是纯黑，图片圆球不显示选中环（但仍保留启用状态）。
+    final selected = active && !isNight;
+    final size = widget.size;
+
+    Widget content;
+    if (_picking) {
+      content = SizedBox(
+        width: size * 0.4,
+        height: size * 0.4,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: widget.foreground,
+        ),
+      );
+    } else if (hasImage) {
+      content = ClipOval(
+        child: Image.file(
+          File(background.filePath!),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          cacheWidth: (size * 3).round(),
+          errorBuilder: (context, error, stackTrace) => Icon(
+            Icons.broken_image_outlined,
+            size: size * 0.45,
+            color: widget.foreground.withValues(alpha: 0.7),
+          ),
+        ),
+      );
+    } else {
+      content = Icon(
+        Icons.add_photo_alternate_outlined,
+        size: size * 0.45,
+        color: widget.foreground.withValues(alpha: 0.7),
+      );
+    }
+
+    final borderColor = selected
+        ? widget.ringColor
+        : widget.foreground.withValues(alpha: 0.2);
+    final message = !hasImage
+        ? '从相册选择背景图'
+        : active
+        ? (isNight ? '背景图（夜间不显示）· 点击更换 · 长按移除' : '背景图 · 点击更换 · 长按移除')
+        : '已保存的背景图 · 点击设为底色 · 长按移除';
+    final semanticLabel = !hasImage
+        ? '选择背景图'
+        : active
+        ? '更换背景图，长按移除'
+        : '把已保存的背景图设为底色，长按移除';
+    return Tooltip(
+      // 长按要留给「移除」；Tooltip 默认也抢长按，这里改成手动触发。
+      triggerMode: TooltipTriggerMode.manual,
+      message: message,
+      child: Semantics(
+        button: true,
+        label: semanticLabel,
+        child: InkResponse(
+          onTap: _picking ? null : _handleTap,
+          onLongPress: hasImage && !_picking && !_activating ? _clear : null,
+          radius: size * 0.68,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: hasImage
+                  ? null
+                  : widget.foreground.withValues(alpha: 0.06),
+              shape: BoxShape.circle,
+            ),
+            // 描边画在前景：否则圆形缩略图会把 border 整个盖住。
+            foregroundDecoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: borderColor, width: selected ? 2 : 0.8),
+            ),
+            child: Opacity(
+              opacity: active && isNight ? 0.45 : 1,
+              child: content,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 阅读页右下角的「在看」悬浮按钮。
+///
+/// 只在工具栏展开时显示（由阅读页控制显隐与点击穿透）：阅读页整屏都是翻页
+/// 点击区，常驻按钮会吃掉右下角"下一页"的手势。点一下 pin、再点取消，
+/// 状态来自 [libraryPinnedProvider]，和「我的 → 在看」是同一份数据。
+class ReaderPinButton extends ConsumerWidget {
+  const ReaderPinButton({
+    super.key,
+    required this.bookId,
+    required this.title,
+    required this.cover,
+    required this.paper,
+  });
+
+  /// 测试 / 无障碍定位。
+  static const Key buttonKey = Key('reader-pin-button');
+
+  final String bookId;
+  final String title;
+  final String cover;
+  final ReaderPaper paper;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pinnedState = ref.watch(
+      libraryPinnedProvider((type: LibraryType.novel, id: bookId)),
+    );
+    final pinned = pinnedState.value ?? false;
+    final foreground = paper.foreground;
+    return Tooltip(
+      message: pinned ? '取消在看' : '加入在看',
+      child: Material(
+        key: buttonKey,
+        color: paper.background.withValues(alpha: 0.92),
+        shape: const CircleBorder(),
+        elevation: 2,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => unawaited(_toggle(context, ref, pinned: pinned)),
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Icon(
+              pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+              size: 21,
+              color: pinned
+                  ? Theme.of(context).colorScheme.primary
+                  : foreground.withValues(alpha: 0.72),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggle(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool pinned,
+  }) async {
+    try {
+      await ref
+          .read(readingStoreProvider)
+          .togglePin(
+            type: LibraryType.novel,
+            sourceId: bookId,
+            title: title,
+            cover: cover,
+          );
+    } catch (_) {
+      if (!context.mounted) return;
+      showAppSnackBar(context, pinned ? '取消在看失败，请重试' : '加入在看失败，请重试');
+    }
+  }
 }

@@ -14,8 +14,10 @@ import '../../app/router.dart';
 import '../../app/widgets/embedded_detail_sheet.dart';
 import '../../app/widgets/app_snack_bar.dart';
 import '../../app/widgets/novel_cover.dart';
+import '../../core/storage/library_records.dart';
 import '../../core/storage/offline/offline_series.dart';
 import '../../data/models/chapter.dart';
+import '../../data/models/json_utils.dart';
 import '../../data/models/video_series.dart';
 import '../../data/models/video_source.dart';
 import '../cache/cache_providers.dart';
@@ -29,7 +31,8 @@ import 'screen_awake.dart';
 import 'video_detail_page.dart';
 import 'widgets/episode_picker_sheet.dart';
 import 'widgets/playback_speed_menu.dart';
-import 'widgets/player_option_chip.dart';
+import 'widgets/player_bar_text.dart';
+import 'widgets/related_series_sheet.dart';
 import 'widgets/video_comments_sheet.dart';
 
 /// 在线播放默认档位：720P（按短边，竖屏 720×1280 也算 720P）。
@@ -151,6 +154,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
 
   /// 手指拖动期间暂停当前集：滑走就换集，滑回原页再恢复播放，音画不抢。
   bool _pausedByDrag = false;
+
+  /// 「相关」弹层/跳转进行中：防止连点叠出两个弹层或两次 pushReplacement。
+  bool _openingRelated = false;
 
   /// 有旧画面兜底时延迟显示 spinner：本地文件通常在新画面出来前就绪，
   /// 不应该闪一下「正在准备视频…」。
@@ -1250,6 +1256,82 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     if (mounted) _scheduleHide();
   }
 
+  /// 底栏「相关」用的搜索词：剧名去掉「第 x 集」。
+  String get _relatedQuery => relatedSearchQuery(widget.args.seriesTitle);
+
+  /// 打开「相关」：先把当前集暂停，选完再决定继续播/替换页面。
+  Future<void> _openRelatedSeries() async {
+    if (_openingRelated) return;
+    // seriesId 能直接查同系列，query 只作为兜底；两者都空才不打开。
+    if (widget.args.seriesId.isEmpty && _relatedQuery.isEmpty) return;
+    _openingRelated = true;
+    _hideTimer?.cancel();
+    final controller = _controller;
+    final wasPlaying = controller?.value.isPlaying ?? false;
+    if (wasPlaying) unawaited(controller?.pause());
+    VideoSeries? picked;
+    try {
+      picked = await showRelatedSeriesSheet(
+        context: context,
+        seriesId: widget.args.seriesId,
+        seriesTitle: widget.args.seriesTitle,
+      );
+    } finally {
+      _openingRelated = false;
+    }
+    if (!mounted) return;
+    if (picked == null) {
+      // 取消/点遮罩关闭：恢复原来的播放状态。
+      if (wasPlaying) unawaited(controller?.play());
+      _scheduleHide();
+      return;
+    }
+    final opened = await _playRelatedSeries(picked);
+    if (!mounted) return;
+    // 替换成功后当前页会被新播放页顶掉，不能再去 play 旧 controller。
+    if (!opened) {
+      if (wasPlaying) unawaited(_controller?.play());
+      _scheduleHide();
+    }
+  }
+
+  /// 打开相关短剧第 1 集：拉分集后 **replace** 当前播放页。
+  ///
+  /// 用 replace 而不是 push：相关链路可能连续跳好几部，返回时应回到进播放页
+  /// 之前那一层（详情/历史），而不是沿 A → B → C 一层层退。
+  Future<bool> _playRelatedSeries(VideoSeries series) async {
+    try {
+      final episodes = await ref
+          .read(apiClientProvider)
+          .videoEpisodes(series.id);
+      if (episodes.isEmpty) {
+        throw ApiException('这部剧暂时没有可播放的集数');
+      }
+      if (!mounted) return false;
+      // 全屏横屏时先把方向和系统 UI 还原，否则新播放页会以横屏 + 隐藏状态栏开局。
+      if (_fullscreen) await _exitFullscreen();
+      if (!mounted) return false;
+      unawaited(
+        context.replaceAppRoute(
+          VideoPlayRoute(
+            VideoPlayArgs(
+              seriesTitle: series.title,
+              episodes: episodes,
+              index: 0,
+              seriesId: series.id,
+              cover: series.cover,
+            ),
+          ),
+        ),
+      );
+      return true;
+    } catch (error) {
+      if (!mounted) return false;
+      showAppSnackBar(context, apiErrorCopy(error, fallback: '打开相关短剧失败，请重试'));
+      return false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // 加载期间也保留顶栏（返回键/剧名），不要整屏只剩 spinner。
@@ -1794,9 +1876,59 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
               ),
             ),
           ),
+          if (widget.args.seriesId.isNotEmpty) _buildPinButton(),
         ],
       ),
     );
+  }
+
+  /// 顶栏右侧的「在看」悬浮按钮：跟控制条一起显示/隐藏。
+  ///
+  /// 和「我的 → 在看」共用同一份数据；点一下 pin、再点取消。没有 seriesId
+  /// （老调用方从历史直接进播放页但缺字段）时没有稳定主键，不展示。
+  Widget _buildPinButton() {
+    final pinnedState = ref.watch(
+      libraryPinnedProvider((
+        type: LibraryType.playlet,
+        id: widget.args.seriesId,
+      )),
+    );
+    final pinned = pinnedState.value ?? false;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.28),
+        shape: const CircleBorder(),
+        child: IconButton(
+          onPressed: () => unawaited(_togglePin(pinned: pinned)),
+          tooltip: pinned ? '取消在看' : '加入在看',
+          iconSize: 20,
+          color: pinned ? const Color(0xFFFFD54F) : Colors.white,
+          icon: Icon(pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined),
+          style: IconButton.styleFrom(
+            minimumSize: const Size(36, 36),
+            padding: EdgeInsets.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _togglePin({required bool pinned}) async {
+    try {
+      await ref
+          .read(readingStoreProvider)
+          .togglePin(
+            type: LibraryType.playlet,
+            sourceId: widget.args.seriesId,
+            title: widget.args.seriesTitle,
+            cover: widget.args.cover,
+          );
+    } catch (_) {
+      if (!mounted) return;
+      showAppSnackBar(context, pinned ? '取消在看失败，请重试' : '加入在看失败，请重试');
+    }
   }
 
   /// 横屏全屏底栏的系统状态：时间 / 电量（百分比）/ 当前网络，放在倍速左边。
@@ -1849,27 +1981,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   /// 顶栏现在只留剧名，集号挪到这里——用文字而不是图标，一眼能看到
   /// 当前看到第几集；点击行为与原来的选集图标一致。
   Widget _buildEpisodeButton() {
-    return Tooltip(
-      message: '选集',
-      child: TextButton(
-        onPressed: () => unawaited(_openEpisodePicker()),
-        style: TextButton.styleFrom(
-          foregroundColor: Colors.white,
-          minimumSize: const Size(40, 40),
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          textStyle: TextStyle(
-            fontSize: 13,
-            fontWeight: context.appWeight(FontWeight.w500),
-          ),
-        ),
-        child: Text(
-          _episodeChipLabel,
-          maxLines: 1,
-          softWrap: false,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
+    return PlayerBarText(
+      label: _episodeChipLabel,
+      tooltip: '选集',
+      onTap: () => unawaited(_openEpisodePicker()),
     );
   }
 
@@ -1878,32 +1993,6 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   String get _episodeChipLabel {
     final title = _episode?.title ?? '';
     return _titleHasEpisodeNumber(title) ? title : '第 ${_index + 1} 集';
-  }
-
-  /// 控制条上的纯图标按钮：暗色渐变上用白色，激活态用主题色。
-  Widget _barIconButton({
-    required IconData icon,
-    required String tooltip,
-    VoidCallback? onTap,
-    bool active = false,
-  }) {
-    final scheme = Theme.of(context).colorScheme;
-    return IconButton(
-      onPressed: onTap,
-      icon: Icon(icon),
-      color: active ? scheme.primary : Colors.white,
-      disabledColor: Colors.white38,
-      iconSize: 24,
-      tooltip: tooltip,
-      padding: EdgeInsets.zero,
-      // M3 的 IconButton 默认 48×48；这里收成 40×40，否则操作行在窄屏上
-      // 会挤到暂停键。
-      style: IconButton.styleFrom(
-        minimumSize: const Size(40, 40),
-        padding: EdgeInsets.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-    );
   }
 
   /// 当前集的实际清晰度：只从离线 manifest 的 `variantName` 拿（内核下载时
@@ -2004,13 +2093,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                       children: [
                         _buildEpisodeButton(),
                         if (widget.args.seriesId.isNotEmpty) ...[
-                          _barIconButton(
-                            icon: Icons.info_outline_rounded,
-                            tooltip: '详情',
+                          PlayerBarText(
+                            label: '详情',
                             onTap: () => unawaited(_openDetailSheet()),
                           ),
-                          _barIconButton(
-                            icon: Icons.chat_bubble_outline_rounded,
+                          PlayerBarText(
+                            label: '评论',
                             tooltip: '本集评论',
                             onTap: () => unawaited(_openEpisodeComments()),
                           ),
@@ -2031,14 +2119,24 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
+                        // 「相关」紧贴播放键：用当前剧名（去掉第 x 集）搜索相关短剧。
+                        if (widget.args.seriesId.isNotEmpty ||
+                            _relatedQuery.isNotEmpty) ...[
+                          PlayerBarText(
+                            label: '相关',
+                            tooltip: '相关短剧',
+                            onTap: () => unawaited(_openRelatedSeries()),
+                          ),
+                        ],
                         // 全屏时系统状态栏隐藏，状态放倍速左边；清晰度档
                         // 只是展示信息，全屏先让位给状态（竖屏照常显示）。
                         if (!_fullscreen && quality.isNotEmpty) ...[
-                          PlayerOptionChip(
+                          PlayerBarText(
                             label: quality,
+                            muted: true,
                             tooltip: '当前清晰度（暂不支持切换）',
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 4),
                         ],
                         if (_fullscreen) ...[
                           // 窄屏上整体等比缩放，宁可变小也不挤压倍速。

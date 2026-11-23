@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -8,11 +9,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/providers.dart';
 import 'package:novel_playlet/app/router.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
+import 'package:novel_playlet/app/widgets/color_swatch_dot.dart';
 import 'package:novel_playlet/app/widgets/app_bottom_sheet.dart';
 import 'package:novel_playlet/core/backend/backend_transport.dart';
+import 'package:novel_playlet/core/storage/library_records.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book.dart';
 import 'package:novel_playlet/core/storage/offline/offline_book_store.dart';
 import 'package:novel_playlet/core/storage/offline/offline_paths.dart';
+import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/api/api_client.dart';
 import 'package:novel_playlet/data/models/chapter.dart';
 import 'package:novel_playlet/data/models/chapter_content.dart';
@@ -25,6 +29,7 @@ import 'package:novel_playlet/features/cache/cache_providers.dart';
 import 'package:novel_playlet/features/cache/offline_downloader.dart';
 import 'package:novel_playlet/features/cache/offline_queue.dart';
 import 'package:novel_playlet/features/cache/offline_task.dart';
+import 'package:novel_playlet/features/reader/reader_background.dart';
 import 'package:novel_playlet/features/reader/reader_chapter_cache.dart';
 import 'package:novel_playlet/features/reader/reader_controller.dart';
 import 'package:novel_playlet/features/reader/reader_bubble.dart';
@@ -411,6 +416,42 @@ void main() {
     await tester.tap(find.text('日间'));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(container.read(readerSettingsProvider).paper, ReaderPaper.green);
+  });
+
+  /// 工具栏右下角的「在看」悬浮按钮：工具栏收起时不可见、不拦点击；
+  /// 展开后点一下 pin、再点一下取消。
+  testWidgets('阅读页-在看悬浮按钮可 pin 与取消', (tester) async {
+    final store = ReadingStore();
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      store: store,
+    );
+
+    double buttonOpacity() => tester
+        .widget<AnimatedOpacity>(
+          find.ancestor(
+            of: find.byKey(ReaderPinButton.buttonKey),
+            matching: find.byType(AnimatedOpacity),
+          ),
+        )
+        .opacity;
+    expect(buttonOpacity(), 0, reason: '工具栏收起时不显示在看按钮');
+
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(buttonOpacity(), 1);
+
+    await tester.tap(find.byKey(ReaderPinButton.buttonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(await store.isPinned(LibraryType.novel, '1'), isTrue);
+    expect((await store.pinnedRecords()).single.title, '剑来');
+
+    await tester.tap(find.byKey(ReaderPinButton.buttonKey));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(await store.isPinned(LibraryType.novel, '1'), isFalse);
   });
 
   testWidgets('阅读页-缓存状态：未缓存显示缓存小说', (tester) async {
@@ -863,6 +904,131 @@ void main() {
     );
   });
 
+  testWidgets('阅读页-背景图圆球整合进底色行，长按移除', (tester) async {
+    // widget test 的 fake async 里 await 真实文件 IO 会卡住，这里用同步版本。
+    final dir = Directory.systemTemp.createTempSync('reader-bg-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final image = File('${dir.path}/bg.png')
+      ..writeAsBytesSync(
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        ),
+      );
+
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      extraOverrides: [
+        readerBackgroundProvider.overrideWith(
+          () => _FakeReaderBackground(image.path),
+        ),
+      ],
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    // 不再有独立的「背景图」行：圆球排在夜间（黑）色块右边。
+    expect(find.text('背景图'), findsNothing);
+    final swatch = find.byTooltip('背景图 · 点击更换 · 长按移除');
+    expect(swatch, findsOneWidget);
+    final night = tester.getCenter(find.byTooltip('夜间'));
+    expect(
+      tester.getCenter(swatch).dx,
+      greaterThan(night.dx),
+      reason: '背景图圆球应该在黑色（夜间）色块右边',
+    );
+
+    await tester.longPress(swatch);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(find.text('已移除背景图'), findsOneWidget);
+    expect(find.byTooltip('从相册选择背景图'), findsOneWidget);
+  });
+
+  testWidgets('阅读页-点纸色退出自定义图，点圆球再设回', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('reader-bg-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final image = File('${dir.path}/bg.png')
+      ..writeAsBytesSync(
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        ),
+      );
+
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      extraOverrides: [
+        readerBackgroundProvider.overrideWith(
+          () => _FakeReaderBackground(image.path),
+        ),
+      ],
+    );
+    await tester.tapAt(const Offset(195, 420));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    expect(container.read(readerBackgroundProvider).active, isTrue);
+    expect(
+      tester
+          .widgetList<ColorSwatchDot>(find.byType(ColorSwatchDot))
+          .where((dot) => dot.selected),
+      isEmpty,
+      reason: '自定义图启用时，四个纸色圆点都不该显示选中',
+    );
+
+    // 选纸色 = 退出自定义图，图片还留着（圆球变成「设为底色」）。
+    await tester.tap(find.byTooltip('白'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(container.read(readerBackgroundProvider).active, isFalse);
+    expect(container.read(readerSettingsProvider).paper, ReaderPaper.white);
+    final inactive = find.byTooltip('已保存的背景图 · 点击设为底色 · 长按移除');
+    expect(inactive, findsOneWidget);
+
+    // 再点圆球 = 重新设为底色，不需要重新选图。
+    await tester.tap(inactive);
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(container.read(readerBackgroundProvider).active, isTrue);
+    expect(find.byTooltip('背景图 · 点击更换 · 长按移除'), findsOneWidget);
+
+    // 工具栏日/夜是临时切换：夜间纯黑并选中夜间色块，但「已启用」保留。
+    final settings = container.read(readerSettingsProvider.notifier);
+    settings.toggleDayNight();
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(container.read(readerSettingsProvider).paper, ReaderPaper.night);
+    expect(container.read(readerBackgroundProvider).active, isTrue);
+    final nightDot = tester
+        .widgetList<ColorSwatchDot>(find.byType(ColorSwatchDot))
+        .singleWhere((dot) => dot.selected);
+    expect(nightDot.tooltip, '夜间');
+    expect(find.byTooltip('背景图（夜间不显示）· 点击更换 · 长按移除'), findsOneWidget);
+
+    settings.toggleDayNight();
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    expect(container.read(readerSettingsProvider).paper, ReaderPaper.white);
+    expect(container.read(readerBackgroundProvider).active, isTrue);
+    expect(
+      tester
+          .widgetList<ColorSwatchDot>(find.byType(ColorSwatchDot))
+          .where((dot) => dot.selected),
+      isEmpty,
+      reason: '切回日间后自定义图重新成为当前底色，纸色不应选中',
+    );
+  });
+
   testWidgets('阅读页-切章失败保留旧正文，错误降级为可重试提示条', (tester) async {
     final transport = FakePreviewTransport();
     transport.failingChapterIds.add('c2');
@@ -1193,6 +1359,63 @@ void main() {
       expect(painterOf().style, style);
     }
   });
+
+  /// 「文本」画法：不画标记层，命中的对话文字直接染成所选颜色；只改
+  /// span 颜色，不触发重新分页。
+  testWidgets('阅读页-文本高亮把对话文字染色且不重排', (tester) async {
+    reader_pagination.ReaderPagination.debugResetCounters();
+    addTearDown(reader_pagination.ReaderPagination.debugResetCounters);
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: _DialogueTextTransport(),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    final buildsBefore = reader_pagination.ReaderPagination.debugBuildCount;
+    const picked = Color(0xFFE53935);
+
+    container
+        .read(readerSettingsProvider.notifier)
+        .setDialogueHighlightColor(picked);
+    container
+        .read(readerSettingsProvider.notifier)
+        .setDialogueHighlightStyle(DialogueHighlightStyle.text);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(
+      reader_pagination.ReaderPagination.debugBuildCount,
+      buildsBefore,
+      reason: '文本画法只换 span 颜色，不该重新分页',
+    );
+    expect(
+      find.byKey(const ValueKey('reader-dialogue-highlight')),
+      findsNothing,
+      reason: '文本画法不再画荧光笔/线标记',
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Text &&
+            widget.textSpan is TextSpan &&
+            _containsSpanColor(widget.textSpan! as TextSpan, picked),
+      ),
+      findsWidgets,
+      reason: '命中的对话文字应渲染成所选颜色',
+    );
+  });
+}
+
+/// 递归判断 span 树里是否有用指定颜色渲染的文字（文本高亮回归用）。
+bool _containsSpanColor(TextSpan span, Color color) {
+  if (span.style?.color == color) return true;
+  for (final child in span.children ?? const <InlineSpan>[]) {
+    if (child is TextSpan && _containsSpanColor(child, color)) return true;
+  }
+  return false;
 }
 
 /// 底部常驻信息条里的页码文案（`n/m`）。
@@ -1387,5 +1610,32 @@ class _LongChapterTitleTransport extends FakePreviewTransport {
       );
     }
     return super.send(method, path, query: query, body: body, timeout: timeout);
+  }
+}
+
+/// 预览用：直接给出一个已落盘的背景图路径，不碰 SharedPreferences / 相册。
+class _FakeReaderBackground extends ReaderBackgroundController {
+  _FakeReaderBackground(this.path);
+
+  final String path;
+
+  @override
+  ReaderBackground build() => ReaderBackground(filePath: path, active: true);
+
+  /// UI 测试只关心动作接线；不在这里跑 prefs/删文件的真实 IO
+  /// （widget test 的 fake async 会卡住）。
+  @override
+  Future<void> activate() async {
+    state = ReaderBackground(filePath: state.filePath, active: true);
+  }
+
+  @override
+  Future<void> deactivate() async {
+    state = ReaderBackground(filePath: state.filePath, active: false);
+  }
+
+  @override
+  Future<void> clear() async {
+    state = const ReaderBackground();
   }
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../playback_speed.dart';
-import 'player_option_chip.dart';
+import 'player_bar_text.dart';
 
 /// 播放页的倍速入口：点 chip 贴着它弹出一列倍速（M3 menu），点一档即关。
 ///
@@ -20,7 +20,7 @@ class PlaybackSpeedButton extends StatelessWidget {
     this.onOpenChanged,
   });
 
-  /// 当前倍速：决定 chip 文案、是否高亮，以及菜单里哪一档打勾。
+  /// 当前倍速：决定按钮文案，以及菜单里哪一档打勾。
   final double current;
 
   /// 选中某一档后回调（菜单此时已自动关闭）。
@@ -42,8 +42,8 @@ class PlaybackSpeedButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MenuAnchor(
-      // 贴着 chip 展开：默认往下（对齐 chip 右沿），控制条贴底放不下时
-      // MenuAnchor 自动翻到 chip 上方；6pt 是翻上去之后与 chip 的间距。
+      // 贴着文字展开：默认往下（对齐右沿），控制条贴底放不下时 MenuAnchor
+      // 自动翻到文字上方；6pt 是翻上去之后与文字的间距。
       alignmentOffset: const Offset(0, 6),
       onOpen: () => onOpenChanged?.call(true),
       onClose: () => onOpenChanged?.call(false),
@@ -64,9 +64,8 @@ class PlaybackSpeedButton extends StatelessWidget {
             child: Text(playbackSpeedLabel(speed)),
           ),
       ],
-      builder: (context, controller, _) => PlayerOptionChip(
+      builder: (context, controller, _) => PlayerBarText(
         label: playbackSpeedLabel(current),
-        active: current != 1.0,
         tooltip: '播放速度',
         onTap: controller.isOpen ? controller.close : controller.open,
       ),
