@@ -38,34 +38,43 @@ String _cleanQuery(String raw) => raw
     .replaceAll(RegExp(r'[·\-—_|：:]+$'), '')
     .trim();
 
-/// 播放页「相关」底部弹层：用当前剧名搜短剧/漫剧，点一条返回 [VideoSeries]。
+/// 播放页「相关」底部弹层，点一条返回 [VideoSeries]。
 ///
-/// 只搜剧、不搜小说；搜到当前正在播的那部会被过滤掉。弹层本身不做跳转，
-/// 由播放页拿到结果后决定怎么进（当前是 replace 到该剧第 1 集）。
+/// 优先用 `series_id` 查内核的 `/series/{id}/related`（官方同系列场景，能拿到
+/// 其它季与相关推荐，不依赖标题写没写季号）；没有 seriesId 或接口为空时，
+/// 退回用清洗后的剧名搜短剧。当前正在播的那部会被过滤掉。
 Future<VideoSeries?> showRelatedSeriesSheet({
   required BuildContext context,
+  required String seriesId,
   required String seriesTitle,
-  required String excludeSeriesId,
 }) {
   final query = relatedSearchQuery(seriesTitle);
-  if (query.isEmpty) return Future<VideoSeries?>.value();
+  if (seriesId.isEmpty && query.isEmpty) return Future<VideoSeries?>.value();
   return showAppBottomSheet<VideoSeries>(
     context: context,
-    builder: (_) =>
-        RelatedSeriesSheet(query: query, excludeSeriesId: excludeSeriesId),
+    builder: (_) => RelatedSeriesSheet(
+      seriesId: seriesId,
+      query: query,
+      excludeSeriesId: seriesId,
+    ),
   );
 }
 
 class RelatedSeriesSheet extends ConsumerStatefulWidget {
   const RelatedSeriesSheet({
     super.key,
+    required this.seriesId,
     required this.query,
     required this.excludeSeriesId,
   });
 
+  /// 当前剧的 series_id：优先按它查同系列其它季/相关推荐。
+  final String seriesId;
+
+  /// 标题清洗后的搜索词：seriesRelated 为空时的兜底。
   final String query;
 
-  /// 当前正在播放的剧：搜索结果里过滤掉，避免「相关」搜到自己。
+  /// 当前正在播放的剧：结果里过滤掉，避免「相关」出现自己。
   final String excludeSeriesId;
 
   @override
@@ -82,10 +91,21 @@ class _RelatedSeriesSheetState extends ConsumerState<RelatedSeriesSheet> {
   }
 
   Future<List<VideoSeries>> _search() async {
-    final page = await ref
-        .read(apiClientProvider)
-        .searchVideos(widget.query, tabType: 11);
-    return page.items
+    final api = ref.read(apiClientProvider);
+    var items = <VideoSeries>[];
+    if (widget.seriesId.isNotEmpty) {
+      try {
+        items = await api.seriesRelated(widget.seriesId);
+      } catch (_) {
+        // 相关系列接口失败时退回标题搜索：弹层不该因为一个接口挂掉就只剩错误态。
+        items = const <VideoSeries>[];
+      }
+    }
+    if (items.isEmpty && widget.query.isNotEmpty) {
+      final page = await api.searchVideos(widget.query, tabType: 11);
+      items = page.items;
+    }
+    return items
         .where((item) => item.isValid && item.id != widget.excludeSeriesId)
         .toList(growable: false);
   }
@@ -98,7 +118,7 @@ class _RelatedSeriesSheetState extends ConsumerState<RelatedSeriesSheet> {
   Widget build(BuildContext context) {
     return AppBottomSheet(
       title: '相关',
-      subtitle: '「${widget.query}」的相关短剧',
+      subtitle: widget.query.isEmpty ? null : '「${widget.query}」的相关短剧',
       heightFactor: 0.72,
       child: FutureBuilder<List<VideoSeries>>(
         future: _future,

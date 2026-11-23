@@ -1261,8 +1261,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   /// 打开「相关」：先把当前集暂停，选完再决定继续播/替换页面。
   Future<void> _openRelatedSeries() async {
     if (_openingRelated) return;
-    final query = _relatedQuery;
-    if (query.isEmpty) return;
+    // seriesId 能直接查同系列，query 只作为兜底；两者都空才不打开。
+    if (widget.args.seriesId.isEmpty && _relatedQuery.isEmpty) return;
     _openingRelated = true;
     _hideTimer?.cancel();
     final controller = _controller;
@@ -1272,8 +1272,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     try {
       picked = await showRelatedSeriesSheet(
         context: context,
+        seriesId: widget.args.seriesId,
         seriesTitle: widget.args.seriesTitle,
-        excludeSeriesId: widget.args.seriesId,
       );
     } finally {
       _openingRelated = false;
@@ -2072,7 +2072,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         // 「相关」紧贴播放键：用当前剧名（去掉第 x 集）搜索相关短剧。
-                        if (_relatedQuery.isNotEmpty) ...[
+                        if (widget.args.seriesId.isNotEmpty ||
+                            _relatedQuery.isNotEmpty) ...[
                           PlayerBarText(
                             label: '相关',
                             tooltip: '相关短剧',
