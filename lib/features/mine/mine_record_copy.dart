@@ -5,10 +5,11 @@ import '../../core/storage/library_records.dart';
 /// 页面上的列表、全量弹窗都从这里取副标题，避免「读到第 N 章」和
 /// 「全 N 集」两套口径在多个文件里各写一遍。
 String mineHistorySubtitle(LibraryRecord item) {
-  if (item.type.isPlaylet) {
-    return '看到第 ${item.progressIndex + 1} 集';
+  // 刚 pin、还没开始读的条目也走这里：先交代状态，不要显示「第 1 集」误导用户。
+  if (!item.hasProgress) {
+    return item.type.isPlaylet ? '尚未开始观看' : '尚未开始阅读';
   }
-  if (item.progressRef.isEmpty) return '尚未开始阅读';
+  if (item.type.isPlaylet) return '看到第 ${item.progressIndex + 1} 集';
   return '读到第 ${item.progressIndex + 1} 章';
 }
 

@@ -14,6 +14,7 @@ import '../../app/router.dart';
 import '../../app/widgets/embedded_detail_sheet.dart';
 import '../../app/widgets/app_snack_bar.dart';
 import '../../app/widgets/novel_cover.dart';
+import '../../core/storage/library_records.dart';
 import '../../core/storage/offline/offline_series.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/video_series.dart';
@@ -1794,9 +1795,61 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
               ),
             ),
           ),
+          if (widget.args.seriesId.isNotEmpty) _buildPinButton(),
         ],
       ),
     );
+  }
+
+  /// 顶栏右侧的「在看」悬浮按钮：跟控制条一起显示/隐藏。
+  ///
+  /// 和「我的 → 在看」共用同一份数据；点一下 pin、再点取消。没有 seriesId
+  /// （老调用方从历史直接进播放页但缺字段）时没有稳定主键，不展示。
+  Widget _buildPinButton() {
+    final pinnedState = ref.watch(
+      libraryPinnedProvider((
+        type: LibraryType.playlet,
+        id: widget.args.seriesId,
+      )),
+    );
+    final pinned = pinnedState.value ?? false;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.28),
+        shape: const CircleBorder(),
+        child: IconButton(
+          onPressed: () => unawaited(_togglePin(pinned: pinned)),
+          tooltip: pinned ? '取消在看' : '加入在看',
+          iconSize: 20,
+          color: pinned ? const Color(0xFFFFD54F) : Colors.white,
+          icon: Icon(
+            pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+          ),
+          style: IconButton.styleFrom(
+            minimumSize: const Size(36, 36),
+            padding: EdgeInsets.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _togglePin({required bool pinned}) async {
+    try {
+      await ref
+          .read(readingStoreProvider)
+          .togglePin(
+            type: LibraryType.playlet,
+            sourceId: widget.args.seriesId,
+            title: widget.args.seriesTitle,
+            cover: widget.args.cover,
+          );
+    } catch (_) {
+      if (!mounted) return;
+      showAppSnackBar(context, pinned ? '取消在看失败，请重试' : '加入在看失败，请重试');
+    }
   }
 
   /// 横屏全屏底栏的系统状态：时间 / 电量（百分比）/ 当前网络，放在倍速左边。

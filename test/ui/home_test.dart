@@ -138,7 +138,7 @@ void main() {
     );
   });
 
-  /// 首页里切到「我的」：统一页头 + 历史 / 收藏两个区块（真机是同一个
+  /// 首页里切到「我的」：统一页头 + 在看 / 收藏 / 历史三个区块（真机是同一个
   /// Scaffold 里叠加悬浮胶囊，单独 pump MinePage 看不到胶囊）。
   testWidgets('首页-我的（统一页头与历史收藏）', (tester) async {
     await pumpPreview(tester, const HomeShell());

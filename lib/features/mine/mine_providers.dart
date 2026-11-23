@@ -130,6 +130,20 @@ final mineHistoryCountProvider = FutureProvider<int>((ref) async {
   return ref.watch(readingStoreProvider).historyCount();
 });
 
+/// 「在看」列表：pin 过且没取消，按 pin 时间倒序（最新 pin 在最前）。
+///
+/// 只订阅 [pinRevisionProvider]：切换 pin 只刷新这一块，不影响收藏与历史。
+final minePinsProvider = FutureProvider<List<LibraryRecord>>((ref) async {
+  ref.watch(pinRevisionProvider);
+  return ref.watch(readingStoreProvider).pinnedRecords();
+});
+
+/// 「在看」条数（区块头与「更多」入口用）。
+final minePinCountProvider = FutureProvider<int>((ref) async {
+  ref.watch(pinRevisionProvider);
+  return ref.watch(readingStoreProvider).pinnedCount();
+});
+
 /// 收藏预览（跨小说与短剧，按加入时间倒序）：最多 [mineCollectionPreviewLimit] 个。
 ///
 /// 订阅两个收藏通道：任意一侧加/移收藏都会刷新，阅读进度则不影响。

@@ -27,6 +27,65 @@ void main() {
     expect(record.containsKey('shelfRemovedAt'), isFalse);
   });
 
+  test('pin 可切换、导出带 pinnedAt，取消后写 unpinnedAt 并同步', () async {
+    final store = ReadingStore();
+    await store.saveProgress(
+      bookId: 'a',
+      bookTitle: 'A',
+      cover: '',
+      chapterId: 'c1',
+      chapterIndex: 0,
+    );
+    expect(await store.isPinned(LibraryType.novel, 'a'), isFalse);
+
+    expect(
+      await store.togglePin(
+        type: LibraryType.novel,
+        sourceId: 'a',
+        title: 'A',
+      ),
+      isTrue,
+    );
+    expect(await store.isPinned(LibraryType.novel, 'a'), isTrue);
+    expect((await store.pinnedRecords()).map((r) => r.sourceId), ['a']);
+
+    final pinnedRecord = recordOf(await store.exportSyncData());
+    expect(pinnedRecord['pinnedAt'], greaterThan(0));
+    expect(pinnedRecord.containsKey('unpinnedAt'), isFalse);
+
+    await store.unpin(LibraryType.novel, 'a');
+    expect(await store.isPinned(LibraryType.novel, 'a'), isFalse);
+    expect(await store.pinnedRecords(), isEmpty);
+    final unpinnedRecord = recordOf(await store.exportSyncData());
+    expect(unpinnedRecord['unpinnedAt'], greaterThan(0));
+
+    // 远端更新的一次 pin 能合并回来；远端没有 unpinnedAt 也不会复活取消。
+    await store.applySyncData({
+      'items': [
+        {
+          'type': 'novel',
+          'id': 'a',
+          'title': 'A',
+          'pinnedAt': DateTime.now().millisecondsSinceEpoch + 10000,
+        },
+      ],
+    });
+    expect(await store.isPinned(LibraryType.novel, 'a'), isTrue);
+
+    await store.applySyncData({
+      'items': [
+        {
+          'type': 'novel',
+          'id': 'a',
+          'title': 'A',
+          'pinnedAt': DateTime.now().millisecondsSinceEpoch + 10000,
+          'unpinnedAt': DateTime.now().millisecondsSinceEpoch + 20000,
+        },
+      ],
+    });
+    expect(await store.isPinned(LibraryType.novel, 'a'), isFalse);
+  });
+
   test('书架删除落成墓碑并清掉快照，书架不再显示', () async {
     final store = ReadingStore();
     await store.addToShelf(const NovelItem(id: 'a', title: 'A'));

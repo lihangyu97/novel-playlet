@@ -21,7 +21,7 @@ import 'library_records.dart';
 class LibraryDb {
   LibraryDb._();
 
-  static const int schemaVersion = 3;
+  static const int schemaVersion = 4;
 
   static const String table = 'library';
   static const String kvTable = 'kv';
@@ -97,6 +97,17 @@ class LibraryDb {
             'INTEGER NOT NULL DEFAULT 0',
           );
         }
+        if (from < 4) {
+          // v3 → v4：加「在看」两列（pin / 取消 pin 的时间戳），老行默认不在看。
+          await db.execute(
+            'ALTER TABLE $table ADD COLUMN pinned_at '
+            'INTEGER NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE $table ADD COLUMN unpinned_at '
+            'INTEGER NOT NULL DEFAULT 0',
+          );
+        }
       },
     );
   }
@@ -125,7 +136,9 @@ class LibraryDb {
         progress_sub INTEGER NOT NULL DEFAULT 0,
         progress_pruned_at INTEGER NOT NULL DEFAULT 0,
         shelf_at INTEGER NOT NULL DEFAULT 0,
-        shelf_removed_at INTEGER NOT NULL DEFAULT 0
+        shelf_removed_at INTEGER NOT NULL DEFAULT 0,
+        pinned_at INTEGER NOT NULL DEFAULT 0,
+        unpinned_at INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await db.execute('''
@@ -158,6 +171,8 @@ class LibraryDb {
     progressPrunedAt: asInt(row['progress_pruned_at']),
     shelfAt: asInt(row['shelf_at']),
     shelfRemovedAt: asInt(row['shelf_removed_at']),
+    pinnedAt: asInt(row['pinned_at']),
+    unpinnedAt: asInt(row['unpinned_at']),
   );
 
   static Future<LibraryRecord?> read(
@@ -225,6 +240,43 @@ class LibraryDb {
     return count ?? 0;
   }
 
+  /// 「在看」列表：pin 过且之后没取消，按 pin 时间倒序（最新 pin 在最前）。
+  ///
+  /// 和收藏分开：pin 不要求上架，也不要求有进度——刚打开书就点「在看」的
+  /// 记录 `last_read_at` 还是 0，历史不显示，但这里要显示。
+  static Future<List<LibraryRecord>> readPinned(
+    DatabaseExecutor db, {
+    int? limit,
+    LibraryType? type,
+  }) async {
+    if (limit != null && limit <= 0) return const [];
+    final where = StringBuffer('pinned_at > 0 AND pinned_at > unpinned_at');
+    final args = <Object?>[];
+    if (type != null) {
+      where.write(' AND type = ?');
+      args.add(type.wire);
+    }
+    final rows = await db.query(
+      table,
+      where: where.toString(),
+      whereArgs: args,
+      orderBy: 'pinned_at DESC, key ASC',
+      limit: limit,
+    );
+    return rows.map(_fromRow).toList();
+  }
+
+  /// 「在看」条数。只算个数、不取行。
+  static Future<int> countPinned(DatabaseExecutor db) async {
+    final count = Sqflite.firstIntValue(
+      await db.rawQuery(
+        'SELECT COUNT(*) FROM $table '
+        'WHERE pinned_at > 0 AND pinned_at > unpinned_at',
+      ),
+    );
+    return count ?? 0;
+  }
+
   /// 「历史」：读过且当前不是墓碑（移出书架的不再出现在历史里）。
   ///
   /// 例外是"移出后又读过"的行：`last_read_at > shelf_removed_at` 说明用户还在
@@ -282,6 +334,8 @@ class LibraryDb {
       'progress_pruned_at': row.progressPrunedAt,
       'shelf_at': row.shelfAt,
       'shelf_removed_at': row.shelfRemovedAt,
+      'pinned_at': row.pinnedAt,
+      'unpinned_at': row.unpinnedAt,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
@@ -303,7 +357,7 @@ class LibraryDb {
       await db.rawQuery(
         'SELECT COUNT(*) FROM $table '
         'WHERE shelf_at = 0 AND shelf_removed_at = 0 '
-        'AND last_read_at > 0',
+        'AND last_read_at > 0 AND pinned_at <= unpinned_at',
       ),
     );
     if (count == null || count <= limit) return;
@@ -312,6 +366,7 @@ class LibraryDb {
     final rows = await db.rawQuery(
       'SELECT key FROM $table '
       'WHERE shelf_at = 0 AND shelf_removed_at = 0 AND last_read_at > 0 '
+      'AND pinned_at <= unpinned_at '
       'ORDER BY last_read_at ASC, key ASC LIMIT ?',
       [excess],
     );
