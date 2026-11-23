@@ -41,17 +41,24 @@ iOS：
 
 ```bash
 flutter pub get
-./scripts/build_rust_ios.sh     # 编 Rust 内核静态库
 pod install
-flutter build ios --release --no-codesign
+./scripts/build_ios_app.sh --flavor release   # release 包（建议在 main 上跑）
+./scripts/build_ios_app.sh --flavor beta      # beta 包（可同时安装，数据独立）
+# 产物 output/ipa/novel_playlet_<flavor>_<sha>_unsigned.ipa
 ```
 
 Android：
 
 ```bash
-./scripts/build_rust_android.sh
-flutter build apk --release --target-platform android-arm64
+./scripts/build_android_app.sh --flavor release   # 正式包
+./scripts/build_android_app.sh --flavor beta      # beta 包（独立 applicationId，可共存）
+# 产物 output/apk/novel_playlet_<flavor>_<sha>.apk
 ```
+
+两个脚本都会先编 Rust 内核，`--skip-rust` 可跳过。`output/` 已在 `.gitignore` 里，
+构建交付物不入库。iOS 的 IPA 是未签名的，签名/安装见
+[docs/implementation.md](docs/implementation.md) §7；Android 加了渠道后，
+直接 `flutter run` / `flutter build apk` 要带 `--flavor prod|beta`。
 
 App 显示名「摆烂盒子」，Bundle ID `com.lihangyu.novelPlaylet`。免费 Apple ID 自签 7 天有效，
 真机安装与签名细节见 [docs/implementation.md](docs/implementation.md) §7。

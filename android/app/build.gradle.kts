@@ -83,6 +83,27 @@ android {
         }
     }
 
+    // release / beta 两个渠道包（打 APK 走 scripts/build_android_app.sh）。
+    //
+    // 渠道名不用 release/debug：和 build type 同名时 variant / task 命名容易歧义
+    // （assembleReleaseRelease 之类），所以正式渠道叫 prod，脚本对外仍是 --flavor release。
+    // 加了 flavor 之后所有 APK 构建都要带 `--flavor prod|beta`，否则 Flutter 找不到
+    // app-<flavor>-<type>.apk。
+    //
+    // beta 用独立 applicationId（.beta 后缀）配独立显示名：两个包可以和 iOS
+    // 一样同时装在一台机器上，数据容器互不覆盖；端口由构建脚本用
+    // --dart-define=BACKEND_PORT=18932 覆盖（见 docs/implementation.md §7.2）。
+    flavorDimensions += "channel"
+    productFlavors {
+        create("prod") {
+            dimension = "channel"
+        }
+        create("beta") {
+            dimension = "channel"
+            applicationIdSuffix = ".beta"
+        }
+    }
+
     packaging {
         jniLibs {
             if (requestedAndroidAbis.isNotEmpty()) {

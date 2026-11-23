@@ -627,8 +627,8 @@ flutter pub get
 ./scripts/build_rust_ios.sh              # 编真机 arm64 静态库 → ios/Frameworks/libfqapi_core.a
 ./scripts/build_rust_ios.sh --simulator  # 需要模拟器时额外编两片并打 xcframework
 pod install                              # 新增/更新插件后
-flutter build ios --release --no-codesign
-# 产物 build/ios/iphoneos/Runner.app，打成未签名 IPA 后走 ios-sideload 自签安装
+./scripts/build_ios_app.sh --flavor release   # 构建 + 打未签名 IPA（内部跑 flutter build ios --no-codesign）
+# 产物 output/ipa/novel_playlet_<flavor>_<sha>_unsigned.ipa，走 ios-sideload 自签安装
 ```
 
 Bundle ID `com.lihangyu.novelPlaylet`，显示名「摆烂盒子」。`Info.plist` 已为 `127.0.0.1`
@@ -661,7 +661,7 @@ App ID 不同，iOS 会分配独立的沙盒容器与 keychain，互不影响；
 ```bash
 ./scripts/build_ios_app.sh --flavor release   # 建议在 main 上跑
 ./scripts/build_ios_app.sh --flavor beta      # 开发分支的包
-# 产物 build/ios/ipa/novel_playlet_<flavor>_<sha>_unsigned.ipa
+# 产物 output/ipa/novel_playlet_<flavor>_<sha>_unsigned.ipa
 ```
 
   脚本会改未签名包的 `CFBundleIdentifier` / `CFBundleDisplayName`（beta 加 Beta
@@ -679,14 +679,24 @@ App ID 不同，iOS 会分配独立的沙盒容器与 keychain，互不影响；
 ### 7.3 Android
 
 ```bash
-./scripts/build_rust_android.sh                         # 内核 .so → jniLibs/arm64-v8a
-./scripts/build_rust_android.sh --abis all              # 需要 32 位时
-flutter build apk --release --target-platform android-arm64
-# 产物 build/app/outputs/flutter-apk/app-release.apk
+./scripts/build_android_app.sh --flavor release          # 正式包（内部先编内核 .so）
+./scripts/build_android_app.sh --flavor beta             # beta 包，可与正式包共存
+./scripts/build_android_app.sh --flavor beta --skip-rust # 内核 .so 已编过
+./scripts/build_android_app.sh --flavor release --abis all   # 需要 32 位时
+# 产物 output/apk/novel_playlet_<flavor>_<sha>.apk
 ```
 
-- Manifest 已补 `INTERNET`、`network_security_config`（只放行 127.0.0.1 明文回环）、备份排除规则、图标与显示名。
+- 双渠道走 Gradle `productFlavors`（`android/app/build.gradle.kts`）：内部名 `prod` / `beta`
+  （避免与 build type 同名造成 variant/task 命名歧义，正式渠道不叫 release）。beta 的
+  `applicationId` 是 `com.lihangyu.novel_playlet.beta`、显示名「摆烂盒子 Beta」、回环端口
+  18932（`--dart-define=BACKEND_PORT=18932`），与 iOS 的 beta 一一对应。
+- 加了渠道后**所有** APK 构建都要带 `--flavor prod|beta`（例如 `flutter run --flavor beta`、
+  `flutter build apk --flavor prod`）：不带渠道时 Flutter 找不到 `app-<flavor>-<type>.apk`。
+  日常直接用上面的脚本。
+- Manifest 已补 `INTERNET`、`network_security_config`（只放行 127.0.0.1 明文回环）、备份排除规则、
+  图标与显示名（`@string/app_name`，beta 由 `android/app/src/beta/res/values/strings.xml` 覆盖）。
 - 正式签名读 `android/key.properties`（仓库外，git 忽略）；没有配置时回退 debug 签名，只能自测、不能覆盖升级。
+  两个渠道共用同一份签名配置。
 - 常见问题：启动报 `UnsatisfiedLinkError` → `.so` 没编或 ABI 不对；release 包接口全失败 → 缺 `INTERNET`；
   播放报 `PanicException(... rustls-platform-verifier ...)` → 旧包，重新构建；装不上 → 签名不一致，先卸载。
 
@@ -749,7 +759,7 @@ xcrun devicectl device copy from --device <UDID> \
 ./scripts/bump_version.sh             # 1.0.0+15 → 1.0.1+16
 ```
 
-- 发版顺序：在 main 上 bump → 构建 release（`flutter build ios --release --no-codesign`，双版本构建脚本见 §7.2）→ 自签覆盖安装。不要手改 Info.plist / Android 的版本号。
+- 发版顺序：在 main 上 bump → `./scripts/build_ios_app.sh --flavor release` 出 IPA（§7.2）、`./scripts/build_android_app.sh --flavor release` 出 APK（§7.3）→ 自签覆盖安装。不要手改 Info.plist / Android 的版本号。
 - 构建号必须递增（Apple 的 `CFBundleVersion` 规则，覆盖安装和安全回滚都靠它），不要回退。
 
 ## 8. 性能记录：阅读页整章分页

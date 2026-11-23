@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 桌面显示名。beta 渠道用 src/beta/res/values/strings.xml 覆盖，
+         与 iOS 的「摆烂盒子 Beta」保持一致。 -->
+    <string name="app_name">摆烂盒子</string>
+</resources>

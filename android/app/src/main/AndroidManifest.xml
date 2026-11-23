@@ -12,7 +12,7 @@
     <!-- targetSdk 36 默认开启 Android 16 预测性返回：返回手势会接管页面，
          跟着手指做系统缩放动画。这里显式关掉，统一交给 Flutter 自己的路由转场。 -->
     <application
-        android:label="摆烂盒子"
+        android:label="@string/app_name"
         android:name="${applicationName}"
         android:enableOnBackInvokedCallback="false"
         android:icon="@mipmap/ic_launcher"
