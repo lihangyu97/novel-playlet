@@ -25,6 +25,7 @@ import '../cache/offline_task.dart';
 import '../cache/widgets/offline_download_button.dart';
 import '../detail/detail_page.dart';
 import 'reader_actions.dart';
+import 'reader_background.dart';
 import 'reader_comments.dart';
 import 'reader_comments_sheet.dart';
 import 'reader_controller.dart';
@@ -265,6 +266,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     // ReadingStore 是进程级 Provider，页面 dispose 后实例仍然有效。
     _readingStore ??= ref.read(readingStoreProvider);
     final paper = settings.paper;
+    // 夜间纸不铺背景图：直接回退到纯夜间底色，避免"黑纸上再压一层黑"。
+    final background = ref.watch(readerBackgroundProvider);
+    final showBackground =
+        paper != ReaderPaper.night && background.hasImage;
 
     // 正文真正换了（contentIndex 变化）才播过渡：向前翻从右侧滑入、向后翻
     // 从左侧滑入。加载态切换不播，避免"先淡入 loading 再淡入正文"两次闪。
@@ -296,6 +301,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         // 正文留在 SafeArea 内，工具栏贴屏幕边缘、自己内部补安全区 padding。
         body: Stack(
           children: [
+            // 背景图铺在正文下面、PageView 外面：每页仍然透明，翻页不会重复
+            // 解码同一张图，也不会在页与页之间留下接缝。
+            if (showBackground)
+              Positioned.fill(
+                child: ReaderBackgroundLayer(
+                  paper: paper,
+                  filePath: background.filePath,
+                ),
+              ),
             Positioned.fill(
               child: SafeArea(
                 child: GestureDetector(
@@ -392,8 +406,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   /// 共享状态视图在夜间底色下要换一套亮色 scheme，否则文字会看不清。
   Widget _buildStatus(ReaderPaper paper, Widget child) {
+    // 有背景图时状态页也保持透明，让图透上来；没图才铺纸色。
+    final background = ref.read(readerBackgroundProvider);
+    final hasBackdrop = paper != ReaderPaper.night && background.hasImage;
     return ColoredBox(
-      color: paper.background,
+      color: hasBackdrop ? Colors.transparent : paper.background,
       child: Theme(data: _readerTheme(paper), child: child),
     );
   }
@@ -451,6 +468,32 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
+  /// 落定页正文：有/无背景图两条路径共用，避免把参数写两遍。
+  Widget _buildSettlePageContent(
+    ChapterContent content,
+    List<reader_pagination.ReaderPage> pages,
+    ReaderSettings settings,
+    TextStyle textStyle,
+    TextScaler textScaler,
+    double contentWidth,
+  ) {
+    return ReaderPageContent(
+      // 新正文已经到达就用新分页的目标页；还在加载旧章时用 sentinel 的
+      // 目标页（两者内容一致）。
+      page: content.id == _settlePageChapterId
+          ? pages[_pageIndex.clamp(0, pages.length - 1)]
+          : _settlePage!,
+      textStyle: textStyle,
+      textScaler: textScaler,
+      contentWidth: contentWidth,
+      horizontalPadding: _horizontalPadding,
+      showDialogueHighlight: settings.showDialogueHighlight,
+      dialogueHighlightColor: settings.dialogueHighlightColor,
+      dialogueHighlightStyle: settings.dialogueHighlightStyle,
+      onBubbleTap: null,
+    );
+  }
+
   Widget _buildPagedContent(
     ReaderSessionState session,
     ReaderSettings settings,
@@ -461,6 +504,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   ) {
     final paper = settings.paper;
     final foreground = paper.foreground;
+    // 背景图是否生效：夜间纸直接不铺图（回退纯夜间底色）。
+    final background = ref.read(readerBackgroundProvider);
+    final hasBackdrop = paper != ReaderPaper.night && background.hasImage;
     // 在 build 阶段取一次主题字体，避免在 LayoutBuilder 的布局阶段做
     // InheritedWidget 查找；测量与渲染用同一个值。
     final fontFamily = Theme.of(context).textTheme.bodyMedium?.fontFamily;
@@ -618,27 +664,38 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                     if (_settlePage != null)
                       Positioned.fill(
                         child: IgnorePointer(
-                          child: ColoredBox(
-                            color: paper.background,
-                            child: ReaderPageContent(
-                              // 新正文已经到达就用新分页的目标页；还在加载旧章
-                              // 时用 sentinel 的目标页（两者内容一致）。
-                              page: content.id == _settlePageChapterId
-                                  ? pages[_pageIndex.clamp(0, pages.length - 1)]
-                                  : _settlePage!,
-                              textStyle: textStyle,
-                              textScaler: textScaler,
-                              contentWidth: contentWidth,
-                              horizontalPadding: _horizontalPadding,
-                              showDialogueHighlight:
-                                  settings.showDialogueHighlight,
-                              dialogueHighlightColor:
-                                  settings.dialogueHighlightColor,
-                              dialogueHighlightStyle:
-                                  settings.dialogueHighlightStyle,
-                              onBubbleTap: null,
-                            ),
-                          ),
+                          // 落定页要盖住旧页，所以必须自己铺一层底：没背景图
+                          // 时铺纸色；有背景图时把同一张背景再垫一层（FileImage
+                          // 有缓存，不会二次解码），否则切章瞬间背景会闪掉。
+                          child: hasBackdrop
+                              ? Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    ReaderBackgroundLayer(
+                                      paper: paper,
+                                      filePath: background.filePath,
+                                    ),
+                                    _buildSettlePageContent(
+                                      content,
+                                      pages,
+                                      settings,
+                                      textStyle,
+                                      textScaler,
+                                      contentWidth,
+                                    ),
+                                  ],
+                                )
+                              : ColoredBox(
+                                  color: paper.background,
+                                  child: _buildSettlePageContent(
+                                    content,
+                                    pages,
+                                    settings,
+                                    textStyle,
+                                    textScaler,
+                                    contentWidth,
+                                  ),
+                                ),
                         ),
                       ),
                     if (session.loading && _settlePage == null)

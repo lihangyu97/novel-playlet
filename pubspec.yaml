@@ -17,6 +17,9 @@ dependencies:
   # 状态管理：每个功能域一个 Notifier，页面只读 provider。
   flutter_riverpod: ^3.4.3
   path_provider: ^2.1.0
+  # 阅读页自定义背景图：从系统相册取一张图（iOS 走 PHPicker）。
+  # 图片只按屏幕需要的尺寸压缩后落本机，不参与云同步。
+  image_picker: ^1.1.2
   # 设备池密钥（Keychain）。密钥材料不落任何明文存储。
   flutter_secure_storage: ^9.0.0
   # 主题/阅读器设置等轻量偏好（书架/进度已迁到 SQLite）。

@@ -1193,6 +1193,63 @@ void main() {
       expect(painterOf().style, style);
     }
   });
+
+  /// 「文本」画法：不画标记层，命中的对话文字直接染成所选颜色；只改
+  /// span 颜色，不触发重新分页。
+  testWidgets('阅读页-文本高亮把对话文字染色且不重排', (tester) async {
+    reader_pagination.ReaderPagination.debugResetCounters();
+    addTearDown(reader_pagination.ReaderPagination.debugResetCounters);
+    await pumpPreview(
+      tester,
+      const ReaderPage(
+        args: ReaderArgs(bookId: '1', bookTitle: '剑来'),
+      ),
+      transport: _DialogueTextTransport(),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ReaderPage)),
+    );
+    final buildsBefore = reader_pagination.ReaderPagination.debugBuildCount;
+    const picked = Color(0xFFE53935);
+
+    container
+        .read(readerSettingsProvider.notifier)
+        .setDialogueHighlightColor(picked);
+    container
+        .read(readerSettingsProvider.notifier)
+        .setDialogueHighlightStyle(DialogueHighlightStyle.text);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(
+      reader_pagination.ReaderPagination.debugBuildCount,
+      buildsBefore,
+      reason: '文本画法只换 span 颜色，不该重新分页',
+    );
+    expect(
+      find.byKey(const ValueKey('reader-dialogue-highlight')),
+      findsNothing,
+      reason: '文本画法不再画荧光笔/线标记',
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Text &&
+            widget.textSpan is TextSpan &&
+            _containsSpanColor(widget.textSpan! as TextSpan, picked),
+      ),
+      findsWidgets,
+      reason: '命中的对话文字应渲染成所选颜色',
+    );
+  });
+}
+
+/// 递归判断 span 树里是否有用指定颜色渲染的文字（文本高亮回归用）。
+bool _containsSpanColor(TextSpan span, Color color) {
+  if (span.style?.color == color) return true;
+  for (final child in span.children ?? const <InlineSpan>[]) {
+    if (child is TextSpan && _containsSpanColor(child, color)) return true;
+  }
+  return false;
 }
 
 /// 底部常驻信息条里的页码文案（`n/m`）。

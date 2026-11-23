@@ -1,12 +1,16 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/app_bottom_sheet.dart';
+import '../../app/widgets/app_snack_bar.dart';
 import '../../app/widgets/color_swatch_dot.dart';
 import '../../app/widgets/setting_switch_row.dart';
+import 'reader_background.dart';
 import 'reader_pagination.dart';
 import 'reader_settings.dart';
 
@@ -52,13 +56,15 @@ class ReaderPageContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // 对话标记色：荧光笔是「面」，浅色纸/夜间纸叠不同透明度；下划线与波浪线
-    // 是「线」，要实一些才看得清（线的透明度太低会糊成纸色）。
+    // 是「线」，要实一些才看得清（线的透明度太低会糊成纸色）。「文本」直接把
+    // 命中文字染成用户选的颜色，不叠透明度。
     final isDark = Theme.of(context).colorScheme.brightness == Brightness.dark;
     final highlightColor = dialogueHighlightColor.withValues(
       alpha: switch (dialogueHighlightStyle) {
         DialogueHighlightStyle.marker => isDark ? 0.22 : 0.34,
         DialogueHighlightStyle.underline ||
         DialogueHighlightStyle.wavy => isDark ? 0.90 : 0.85,
+        DialogueHighlightStyle.text => 1.0,
       },
     );
     return Padding(
@@ -75,6 +81,12 @@ class ReaderPageContent extends StatelessWidget {
   Widget _buildFragment(ReaderFragment fragment, Color highlightColor) {
     // 与分页测量共用同一个 span 构建函数：首行缩进 / 段评气泡的占位度量
     // 在测量与渲染两侧完全一致，不能各自实现一套。
+    //
+    // 「文本」画法在 span 里给命中区间着色；其余画法仍在文字下面画 CustomPaint。
+    // 两种都只改颜色、不改度量，样式切换不会重新分页。
+    final useTextColor =
+        showDialogueHighlight &&
+        dialogueHighlightStyle == DialogueHighlightStyle.text;
     final block = fragment.block;
     final paraIndex = block.paraIndex;
     final paragraph = buildReaderParagraphSpan(
@@ -87,6 +99,10 @@ class ReaderPageContent extends StatelessWidget {
       onBubbleTap: paraIndex == null || onBubbleTap == null
           ? null
           : () => onBubbleTap!(paraIndex),
+      highlightRanges: useTextColor
+          ? block.dialogueRanges
+          : const <TextRange>[],
+      highlightColor: useTextColor ? highlightColor : null,
     );
     return Positioned(
       top: fragment.top,
@@ -106,6 +122,7 @@ class ReaderPageContent extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 if (showDialogueHighlight &&
+                    !useTextColor &&
                     fragment.block.dialogueRects.isNotEmpty)
                   CustomPaint(
                     key: const ValueKey('reader-dialogue-highlight'),
@@ -452,12 +469,12 @@ class ReaderLoadingPill extends StatelessWidget {
   }
 }
 
-/// 阅读设置弹层：字号、行距、底色、对话高亮、段评气泡。
+/// 阅读设置弹层：字号、行距、底色、背景图、对话高亮、段评气泡。
 ///
 /// 字号/行距是分页输入。拖动过程中只更新**本地预览值**（滑块与文案立即跟手，
 /// 不碰 provider），松手（`onChangeEnd`）才提交一次：一次整章重排 + 一次落盘。
 /// 否则滑块每个 tick 都会让 `_PaginationKey` 失效、整章 TextPainter 重排一次，
-/// 并写 7 个 SharedPreferences key。
+/// 并写一整组 SharedPreferences key。
 class ReaderSettingsSheet extends ConsumerStatefulWidget {
   const ReaderSettingsSheet({super.key});
 
@@ -625,9 +642,11 @@ class _ReaderSettingsSheetState extends ConsumerState<ReaderSettingsSheet> {
                 ],
               ),
               const SizedBox(height: 14),
+              _ReaderBackgroundRow(foreground: foreground, muted: muted),
+              const SizedBox(height: 14),
               SettingSwitchRow(
                 title: '对话高亮',
-                subtitle: '给双引号里的人物说话内容加荧光笔',
+                subtitle: '给双引号里的人物说话内容加标记',
                 value: settings.showDialogueHighlight,
                 onChanged: controller.setShowDialogueHighlight,
                 foreground: foreground,
@@ -714,6 +733,10 @@ class _DialogueHighlightPainter extends CustomPainter {
         _paintLine(canvas, wavy: false);
       case DialogueHighlightStyle.wavy:
         _paintLine(canvas, wavy: true);
+      case DialogueHighlightStyle.text:
+        // 「文本」画法把命中区间的文字直接染色（见 ReaderPageContent），
+        // 不在文字下面再画标记。
+        break;
     }
   }
 
@@ -781,4 +804,123 @@ class _DialogueHighlightPainter extends CustomPainter {
       oldDelegate.color != color ||
       oldDelegate.style != style ||
       oldDelegate.rects != rects;
+}
+
+/// 阅读设置里的「背景图」入口：相册选图 / 更换 / 移除。
+///
+/// 图只存本机，不写进阅读设置也不参与云同步；夜间纸不显示（渲染层直接
+/// 不挂背景层），这里只负责给入口和状态文案。
+class _ReaderBackgroundRow extends ConsumerStatefulWidget {
+  const _ReaderBackgroundRow({required this.foreground, required this.muted});
+
+  final Color foreground;
+  final Color muted;
+
+  @override
+  ConsumerState<_ReaderBackgroundRow> createState() =>
+      _ReaderBackgroundRowState();
+}
+
+class _ReaderBackgroundRowState extends ConsumerState<_ReaderBackgroundRow> {
+  /// 相册弹层打开期间禁用按钮，避免连点起两个 picker。
+  bool _picking = false;
+
+  Future<void> _pick() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      await ref.read(readerBackgroundProvider.notifier).pickFromGallery();
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        error.code == 'photo_access_denied'
+            ? '没有相册权限，请到系统设置里允许访问照片'
+            : '打开相册失败，请重试',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      showAppSnackBar(context, '选择背景图失败，请重试');
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final background = ref.watch(readerBackgroundProvider);
+    final isNight =
+        ref.watch(readerSettingsProvider).paper == ReaderPaper.night;
+    final subtitle = background.hasImage
+        ? (isNight ? '夜间不显示，切回日间恢复' : '已选图片，仅保存在本机')
+        : '从相册选一张图，夜间自动隐藏';
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '背景图',
+                style: TextStyle(fontSize: 13, color: widget.foreground),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 11,
+                  height: 1.3,
+                  color: widget.muted,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        if (background.hasImage) ...[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Image.file(
+              File(background.filePath!),
+              width: 38,
+              height: 38,
+              fit: BoxFit.cover,
+              cacheWidth: 114,
+              errorBuilder: (context, error, stackTrace) => Container(
+                width: 38,
+                height: 38,
+                color: widget.foreground.withValues(alpha: 0.08),
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  size: 18,
+                  color: widget.muted,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+        TextButton(
+          onPressed: _picking ? null : _pick,
+          style: TextButton.styleFrom(
+            foregroundColor: widget.foreground,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: const Size(0, 36),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: Text(background.hasImage ? '更换' : '选择'),
+        ),
+        if (background.hasImage)
+          IconButton(
+            onPressed: _picking
+                ? null
+                : () => ref.read(readerBackgroundProvider.notifier).clear(),
+            icon: const Icon(Icons.delete_outline_rounded, size: 20),
+            color: widget.muted,
+            tooltip: '移除背景图',
+            visualDensity: VisualDensity.compact,
+          ),
+      ],
+    );
+  }
 }

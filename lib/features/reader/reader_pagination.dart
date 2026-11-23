@@ -43,6 +43,8 @@ ReaderParagraphSpan buildReaderParagraphSpan({
   ParagraphBubbleVariant bubbleVariant = ParagraphBubbleVariant.plain,
   VoidCallback? onBubbleTap,
   bool measureOnly = false,
+  List<TextRange> highlightRanges = const <TextRange>[],
+  Color? highlightColor,
 }) {
   final fontSize = style.fontSize ?? 14;
   // RenderParagraph 会把 WidgetSpan 子节点按周围 span 的字号做自动缩放，
@@ -57,7 +59,7 @@ ReaderParagraphSpan buildReaderParagraphSpan({
       alignment: PlaceholderAlignment.bottom,
       child: SizedBox(width: indent, height: 0),
     ),
-    TextSpan(text: text),
+    ..._paragraphTextRuns(text, highlightRanges, highlightColor),
   ];
   final placeholders = <PlaceholderDimensions>[
     PlaceholderDimensions(
@@ -93,6 +95,48 @@ ReaderParagraphSpan buildReaderParagraphSpan({
     span: TextSpan(style: style, children: children),
     placeholders: placeholders,
   );
+}
+
+/// 把段落正文按对话区间拆成若干 [TextSpan]。
+///
+/// 只有「文本」画法会传 `highlightColor`：命中区间单独着色，其余保持正文色。
+/// 颜色不参与 `TextPainter` 度量，所以测量路径（不传 highlight）与渲染路径
+/// 的断行、行高完全一致，不会因为换样式而重新分页。
+///
+/// 区间来自 [ReaderDialogueScanner]，正常情况下互不重叠；这里仍按起点排序并
+/// 裁剪到正文长度内，避免异常数据让 `substring` 抛错。
+List<InlineSpan> _paragraphTextRuns(
+  String text,
+  List<TextRange> ranges,
+  Color? color,
+) {
+  if (color == null || ranges.isEmpty || text.isEmpty) {
+    return <InlineSpan>[TextSpan(text: text)];
+  }
+  final sorted = ranges
+      .where((range) => range.end > range.start)
+      .toList(growable: false)
+    ..sort((a, b) => a.start.compareTo(b.start));
+  final spans = <InlineSpan>[];
+  var cursor = 0;
+  for (final range in sorted) {
+    final start = range.start.clamp(0, text.length).toInt();
+    final end = range.end.clamp(0, text.length).toInt();
+    if (end <= cursor) continue;
+    if (start > cursor) {
+      spans.add(TextSpan(text: text.substring(cursor, start)));
+    }
+    spans.add(
+      TextSpan(
+        text: text.substring(start, end),
+        style: TextStyle(color: color),
+      ),
+    );
+    cursor = end;
+  }
+  if (cursor >= text.length) return spans;
+  spans.add(TextSpan(text: text.substring(cursor)));
+  return spans;
 }
 
 double _textScaleFactor(TextScaler textScaler, double fontSize) {
@@ -147,9 +191,11 @@ class ReaderBlock {
     this.bubbleCount = 0,
     this.bubbleVariant = ParagraphBubbleVariant.plain,
     List<Rect> dialogueRects = const <Rect>[],
+    List<TextRange> dialogueRanges = const <TextRange>[],
   }) : lineTops = List<double>.unmodifiable(lineTops),
        lineHeights = List<double>.unmodifiable(lineHeights),
-       dialogueRects = List<Rect>.unmodifiable(dialogueRects);
+       dialogueRects = List<Rect>.unmodifiable(dialogueRects),
+       dialogueRanges = List<TextRange>.unmodifiable(dialogueRanges);
 
   /// 量测缓存命中时直接复用已经算好的行数据与对话矩形，不再拷贝、不再排版。
   const ReaderBlock._reuse({
@@ -159,6 +205,7 @@ class ReaderBlock {
     required this.lineTops,
     required this.lineHeights,
     this.dialogueRects = const <Rect>[],
+    this.dialogueRanges = const <TextRange>[],
     this.paraIndex,
     this.bubbleCount = 0,
     this.bubbleVariant = ParagraphBubbleVariant.plain,
@@ -173,6 +220,10 @@ class ReaderBlock {
   /// 对话高亮矩形：段内坐标系，测量时用同一份 TextPainter 的
   /// `getBoxesForSelection` 算好，渲染时只画、不再二次排版。
   final List<Rect> dialogueRects;
+
+  /// 对话命中的正文区间（段内 offset，不含引号）：荧光笔/线类画法用不到，
+  /// 「文本」画法渲染时按它给文字着色，所以和矩形一起留在 block 上。
+  final List<TextRange> dialogueRanges;
 
   /// 上游段落 id（正文 `<p idx>`），段评气泡与面板按它定位。
   final int? paraIndex;
@@ -268,6 +319,7 @@ class _MeasuredParagraph {
     required this.lineTops,
     required this.lineHeights,
     required this.dialogueRects,
+    this.dialogueRanges = const <TextRange>[],
     required this.effectiveBubbleCount,
   });
 
@@ -275,6 +327,10 @@ class _MeasuredParagraph {
   final List<double> lineTops;
   final List<double> lineHeights;
   final List<Rect> dialogueRects;
+
+  /// 对话命中的正文区间：与 [dialogueRects] 同源，缓存命中时一起复用，
+  /// 渲染层「文本」画法按它着色。
+  final List<TextRange> dialogueRanges;
 
   /// 实际画出来的气泡数：0 表示末行放不下、这章这一段不画气泡。
   final int effectiveBubbleCount;
@@ -291,6 +347,7 @@ class _MeasuredParagraph {
     lineTops: lineTops,
     lineHeights: lineHeights,
     dialogueRects: dialogueRects,
+    dialogueRanges: dialogueRanges,
     paraIndex: paraIndex,
     bubbleCount: effectiveBubbleCount,
     bubbleVariant: bubbleVariant,
@@ -640,6 +697,7 @@ class ReaderPagination {
         dialogueRects: dialogueRanges.isEmpty
             ? const <Rect>[]
             : List<Rect>.unmodifiable(_dialogueRects(dialogueRanges, painter)),
+        dialogueRanges: List<TextRange>.unmodifiable(dialogueRanges),
         effectiveBubbleCount: effectiveBubbleCount,
       );
       measureCache?._store(key, measured);
