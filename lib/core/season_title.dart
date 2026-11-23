@@ -63,7 +63,6 @@ int? _parseSeasonNumber(String raw) {
   return _digitValues[raw];
 }
 
-
 /// 去掉标题里的「第 N 季」片段（连同年内括号与两侧空白），用于派生搜索词。
 ///
 /// 季只是标题文字、上游没有独立字段（每季是独立 `series_id`）；「相关」搜索

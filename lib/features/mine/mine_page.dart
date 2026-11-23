@@ -75,9 +75,7 @@ class MinePage extends ConsumerWidget {
                   child: CustomScrollView(
                     physics: const ClampingScrollPhysics(),
                     slivers: [
-                      SliverToBoxAdapter(
-                        child: _MinePinSection(key: pinKey),
-                      ),
+                      SliverToBoxAdapter(child: _MinePinSection(key: pinKey)),
                       SliverToBoxAdapter(
                         child: _MineCollectionSection(key: collectionKey),
                       ),

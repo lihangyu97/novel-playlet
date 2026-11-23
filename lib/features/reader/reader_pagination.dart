@@ -113,10 +113,9 @@ List<InlineSpan> _paragraphTextRuns(
   if (color == null || ranges.isEmpty || text.isEmpty) {
     return <InlineSpan>[TextSpan(text: text)];
   }
-  final sorted = ranges
-      .where((range) => range.end > range.start)
-      .toList(growable: false)
-    ..sort((a, b) => a.start.compareTo(b.start));
+  final sorted =
+      ranges.where((range) => range.end > range.start).toList(growable: false)
+        ..sort((a, b) => a.start.compareTo(b.start));
   final spans = <InlineSpan>[];
   var cursor = 0;
   for (final range in sorted) {

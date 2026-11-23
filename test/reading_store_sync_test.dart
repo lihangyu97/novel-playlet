@@ -39,11 +39,7 @@ void main() {
     expect(await store.isPinned(LibraryType.novel, 'a'), isFalse);
 
     expect(
-      await store.togglePin(
-        type: LibraryType.novel,
-        sourceId: 'a',
-        title: 'A',
-      ),
+      await store.togglePin(type: LibraryType.novel, sourceId: 'a', title: 'A'),
       isTrue,
     );
     expect(await store.isPinned(LibraryType.novel, 'a'), isTrue);

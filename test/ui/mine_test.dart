@@ -134,11 +134,7 @@ void main() {
       chapterId: 'c3',
       chapterIndex: 2,
     );
-    await store.togglePin(
-      type: LibraryType.novel,
-      sourceId: 'n1',
-      title: '剑来',
-    );
+    await store.togglePin(type: LibraryType.novel, sourceId: 'n1', title: '剑来');
     await store.saveVideoProgress(
       seriesId: 'p1',
       title: '太奶奶的短剧',

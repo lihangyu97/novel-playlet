@@ -165,10 +165,11 @@ class ReaderBackgroundLayer extends StatelessWidget {
   Widget build(BuildContext context) {
     final file = filePath == null ? null : File(filePath!);
     // 只按屏幕需要的尺寸解码：整张相册原图（4000px+）解成 RGBA 会白占几十 MB。
-    final decodeWidth = (MediaQuery.sizeOf(context).width *
-            MediaQuery.devicePixelRatioOf(context) *
-            1.2)
-        .round();
+    final decodeWidth =
+        (MediaQuery.sizeOf(context).width *
+                MediaQuery.devicePixelRatioOf(context) *
+                1.2)
+            .round();
     return RepaintBoundary(
       child: Stack(
         fit: StackFit.expand,

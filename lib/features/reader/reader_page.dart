@@ -268,8 +268,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final paper = settings.paper;
     // 夜间纸不铺背景图：直接回退到纯夜间底色，避免"黑纸上再压一层黑"。
     final background = ref.watch(readerBackgroundProvider);
-    final showBackground =
-        paper != ReaderPaper.night && background.hasImage;
+    final showBackground = paper != ReaderPaper.night && background.hasImage;
 
     // 正文真正换了（contentIndex 变化）才播过渡：向前翻从右侧滑入、向后翻
     // 从左侧滑入。加载态切换不播，避免"先淡入 loading 再淡入正文"两次闪。

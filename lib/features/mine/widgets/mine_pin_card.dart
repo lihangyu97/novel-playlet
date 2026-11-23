@@ -50,11 +50,7 @@ class MinePinCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Icon(
-                    Icons.push_pin_rounded,
-                    size: 14,
-                    color: scheme.primary,
-                  ),
+                  Icon(Icons.push_pin_rounded, size: 14, color: scheme.primary),
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(

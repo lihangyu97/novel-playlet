@@ -1327,10 +1327,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       return true;
     } catch (error) {
       if (!mounted) return false;
-      showAppSnackBar(
-        context,
-        apiErrorCopy(error, fallback: '打开相关短剧失败，请重试'),
-      );
+      showAppSnackBar(context, apiErrorCopy(error, fallback: '打开相关短剧失败，请重试'));
       return false;
     }
   }
@@ -1907,9 +1904,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
           tooltip: pinned ? '取消在看' : '加入在看',
           iconSize: 20,
           color: pinned ? const Color(0xFFFFD54F) : Colors.white,
-          icon: Icon(
-            pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
-          ),
+          icon: Icon(pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined),
           style: IconButton.styleFrom(
             minimumSize: const Size(36, 36),
             padding: EdgeInsets.zero,
