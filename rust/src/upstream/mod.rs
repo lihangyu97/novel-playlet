@@ -5,7 +5,15 @@ pub mod client;
 pub mod cm;
 pub mod dh;
 pub mod http;
+pub(crate) mod playback_routes;
 pub mod shuqi;
+
+/// 测试接缝：清空进程级的播放门健康度，避免同一测试二进制里一条用例留下的
+/// 冷却污染下一条。生产代码永远不调。
+#[doc(hidden)]
+pub fn reset_playback_route_state_for_tests() {
+    playback_routes::reset_state_for_tests();
+}
 
 pub use client::{ClientError, PinnedDevice, TransientKind, UpstreamClient, UpstreamRequest};
 pub use http::{HttpTransport, RawResponse, TransportError};

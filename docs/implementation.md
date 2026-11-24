@@ -438,7 +438,7 @@ _onTick：同页重载时新集 position>0 才释放旧帧；播到尾部自动 
 | 参数 | `mode=stream/cached`、`refresh=1`、`variants=0`、`max_height`（下载清晰度上限）、`prefer_height`（在线播放档位偏好，播放页传 720） |
 | `mode=cached` | 只查 `src/<id>{.mp4,.m4s,.ts}`（>0 字节、密文必须有可读 `.key`），**完全不打上游** |
 | `mode=stream`（M1） | 复用上面的取流/选档结果，启动后台下载到 `src/<id>.mp4.part`，拿到上游响应头（Content-Length）后**立即**返回本地 `/src` 地址（`streaming:true`），不读 body、不等整集落盘；同 id 复用进行中的会话，已有完整缓存直接按 cached 返回；`.m4s/.ts`、拿不到 Content-Length、启动失败 → 退回整集下载（`streaming:false`） |
-| 取上游 | 主取流打 V5 播放门 `multi_video_model/player/v1`（见下）；V5 请求失败 / 解析不出模型 / 选流 `NotFound` 时回落 legacy：播放默认只打 phoenix `multi_video_model`，stream / 带 `max_height` 时并发 shortplay+phoenix 合并档位 |
+| 取上游 | 主取流走**门阶梯**（见下）：v5 播放门 `multi_video_model/player/v1` → 官方 `GET video_tab`（同一身份）；两扇门都给不出可播模型时才回落 legacy：播放默认只打 phoenix `multi_video_model`，stream / 带 `max_height` 时并发 shortplay+phoenix 合并档位 |
 | 选档 | 分数 `宽×1e9 + 高×1e6 + 码率 (+h264/avc1 1)`；`bytevc2` 整档排除；无 `prefer_height` 时按分数从高到低。在线播放传 `prefer_height=720`：短边 720 的档排最前（同档再按分数），**没有 720P 时退回最高可解码档**；按该顺序取第一个能解出 url+key 的档（720 档解不出会自动落到下一档，不会选流失败） |
 | 清晰度上限 | `max_height` → 短边 ≤N 的最高档；没有更低档 → 最低可用档 + `quality_fallback=true` |
 | 整集下载 | 流式写 `.part` → rename `src/<id>.<ext>`（**CENC 密文原样落盘**），密文再写 `.key` sidecar、有档位写 `.variant.json` |
@@ -452,8 +452,41 @@ _onTick：同页重载时新集 position>0 才释放旧帧；播到尾部自动 
 
 - 请求体先 gzip，再对**线上字节**做 MD5 进 `x-ss-stub`、做 SM3 进签名——压缩必须排在签名之前，签完不得再改 body；
 - query/header 全部由签名器生成，**不走**通用 `Manager::generate_headers`，因此请求不带 `x-argus`；
-- 429/5xx/传输错误在同设备上退避重试，只有 HTTP 401/403 才判定设备失效并换号。
+- 429/5xx/传输错误在同设备上退避重试，只有 HTTP 401/403 才判定设备失效并换号；
+- **空 body 不在传输层重试**：`HTTP 200` + 0 字节按「这扇门不放行」交给端点，由门阶梯换门。
 `mode=stream` 的后台下载沿用同一超时；失败时删除 `.part` 与预写的 `.key`，等待中的 Range 请求收到 502。
+**取流门阶梯（2026-11-24，移植 novel-sound 的做法）**：v5 门拒绝请求时回的是
+`HTTP 200` + 0 字节——不带状态码、不带业务码。在同一个身份上重试这扇门永远不会恢复，
+所以主门失败不再原地重试，而是**换门**。`rust/src/upstream/playback_routes.rs` 维护两扇门
+的进程级健康度：
+
+- 阶梯顺序：v5 `multi_video_model/player/v1` → 官方 `GET video_tab/multi_video_model/v1/`。
+  兜底门用**同一身份**、同一套播放器信封（`sign/v5.rs::sign_playback_v5_get`，不带
+  `Content-Type`/`Content-Encoding`/`x-ss-stub`——带了 body 头却没有 body 正是被判空体的形态），
+  响应里的 `data.video_model_data.<id>.video_model` 先重写成取流器已认识的
+  `data.<id>.video_model`，不新增解析栈。
+- 空实体停 30s，其他失败停 5s，成功清零并排到最前；前台在全部冷却时按恢复时间顺序把两扇门
+  各探一次，预取（`_playback_purpose=prefetch`）只探一条且不探冷却门。
+- 空实体后等 250ms 用**同一身份**重探同一扇门一次：实测空实体是「单次请求级」而不是
+  「身份级」，两三百毫秒后同一身份往往就恢复了。重探仍空才让这扇门进冷却。
+- 两扇门都被空实体停用、或连续两轮全空时，前台可做**一次**身份轮换：先用池内其他已注册设备
+  （`DevicePool::get_excluding`），池里只剩失败设备才重注册；受 30s 冷却（注册失败 5s）与
+  剩余预算（<1.5s 不轮换）约束。空实体不退休设备：它只是要绕开的身份，不是对身份的判决。
+- 单请求最多 6 次门尝试（含一次重探与一整轮轮换）。`bytevc2` 这类「非空但不可播」同样算这扇门
+  没成，继续换门——不同门的编码分布不同，一扇门只给不可解码档位不代表整集没得看。
+- 诊断只记门代号、结果、字节数、耗时、尝试数与轮换数；不记地址、query、正文、签名或真实身份。
+
+**尚未验证**（必须真机采样，不能由单测代替）：`video_tab` 门是否接受我们这套信封、
+空实体是否真的只在几百毫秒内、以及空实体率是否下降。`video_tab` 属于播放器族，
+**不能**用通用 argus/ladon 签名去打——那样回来的是 `200` + 0 字节（novel-sound 实测 6/6），
+看起来和「没内容」一样，实际是验签阶段就被短路。
+
+`_playback_purpose` 由 `ApiClient.videoSource(purpose:)` 作为本地 query 传给内核，只做
+allowlist 校验，不进上游 URL/请求体/签名。播放页里「用户正在等的这一集」传
+`PlaybackPurpose.foreground`，下一集预取与相邻页预热传 `PlaybackPurpose.prefetch`
+（`_episodeSourceResolver(speculative: true)`），下载器不传（缺省 `other`，等价前台）。
+同一集的前台与预取因此共享同一条内核缓存/请求路径，区别只在失败时花不花轮换预算。
+
 若只拿到远程加密地址（未落盘），Dart 直接报「整集缓存失败」。
 
 ### 5.4 回环 `/src`：Range + CENC 解密
