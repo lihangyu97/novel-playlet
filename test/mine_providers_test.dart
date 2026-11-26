@@ -8,10 +8,12 @@ import 'package:novel_playlet/features/mine/mine_providers.dart';
 
 /// 「我的」页数据通道拆分（CODE_REVIEW P1-5 回归）。
 ///
-/// 小说与短剧合并成一条时间线 / 一个收藏夹之后，通道只剩两条：
-/// - 写进度（阅读页防抖落盘、播放页换集）→ 只刷新「历史」；
-/// - 加/移收藏 → 只刷新「收藏」。
-/// 两条互不牵连，否则保活的整页会跟着重建。
+/// 小说与短剧合并成一条时间线 / 一个收藏夹之后，通道只剩三条：
+/// - 写进度（阅读页防抖落盘、播放页换集）→ 刷新「历史」和「在看」（卡片上
+///   的「读到第 N 章 / 看到第 N 集」就是进度列）；
+/// - 加/移收藏 → 只刷新「收藏」；
+/// - pin / 取消 pin → 只刷新「在看」。
+/// 除「在看 / 历史」这一对之外互不牵连，否则保活的整页会跟着重建。
 void main() {
   test('保存阅读进度只刷新历史，不重读收藏', () async {
     final container = ProviderContainer();
@@ -103,6 +105,78 @@ void main() {
     expect(historyRebuilds, greaterThan(0));
     final history = await container.read(mineHistoryProvider.future);
     expect(history.single.progressIndex, 3);
+  });
+
+  test('在看卡片跟着阅读进度刷新', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final store = container.read(readingStoreProvider);
+    await store.saveProgress(
+      bookId: 'n1',
+      bookTitle: '剑来',
+      cover: '',
+      chapterId: 'c1',
+      chapterIndex: 0,
+    );
+    await store.togglePin(type: LibraryType.novel, sourceId: 'n1', title: '剑来');
+
+    var pinRebuilds = 0;
+    container.listen(minePinsProvider, (_, _) => pinRebuilds++);
+    var pins = await container.read(minePinsProvider.future);
+    expect(pins.single.progressIndex, 0);
+    await container.pump();
+    pinRebuilds = 0;
+
+    // 翻到第 5 章：卡片上的「读到第 N 章」必须跟着变，不能停在第 1 章。
+    await store.saveProgress(
+      bookId: 'n1',
+      bookTitle: '剑来',
+      cover: '',
+      chapterId: 'c5',
+      chapterIndex: 4,
+    );
+    await container.pump();
+
+    expect(pinRebuilds, greaterThan(0), reason: '进度落盘要让在看列表重查');
+    pins = await container.read(minePinsProvider.future);
+    expect(pins.single.progressRef, 'c5');
+    expect(pins.single.progressIndex, 4);
+  });
+
+  test('短剧在看同样跟着换集刷新', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final store = container.read(readingStoreProvider);
+    await store.saveVideoProgress(
+      seriesId: 'series-1',
+      title: '短剧甲',
+      episodeIndex: 0,
+    );
+    await store.togglePin(
+      type: LibraryType.playlet,
+      sourceId: 'series-1',
+      title: '短剧甲',
+    );
+
+    var pinRebuilds = 0;
+    container.listen(minePinsProvider, (_, _) => pinRebuilds++);
+    var pins = await container.read(minePinsProvider.future);
+    expect(pins.single.progressIndex, 0);
+    await container.pump();
+    pinRebuilds = 0;
+
+    await store.saveVideoProgress(
+      seriesId: 'series-1',
+      title: '短剧甲',
+      episodeIndex: 4,
+    );
+    await container.pump();
+
+    expect(pinRebuilds, greaterThan(0), reason: '换集要让在看列表重查');
+    pins = await container.read(minePinsProvider.future);
+    expect(pins.single.progressIndex, 4);
   });
 
   test('历史按最近一次阅读/观看混排，小说与短剧都在同一条线上', () async {

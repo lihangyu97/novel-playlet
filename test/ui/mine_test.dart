@@ -6,6 +6,7 @@ import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
+import 'package:novel_playlet/features/mine/mine_section_order.dart';
 import 'package:novel_playlet/features/mine/widgets/library_type_badge.dart';
 import 'package:novel_playlet/features/mine/widgets/mine_all_sheet.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
@@ -166,6 +167,34 @@ void main() {
     expect(find.byKey(mineAllSheetKey), findsOneWidget);
     expect(find.text('全部在看'), findsOneWidget);
     expect(find.text('共 2 条'), findsOneWidget);
+  });
+
+  testWidgets('我的页-在看：翻章后卡片进度跟着更新', (tester) async {
+    final store = ReadingStore();
+    await store.saveProgress(
+      bookId: 'n1',
+      bookTitle: '剑来',
+      cover: '',
+      chapterId: 'c1',
+      chapterIndex: 0,
+    );
+    await store.togglePin(type: LibraryType.novel, sourceId: 'n1', title: '剑来');
+
+    await pumpPreview(tester, const MinePage(), store: store);
+    expect(find.text('读到第 1 章'), findsNWidgets(2), reason: '在看卡片 + 历史行');
+
+    // 翻到第 5 章：历史与在看一起变，不能一个更新、一个停在第 1 章。
+    await store.saveProgress(
+      bookId: 'n1',
+      bookTitle: '剑来',
+      cover: '',
+      chapterId: 'c5',
+      chapterIndex: 4,
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(find.text('读到第 1 章'), findsNothing);
+    expect(find.text('读到第 5 章'), findsNWidgets(2));
   });
 
   testWidgets('我的页-收藏混排：统一 3:4 封面 + 标签 + 长按移出', (tester) async {
@@ -371,5 +400,28 @@ void main() {
       lessThan(sectionBefore.dy),
       reason: '页头下面的内容应该正常滚动',
     );
+  });
+
+  testWidgets('我的页-区块顺序跟随偏好', (tester) async {
+    await pumpPreview(
+      tester,
+      const MinePage(),
+      extraOverrides: [
+        mineSectionOrderProvider.overrideWith(
+          () => MineSectionOrderController(
+            initialOrder: const [
+              MineSection.collection,
+              MineSection.history,
+              MineSection.pins,
+            ],
+          ),
+        ),
+      ],
+    );
+
+    final collection = tester.getTopLeft(find.byKey(MinePage.collectionKey));
+    final history = tester.getTopLeft(find.byKey(MinePage.historyKey));
+    expect(collection.dy, lessThan(history.dy), reason: '收藏排在历史前面');
+    expect(find.text('在看'), findsNothing, reason: '没有 pin 时整块隐藏');
   });
 }

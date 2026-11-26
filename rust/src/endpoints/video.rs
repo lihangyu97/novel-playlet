@@ -23,6 +23,7 @@ use crate::endpoints::base::{
 use crate::endpoints::util::{default_val, go_query_escape, int_default, user_agent_headers};
 use crate::endpoints::{Ctx, Params, Server};
 use crate::error::{ApiError, ApiResult};
+use crate::upstream::playback_routes::{self, Door, V5_PLAYER_URL};
 use crate::upstream::UpstreamRequest;
 
 /// The spade derivation constant table from video.go.
@@ -46,11 +47,28 @@ const DIRECTORY_READING_QUERY_SUFFIX: &str = "&book_info_md5=&need_version=true&
 
 const VIDEO_DETAIL_PATH: &str = "/novel/player/video_detail/v1/";
 
-/// v5 播放门：上游在 2026-11 中旬把短剧取流从 `multi_video_model/v1`
-/// 换成了带 v5 签名（x-medusa + SM3）的 `multi_video_model/player/v1`。
-/// 旧的 argus 签名请求从那时起统一被拒，表现为短剧整片无法起播。
-const V5_PLAYER_URL: &str =
-    "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/player/v1";
+// v5 播放门的地址由 `upstream::playback_routes` 持有（它同时维护这扇门与
+// `GET video_tab` 兜底门的健康度）。上游在 2026-11 中旬把短剧取流从
+// `multi_video_model/v1` 换成了带 v5 签名（x-medusa + SM3）的
+// `multi_video_model/player/v1`，旧的 argus 签名请求从那时起统一被拒。
+
+/// 一次取流请求里最多打几扇门（含同门重探与一整轮身份轮换）。
+const MAX_PLAYBACK_ATTEMPTS: usize = 6;
+
+/// 空实体后用**同一身份**重探同一扇门前的等待。
+///
+/// 实测空实体是「单次请求级」而不是「身份级」：同一身份在 250-300ms 之后
+/// 往往就能拿到模型。等这一下，比换身份便宜得多。
+const SAME_DOOR_REPROBE_DELAY: Duration = Duration::from_millis(250);
+
+/// 剩余预算低于这个值就不再重探：重探要占一次完整往返。
+const REPROBE_MIN_BUDGET: Duration = Duration::from_millis(1_000);
+
+/// 剩余预算低于这个值不轮换身份：换一台新设备是几次往返。
+const ROTATION_MIN_BUDGET: Duration = Duration::from_millis(1_500);
+
+/// 调用方没给总超时时的取流阶梯预算（HTTP 单次超时是 15s）。
+const DEFAULT_PLAYBACK_BUDGET: Duration = Duration::from_secs(20);
 
 type CacheLocks = HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>;
 static VIDEO_CACHE_LOCKS: Lazy<Mutex<CacheLocks>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -89,6 +107,12 @@ struct ParsedVideoResponse {
 
 impl ParsedVideoResponse {
     fn parse(raw: &[u8]) -> ApiResult<Self> {
+        // `HTTP 200` + 0 字节不是「JSON 坏了」，是上游这次没给数据（短剧取流
+        // 接口限流时就是这样）。单独分类，客户端才能提示「稍后再试」而不是
+        // 把 serde 的 "EOF while parsing a value" 原样甩给用户。
+        if raw.iter().all(|b| b.is_ascii_whitespace()) {
+            return Err(ApiError::upstream_empty("上游返回空响应（0 字节）"));
+        }
         let root: Value = serde_json::from_slice(raw)
             .map_err(|e| ApiError::Internal(format!("parse upstream json: {e}")))?;
         let models = root
@@ -170,38 +194,40 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         // shortplay 会丢 1080P，只信 phoenix 会让低档被编码门整片丢掉。
         // 两个请求互不依赖，并发发出，不额外占用一个往返。
         //
-        // 2026-11 上游把播放门换成了 v5 签名（见 `V5_PLAYER_URL`），旧的
-        // argus 签名请求一律被拒。因此主取流先走 v5；只有 v5 整条链路不可用
-        // （请求失败 / 响应解析不出模型 / 选流 NotFound）时才回落到原来的
-        // shortplay + phoenix 双请求，保留旧行为作兜底。
-        let v5_parsed = match fetch_v5_video_model(ctx, &video_id).await {
-            Ok(raw) => match ParsedVideoResponse::parse(&raw) {
-                Ok(parsed) if !parsed.models.is_empty() => Some(parsed),
-                Ok(parsed) => {
-                    log::warn!(
-                        "video {video_id}: v5 body has no video payload: {}",
-                        body_envelope(&parsed.root)
-                    );
-                    None
-                }
-                Err(error) => {
-                    log::warn!(
-                        "video {video_id}: v5 response unusable: {}",
-                        error.message()
-                    );
-                    None
-                }
-            },
-            Err(error) => {
-                log::warn!("video {video_id}: v5 request failed: {}", error.message());
-                None
-            }
-        };
+        let purpose = playback_purpose(&params.get_str("_playback_purpose"));
+        let speculative = purpose == "prefetch";
+        // 2026-11 上游把播放门换成了 v5 签名（见 `V5_PLAYER_URL`），旧的 argus
+        // 签名请求一律被拒。v5 拒绝请求时回的是 `HTTP 200` + 0 字节，所以在原地
+        // 重试同一个身份永远不会恢复——主门失败要**换门**：v5 → 官方
+        // `GET video_tab`（同一身份），两步都不成再回落到旧 shortplay + phoenix
+        // 双请求，保留旧行为作最后兜底。
+        //
+        // 非空但不可播（全 bytevc2）同样换门：不同门的编码分布不同，一扇门只给
+        // 不可解码档位，不代表这一集整集没得看。
+        let primary = fetch_primary_models(ctx, &video_id, speculative).await;
 
-        let (parsed, phoenix_parsed, resolved) = if let Some(v5) = v5_parsed {
-            let resolved = resolve_video_source(ctx, &v5, prefer_short_edge).await;
-            if resolved == VideoSourceResolution::NotFound {
-                log::warn!("video {video_id}: v5 source not found; falling back to shortplay");
+        let (parsed, phoenix_parsed, resolved, selected_source) = match primary {
+            Some((primary, door)) => {
+                let resolved = resolve_video_source(ctx, &primary, prefer_short_edge).await;
+                if matches!(resolved, VideoSourceResolution::Found(..)) {
+                    (primary, None, resolved, door.tag())
+                } else {
+                    log::warn!(
+                        "video {video_id}: door={} source not usable; falling back to legacy",
+                        door.tag()
+                    );
+                    let (parsed, phoenix, resolved) = fetch_legacy_video_models(
+                        ctx,
+                        &video_id,
+                        stream_mode,
+                        want_quality,
+                        prefer_short_edge,
+                    )
+                    .await?;
+                    (parsed, phoenix, resolved, "legacy")
+                }
+            }
+            None => {
                 let (parsed, phoenix, resolved) = fetch_legacy_video_models(
                     ctx,
                     &video_id,
@@ -210,14 +236,12 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
                     prefer_short_edge,
                 )
                 .await?;
-                (parsed, phoenix, resolved)
-            } else {
-                (v5, None, resolved)
+                (parsed, phoenix, resolved, "legacy")
             }
-        } else {
-            fetch_legacy_video_models(ctx, &video_id, stream_mode, want_quality, prefer_short_edge)
-                .await?
         };
+        log::info!(
+            "video {video_id}: playback selected_source={selected_source} purpose={purpose}"
+        );
 
         // 官方 `wp3/o1.java:301-347` 的 `isSupportShowLandIcon` 按服务端
         // `vertical` 决定竖屏剧集是否给「全屏观看」（竖屏不给）。该字段随
@@ -405,13 +429,379 @@ fn v5_playback_body(video_id: &str) -> ApiResult<Vec<u8>> {
         .map_err(|e| ApiError::Internal(format!("gzip v5 playback body: {e}")))
 }
 
-/// v5 签名取流。签名由 `sign::v5` 全权负责（query/header/body 哈希都是它
-/// 自己的协议），所以这里不走通用的 `raw()` 签名路径。
-async fn fetch_v5_video_model(ctx: &Ctx, video_id: &str) -> ApiResult<Vec<u8>> {
-    let body = v5_playback_body(video_id)?;
-    Upstream::new(ctx.up.clone())
-        .v5_playback(V5_PLAYER_URL, &body)
-        .await
+/// 一扇门尝试之后的结果。
+enum DoorOutcome {
+    /// 非空 200 body（兜底门已重写成取流器认识的形状）。
+    Body(Vec<u8>),
+    /// `HTTP 200` + 0 字节：门拒绝但不说话。
+    Empty,
+    /// 传输错误、不可用状态，或 body 里没有可用模型。
+    Failed,
+    /// 调用方 deadline 先到。
+    Deadline,
+}
+
+struct PlaybackAttempt {
+    outcome: DoorOutcome,
+    /// 这次尝试实际用的身份；拿得到就带上，兜底门要复用它。
+    device_id: Option<String>,
+}
+
+/// `video_tab` 门自己的业务参数（官方 `GetVideoModelRequest` 的 snake_case 字段）。
+///
+/// 身份字段由 v5 信封的身份包给出，所以两扇门永远被问在同一个身份上——
+/// 否则空实体到底归因于门还是身份就永远分不清。
+fn video_tab_query(video_id: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("video_id", video_id.to_string()),
+        ("video_id_type", "0".to_string()),
+        ("device_level", "1".to_string()),
+        ("need_all_video_definition", "1".to_string()),
+        ("need_mp4_align", "0".to_string()),
+        ("use_os_player", "0".to_string()),
+        ("video_platform", "1024".to_string()),
+        ("source", "0".to_string()),
+        ("from_video_id", String::new()),
+    ]
+}
+
+/// 把 `video_tab` 的响应重写成取流器已经认识的 `data.<id>.video_model` 形状。
+///
+/// 业务拒绝或没有模型时返回 `None`：那算「门失败」，不算空实体——两者冷却
+/// 时间不同（30s / 5s），混在一起会让一扇真出故障的门被当成「上游在拒绝」。
+fn video_tab_player_shape(raw: &[u8], video_id: &str) -> Option<Vec<u8>> {
+    let root: Value = serde_json::from_slice(raw).ok()?;
+    let code = root
+        .get("code")
+        .or_else(|| root.get("Code"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    if code != 0 {
+        return None;
+    }
+    let data = root.get("data")?.as_object()?;
+    let entry = data
+        .get("video_model_data")
+        .and_then(Value::as_object)
+        .and_then(|rows| rows.get(video_id))
+        .or_else(|| data.get(video_id))?;
+    let model = entry.get("video_model")?.clone();
+
+    let mut model_entry = Map::new();
+    model_entry.insert("video_model".to_string(), model);
+    let mut data_entry = Map::new();
+    data_entry.insert(video_id.to_string(), Value::Object(model_entry));
+    let mut shaped = Map::new();
+    shaped.insert("data".to_string(), Value::Object(data_entry));
+    serde_json::to_vec(&Value::Object(shaped)).ok()
+}
+
+/// 在 deadline 内问一扇门。
+async fn attempt_playback_door(
+    upstream: &Upstream,
+    video_id: &str,
+    body: &[u8],
+    door: Door,
+    pin: Option<&str>,
+    deadline: tokio::time::Instant,
+) -> PlaybackAttempt {
+    let outcome = match door {
+        Door::V5Player => {
+            tokio::time::timeout_at(
+                deadline,
+                upstream.v5_playback_with_device(V5_PLAYER_URL, body, pin),
+            )
+            .await
+        }
+        Door::VideoTab => {
+            let query = video_tab_query(video_id);
+            let extra: Vec<(&str, &str)> = query
+                .iter()
+                .map(|(key, value)| (*key, value.as_str()))
+                .collect();
+            tokio::time::timeout_at(
+                deadline,
+                upstream.v5_playback_get_with_device(door.url(), &extra, pin),
+            )
+            .await
+        }
+    };
+
+    match outcome {
+        Err(_) => PlaybackAttempt {
+            outcome: DoorOutcome::Deadline,
+            device_id: None,
+        },
+        Ok(Err(_)) => PlaybackAttempt {
+            outcome: DoorOutcome::Failed,
+            device_id: None,
+        },
+        Ok(Ok((raw, device))) => {
+            if raw.is_empty() {
+                return PlaybackAttempt {
+                    outcome: DoorOutcome::Empty,
+                    device_id: Some(device.device_id),
+                };
+            }
+            let shaped = match door {
+                Door::V5Player => Some(raw),
+                Door::VideoTab => video_tab_player_shape(&raw, video_id),
+            };
+            match shaped {
+                Some(payload) => PlaybackAttempt {
+                    outcome: DoorOutcome::Body(payload),
+                    device_id: Some(device.device_id),
+                },
+                None => PlaybackAttempt {
+                    outcome: DoorOutcome::Failed,
+                    device_id: Some(device.device_id),
+                },
+            }
+        }
+    }
+}
+
+/// 一次有界身份轮换；失败只记日志，不影响本轮用原身份收尾。
+async fn rotate_playback_identity(
+    upstream: &Upstream,
+    video_id: &str,
+    deadline: tokio::time::Instant,
+    failed: Option<&str>,
+) -> Option<String> {
+    match tokio::time::timeout_at(deadline, upstream.rotate_playback_identity(failed)).await {
+        Ok(Ok(device)) => {
+            log::info!("video {video_id}: playback rotate result=ok");
+            Some(device.device_id)
+        }
+        Ok(Err(_)) => {
+            log::warn!("video {video_id}: playback rotate result=unavailable");
+            None
+        }
+        Err(_) => {
+            log::warn!("video {video_id}: playback rotate result=deadline");
+            None
+        }
+    }
+}
+
+/// 本地取流用途参数：只接受三个值，未知一律归 `other`。
+///
+/// `prefetch` 不探冷却门、不重探、不轮换、不注册——后台的猜测不能消耗前台
+/// 要用的失败预算与身份预算。
+fn playback_purpose(raw: &str) -> &'static str {
+    match raw {
+        "foreground" => "foreground",
+        "prefetch" => "prefetch",
+        _ => "other",
+    }
+}
+
+/// 主取流门的阶梯：v5 → `GET video_tab`，带门健康度、同门重探与至多一次身份轮换。
+///
+/// 移植 novel-sound 的做法：`HTTP 200` + 0 字节不是可重试错误，而是「这扇门
+/// 不放行」；换门比换身份便宜，换身份比让用户看到一个空播放器便宜。返回选中
+/// 的响应体与它来自哪扇门。
+async fn fetch_primary_models(
+    ctx: &Ctx,
+    video_id: &str,
+    speculative: bool,
+) -> Option<(ParsedVideoResponse, Door)> {
+    let body = match v5_playback_body(video_id) {
+        Ok(body) => body,
+        Err(error) => {
+            log::warn!(
+                "video {video_id}: marshal v5 playback body failed: {}",
+                error.message()
+            );
+            return None;
+        }
+    };
+    let upstream = Upstream::new(ctx.up.clone());
+
+    let budget = crate::upstream::budget::remaining().unwrap_or(DEFAULT_PLAYBACK_BUDGET);
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut pin: Option<String> = None;
+    let mut attempts = 0usize;
+    let mut reprobed = false;
+    let mut all_empty = true;
+
+    // 连续全空的旧账先还一次（只有前台）：参考实现正是靠这一次轮换恢复播放。
+    let now = playback_routes::now_ms();
+    if playback_routes::with_state(|state| state.rotate_due(now, speculative))
+        && budget > ROTATION_MIN_BUDGET
+    {
+        pin = rotate_playback_identity(&upstream, video_id, deadline, None).await;
+        let registered = pin.is_some();
+        playback_routes::with_state(|state| {
+            state.note_rotate(playback_routes::now_ms(), registered)
+        });
+    }
+
+    for round in 0..2u8 {
+        let plan =
+            playback_routes::with_state(|state| state.plan(playback_routes::now_ms(), speculative));
+        let mut stop_ladder = false;
+        for door in plan {
+            // 一扇门最多问两次：首次 + 一次同门重探。
+            for _ in 0..2 {
+                if attempts >= MAX_PLAYBACK_ATTEMPTS || tokio::time::Instant::now() >= deadline {
+                    stop_ladder = true;
+                    break;
+                }
+                let now = playback_routes::now_ms();
+                // 被冷却钉住的门这次是被主动探测的，不再叠加一次重探，
+                // 否则「探一次」会悄悄变成「探两次」。
+                let was_parked = playback_routes::with_state(|state| state.parked(door, now));
+                attempts += 1;
+                let started = std::time::Instant::now();
+                let attempt = attempt_playback_door(
+                    &upstream,
+                    video_id,
+                    &body,
+                    door,
+                    pin.as_deref(),
+                    deadline,
+                )
+                .await;
+                let elapsed = started.elapsed().as_millis();
+                if let Some(device_id) = attempt.device_id {
+                    // 兜底门必须复用主门刚用过的身份。
+                    pin = Some(device_id);
+                }
+
+                match attempt.outcome {
+                    DoorOutcome::Body(raw) => {
+                        match ParsedVideoResponse::parse(&raw) {
+                            Ok(parsed) if !parsed.models.is_empty() => {
+                                log::info!(
+                                    "video {video_id}: door={} result=ok elapsed_ms={elapsed} body_len={}",
+                                    door.tag(),
+                                    raw.len()
+                                );
+                                playback_routes::with_state(|state| {
+                                    state.success(door, playback_routes::now_ms());
+                                    state.note_round(false);
+                                });
+                                return Some((parsed, door));
+                            }
+                            Ok(parsed) => {
+                                log::warn!(
+                                    "video {video_id}: door={} result=no_model elapsed_ms={elapsed} body_len={} {}",
+                                    door.tag(),
+                                    raw.len(),
+                                    body_envelope(&parsed.root)
+                                );
+                            }
+                            Err(_) => {
+                                log::warn!(
+                                    "video {video_id}: door={} result=unparsable elapsed_ms={elapsed} body_len={}",
+                                    door.tag(),
+                                    raw.len()
+                                );
+                            }
+                        }
+                        // 非空但没模型：不算空实体，只短暂停一下这扇门。
+                        all_empty = false;
+                        playback_routes::with_state(|state| {
+                            state.failed(door, playback_routes::now_ms(), false)
+                        });
+                        break;
+                    }
+                    DoorOutcome::Empty => {
+                        log::info!(
+                            "video {video_id}: door={} result=empty elapsed_ms={elapsed}",
+                            door.tag()
+                        );
+                        playback_routes::with_state(|state| {
+                            state.failed(door, playback_routes::now_ms(), true)
+                        });
+                        let can_reprobe = !speculative
+                            && !reprobed
+                            && !was_parked
+                            && attempts < MAX_PLAYBACK_ATTEMPTS
+                            && tokio::time::Instant::now() + REPROBE_MIN_BUDGET < deadline
+                            && crate::upstream::budget::remaining()
+                                .is_none_or(|left| left > REPROBE_MIN_BUDGET);
+                        if can_reprobe
+                            && crate::upstream::budget::retry_pause(SAME_DOOR_REPROBE_DELAY).await
+                        {
+                            // 同一身份、同一扇门再来一次：实测空实体常常只持续
+                            // 两三百毫秒，这一下比重注册一台设备划算得多。
+                            reprobed = true;
+                            continue;
+                        }
+                        break;
+                    }
+                    DoorOutcome::Failed => {
+                        log::warn!(
+                            "video {video_id}: door={} result=failed elapsed_ms={elapsed}",
+                            door.tag()
+                        );
+                        all_empty = false;
+                        playback_routes::with_state(|state| {
+                            state.failed(door, playback_routes::now_ms(), false)
+                        });
+                        break;
+                    }
+                    DoorOutcome::Deadline => {
+                        log::warn!("video {video_id}: door={} result=deadline", door.tag());
+                        all_empty = false;
+                        playback_routes::with_state(|state| {
+                            state.failed(door, playback_routes::now_ms(), false)
+                        });
+                        stop_ladder = true;
+                        break;
+                    }
+                }
+            }
+            if stop_ladder {
+                break;
+            }
+        }
+
+        // 一轮打完还是全空时，可以买一次轮换——但节流闸必须放行：身份池有上限。
+        let parked =
+            playback_routes::with_state(|state| state.exhausted(playback_routes::now_ms()));
+        let paced = playback_routes::with_state(|state| {
+            state.rotation_paced(playback_routes::now_ms(), speculative)
+        });
+        let due = playback_routes::with_state(|state| {
+            state.rotate_due(playback_routes::now_ms(), speculative)
+        });
+        let can_rotate = round == 0
+            && paced
+            && (parked || due)
+            && attempts < MAX_PLAYBACK_ATTEMPTS
+            && tokio::time::Instant::now() + ROTATION_MIN_BUDGET < deadline
+            && crate::upstream::budget::remaining().is_none_or(|left| left > ROTATION_MIN_BUDGET);
+        if !can_rotate {
+            break;
+        }
+        match rotate_playback_identity(&upstream, video_id, deadline, pin.as_deref()).await {
+            Some(device_id) => {
+                pin = Some(device_id);
+                playback_routes::with_state(|state| {
+                    state.note_rotate(playback_routes::now_ms(), true)
+                });
+            }
+            None => {
+                playback_routes::with_state(|state| {
+                    state.note_rotate(playback_routes::now_ms(), false)
+                });
+                break;
+            }
+        }
+    }
+
+    if attempts > 0 {
+        playback_routes::with_state(|state| state.note_round(all_empty));
+    }
+    let (empty_rounds, rotations) =
+        playback_routes::with_state(|state| (state.empty_rounds(), state.rotations()));
+    log::warn!(
+        "video {video_id}: playback doors exhausted attempts={attempts} all_empty={all_empty} empty_rounds={empty_rounds} rotations={rotations}"
+    );
+    None
 }
 
 /// v5 不可用时的兜底取流：短剧专用模型 + 凤凰模型并发，清晰度列表取两者并集。
@@ -4338,6 +4728,8 @@ pub fn register(s: &mut Server) {
 #[cfg(test)]
 mod cenc_sample_fixture;
 #[cfg(test)]
+mod playback_ladder;
+#[cfg(test)]
 mod spade_vectors;
 #[cfg(test)]
 mod stream_loopback;
@@ -4347,3 +4739,20 @@ mod unsigned_get_cap;
 mod v5_playback_contract;
 #[cfg(test)]
 mod variant_url_shapes;
+
+#[cfg(test)]
+mod empty_body_classification {
+    use super::ParsedVideoResponse;
+
+    /// 空 body / 纯空白 body 是「上游这次没给数据」，不是 JSON 语法错误：
+    /// 必须落到 `upstream_empty`，客户端才能提示稍后再试。
+    #[test]
+    fn empty_or_whitespace_body_is_upstream_empty() {
+        for raw in [&b""[..], b"  \n\t", b"\r\n"] {
+            let Err(error) = ParsedVideoResponse::parse(raw) else {
+                panic!("empty body must not parse: {raw:?}");
+            };
+            assert_eq!(error.kind(), "upstream_empty", "raw={raw:?}");
+        }
+    }
+}

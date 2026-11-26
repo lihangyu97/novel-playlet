@@ -25,6 +25,10 @@ pub enum ApiError {
     RateLimited(String),
     /// Upstream server fault (HTTP 5xx). Kept at HTTP 500.
     Upstream5xx(String),
+    /// Upstream answered `HTTP 200` but with an empty (or whitespace-only)
+    /// body — e.g. the short-drama playback gates answering with 0 bytes when
+    /// they rate-limit the identity. Kept at HTTP 500; retryable.
+    UpstreamEmpty(String),
     /// A transport or request deadline expired. Kept at HTTP 500.
     Timeout(String),
     /// A request or response exceeded a local size bound. Kept at HTTP 500.
@@ -41,6 +45,7 @@ impl ApiError {
     pub const KIND_DEVICE_FAILED: &'static str = "device_failed";
     pub const KIND_RATE_LIMITED: &'static str = "rate_limited";
     pub const KIND_UPSTREAM_5XX: &'static str = "upstream_5xx";
+    pub const KIND_UPSTREAM_EMPTY: &'static str = "upstream_empty";
     pub const KIND_TIMEOUT: &'static str = "timeout";
     pub const KIND_TOO_LARGE: &'static str = "too_large";
     pub const KIND_UNKNOWN: &'static str = "unknown";
@@ -61,6 +66,10 @@ impl ApiError {
         ApiError::Upstream5xx(msg.into())
     }
 
+    pub fn upstream_empty(msg: impl Into<String>) -> Self {
+        ApiError::UpstreamEmpty(msg.into())
+    }
+
     pub fn timeout(msg: impl Into<String>) -> Self {
         ApiError::Timeout(msg.into())
     }
@@ -79,6 +88,7 @@ impl ApiError {
             ApiError::DeviceFailed(_)
             | ApiError::RateLimited(_)
             | ApiError::Upstream5xx(_)
+            | ApiError::UpstreamEmpty(_)
             | ApiError::Timeout(_)
             | ApiError::TooLarge(_)
             | ApiError::Internal(_) => 500,
@@ -93,6 +103,7 @@ impl ApiError {
             ApiError::DeviceFailed(_) => Self::KIND_DEVICE_FAILED,
             ApiError::RateLimited(_) => Self::KIND_RATE_LIMITED,
             ApiError::Upstream5xx(_) => Self::KIND_UPSTREAM_5XX,
+            ApiError::UpstreamEmpty(_) => Self::KIND_UPSTREAM_EMPTY,
             ApiError::Timeout(_) => Self::KIND_TIMEOUT,
             ApiError::TooLarge(_) => Self::KIND_TOO_LARGE,
             ApiError::Internal(_) => Self::KIND_UNKNOWN,
@@ -105,6 +116,7 @@ impl ApiError {
             | ApiError::DeviceFailed(m)
             | ApiError::RateLimited(m)
             | ApiError::Upstream5xx(m)
+            | ApiError::UpstreamEmpty(m)
             | ApiError::Timeout(m)
             | ApiError::TooLarge(m)
             | ApiError::Internal(m) => m,
@@ -115,10 +127,10 @@ impl ApiError {
     ///
     /// The retry policy itself is unchanged by the kind split: only bad input
     /// is deterministic and must never be retried. `DeviceFailed`,
-    /// `RateLimited`, `Upstream5xx`, `Timeout` and `TooLarge` replaced errors
-    /// that used to be `Internal` (and therefore retryable) on the paths that
-    /// classify them, so they keep that behaviour; the decision lives with the
-    /// callers that own a retry loop (`endpoints/audio.rs`).
+    /// `RateLimited`, `Upstream5xx`, `UpstreamEmpty`, `Timeout` and `TooLarge`
+    /// replaced errors that used to be `Internal` (and therefore retryable) on
+    /// the paths that classify them, so they keep that behaviour; the decision
+    /// lives with the callers that own a retry loop (`endpoints/audio.rs`).
     pub fn is_retryable(&self) -> bool {
         !matches!(self, ApiError::BadRequest(_))
     }
@@ -157,6 +169,7 @@ mod tests {
             (ApiError::device_failed("x"), "device_failed"),
             (ApiError::rate_limited("x"), "rate_limited"),
             (ApiError::upstream_5xx("x"), "upstream_5xx"),
+            (ApiError::upstream_empty("x"), "upstream_empty"),
             (ApiError::timeout("x"), "timeout"),
             (ApiError::too_large("x"), "too_large"),
             (ApiError::internal("x"), "unknown"),
@@ -173,6 +186,7 @@ mod tests {
             ApiError::device_failed("x"),
             ApiError::rate_limited("x"),
             ApiError::upstream_5xx("x"),
+            ApiError::upstream_empty("x"),
             ApiError::timeout("x"),
             ApiError::too_large("x"),
             ApiError::internal("x"),
@@ -186,6 +200,7 @@ mod tests {
         assert!(!ApiError::bad_request("x").is_retryable());
         assert!(ApiError::internal("x").is_retryable());
         assert!(ApiError::upstream_5xx("x").is_retryable());
+        assert!(ApiError::upstream_empty("x").is_retryable());
     }
 
     #[test]

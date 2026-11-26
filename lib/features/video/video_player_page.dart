@@ -16,6 +16,7 @@ import '../../app/widgets/app_snack_bar.dart';
 import '../../app/widgets/novel_cover.dart';
 import '../../core/storage/library_records.dart';
 import '../../core/storage/offline/offline_series.dart';
+import '../../data/api/api_client.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/json_utils.dart';
 import '../../data/models/video_series.dart';
@@ -437,11 +438,18 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
   ///
   /// resolver 不持有 State：取消判定通过 [isCancelled] 注入，网络源是否真的
   /// 起播由调用方决定（正式起播传 `playNetworkUrl`；预热/预取只解析地址）。
+  ///
+  /// [speculative] 标记「这次取流用户并没有在等」（下一集预取、相邻页预热）：
+  /// 内核据此在失败时不去花身份轮换的预算，把失败余额留给真实播放。
   EpisodeSourceResolver _episodeSourceResolver({
     required bool Function() isCancelled,
+    bool speculative = false,
   }) {
     final api = ref.read(apiClientProvider);
     final health = ref.read(networkHealthProvider);
+    final purpose = speculative
+        ? PlaybackPurpose.prefetch
+        : PlaybackPurpose.foreground;
     return EpisodeSourceResolver(
       loadOfflineFile: (episodeId, {required refresh}) =>
           _offlineFile(episodeId, refresh: refresh),
@@ -452,11 +460,13 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
               episodeId,
               stream: true,
               preferHeight: _playbackPreferHeight,
+              purpose: purpose,
             )
           : api.videoSource(
               episodeId,
               refresh: refresh,
               preferHeight: _playbackPreferHeight,
+              purpose: purpose,
             ),
       isSuspectedOffline: () => health.isSuspectedOffline,
       recordSuccess: health.recordSuccess,
@@ -694,8 +704,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
     try {
       // 预取只解析地址、不起播：交给同一个取流级联（内核缓存命中 → stream
       // → 整集下载兜底），拿到地址后存进页内 LRU。
-      final resolved = await _episodeSourceResolver(isCancelled: () => !mounted)
-          .resolve(episodeId: episode.id);
+      final resolved = await _episodeSourceResolver(
+        isCancelled: () => !mounted,
+        speculative: true,
+      ).resolve(episodeId: episode.id);
       if (resolved == null || resolved.isLocal) return;
       // 预取真的走了网络且成功时 resolver 已 recordSuccess；这里只记地址
       // （切集只用得到 url）。
@@ -1019,6 +1031,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage>
       // 建好后停在第一帧。
       final resolved = await _episodeSourceResolver(
         isCancelled: () => !mounted || token != _prepareToken,
+        speculative: true,
       ).resolve(episodeId: episode.id);
       if (resolved == null) return;
       controller = resolved.isLocal

@@ -138,6 +138,21 @@ void main() {
       expect(failure.reason, contains('上游返回 500'));
     });
 
+    test('上游空响应（限流）：解释成「上游没给数据」而不是解析错误', () {
+      for (final message in ['上游返回空响应（0 字节）', '上游没有返回可播放地址（video_url 为空）']) {
+        final failure = describePlaybackFailure(
+          ApiException(message, kind: ApiErrorKind.upstreamEmpty),
+          stack,
+          context: context,
+        );
+        expect(failure.title, '上游没有返回可播放数据');
+        expect(failure.reason, contains('限流'));
+        expect(failure.reason, contains('过几分钟'));
+        // 技术细节仍保留在可复制详情里，方便贴日志。
+        expect(failure.detail, contains(message));
+      }
+    });
+
     test('PlatformException：ATS / 连接中断 / 解码 / 4xx / 回环 / 兜底', () {
       expect(
         describePlaybackFailure(

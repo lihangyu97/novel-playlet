@@ -1345,6 +1345,7 @@ class _FakeApi extends ApiClient {
     int? maxHeight,
     int? preferHeight,
     bool stream = false,
+    String? purpose,
   }) async {
     if (stream) {
       streamCalls += 1;

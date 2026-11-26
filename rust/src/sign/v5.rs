@@ -628,7 +628,12 @@ fn encode_component(value: &str) -> String {
     output
 }
 
-fn playback_query(identity: &V5Identity<'_>, ticket: i64, app_id: &str) -> String {
+fn playback_query(
+    identity: &V5Identity<'_>,
+    ticket: i64,
+    app_id: &str,
+    extra: &[(&str, &str)],
+) -> String {
     let pairs = [
         ("aid", app_id),
         ("app_name", "novelread"),
@@ -653,6 +658,14 @@ fn playback_query(identity: &V5Identity<'_>, ticket: i64, app_id: &str) -> Strin
         query.push('=');
         query.push_str(&encode_component(value));
     }
+    // 门自己的参数排在身份包之后、ticket 之前：POST 门的字节顺序一字不变，
+    // GET 门只是多挂几个自己的字段。
+    for (key, value) in extra {
+        query.push('&');
+        query.push_str(&encode_component(key));
+        query.push('=');
+        query.push_str(&encode_component(value));
+    }
     query.push_str("&_rticket=");
     query.push_str(&ticket.to_string());
     query
@@ -665,6 +678,34 @@ fn playback_query(identity: &V5Identity<'_>, ticket: i64, app_id: &str) -> Strin
 pub fn sign_playback_v5(
     base: &str,
     compressed_body: &[u8],
+    identity: &V5Identity<'_>,
+) -> Result<V5Request, String> {
+    sign_v5_request(base, &[], Some(compressed_body), identity)
+}
+
+/// Signs the `GET video_tab` 兜底门 with the same player envelope as the v5 POST.
+///
+/// 这扇门属于播放器族，**不能**用通用请求签名（argus/ladon）去打：实测那样打
+/// 回来的是 `HTTP 200` + 0 字节，看起来和「没内容」一样，实际是验签阶段就被
+/// 短路了。所以它复用 v5 的 Medusa/Helios/Khronos 信封与身份包，只把 body 的
+/// 摘要换成空串、并且不带 `Content-Type`/`Content-Encoding`/`x-ss-stub`——
+/// 带了 body 头却没有 body，正是那次被判空体的形态。
+pub fn sign_playback_v5_get(
+    base: &str,
+    extra: &[(&str, &str)],
+    identity: &V5Identity<'_>,
+) -> Result<V5Request, String> {
+    sign_v5_request(base, extra, None, identity)
+}
+
+/// 取流信封的公共内核：签名只取决于 query 字节、body 字节摘要与时间戳。
+///
+/// `body = None` 表示 GET（空 body 摘要参与分支选择），`Some` 表示带 gzip 体
+/// 的 POST。两条门共用同一套分支与时序，避免协议悄悄分叉。
+fn sign_v5_request(
+    base: &str,
+    extra: &[(&str, &str)],
+    body: Option<&[u8]>,
     identity: &V5Identity<'_>,
 ) -> Result<V5Request, String> {
     if base.is_empty() {
@@ -680,7 +721,7 @@ pub fn sign_playback_v5(
     let now_ms = crate::timeutil::now_millis();
     let ts = u32::try_from(now_ms / 1000)
         .map_err(|_| "V5 playback timestamp is outside the protocol range".to_string())?;
-    let body_md5 = md5_bytes(compressed_body);
+    let body_md5 = md5_bytes(body.unwrap_or(&[]));
     let state = process_state(now_ms);
     let app_id = APP_ID.to_string();
 
@@ -688,7 +729,7 @@ pub fn sign_playback_v5(
         let ticket = now_ms
             .checked_add(offset)
             .ok_or_else(|| "V5 playback request ticket overflow".to_string())?;
-        let query = playback_query(identity, ticket, &app_id);
+        let query = playback_query(identity, ticket, &app_id, extra);
         let query_hash = sm3_hash(query.as_bytes());
         if branch_iv(&query_hash, &body_md5, ts) & 15 != 12 {
             continue;
@@ -697,19 +738,21 @@ pub fn sign_playback_v5(
         let entropy = entropy();
         let medusa = medusa(&query_hash, &body_md5, ts, identity, state, entropy)?;
         let url = format!("{base}?{query}");
-        let headers = vec![
+        let mut headers = vec![
             ("x-khronos".to_string(), ts.to_string()),
             ("x-helios".to_string(), helios(ts, entropy.helios)),
             ("x-medusa".to_string(), medusa),
             ("User-Agent".to_string(), USER_AGENT.to_string()),
             ("Accept".to_string(), "application/json".to_string()),
-            (
+        ];
+        if body.is_some() {
+            headers.push((
                 "Content-Type".to_string(),
                 "application/json; charset=utf-8".to_string(),
-            ),
-            ("Content-Encoding".to_string(), "gzip".to_string()),
-            ("x-ss-stub".to_string(), hex::encode_upper(body_md5)),
-        ];
+            ));
+            headers.push(("Content-Encoding".to_string(), "gzip".to_string()));
+            headers.push(("x-ss-stub".to_string(), hex::encode_upper(body_md5)));
+        }
         return Ok(V5Request { url, headers });
     }
 
