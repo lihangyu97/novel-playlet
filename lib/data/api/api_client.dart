@@ -21,6 +21,25 @@ import '../models/video_source.dart';
 import '../parsers/novel_parsers.dart';
 import '../parsers/video_parsers.dart';
 
+/// 取流用途：只作为本地参数 `_playback_purpose` 传给内核，不进上游请求。
+///
+/// 内核用它决定「这次失败值不值得花身份轮换的预算」：预取（下一集预热、相邻
+/// 页预热）只解析地址，不该消耗真实播放要用的失败预算与设备预算，所以预取
+/// 不探冷却中的取流门、不重探、不轮换、不注册。拼错或未知值在核内一律退化成
+/// [other]（等价于按前台处理），不会把预取意外升级成前台。
+class PlaybackPurpose {
+  const PlaybackPurpose._();
+
+  /// 用户正在等的这一集。
+  static const String foreground = 'foreground';
+
+  /// 后台猜测（下一集预取、播放页相邻页预热）。
+  static const String prefetch = 'prefetch';
+
+  /// 下载器等其他调用方。
+  static const String other = 'other';
+}
+
 /// 业务接口层：路径 + 查询参数 + 解析。
 ///
 /// 这里刻意不做缓存、不做重试、不碰 UI——签名/设备池/限流在 Rust 核里，
@@ -274,12 +293,16 @@ class ApiClient {
   /// [preferHeight] 是这一集的**播放**档位偏好（按短边，720 表示优先 720P）：
   /// 内核先按该档找，找不到再取最高可解码档。只有在线播放传它；下载链路
   /// 传 [maxHeight]（清晰度上限），两者的语义不同。
+  ///
+  /// [purpose] 见 [PlaybackPurpose]：只影响内核在取流失败时有多敢于换门/换身份，
+  /// 不影响返回值的含义。
   Future<VideoSource> videoSource(
     String episodeId, {
     bool refresh = false,
     int? maxHeight,
     int? preferHeight,
     bool stream = false,
+    String? purpose,
   }) async {
     final payload = await _getJson(
       '/api/v1/videos/${Uri.encodeComponent(episodeId)}',
@@ -288,12 +311,15 @@ class ApiClient {
       // mode=stream：边下边播（见方法注释），不传时保持整集下载语义。
       // variants=0：播放页不需要清晰度列表，别让内核为它多拉一次 fallback。
       // max_height：离线/下载清晰度上限（短边 ≤ N 的最高档）。
+      // _playback_purpose：本地用途标记（前台/预取），核内只做 allowlist 校验，
+      // 不进上游 URL、不进请求体、不进签名。
       {
         if (refresh) 'refresh': '1',
         if (maxHeight != null && maxHeight > 0) 'max_height': '$maxHeight',
         if (preferHeight != null && preferHeight > 0)
           'prefer_height': '$preferHeight',
         if (stream) 'mode': 'stream',
+        if (purpose != null && purpose.isNotEmpty) '_playback_purpose': purpose,
         'variants': '0',
       },
       // 首次播放要等整集下载 + 写密钥 sidecar，默认 20s 不够。

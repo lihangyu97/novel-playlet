@@ -142,6 +142,32 @@ impl Upstream {
             .await
             .map_err(map_client_error)
     }
+
+    /// 同上，外加**应答它的那台池内身份**：兜底门必须用同一身份继续问，
+    /// 否则空实体到底归因于门还是身份永远分不清。空 body 原样返回。
+    pub async fn v5_playback_with_device(
+        &self,
+        base: &str,
+        body: &[u8],
+        pin: Option<&str>,
+    ) -> Result<(Vec<u8>, Device), ClientError> {
+        self.up.v5_playback_with_device(base, body, pin).await
+    }
+
+    /// 兜底门：同一套播放器信封的签名 GET（`video_tab`），参数由调用方给。
+    pub async fn v5_playback_get_with_device(
+        &self,
+        base: &str,
+        extra: &[(&str, &str)],
+        pin: Option<&str>,
+    ) -> Result<(Vec<u8>, Device), ClientError> {
+        self.up.v5_playback_get_with_device(base, extra, pin).await
+    }
+
+    /// 取流用的一次有界身份轮换（池内备用身份优先，其次重注册）。
+    pub async fn rotate_playback_identity(&self, failed: Option<&str>) -> Result<Device, String> {
+        self.up.rotate_playback_identity(failed).await
+    }
 }
 
 /// Maps a transport-level failure onto the API error model (P1-4).
@@ -159,6 +185,11 @@ pub fn map_client_error(err: ClientError) -> ApiError {
             TransientKind::Upstream5xx => ApiError::upstream_5xx(message),
         },
         ClientError::TooLarge(m) => ApiError::too_large(m),
+        // 空实体是「这扇门不放行」：既不是网络问题也不是设备问题，别让 Dart
+        // 侧把它当成可重试的瞬时错误。
+        ClientError::EmptyPlaybackBody => {
+            ApiError::internal("empty playback response body".to_string())
+        }
         ClientError::Http(m) => ApiError::internal(m),
         ClientError::Other(m) => ApiError::internal(m),
     }

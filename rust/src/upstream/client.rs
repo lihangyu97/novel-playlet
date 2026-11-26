@@ -70,6 +70,12 @@ pub enum ClientError {
     },
     /// A local size bound (response body or request body) was exceeded.
     TooLarge(String),
+    /// `HTTP 200` with zero bytes.
+    ///
+    /// 取流门拒绝请求时就是这个形态：不说原因、不带错误码。它不是设备故障，
+    /// 也不是值得在同一身份上重试的瞬时错误，所以调用方应换门（必要时换身份）。
+    /// 普通接口仍接受空 body，只有取流路径会把它翻成这个错误。
+    EmptyPlaybackBody,
     Http(String),
     Other(String),
 }
@@ -77,6 +83,10 @@ pub enum ClientError {
 impl ClientError {
     pub fn is_device_failed(&self) -> bool {
         matches!(self, ClientError::DeviceFailed(_))
+    }
+
+    pub fn is_empty_playback_body(&self) -> bool {
+        matches!(self, ClientError::EmptyPlaybackBody)
     }
 }
 
@@ -86,6 +96,7 @@ impl std::fmt::Display for ClientError {
             ClientError::DeviceFailed(m) => write!(f, "device failed: {m}"),
             ClientError::Transient { message, .. } => f.write_str(message),
             ClientError::TooLarge(m) => f.write_str(m),
+            ClientError::EmptyPlaybackBody => f.write_str("empty playback response body"),
             ClientError::Http(m) => f.write_str(m),
             ClientError::Other(m) => f.write_str(m),
         }
@@ -407,20 +418,43 @@ impl UpstreamClient {
         })
     }
 
-    /// Calls the v5 playback door with the exact gzip bytes it signs.
+    /// 取流门的一次签名调用，返回**应答它的那台池内身份**。
     ///
-    /// The v5 signer owns every query/header field and the wire body hash, so
-    /// this path deliberately bypasses generic signing. Transport/429/5xx
-    /// retries stay on the same device; only HTTP 401/403 replace it.
-    pub async fn v5_playback(&self, base: &str, body: &[u8]) -> Result<Vec<u8>, ClientError> {
+    /// `pin` 指定必须用哪台身份：兜底门要复用主门刚被拒的那一台，否则事后
+    /// 永远分不清是门的问题还是身份的问题。pin 失效（已被换出池）时退回池的
+    /// 轮换顺序。
+    ///
+    /// 空 body 原样返回，不在这里重试：`HTTP 200` + 0 字节是「这扇门不放行」，
+    /// 不是瞬时错误也不是设备故障，处理方式是换门，由端点决定。
+    ///
+    /// v5 签名器自己拥有全部 query/header 字段与线上 body 哈希，所以这条路径
+    /// 刻意绕开通用签名；只有 401/403 才退设备。
+    async fn v5_call_with_device(
+        &self,
+        mut pin: Option<&str>,
+        method: &str,
+        body: Option<&[u8]>,
+        sign: impl Fn(&crate::sign::v5::V5Identity<'_>) -> Result<crate::sign::v5::V5Request, String>,
+    ) -> Result<(Vec<u8>, Device), ClientError> {
         let mut last_err = None;
 
         for _ in 0..self.max_retries {
-            let dev = self
-                .pool
-                .get()
-                .await
-                .map_err(|e| ClientError::Other(format!("get device: {e}")))?;
+            let dev = match pin {
+                Some(device_id) => match self.pool.get_by_id(device_id).await {
+                    Ok(dev) => dev,
+                    // pin 失效不报错：退回池的轮换，别让一台退池设备终结整次取流。
+                    Err(_) => self
+                        .pool
+                        .get()
+                        .await
+                        .map_err(|e| ClientError::Other(format!("get device: {e}")))?,
+                },
+                None => self
+                    .pool
+                    .get()
+                    .await
+                    .map_err(|e| ClientError::Other(format!("get device: {e}")))?,
+            };
 
             let cdid = if dev.cdid.is_empty() {
                 dev.openudid.as_str()
@@ -432,17 +466,15 @@ impl UpstreamClient {
                 install_id: &dev.install_id,
                 cdid,
             };
-            // Sign exactly once per attempt: the signer draws fresh entropy, so
-            // a second call would yield a URL and headers from different
-            // nonces.
-            let signed = crate::sign::v5::sign_playback_v5(base, body, &identity)
-                .map_err(ClientError::Other)?;
+            // 每次尝试只签一次：签名器每次都抽新熵，签两次会得到两套 nonce，
+            // URL 与 header 就对不上了。
+            let signed = sign(&identity).map_err(ClientError::Other)?;
             match self
                 .do_resp_with_transient_retry(
                     &UpstreamRequest {
-                        method: Some("POST".to_string()),
+                        method: Some(method.to_string()),
                         url: signed.url,
-                        body: Some(body.to_vec()),
+                        body: body.map(|raw| raw.to_vec()),
                         headers: signed.headers,
                         no_sign: true,
                         pin: None,
@@ -451,7 +483,7 @@ impl UpstreamClient {
                 )
                 .await
             {
-                Ok((data, _)) => return Ok(data),
+                Ok((data, _)) => return Ok((data, dev)),
                 Err(err) => {
                     last_err = Some(err.clone());
                     if err.is_device_failed() {
@@ -459,6 +491,7 @@ impl UpstreamClient {
                             return Err(err);
                         }
                         let _ = self.pool.replace_failed(&dev.device_id).await;
+                        pin = None;
                         if !super::budget::retry_pause(Duration::from_millis(100)).await {
                             return Err(err);
                         }
@@ -469,6 +502,62 @@ impl UpstreamClient {
             }
         }
         Err(last_err.unwrap_or_else(|| ClientError::Other("v5 playback failed".to_string())))
+    }
+
+    /// 主门：v5 签名 POST，返回应答身份。
+    pub async fn v5_playback_with_device(
+        &self,
+        base: &str,
+        body: &[u8],
+        pin: Option<&str>,
+    ) -> Result<(Vec<u8>, Device), ClientError> {
+        self.v5_call_with_device(pin, "POST", Some(body), |identity| {
+            crate::sign::v5::sign_playback_v5(base, body, identity)
+        })
+        .await
+    }
+
+    /// 兜底门：同一套播放器信封的签名 GET（`video_tab`），不带 body。
+    pub async fn v5_playback_get_with_device(
+        &self,
+        base: &str,
+        extra: &[(&str, &str)],
+        pin: Option<&str>,
+    ) -> Result<(Vec<u8>, Device), ClientError> {
+        self.v5_call_with_device(pin, "GET", None, |identity| {
+            crate::sign::v5::sign_playback_v5_get(base, extra, identity)
+        })
+        .await
+    }
+
+    /// 只要 body 的旧形态：空 body 视为「门拒绝」，翻成 [ClientError::EmptyPlaybackBody]。
+    pub async fn v5_playback(&self, base: &str, body: &[u8]) -> Result<Vec<u8>, ClientError> {
+        let (data, _) = self.v5_playback_with_device(base, body, None).await?;
+        if data.is_empty() {
+            return Err(ClientError::EmptyPlaybackBody);
+        }
+        Ok(data)
+    }
+
+    /// 为取流做一次有界身份轮换。
+    ///
+    /// 池内其他已注册身份不要钱，优先；池里只剩失败那台时才付一次注册往返，
+    /// 那可能要几秒，所以调用方自己套 deadline。空实体**不**退休设备：
+    /// `failed` 是要绕开的身份，不是对它的判决。
+    pub async fn rotate_playback_identity(&self, failed: Option<&str>) -> Result<Device, String> {
+        match failed {
+            Some(failed) => match self.pool.get_excluding(failed).await {
+                Ok(device) => Ok(device),
+                Err(_) => self.pool.replace_failed(failed).await,
+            },
+            None => {
+                let victim = self.pool.get().await?;
+                match self.pool.get_excluding(&victim.device_id).await {
+                    Ok(device) => Ok(device),
+                    Err(_) => self.pool.replace_failed(&victim.device_id).await,
+                }
+            }
+        }
     }
 }
 

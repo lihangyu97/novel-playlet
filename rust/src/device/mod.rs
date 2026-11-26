@@ -473,6 +473,23 @@ impl DevicePool {
         }
     }
 
+    /// 挑一台**不同于** `device_id` 的池内身份，但不注册新设备。
+    ///
+    /// 取流轮换优先花一枚已注册的备用身份，而不是先付一次注册往返。池里只剩
+    /// 失败的那台时返回错误，让调用方自己判断剩余预算还够不够注册。
+    /// 使用计数刻意不动：这里只是把身份**借**出去，不代表它已经被消耗。
+    pub async fn get_excluding(&self, device_id: &str) -> Result<Device, String> {
+        let picked = {
+            let mut s = self.state.lock().await;
+            s.devices.sort_by(|a, b| a.last_used.cmp(&b.last_used));
+            s.devices
+                .iter()
+                .find(|device| device.device_id != device_id && !device.secret_key.is_empty())
+                .cloned()
+        };
+        picked.ok_or_else(|| format!("no alternate device besides {device_id}"))
+    }
+
     /// Registers a fresh device and swaps it in for a failed one.
     pub async fn replace_failed(&self, device_id: &str) -> Result<Device, String> {
         let _maintenance = self.maintenance_lock.lock().await;
