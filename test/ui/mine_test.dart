@@ -6,6 +6,7 @@ import 'package:novel_playlet/core/storage/reading_store.dart';
 import 'package:novel_playlet/data/models/novel_item.dart';
 import 'package:novel_playlet/data/models/video_series.dart';
 import 'package:novel_playlet/features/mine/mine_page.dart';
+import 'package:novel_playlet/features/mine/mine_section_order.dart';
 import 'package:novel_playlet/features/mine/widgets/library_type_badge.dart';
 import 'package:novel_playlet/features/mine/widgets/mine_all_sheet.dart';
 import 'package:novel_playlet/features/video/video_player_page.dart';
@@ -399,5 +400,28 @@ void main() {
       lessThan(sectionBefore.dy),
       reason: '页头下面的内容应该正常滚动',
     );
+  });
+
+  testWidgets('我的页-区块顺序跟随偏好', (tester) async {
+    await pumpPreview(
+      tester,
+      const MinePage(),
+      extraOverrides: [
+        mineSectionOrderProvider.overrideWith(
+          () => MineSectionOrderController(
+            initialOrder: const [
+              MineSection.collection,
+              MineSection.history,
+              MineSection.pins,
+            ],
+          ),
+        ),
+      ],
+    );
+
+    final collection = tester.getTopLeft(find.byKey(MinePage.collectionKey));
+    final history = tester.getTopLeft(find.byKey(MinePage.historyKey));
+    expect(collection.dy, lessThan(history.dy), reason: '收藏排在历史前面');
+    expect(find.text('在看'), findsNothing, reason: '没有 pin 时整块隐藏');
   });
 }

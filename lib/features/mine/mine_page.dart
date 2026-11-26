@@ -10,6 +10,7 @@ import '../../app/widgets/states.dart';
 import '../../app/widgets/top_glow.dart';
 import '../../core/storage/library_records.dart';
 import 'mine_providers.dart';
+import 'mine_section_order.dart';
 import 'widgets/media_manage_sheet.dart';
 import 'widgets/mine_all_sheet.dart';
 import 'widgets/mine_grid_metrics.dart';
@@ -28,11 +29,13 @@ import '../../data/models/video_series.dart';
 /// （绿=小说、橙=短剧）。
 ///
 /// 页头（图标 + 「我的」 + 缓存 / 设置）固定贴顶、不随内容滚动；顶部氛围
-/// 渐变整页一套。区块顺序固定为「在看 → 收藏 → 历史」。
+/// 渐变整页一套。区块顺序默认「在看 → 收藏 → 历史」，可在设置 → 外观 →
+/// 「我的页模块」里拖动调整（偏好见 `mine_section_order.dart`）。
 ///
-/// 页面根节点**不订阅任何数据 provider**：三个区块各自 watch 自己的通道，
-/// 阅读页落一次进度重建「历史」和「在看」（在看卡片要显示读到第几章），
-/// 切换 pin 只重建「在看」，收藏变更只重建「收藏」（CODE_REVIEW P1-5）。
+/// 页面根节点**不订阅任何数据 provider**（只订阅区块顺序偏好）：三个区块
+/// 各自 watch 自己的数据通道，阅读页落一次进度重建「历史」和「在看」（在看
+/// 卡片要显示读到第几章），切换 pin 只重建「在看」，收藏变更只重建「收藏」
+/// （CODE_REVIEW P1-5）。顺序变化只重排 sliver，不会让三个区块重查库。
 class MinePage extends ConsumerWidget {
   const MinePage({super.key, this.bottomInset = 0});
 
@@ -51,6 +54,14 @@ class MinePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // 渐变要盖到状态栏那一条（安全区不参与布局），否则顶部会留一条纯白。
     final topInset = MediaQuery.paddingOf(context).top;
+    // 区块顺序：设置 → 外观 →「我的页模块」里拖动调整，默认
+    // 在看 → 收藏 → 历史。三个区块的 key 不变，拖完只是重排同一批 section。
+    final order = ref.watch(mineSectionOrderProvider);
+    const sections = <MineSection, Widget>{
+      MineSection.pins: _MinePinSection(key: pinKey),
+      MineSection.collection: _MineCollectionSection(key: collectionKey),
+      MineSection.history: _MineHistorySection(key: historyKey),
+    };
     return Scaffold(
       body: Stack(
         children: [
@@ -75,13 +86,13 @@ class MinePage extends ConsumerWidget {
                   child: CustomScrollView(
                     physics: const ClampingScrollPhysics(),
                     slivers: [
-                      SliverToBoxAdapter(child: _MinePinSection(key: pinKey)),
-                      SliverToBoxAdapter(
-                        child: _MineCollectionSection(key: collectionKey),
-                      ),
-                      SliverToBoxAdapter(
-                        child: _MineHistorySection(key: historyKey),
-                      ),
+                      for (final section in order)
+                        SliverToBoxAdapter(
+                          // 带 key 才能在顺序变化时移动元素而不是重建：
+                          // 「在看」横向列表的滚动位置跟着区块一起搬。
+                          key: ValueKey(section),
+                          child: sections[section],
+                        ),
                       SliverToBoxAdapter(
                         child: SizedBox(height: 28 + bottomInset),
                       ),

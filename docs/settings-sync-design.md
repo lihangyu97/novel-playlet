@@ -22,7 +22,7 @@
 
 ## 2. 现状
 
-设置项当前由 **8 个 provider、17 个 `shared_preferences` key** 分散持有，没有统一对象：
+设置项当前由 **9 个 provider、18 个 `shared_preferences` key** 分散持有，没有统一对象：
 
 | 设置 | provider | prefs key |
 |---|---|---|
@@ -31,6 +31,7 @@
 | 深浅色模式 | `themeModeProvider` | `app_theme_mode_v1` |
 | 全局字重（仅 Android 生效） | `appFontWeightProvider` | `app_font_weight_v1` |
 | 推荐流布局 | `recommendLayoutProvider` | `home_recommend_layout_v1` |
+| 「我的」页模块顺序 | `mineSectionOrderProvider` | `mine_section_order_v1` |
 | 阅读排版（10 项） | `readerSettingsProvider` | `reader_*_v1` × 10 |
 | 播放倍速 | `playbackSpeedProvider` | `video_playback_speed_v1` |
 | 下载清晰度 | `videoDownloadQualityProvider` | `video_download_quality_v1` |
@@ -89,7 +90,8 @@ final mergedData = await store.exportSyncData();   // 只产出 {'items': [...]}
       "showDialogueHighlight": true,
       "dialogueHighlightColor": 4294954319,
       "dialogueHighlightStyle": "marker"
-    }
+    },
+    "mine": { "sections": ["pins", "collection", "history"] }
   }
 }
 ```
@@ -170,6 +172,7 @@ read-modify-write；重启后仍然能做 LWW。
 | theme | seed / mode / customSeed | ✅ | 跨设备观感一致 |
 | font | 全局字重 | ✅ | 仅 Android 生效，iOS 拉到无害 |
 | feed | 布局（双列 / 三列） | ✅ | 观感一致 |
+| mine | 「我的」页模块顺序 | ✅ | 观感一致；脏值补齐成完整排列 |
 | reader | 10 项排版 | ✅ | 核心场景 |
 | video | 播放倍速 | ❌ | 设备习惯 |
 | video | 下载清晰度 | ❌ | 与设备存储 / 流量相关 |
@@ -235,3 +238,8 @@ read-modify-write；重启后仍然能做 LWW。
 - 手动「立即同步」与保存配置并行跑书架 + 设置；设置页退出时 `SettingsSyncFlush` 补 flush。
 - 测试：`test/settings_sync_test.dart`（推送/拉取/LWW/412/未知 v/沉浸页/脏值 clamp/coordinator）、
   `test/sync_log_test.dart` 与 `test/ui/sync_log_test.dart`（scope 往返与设置行）。
+
+后续增补（2026-11-26）：新增 `mine` section（「我的」页模块顺序，存 name 数组，
+脏值由 `mineSectionOrderFromNames()` 补齐成完整排列）。`SettingsSection` 变成 5 组，
+coordinator 的监听来源与 `restoreFuture` 等待列表同步扩到 7 个；`settings.json` 结构不变，
+仍是 `v: 1`（新增 section 只是多一个 key，老版本客户端推一次会丢这个 key，属已知退化）。

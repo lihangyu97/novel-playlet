@@ -9,6 +9,7 @@ import 'package:novel_playlet/app/theme/theme_settings.dart';
 import 'package:novel_playlet/core/cache/app_cache.dart';
 import 'package:novel_playlet/features/settings/widgets/dialogue_highlight_preview.dart';
 import 'package:novel_playlet/features/cache/download_quality.dart';
+import 'package:novel_playlet/features/mine/mine_section_order.dart';
 import 'package:novel_playlet/features/recommend/recommend_layout.dart';
 import 'package:novel_playlet/features/reader/reader_settings.dart';
 import 'package:novel_playlet/features/settings/settings_page.dart';
@@ -17,8 +18,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preview_harness.dart';
 
-/// 设置页预览：主题色（3 个预设 + 自定义）、深浅色模式、推荐流布局、全局字重、
-/// 对话高亮、存储区块（占用明细 / 清理 / 缓存质量）。
+/// 设置页预览：主题色（3 个预设 + 自定义）、深浅色模式、推荐流布局、
+/// 我的页模块顺序、全局字重、对话高亮（独立卡）、存储区块（占用明细 / 清理 /
+/// 缓存质量）。
 ///
 /// 更新基线：`flutter test --update-goldens test/ui/settings_page_test.dart`。
 void main() {
@@ -106,7 +108,7 @@ void main() {
       tester.element(find.byType(SettingsPage)),
     );
 
-    await tester.scrollUntilVisible(find.text('缓存质量'), 300);
+    await _scrollTo(tester, find.text('缓存质量'));
     await tester.pumpAndSettle();
     expect(find.text('缓存质量'), findsOneWidget);
     expect(find.text('下载清晰度'), findsNothing, reason: '标题改叫「缓存质量」');
@@ -132,7 +134,7 @@ void main() {
   /// 四档质量收在一个按钮组里，不再是一排独立 chip。
   testWidgets('设置页-缓存质量用 M3 按钮组（SegmentedButton）', (tester) async {
     await pumpPreview(tester, const SettingsPage());
-    await tester.scrollUntilVisible(find.text('缓存质量'), 300);
+    await _scrollTo(tester, find.text('缓存质量'));
     await tester.pumpAndSettle();
 
     final segmented = _qualitySegments(tester);
@@ -168,7 +170,7 @@ void main() {
       ('推荐流布局', find.byType(SegmentedButton<RecommendLayout>)),
       ('缓存质量', find.byType(SegmentedButton<VideoDownloadQuality>)),
     ]) {
-      await tester.scrollUntilVisible(find.text(title), 300);
+      await _scrollTo(tester, find.text(title));
       await tester.pumpAndSettle();
       final titleRect = tester.getRect(find.text(title));
       final groupRect = tester.getRect(group);
@@ -471,7 +473,15 @@ void main() {
     );
     const inset = 32.0; // 卡片 16 外边距 + 16 内边距
 
-    for (final text in ['主题', '对话高亮', '跟随系统', '推荐流布局', '存储']) {
+    for (final text in [
+      '外观',
+      '主题色',
+      '跟随系统',
+      '推荐流布局',
+      '我的页模块',
+      '对话高亮',
+      '存储',
+    ]) {
       expect(
         tester.getTopLeft(find.text(text).first).dx,
         inset,
@@ -479,14 +489,29 @@ void main() {
       );
     }
 
-    // 主题色第一颗圆点的左沿、最后一颗（自定义）圆点的右沿贴住内容边界。
-    final firstDot = find.byTooltip('天蓝');
-    expect(tester.getRect(firstDot).left, inset);
+    // 主题色：文案左对齐，四颗圆点整组右对齐、等间距，最后一颗贴住内容右边界。
+    final dotRects = [
+      for (final name in ['天蓝', '草绿', '绯红'])
+        tester.getRect(find.byTooltip(name)),
+      tester.getRect(find.byKey(themeCustomColorKey)),
+    ];
     expect(
-      tester.getRect(find.byKey(themeCustomColorKey)).right,
+      tester.getRect(find.text('主题色')).right,
+      lessThan(dotRects.first.left),
+      reason: '文案在圆点左侧，不挤压',
+    );
+    expect(
+      dotRects.last.right,
       390 - inset,
       reason: '自定义圆点右沿应对齐内容右边界',
     );
+    for (var i = 1; i < dotRects.length; i++) {
+      expect(
+        dotRects[i].left - dotRects[i - 1].right,
+        closeTo(12, 0.5),
+        reason: '圆点之间等距（12pt）',
+      );
+    }
 
     // 存储明细：label 贴内容左边界；数值在清理按钮左侧，按钮贴内容右边界。
     expect(tester.getTopLeft(find.text('视频缓存')).dx, inset);
@@ -507,7 +532,7 @@ void main() {
   testWidgets('设置页-存储明细与清理共卡、缓存质量独立卡', (tester) async {
     await pumpPreview(tester, const SettingsPage());
 
-    await tester.scrollUntilVisible(find.text('缓存质量'), 300);
+    await _scrollTo(tester, find.text('缓存质量'));
     await tester.pumpAndSettle();
 
     final usageCard = tester.widget<Card>(
@@ -549,7 +574,7 @@ void main() {
 
   testWidgets('设置页-存储卡不再显示总计和范围说明', (tester) async {
     await pumpPreview(tester, const SettingsPage());
-    await tester.scrollUntilVisible(find.text('章节缓存'), 300);
+    await _scrollTo(tester, find.text('章节缓存'));
     await tester.pumpAndSettle();
 
     expect(
@@ -572,34 +597,36 @@ void main() {
     );
   });
 
-  /// 主题区块顺序：常用外观项在前，阅读页局部的「对话高亮」收在最后。
-  testWidgets('设置页-主题区块：对话高亮排在推荐流布局与全局字重之后', (tester) async {
+  /// 外观卡顺序：常用外观项在前，阅读页局部的「对话高亮」收在最后。
+  testWidgets('设置页-外观卡：对话高亮排在推荐流布局与全局字重之后', (tester) async {
     final originalPlatform = debugDefaultTargetPlatformOverride;
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
       await pumpPreview(tester, const SettingsPage());
-      // 拉高视口让主题区块整段同时被 build，避免 ListView 懒加载导致
+      // 拉高视口让外观卡整段同时被 build，避免 ListView 懒加载导致
       // 比较时前一项已被回收。
       tester.view.physicalSize = const Size(390, 1600);
       await tester.pump();
 
       final feed = tester.getTopLeft(find.text('推荐流布局')).dy;
+      final mine = tester.getTopLeft(find.text('我的页模块')).dy;
       final weight = tester.getTopLeft(find.text('全局字重')).dy;
       final dialogue = tester.getTopLeft(find.text('对话高亮')).dy;
-      expect(feed, lessThan(weight));
-      expect(weight, lessThan(dialogue), reason: '对话高亮应在主题区块最后');
+      expect(feed, lessThan(mine), reason: '我的页模块紧跟推荐流布局');
+      expect(mine, lessThan(weight));
+      expect(weight, lessThan(dialogue), reason: '对话高亮在独立卡里，排在外观卡之后');
       expect(
         dialogue,
         lessThan(tester.getTopLeft(find.text('同步')).dy),
-        reason: '对话高亮仍在主题区块内',
+        reason: '对话高亮仍在外观区块内（同步之前）',
       );
     } finally {
       debugDefaultTargetPlatformOverride = originalPlatform;
     }
   });
 
-  /// 主题区块的所有控件共用一张卡，卡内不画分割线（含深色/跟随系统之间）。
-  testWidgets('设置页-主题区块共用一张卡片、无分割线', (tester) async {
+  /// 外观卡的所有控件共用一张卡，卡内不画分割线（含深色/跟随系统之间）。
+  testWidgets('设置页-外观卡共用一张卡片、无分割线', (tester) async {
     final originalPlatform = debugDefaultTargetPlatformOverride;
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
@@ -608,7 +635,7 @@ void main() {
       await tester.pump();
 
       final cards = [
-        for (final label in ['跟随系统', '推荐流布局', '全局字重', '对话高亮'])
+        for (final label in ['跟随系统', '推荐流布局', '我的页模块', '全局字重'])
           tester.widget<Card>(
             find
                 .ancestor(of: find.text(label), matching: find.byType(Card))
@@ -629,7 +656,18 @@ void main() {
         1,
         reason: '主题色圆点与其它行同属一张卡',
       );
-      expect(find.byType(Divider), findsNothing, reason: '主题卡内不画分割线');
+      // 对话高亮仍在外观区块，但单独一张卡。
+      final dialogueCard = tester.widget<Card>(
+        find
+            .ancestor(of: find.text('对话高亮'), matching: find.byType(Card))
+            .first,
+      );
+      expect(
+        identical(dialogueCard, cards.first),
+        isFalse,
+        reason: '对话高亮单独一张卡（仍紧跟外观卡、在同步之前）',
+      );
+      expect(find.byType(Divider), findsNothing, reason: '外观卡内不画分割线');
     } finally {
       debugDefaultTargetPlatformOverride = originalPlatform;
     }
@@ -639,7 +677,7 @@ void main() {
   testWidgets('设置页-同步三项共用一张卡片、无分割线', (tester) async {
     await pumpPreview(tester, const SettingsPage());
 
-    await tester.scrollUntilVisible(find.text('云端数据'), 300);
+    await _scrollTo(tester, find.text('云端数据'));
     await tester.pumpAndSettle();
 
     final cards = [
@@ -662,7 +700,7 @@ void main() {
   /// 每类缓存行尾各有一个小清理图标，不再有整卡清空按钮。
   testWidgets('设置页-每类缓存行尾各有清理图标', (tester) async {
     await pumpPreview(tester, const SettingsPage());
-    await tester.scrollUntilVisible(find.text('章节缓存'), 300);
+    await _scrollTo(tester, find.text('章节缓存'));
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('清理缓存'), findsNothing, reason: '不再有整卡清空入口');
@@ -874,7 +912,7 @@ void main() {
     );
 
     final finder = find.text('Release 1.0.0 (15)');
-    await tester.scrollUntilVisible(finder, 300);
+    await _scrollTo(tester, finder);
     expect(finder, findsOneWidget);
 
     final text = tester.widget<Text>(finder);
@@ -890,6 +928,72 @@ void main() {
       findsOneWidget,
     );
   });
+
+  /// 外观卡里的「我的页模块」：三条可拖动行，拖动即时生效并落盘。
+  ///
+  /// 这里直接调 `onReorderItem`（而不是模拟手势）：手势路径在
+  /// ReorderableListView 内部，断言它的回调更稳；真机手感另靠手动验证。
+  testWidgets('设置页-我的页模块顺序可拖动、可恢复默认', (tester) async {
+    await pumpPreview(tester, const SettingsPage());
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(SettingsPage)),
+    );
+    expect(container.read(mineSectionOrderProvider), defaultMineSectionOrder);
+
+    await _scrollTo(tester, find.byKey(mineSectionOrderKey));
+    await tester.pumpAndSettle();
+
+    // 行按当前顺序渲染，第一行是「在看」。
+    final pinsTop = tester.getTopLeft(
+      find.byKey(mineSectionOrderRowKey(MineSection.pins)),
+    );
+    final collectionTop = tester.getTopLeft(
+      find.byKey(mineSectionOrderRowKey(MineSection.collection)),
+    );
+    expect(pinsTop.dy, lessThan(collectionTop.dy), reason: '第一行是在看');
+    expect(
+      find.byKey(mineSectionResetKey),
+      findsNothing,
+      reason: '默认顺序不显示「恢复默认」',
+    );
+
+    // 第一行拖到最后：即时改 provider，并写进偏好。
+    final list = tester.widget<ReorderableListView>(
+      find.byKey(mineSectionOrderKey),
+    );
+    list.onReorderItem!(0, defaultMineSectionOrder.length - 1);
+    await tester.pumpAndSettle();
+
+    expect(container.read(mineSectionOrderProvider), [
+      MineSection.collection,
+      MineSection.history,
+      MineSection.pins,
+    ]);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getStringList(MineSectionOrderController.orderKey), [
+      'collection',
+      'history',
+      'pins',
+    ]);
+
+    await tester.tap(find.byKey(mineSectionResetKey));
+    await tester.pumpAndSettle();
+    expect(container.read(mineSectionOrderProvider), defaultMineSectionOrder);
+    expect(find.byKey(mineSectionResetKey), findsNothing);
+  });
+}
+
+/// 设置页里的滚动统一走这里。
+///
+/// 「外观」卡里的模块顺序是 `ReorderableListView`，它自带一个 Scrollable；
+/// `scrollUntilVisible` 默认按 `find.byType(Scrollable)` 找唯一的滚动容器，
+/// 会命中两个而报错，所以显式指定外层 ListView 的那个（树里第一个）。
+Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
+  await tester.scrollUntilVisible(
+    finder,
+    300,
+    scrollable: find.byType(Scrollable).first,
+  );
 }
 
 /// 「缓存质量」那一组按钮（M3 SegmentedButton）。

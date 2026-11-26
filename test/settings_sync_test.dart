@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_playlet/app/theme/app_font_weight.dart';
 import 'package:novel_playlet/app/theme/app_theme.dart';
 import 'package:novel_playlet/app/theme/theme_settings.dart';
+import 'package:novel_playlet/features/mine/mine_section_order.dart';
 import 'package:novel_playlet/features/reader/reader_settings.dart';
 import 'package:novel_playlet/features/sync/settings_sections.dart';
 import 'package:novel_playlet/features/sync/settings_sync_coordinator.dart';
@@ -341,5 +342,34 @@ void main() {
       container.read(settingsSyncStatusProvider).phase,
       SettingsSyncPhase.success,
     );
+  });
+
+  test('设置：我的页模块顺序 capture / applyRemote / 脏值补齐', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final section = container
+        .read(settingsSectionsProvider)
+        .firstWhere((item) => item.id == 'mine');
+
+    container.read(mineSectionOrderProvider.notifier).setOrder(const [
+      MineSection.history,
+      MineSection.collection,
+      MineSection.pins,
+    ]);
+    expect(section.capture(), {
+      'sections': ['history', 'collection', 'pins'],
+    });
+
+    // 缺一项：补到末尾，不会少一个区块。
+    await section.applyRemote({'sections': ['history', 'pins']});
+    expect(container.read(mineSectionOrderProvider), [
+      MineSection.history,
+      MineSection.pins,
+      MineSection.collection,
+    ]);
+
+    // 类型不对：整组回落默认顺序。
+    await section.applyRemote({'sections': 'bogus'});
+    expect(container.read(mineSectionOrderProvider), defaultMineSectionOrder);
   });
 }

@@ -283,7 +283,7 @@ ChapterContent{id,title,paragraphs}
 - 表：与书架/收藏同表，`library` 里一行（`type='novel'` + `source_id`），进度落
   `progress_ref / progress_index / progress_sub`，看过的书就是「历史」的来源。
 - 设置：字号 15–30（默认 **21**）、行距 1.3–2.0（默认 **1.8**）、字重 300–800（默认 **400**，整百档）、4 种纸色 + 自定义图（色块与「底色」标题同一行，不显示文字；自定义图有图才显示圆形缩略图）、对话高亮开关
-  （默认开）与颜色（默认 `#FFD54F`，设置页主题模块自定义）、段评气泡开关（默认开），落
+  （默认开）与颜色（默认 `#FFD54F`，设置页外观模块自定义）、段评气泡开关（默认开），落
   `reader_font_size_v1 / reader_line_height_v1 / reader_font_weight_v1 / reader_paper_v1 / reader_day_paper_v1 / reader_show_dialogue_highlight_v1 / reader_dialogue_highlight_color_v1 / reader_show_bubbles_v1`；
   `reader_day_paper_v1` 记住最近一次浅色纸，供工具栏日/夜切换切回；已落盘偏好优先，
   默认值只影响无历史偏好的用户。
@@ -962,7 +962,7 @@ flutter drive --profile -d <iPhone UDID> \
 ### 11.5 推荐流布局与封面比例（2026-11-09）
 
 - **布局**：`SliverMasonryGrid`（`flutter_staggered_grid_view`，CONTRACTS 依赖白名单）按子节点实际
-  高度排版，双列/三列共用一套卡片；列数来自 `recommendLayoutProvider`（设置页「主题 → 推荐流布局」，
+  高度排版，双列/三列共用一套卡片；列数来自 `recommendLayoutProvider`（设置页「外观 → 推荐流布局」，
   默认双列，持久化 key `home_recommend_layout_v1`，`main.dart` 启动预读避免首页先按双列渲染再跳）。
   旧的固定高度三列网格 `FeedGrid` / `FeedGridMetrics` 已删除，新增 `FeedStaggeredGrid`：
   卡片高度不再预算，列宽由 `SliverLayoutBuilder` 从 sliver 实际拿到的 `crossAxisExtent`
@@ -1050,7 +1050,7 @@ flutter drive --profile -d <iPhone UDID> \
   `paused` 与离开设置页 flush；「立即同步」同时跑书架与设置，保存 WebDAV 配置后也两者一起跑。
 - **文件**：`novel-playlet/<release|beta|dev>/settings.json`，与 `sync.json` 完全独立；
   外层 `{v: 1, deviceId, updatedAt, settings}`。`v` 只认 1，更高版本直接停止同步、不降级覆盖。
-- **内容**：主题（seed / mode / customSeed）、全局字重、推荐布局、阅读排版 10 项；
+- **内容**：主题（seed / mode / customSeed）、全局字重、推荐布局、我的页模块顺序、阅读排版 10 项；
   **不同步**播放倍速与缓存质量（设备相关）。枚举存 name（`system` / `two` / `parchment`），
   不存下标；脏值按字号 15–30、行距 1.3–2.0、字重整百档、纸色/样式白名单 clamp 或回落默认。
 - **LWW**：本地 `settings_local_updated_at_v1` 记录最后一次变更时间；与云端 `updatedAt`
@@ -1060,7 +1060,7 @@ flutter drive --profile -d <iPhone UDID> \
   离开沉浸页或下次 resumed 自动重试；不写 `updatedAt` 相同但 hash 不同的“假最新”。
 - **挡板**：`ImmersivePageTracker` 在阅读页 / 播放页 / 设置页压栈时计数，`idle == 0` 才 apply；
   详情 / 搜索 / 缓存中心允许回填。
-- **注册表**：`SettingsSection` 把主题、全局字重、推荐布局、阅读排版拆成 4 组；每组只实现
+- **注册表**：`SettingsSection` 把主题、全局字重、推荐布局、我的页模块顺序、阅读排版拆成 5 组；每组只实现
   `capture()` / `applyRemote()`，新增设置优先加字段而不是加一套同步代码。同步服务与 coordinator
   都不认识具体 provider，方便单测。
 - **同步记录**：成功推送/拉取写一条 `scope = settings` 的记录；失败写失败阶段；无变化与

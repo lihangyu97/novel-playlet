@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/immersive_page.dart';
 import '../../app/theme/app_font_weight.dart';
 import '../../app/theme/theme_settings.dart';
+import '../mine/mine_section_order.dart';
 import '../reader/reader_settings.dart';
 import '../recommend/recommend_layout.dart';
 import 'settings_sections.dart';
@@ -56,9 +57,9 @@ final settingsSyncStatusProvider =
 
 /// 设置同步的脏标记、去抖、单飞与状态。
 ///
-/// 监听 6 个设置 controller 的变更（主题色/自定义色/深浅色/全局字重/推荐
-/// 布局/阅读排版），1.6s 去抖后推一次；远端 apply 期间用 `_applyingRemote`
-/// 屏蔽自己的监听，避免 pull → 脏 → push 的乒乓。
+/// 监听 7 个设置 controller 的变更（主题色/自定义色/深浅色/全局字重/推荐
+/// 布局/我的页模块顺序/阅读排版），1.6s 去抖后推一次；远端 apply 期间用
+/// `_applyingRemote` 屏蔽自己的监听，避免 pull → 脏 → push 的乒乓。
 class SettingsSyncCoordinator extends Notifier<SettingsSyncStatus> {
   final SettingsSyncMetaStore _metaStore = SettingsSyncMetaStore();
   final SettingsLocalTimestampStore _localStore = SettingsLocalTimestampStore();
@@ -74,12 +75,13 @@ class SettingsSyncCoordinator extends Notifier<SettingsSyncStatus> {
 
   @override
   SettingsSyncStatus build() {
-    // 6 个设置来源；任一变化都可能是本地编辑，也可能是 applyRemote。
+    // 7 个设置来源；任一变化都可能是本地编辑，也可能是 applyRemote。
     ref.listen(themeSeedProvider, (_, _) => _onLocalChanged());
     ref.listen(customThemeSeedProvider, (_, _) => _onLocalChanged());
     ref.listen(themeModeProvider, (_, _) => _onLocalChanged());
     ref.listen(appFontWeightProvider, (_, _) => _onLocalChanged());
     ref.listen(recommendLayoutProvider, (_, _) => _onLocalChanged());
+    ref.listen(mineSectionOrderProvider, (_, _) => _onLocalChanged());
     ref.listen(readerSettingsProvider, (_, _) => _onLocalChanged());
     // 离开阅读/播放/设置页后如果还有 deferred 的云端设置，立刻补一次 apply。
     ref.listen(immersivePageProvider, (previous, next) {
@@ -103,6 +105,7 @@ class SettingsSyncCoordinator extends Notifier<SettingsSyncStatus> {
         ref.read(themeModeProvider.notifier).restoreFuture,
         ref.read(appFontWeightProvider.notifier).restoreFuture,
         ref.read(recommendLayoutProvider.notifier).restoreFuture,
+        ref.read(mineSectionOrderProvider.notifier).restoreFuture,
         ref.read(readerSettingsProvider.notifier).restoreFuture,
       ]);
       final meta = await _metaStore.read();
