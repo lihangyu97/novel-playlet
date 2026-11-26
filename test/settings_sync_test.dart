@@ -361,7 +361,9 @@ void main() {
     });
 
     // 缺一项：补到末尾，不会少一个区块。
-    await section.applyRemote({'sections': ['history', 'pins']});
+    await section.applyRemote({
+      'sections': ['history', 'pins'],
+    });
     expect(container.read(mineSectionOrderProvider), [
       MineSection.history,
       MineSection.pins,

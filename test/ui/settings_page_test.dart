@@ -473,15 +473,7 @@ void main() {
     );
     const inset = 32.0; // 卡片 16 外边距 + 16 内边距
 
-    for (final text in [
-      '外观',
-      '主题色',
-      '跟随系统',
-      '推荐流布局',
-      '我的页模块',
-      '对话高亮',
-      '存储',
-    ]) {
+    for (final text in ['外观', '主题色', '跟随系统', '推荐流布局', '我的页模块', '对话高亮', '存储']) {
       expect(
         tester.getTopLeft(find.text(text).first).dx,
         inset,
@@ -500,11 +492,7 @@ void main() {
       lessThan(dotRects.first.left),
       reason: '文案在圆点左侧，不挤压',
     );
-    expect(
-      dotRects.last.right,
-      390 - inset,
-      reason: '自定义圆点右沿应对齐内容右边界',
-    );
+    expect(dotRects.last.right, 390 - inset, reason: '自定义圆点右沿应对齐内容右边界');
     for (var i = 1; i < dotRects.length; i++) {
       expect(
         dotRects[i].left - dotRects[i - 1].right,
@@ -658,9 +646,7 @@ void main() {
       );
       // 对话高亮仍在外观区块，但单独一张卡。
       final dialogueCard = tester.widget<Card>(
-        find
-            .ancestor(of: find.text('对话高亮'), matching: find.byType(Card))
-            .first,
+        find.ancestor(of: find.text('对话高亮'), matching: find.byType(Card)).first,
       );
       expect(
         identical(dialogueCard, cards.first),

@@ -42,16 +42,16 @@ void main() {
       mineSectionOrderFromNames(const <Object?>[]),
       defaultMineSectionOrder,
     );
-    expect(
-      mineSectionOrderFromNames(const ['history', 'pins', 'history']),
-      [MineSection.history, MineSection.pins, MineSection.collection],
-      reason: '重复项只留第一次出现的那个',
-    );
-    expect(
-      mineSectionOrderFromNames(const ['bogus', 42, 'collection']),
-      [MineSection.collection, MineSection.pins, MineSection.history],
-      reason: '不认识的 name 丢掉，缺的按默认顺序补到最后',
-    );
+    expect(mineSectionOrderFromNames(const ['history', 'pins', 'history']), [
+      MineSection.history,
+      MineSection.pins,
+      MineSection.collection,
+    ], reason: '重复项只留第一次出现的那个');
+    expect(mineSectionOrderFromNames(const ['bogus', 42, 'collection']), [
+      MineSection.collection,
+      MineSection.pins,
+      MineSection.history,
+    ], reason: '不认识的 name 丢掉，缺的按默认顺序补到最后');
   });
 
   test('拖动落位：上移 / 下移 / 原地 / 越界', () {
@@ -68,11 +68,11 @@ void main() {
     ]);
     expect(reorderMineSections(order, 1, 1), order, reason: '原地不动');
     expect(reorderMineSections(order, 5, 0), order, reason: '越界原样返回');
-    expect(
-      reorderMineSections(order, 0, 9),
-      [MineSection.collection, MineSection.history, MineSection.pins],
-      reason: '目标下标夹到末尾',
-    );
+    expect(reorderMineSections(order, 0, 9), [
+      MineSection.collection,
+      MineSection.history,
+      MineSection.pins,
+    ], reason: '目标下标夹到末尾');
   });
 
   test('拖完落盘，新容器先从默认顺序起、随后恢复', () async {

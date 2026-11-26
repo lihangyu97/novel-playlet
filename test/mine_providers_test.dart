@@ -119,11 +119,7 @@ void main() {
       chapterId: 'c1',
       chapterIndex: 0,
     );
-    await store.togglePin(
-      type: LibraryType.novel,
-      sourceId: 'n1',
-      title: '剑来',
-    );
+    await store.togglePin(type: LibraryType.novel, sourceId: 'n1', title: '剑来');
 
     var pinRebuilds = 0;
     container.listen(minePinsProvider, (_, _) => pinRebuilds++);
