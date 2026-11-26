@@ -769,8 +769,8 @@ class _MineSectionOrderTile extends StatelessWidget {
         excludeSemantics: true,
         label: '${section.label}，第 ${index + 1} 项，共 $total 项，可拖动排序',
         customSemanticsActions: {
-          if (up != null) const CustomSemanticsAction(label: '上移'): up,
-          if (down != null) const CustomSemanticsAction(label: '下移'): down,
+          const CustomSemanticsAction(label: '上移'): ?up,
+          const CustomSemanticsAction(label: '下移'): ?down,
         },
         child: Container(
           key: mineSectionOrderRowKey(section),

@@ -489,8 +489,8 @@ void main() {
     ];
     expect(
       tester.getRect(find.text('主题色')).right,
-      lessThan(dotRects.first.left),
-      reason: '文案在圆点左侧，不挤压',
+      lessThanOrEqualTo(dotRects.first.left),
+      reason: '文案框在圆点左侧（Expanded + 省略号，窄屏只截文案、不挤压圆点）',
     );
     expect(dotRects.last.right, 390 - inset, reason: '自定义圆点右沿应对齐内容右边界');
     for (var i = 1; i < dotRects.length; i++) {
@@ -949,7 +949,6 @@ void main() {
     );
     list.onReorderItem!(0, defaultMineSectionOrder.length - 1);
     await tester.pumpAndSettle();
-
     expect(container.read(mineSectionOrderProvider), [
       MineSection.collection,
       MineSection.history,
@@ -962,7 +961,12 @@ void main() {
       'pins',
     ]);
 
-    await tester.tap(find.byKey(mineSectionResetKey));
+    // 「恢复默认」出现在卡片标题行；刚滚到列表时这一行会被吸顶标题挡住，
+    // 先把它滚到屏幕中部再点。
+    final reset = find.byKey(mineSectionResetKey);
+    await Scrollable.ensureVisible(tester.element(reset), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(reset);
     await tester.pumpAndSettle();
     expect(container.read(mineSectionOrderProvider), defaultMineSectionOrder);
     expect(find.byKey(mineSectionResetKey), findsNothing);
