@@ -98,8 +98,9 @@ Android 是 `.so`，FRB 走默认 `DynamicLibrary.open('libfqapi_core.so')`。
   请求有总时间预算。Dart **不做通用自动重试循环**，只决定要不要给用户「重试」入口；唯一例外是
   推荐流首屏的有界重试（见「推荐」节：2 次退避 + 回前台补拉，只为覆盖首次安装的联网权限弹窗）。
 - 错误模型：`ApiException { message, kind }`，`kind` ∈
-  `bad_input / device_failed / rate_limited / upstream_5xx / timeout / too_large / unknown`；
-  统一文案 `apiErrorCopy()`，只有技术兜底 message 才换成人话。
+  `bad_input / device_failed / rate_limited / upstream_5xx / upstream_empty / timeout / too_large / unknown`；
+  统一文案 `apiErrorCopy()`，只有技术兜底 message 才换成人话；`upstream_empty`（上游
+  `HTTP 200` + 0 字节，短剧取流门限流时的典型表现）统一换成「上游暂时没有返回数据」。
 
 ### 3.2 回环 HTTP
 

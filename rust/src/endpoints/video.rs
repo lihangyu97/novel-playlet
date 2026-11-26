@@ -107,6 +107,12 @@ struct ParsedVideoResponse {
 
 impl ParsedVideoResponse {
     fn parse(raw: &[u8]) -> ApiResult<Self> {
+        // `HTTP 200` + 0 字节不是「JSON 坏了」，是上游这次没给数据（短剧取流
+        // 接口限流时就是这样）。单独分类，客户端才能提示「稍后再试」而不是
+        // 把 serde 的 "EOF while parsing a value" 原样甩给用户。
+        if raw.iter().all(|b| b.is_ascii_whitespace()) {
+            return Err(ApiError::upstream_empty("上游返回空响应（0 字节）"));
+        }
         let root: Value = serde_json::from_slice(raw)
             .map_err(|e| ApiError::Internal(format!("parse upstream json: {e}")))?;
         let models = root
@@ -4733,3 +4739,20 @@ mod unsigned_get_cap;
 mod v5_playback_contract;
 #[cfg(test)]
 mod variant_url_shapes;
+
+#[cfg(test)]
+mod empty_body_classification {
+    use super::ParsedVideoResponse;
+
+    /// 空 body / 纯空白 body 是「上游这次没给数据」，不是 JSON 语法错误：
+    /// 必须落到 `upstream_empty`，客户端才能提示稍后再试。
+    #[test]
+    fn empty_or_whitespace_body_is_upstream_empty() {
+        for raw in [&b""[..], b"  \n\t", b"\r\n"] {
+            let Err(error) = ParsedVideoResponse::parse(raw) else {
+                panic!("empty body must not parse: {raw:?}");
+            };
+            assert_eq!(error.kind(), "upstream_empty", "raw={raw:?}");
+        }
+    }
+}

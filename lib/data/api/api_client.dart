@@ -333,7 +333,10 @@ class ApiClient {
         '上游没有返回可播放地址',
         detail: 'video_url 为空',
       );
-      throw ApiException('上游没有返回可播放地址（video_url 为空）');
+      throw ApiException(
+        '上游没有返回可播放地址（video_url 为空）',
+        kind: ApiErrorKind.upstreamEmpty,
+      );
     }
     // 下载失败时内核会退回「远程地址 + key」的流式形态；那种地址是密文，
     // 播放器不能直接播，这里明确失败而不是让 AVPlayer 黑屏。
@@ -683,6 +686,8 @@ class ApiClient {
         // 非 JSON 响应保持状态码文案与 kind 的默认判断。
       }
       // 技术兜底 message（如 "HTTP 500"）换成 kind 短句；具体 message 原样抛出。
+      // upstream_empty 例外：内核那句「上游返回空响应（0 字节）」是错误详情里
+      // 唯一能说明原因的线索，保留原样；UI 短句由 apiErrorCopy / 播放页负责。
       final raw = ApiException(message, kind: kind);
       _logFailure(
         path,
@@ -690,7 +695,12 @@ class ApiClient {
         status: response.statusCode,
         elapsedMs: stopwatch.elapsedMilliseconds,
       );
-      throw ApiException(apiErrorCopy(raw, fallback: message), kind: kind);
+      throw ApiException(
+        kind == ApiErrorKind.upstreamEmpty
+            ? message
+            : apiErrorCopy(raw, fallback: message),
+        kind: kind,
+      );
     }
     final Object? decoded;
     try {

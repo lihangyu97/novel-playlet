@@ -158,6 +158,7 @@ void main() {
     test('只有网络/上游瞬时失败算 isTransient', () {
       expect(ApiErrorKind.rateLimited.isTransient, isTrue);
       expect(ApiErrorKind.upstream5xx.isTransient, isTrue);
+      expect(ApiErrorKind.upstreamEmpty.isTransient, isTrue);
       expect(ApiErrorKind.timeout.isTransient, isTrue);
       for (final kind in [
         ApiErrorKind.badInput,
@@ -176,6 +177,7 @@ void main() {
         ApiErrorKind.badInput,
         ApiErrorKind.rateLimited,
         ApiErrorKind.upstream5xx,
+        ApiErrorKind.upstreamEmpty,
         ApiErrorKind.timeout,
         ApiErrorKind.tooLarge,
         ApiErrorKind.unknown,
@@ -219,6 +221,7 @@ void main() {
         ApiErrorKind.rateLimited: '请求太频繁，稍后重试',
         ApiErrorKind.timeout: '网络超时，请重试',
         ApiErrorKind.upstream5xx: '上游服务异常，稍后重试',
+        ApiErrorKind.upstreamEmpty: '上游暂时没有返回数据，请稍后重试',
         ApiErrorKind.deviceFailed: '设备注册失效，请重启应用',
         ApiErrorKind.tooLarge: '内容过大，暂时无法加载',
       };
@@ -470,6 +473,27 @@ void main() {
         );
         expect(transport.calls, [novelPath('c1')]);
       }
+    });
+
+    test('上游空响应（upstream_empty）：不回退，且保留内核 message 给详情', () async {
+      // 空 body 是瞬时失败（限流），回退另一条接口只会多打一次上游；
+      // 同时 message 不能在 ApiClient 层被换成短句——播放页的「原始错误」
+      // 只剩这一句能说明原因。
+      final transport = _ChapterTransport(
+        (_) => _jsonResponse(
+          _businessError('上游返回空响应（0 字节）', 'upstream_empty'),
+          status: 500,
+        ),
+      );
+      await expectLater(
+        ApiClient(transport).chapter('c1'),
+        throwsA(
+          isA<ApiException>()
+              .having((error) => error.kind, 'kind', ApiErrorKind.upstreamEmpty)
+              .having((error) => error.message, 'message', '上游返回空响应（0 字节）'),
+        ),
+      );
+      expect(transport.calls, [novelPath('c1')], reason: '瞬时失败不回退');
     });
 
     test('图文接口业务失败（badInput）：回退纯文本接口并成功', () async {

@@ -83,6 +83,15 @@ PlaybackFailure describePlaybackFailure(
   if (timedOut) {
     title = '取流超时';
     reason = '等内核下载/解密这一集超过 120 秒。常见于网络慢、上游限速，或这一集体积过大。';
+  } else if (error is ApiException &&
+      error.kind == ApiErrorKind.upstreamEmpty) {
+    // 上游 200 + 0 字节（短剧取流门限流时的典型表现）：内核已经换门、换身份
+    // 试过一轮，这里只解释「为什么没画面」以及「现在能做什么」。
+    title = '上游没有返回可播放数据';
+    reason =
+        '短剧取流接口连续返回空响应，通常是上游限流或风控。'
+        'App 已自动切换备用取流通道重试；建议过几分钟再试，'
+        '频繁点重试可能延长限制期。';
   } else if (error is ApiException) {
     title = '取流失败';
     // 具体原因优先；技术兜底换 kind 短句（deviceFailed 会提示重启应用）。

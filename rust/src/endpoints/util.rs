@@ -72,6 +72,13 @@ pub fn clean_item_ids(raw: &str) -> String {
 
 /// Go's `rawJSON`: parse for pass-through.
 pub fn raw_json(raw: &[u8]) -> Result<Value, crate::error::ApiError> {
+    // 空 body（HTTP 200 + 0 字节）单独成类：它是「上游这次没给数据」，不是
+    // JSON 语法错误，客户端据此提示稍后重试。
+    if raw.iter().all(|b| b.is_ascii_whitespace()) {
+        return Err(crate::error::ApiError::upstream_empty(
+            "上游返回空响应（0 字节）",
+        ));
+    }
     serde_json::from_slice(raw)
         .map_err(|e| crate::error::ApiError::Internal(format!("parse upstream json: {e}")))
 }

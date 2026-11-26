@@ -99,10 +99,10 @@ Future<String?> cachedVideoUrl(String episodeId); // mode=cached：只查本地 
 
 ### 错误模型
 
-`ApiException { String message; String? code; ApiErrorKind kind }`。`kind` 取值 `bad_input / device_failed / rate_limited / upstream_5xx / timeout / too_large / unknown`，wire 值与 Rust 内核一致（错误 JSON 里带 `kind` 字段）。
+`ApiException { String message; String? code; ApiErrorKind kind }`。`kind` 取值 `bad_input / device_failed / rate_limited / upstream_5xx / upstream_empty / timeout / too_large / unknown`，wire 值与 Rust 内核一致（错误 JSON 里带 `kind` 字段）。`upstream_empty` 是「上游 HTTP 200 但 body 为空/纯空白」（短剧取流门限流时的典型形态），与 JSON 语法错误区分开。
 
-- `ApiErrorKind.isTransient`（`rateLimited` / `upstream5xx` / `timeout`）、`needsRestart`（`deviceFailed`）、`userCopy`（kind 的兜底人话短句）；`ApiException.isRetryable` / `needsRestart` 是同一套语义的实例入口（`unknown` 按可重试处理：本地意外，再试一次可能就好）。
-- 统一文案 `apiErrorCopy(error, fallback:)`（`lib/data/models/json_utils.dart`）：后端给了具体 message 就优先保留，只有 "HTTP 500" 这类技术兜底 message 才换成 `userCopy`；非 `ApiException` 用 `fallback`。
+- `ApiErrorKind.isTransient`（`rateLimited` / `upstream5xx` / `upstreamEmpty` / `timeout`）、`needsRestart`（`deviceFailed`）、`userCopy`（kind 的兜底人话短句）；`ApiException.isRetryable` / `needsRestart` 是同一套语义的实例入口（`unknown` 按可重试处理：本地意外，再试一次可能就好）。
+- 统一文案 `apiErrorCopy(error, fallback:)`（`lib/data/models/json_utils.dart`）：后端给了具体 message 就优先保留，只有 "HTTP 500" 这类技术兜底 message 才换成 `userCopy`；`upstreamEmpty` 不论 message 一律用 `userCopy`（内核那句「上游返回空响应（0 字节）」只进日志与错误详情）；非 `ApiException` 用 `fallback`。
 - 行为策略：翻页失败时 `FeedState.loadMoreRetryable` 决定 footer 是否显示「重试」；`badInput` / `tooLarge` / `deviceFailed` 这类不可重试错误不显示按钮，`retryLoadMore()` 也直接不发请求。
 - B2 超时归一：内核 504 在传输层抛 `BackendTimeoutException`，`ApiClient` 归一成 `ApiException(kind: timeout)`；499 取消仍是 `TimeoutException`（用户不可见，不转成 ApiException）。
 - **仍不做通用 Dart 自动重试 / 退避循环**：重试与退避在 Rust 内核，Dart 只决定「要不要给用户一个重试入口」。唯一例外是推荐流首屏：可重试失败做 2 次短退避（400ms / 800ms，覆盖首次安装的联网权限弹窗），App 回前台（`resumed`）时对停在错误态的首屏补拉一次；确定性失败不重试（`lib/features/recommend/recommend_controller.dart`、`recommend_page.dart`）。

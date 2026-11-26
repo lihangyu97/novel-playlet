@@ -159,6 +159,7 @@ enum ApiErrorKind {
   upstream5xx('upstream_5xx'),
   timeout('timeout'),
   tooLarge('too_large'),
+  upstreamEmpty('upstream_empty'),
   unknown('unknown');
 
   const ApiErrorKind(this.wireName);
@@ -176,6 +177,7 @@ enum ApiErrorKind {
   bool get isTransient => switch (this) {
     ApiErrorKind.rateLimited ||
     ApiErrorKind.upstream5xx ||
+    ApiErrorKind.upstreamEmpty ||
     ApiErrorKind.timeout => true,
     ApiErrorKind.badInput ||
     ApiErrorKind.deviceFailed ||
@@ -198,6 +200,7 @@ enum ApiErrorKind {
     ApiErrorKind.rateLimited => '请求太频繁，稍后重试',
     ApiErrorKind.timeout => '网络超时，请重试',
     ApiErrorKind.upstream5xx => '上游服务异常，稍后重试',
+    ApiErrorKind.upstreamEmpty => '上游暂时没有返回数据，请稍后重试',
     ApiErrorKind.deviceFailed => '设备注册失效，请重启应用',
     ApiErrorKind.tooLarge => '内容过大，暂时无法加载',
     ApiErrorKind.badInput => '',
@@ -264,6 +267,10 @@ String apiErrorCopy(Object error, {required String fallback}) {
     case ApiErrorKind.badInput:
     case ApiErrorKind.unknown:
       return message.isEmpty ? fallback : message;
+    case ApiErrorKind.upstreamEmpty:
+      // 这类 message（"上游返回空响应（0 字节）"）是给日志/详情看的，产品文案
+      // 统一用 kind 短句，避免把「上游 / 空响应」这类词甩给用户。
+      return error.kind.userCopy;
     case ApiErrorKind.rateLimited:
     case ApiErrorKind.upstream5xx:
     case ApiErrorKind.timeout:
