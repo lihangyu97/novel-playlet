@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_font_weight.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/theme_settings.dart';
+import '../mine/mine_section_order.dart';
 import '../reader/reader_settings.dart';
 import '../recommend/recommend_layout.dart';
 
@@ -28,6 +29,7 @@ final settingsSectionsProvider = Provider<List<SettingsSection>>((ref) {
     ThemeSettingsSection(ref),
     FontWeightSettingsSection(ref),
     FeedSettingsSection(ref),
+    MineSettingsSection(ref),
     ReaderSettingsSection(ref),
   ];
 });
@@ -103,6 +105,33 @@ class FeedSettingsSection implements SettingsSection {
         ? RecommendLayout.three
         : RecommendLayout.two;
     await ref.read(recommendLayoutProvider.notifier).applyRemote(layout);
+  }
+}
+
+/// 「我的」页区块顺序（在看 / 收藏 / 历史）。
+///
+/// 只存 name 列表：顺序是观感偏好，跨设备一致才有意义；脏值由
+/// [mineSectionOrderFromNames] 补齐成完整排列，不会让某个区块消失。
+class MineSettingsSection implements SettingsSection {
+  const MineSettingsSection(this.ref);
+
+  final Ref ref;
+
+  @override
+  String get id => 'mine';
+
+  @override
+  Object? capture() => {
+    'sections': mineSectionOrderNames(ref.read(mineSectionOrderProvider)),
+  };
+
+  @override
+  Future<void> applyRemote(Object? data) async {
+    final raw = _map(data)['sections'];
+    final names = raw is List ? raw : const <Object?>[];
+    await ref
+        .read(mineSectionOrderProvider.notifier)
+        .applyRemote(mineSectionOrderFromNames(names));
   }
 }
 

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+// 读屏「上移 / 下移」动作：CustomSemanticsAction 不在 material 的导出里。
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_version.dart';
@@ -14,6 +16,7 @@ import '../../core/cache/app_cache.dart';
 // 设置页集中放全站偏好，会跨 feature 引用偏好 provider（视频清晰度 / 推荐布局）。
 // 偏好本身归功能域所有，但入口统一在设置页，所以这里的跨域 import 是约定的。
 import '../cache/download_quality.dart';
+import '../mine/mine_section_order.dart';
 import '../reader/reader_settings.dart';
 import '../sync/widgets/webdav_sync_card.dart';
 import '../recommend/recommend_layout.dart';
@@ -21,7 +24,8 @@ import 'settings_providers.dart';
 import 'widgets/dialogue_highlight_preview.dart';
 import 'widgets/theme_color_picker.dart';
 
-/// 设置页：主题（主题色 / 深浅色 / 推荐流布局 / 全局字重 / 对话高亮）+ 存储（占用清理 + 缓存质量）+ 同步（WebDAV）。
+/// 设置页：外观（主题色 / 深浅色 / 推荐流布局 / 我的页模块顺序 / 全局字重 /
+/// 对话高亮）+ 存储（占用清理 + 缓存质量）+ 同步（WebDAV）。
 ///
 /// 从「我的」右上角进。这里只放全局偏好与可重建缓存，书架/阅读进度属于用户
 /// 数据，不给清理入口（那些在「我的」页里操作）。
@@ -46,7 +50,7 @@ class SettingsPage extends StatelessWidget {
           padding: EdgeInsets.only(bottom: 28 + bottomInset),
           children: [
             const AppSectionHeader(
-              title: '主题',
+              title: '外观',
               padding: EdgeInsets.fromLTRB(
                 _contentInset,
                 20,
@@ -54,9 +58,11 @@ class SettingsPage extends StatelessWidget {
                 10,
               ),
             ),
-            // 整个主题区块共用一张卡：这些偏好都互相独立，拆成多张卡反而
-            // 把竖屏切成一截一截；靠行间留白分组就够了，不画分割线。
+            // 外观区块：整站观感共用一张卡（卡内不画分割线）；「对话高亮」只
+            // 影响阅读页正文，单独一张卡跟在后面，但仍然属于「外观」区块。
             const _ThemeCard(),
+            const SizedBox(height: 12),
+            const _DialogueHighlightCard(),
             const AppSectionHeader(
               title: '同步',
               padding: EdgeInsets.fromLTRB(
@@ -162,11 +168,14 @@ class _Card extends StatelessWidget {
   }
 }
 
-/// 主题区块：所有外观偏好共用一张卡，卡内不画分割线。
+/// 外观区块的主卡：整站观感偏好共用一张卡，卡内不画分割线。
 ///
-/// 顺序按「一眼就能定」排：主题色 → 深浅色 → 推荐流布局 → 全局字重（仅
-/// Android）→ 对话高亮（阅读页局部装饰，放最后）。每行自己带上下 padding，
-/// 卡片只保留 6pt 的外边距，行间留白就是唯一的分组手段。
+/// 顺序按「一眼就能定」排：主题色 → 深浅色 → 推荐流布局 → 我的页模块（拖动
+/// 排序）→ 全局字重（仅 Android）。每行自己带上下 padding，卡片只保留 6pt
+/// 的外边距，行间留白就是唯一的分组手段。
+///
+/// 「对话高亮」只影响阅读页正文，不在这里：它是同一区块里的第二张卡
+/// （见 [_DialogueHighlightCard]）。
 class _ThemeCard extends StatelessWidget {
   const _ThemeCard();
 
@@ -182,8 +191,8 @@ class _ThemeCard extends StatelessWidget {
           const _ThemeColorRow(),
           const _AppearanceRows(),
           const _FeedLayoutRow(),
+          const _MineSectionOrderRow(),
           if (showFontWeight) const _GlobalFontWeightRow(),
-          const _DialogueHighlightRow(),
         ],
       ),
     );
@@ -197,50 +206,73 @@ class _ThemeCard extends StatelessWidget {
 /// 「自定义颜色」色块的 key：测试用它点开取色弹层。
 const Key themeCustomColorKey = Key('theme-color-custom');
 
+/// 主题色圆点之间的间距。
+///
+/// 圆点自身 44（保证点击热区），四颗 + 三个间隙 = 212；右侧对齐后左边留给
+/// 「主题色」文案，最窄的 375pt 屏（内容宽 311）也放得下。
+const double _themeColorDotGap = 12;
+
 class _ThemeColorRow extends ConsumerWidget {
   const _ThemeColorRow();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
     final seed = ref.watch(themeSeedProvider);
     final controller = ref.read(themeSeedProvider.notifier);
     final customSeed = ref.watch(customThemeSeedProvider);
     final customController = ref.read(customThemeSeedProvider.notifier);
     final customSelected = !isPresetColor(seed);
+    final dots = <Widget>[
+      for (final option in themeColorOptions)
+        ColorSwatchDot(
+          color: option.color,
+          tooltip: option.name,
+          selected: option.color == seed,
+          onTap: () => controller.setSeed(option.color),
+        ),
+      ColorSwatchDot(
+        key: themeCustomColorKey,
+        color: customSeed,
+        selected: customSelected,
+        showCheck: false,
+        icon: Icons.palette_outlined,
+        tooltip: '自定义主题色',
+        semanticLabel: '自定义',
+        onTap: () async {
+          final picked = await showThemeColorPicker(
+            context,
+            initial: customSeed,
+          );
+          if (picked == null) return;
+          controller.setSeed(picked);
+          customController.setSeed(picked);
+        },
+      ),
+    ];
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 文案左、圆点整组右对齐：和卡里其它「标题 + 右侧控件」的行同一套
+          // 版式。四颗圆点铺满整行时看不出这是一项设置。
           Row(
-            // 首尾圆点分别贴住内容左右边界，和上下的 label / 开关 / chip 对齐。
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              for (final option in themeColorOptions)
-                ColorSwatchDot(
-                  color: option.color,
-                  tooltip: option.name,
-                  selected: option.color == seed,
-                  onTap: () => controller.setSeed(option.color),
+              Expanded(
+                child: Text(
+                  '主题色',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: context.appWeight(FontWeight.w600),
+                  ),
                 ),
-              ColorSwatchDot(
-                key: themeCustomColorKey,
-                color: customSeed,
-                selected: customSelected,
-                showCheck: false,
-                icon: Icons.palette_outlined,
-                tooltip: '自定义主题色',
-                semanticLabel: '自定义',
-                onTap: () async {
-                  final picked = await showThemeColorPicker(
-                    context,
-                    initial: customSeed,
-                  );
-                  if (picked == null) return;
-                  controller.setSeed(picked);
-                  customController.setSeed(picked);
-                },
               ),
+              for (var i = 0; i < dots.length; i++) ...[
+                if (i > 0) const SizedBox(width: _themeColorDotGap),
+                dots[i],
+              ],
             ],
           ),
           if (seed != appSeedColor)
@@ -265,6 +297,20 @@ class _ThemeColorRow extends ConsumerWidget {
 // ---------------------------------------------------------------------------
 // 对话高亮（样式 + 颜色）
 // ---------------------------------------------------------------------------
+
+/// 对话高亮：只影响阅读页正文里的标记色，和整站外观不是一类设置，单独一张卡。
+///
+/// 仍属于「外观」区块（区块标题不重复），与上面的外观卡留 12 的间距 ——
+/// 和「存储 → 缓存质量」同一套排版。
+class _DialogueHighlightCard extends StatelessWidget {
+  const _DialogueHighlightCard();
+
+  @override
+  Widget build(BuildContext context) => const _Card(
+    padding: EdgeInsets.fromLTRB(16, 6, 16, 6),
+    child: _DialogueHighlightRow(),
+  );
+}
 
 /// 「对话高亮」色块的 key：测试用它点开取色弹层。
 const Key dialogueHighlightColorKey = Key('settings-dialogue-highlight-color');
@@ -559,6 +605,211 @@ class _FeedLayoutRow extends ConsumerWidget {
                 controller.setLayout(selected.single),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 我的页模块（拖动排序）
+// ---------------------------------------------------------------------------
+
+/// 「我的页模块」整组的 key：测试用它滚到可见位置。
+const Key mineSectionOrderKey = Key('settings-mine-section-order');
+
+/// 「恢复默认」按钮的 key（只在非默认顺序时出现）。
+const Key mineSectionResetKey = Key('settings-mine-section-reset');
+
+/// 拖动行的 key（按区块名取，不依赖下标）。
+Key mineSectionOrderRowKey(MineSection section) =>
+    ValueKey('settings-mine-section-${section.name}');
+
+/// 「我的页模块」：三条可拖动行，直接决定「我的」页三个区块的先后。
+///
+/// 不单独开一个设置区块：它和「推荐流布局」同属布局偏好，三行也不值得再占
+/// 一张卡，所以并进外观卡。拖动即时生效（与开关 / 按钮组一致，没有确定/取消）：
+/// 「我的」页 watch 同一个 provider，返回后立刻按新顺序渲染。
+///
+/// 手柄才起拖（`buildDefaultDragHandles: false`）：设置页整页还要能竖向滚，
+/// 整行长按拖动会和页面滚动抢手势。
+class _MineSectionOrderRow extends ConsumerWidget {
+  const _MineSectionOrderRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final order = ref.watch(mineSectionOrderProvider);
+    final controller = ref.read(mineSectionOrderProvider.notifier);
+    final isDefault = sameMineSectionOrder(order, defaultMineSectionOrder);
+
+    void move(int from, int to) =>
+        controller.setOrder(reorderMineSections(order, from, to));
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '我的页模块',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: context.appWeight(FontWeight.w600),
+                  ),
+                ),
+              ),
+              if (!isDefault)
+                TextButton(
+                  key: mineSectionResetKey,
+                  onPressed: controller.reset,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  child: const Text('恢复默认'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '拖动右侧手柄调整先后，没有内容的区块会自动隐藏',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+              height: 1.3,
+            ),
+          ),
+          const SizedBox(height: 10),
+          ReorderableListView.builder(
+            key: mineSectionOrderKey,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            padding: EdgeInsets.zero,
+            itemCount: order.length,
+            // onReorder 在 3.41 之后已废弃（newIndex 要自己减 1）；
+            // onReorderItem 直接给「移除后再插入」的目标下标。
+            onReorderItem: (oldIndex, newIndex) => controller.setOrder(
+              reorderMineSections(order, oldIndex, newIndex),
+            ),
+            proxyDecorator: (child, index, animation) => AnimatedBuilder(
+              animation: animation,
+              // 拖动中的行抬起来：不抬的话整行跟着手指走、又没有层级变化，
+              // 看起来像在滚动而不是在排序。
+              builder: (context, _) => Material(
+                color: scheme.surfaceContainerHigh,
+                elevation: 4 * Curves.easeOut.transform(animation.value),
+                borderRadius: BorderRadius.circular(10),
+                shadowColor: scheme.shadow.withValues(alpha: 0.3),
+                child: child,
+              ),
+            ),
+            itemBuilder: (context, index) {
+              final section = order[index];
+              return _MineSectionOrderTile(
+                key: ValueKey(section),
+                section: section,
+                index: index,
+                total: order.length,
+                onMoveUp: index == 0 ? null : () => move(index, index - 1),
+                onMoveDown: index == order.length - 1
+                    ? null
+                    : () => move(index, index + 1),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 拖动行：图标 + 区块名 + 右侧手柄。
+///
+/// 行本身不可点（只有手柄起拖）：点一下没有任何结果的「假可点」比不给手势更
+/// 让人困惑。行尾手柄带 Tooltip，读屏会念「拖动调整…的位置」。
+class _MineSectionOrderTile extends StatelessWidget {
+  const _MineSectionOrderTile({
+    super.key,
+    required this.section,
+    required this.index,
+    required this.total,
+    this.onMoveUp,
+    this.onMoveDown,
+  });
+
+  final MineSection section;
+  final int index;
+
+  /// 总行数：只用于读屏语义「第 N 项 / 共 M 项」。
+  final int total;
+
+  /// 读屏「上移 / 下移」动作用的回调；首尾行对应方向为 null。
+  final VoidCallback? onMoveUp;
+  final VoidCallback? onMoveDown;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final up = onMoveUp;
+    final down = onMoveDown;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Semantics(
+        container: true,
+        // 整行当一个节点播报：子节点的文字 / 手柄不再单独抢焦点，
+        // 排序用下面两个自定义动作，读屏用户不用长按拖动。
+        excludeSemantics: true,
+        label: '${section.label}，第 ${index + 1} 项，共 $total 项，可拖动排序',
+        customSemanticsActions: {
+          if (up != null) const CustomSemanticsAction(label: '上移'): up,
+          if (down != null) const CustomSemanticsAction(label: '下移'): down,
+        },
+        child: Container(
+          key: mineSectionOrderRowKey(section),
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: scheme.onSurface.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Icon(section.icon, size: 18, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  section.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+              ReorderableDragStartListener(
+                index: index,
+                child: Tooltip(
+                  message: '拖动调整「${section.label}」的位置',
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Icon(
+                      Icons.drag_handle_rounded,
+                      size: 20,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
