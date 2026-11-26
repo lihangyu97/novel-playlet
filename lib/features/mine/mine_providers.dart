@@ -132,9 +132,15 @@ final mineHistoryCountProvider = FutureProvider<int>((ref) async {
 
 /// 「在看」列表：pin 过且没取消，按 pin 时间倒序（最新 pin 在最前）。
 ///
-/// 只订阅 [pinRevisionProvider]：切换 pin 只刷新这一块，不影响收藏与历史。
+/// 订阅 pin 通道 + 两条进度通道：卡片副标题是「读到第 N 章 / 看到第 N 集」，
+/// 而进度写在同一条记录的同几列上（`library` 表的 `progress_*` 三列）。只挂
+/// pin 通道时，翻到新章后「历史」已经更新、「在看」还停在旧进度——provider
+/// 没 autoDispose，保活的页面不会自己重查。所以和「历史」保持一致：进度一变
+/// 就重查，切换 pin 仍然只刷新这一块、不影响收藏与历史。
 final minePinsProvider = FutureProvider<List<LibraryRecord>>((ref) async {
   ref.watch(pinRevisionProvider);
+  ref.watch(recentRevisionProvider);
+  ref.watch(videoHistoryRevisionProvider);
   return ref.watch(readingStoreProvider).pinnedRecords();
 });
 

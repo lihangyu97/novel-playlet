@@ -168,6 +168,34 @@ void main() {
     expect(find.text('共 2 条'), findsOneWidget);
   });
 
+  testWidgets('我的页-在看：翻章后卡片进度跟着更新', (tester) async {
+    final store = ReadingStore();
+    await store.saveProgress(
+      bookId: 'n1',
+      bookTitle: '剑来',
+      cover: '',
+      chapterId: 'c1',
+      chapterIndex: 0,
+    );
+    await store.togglePin(type: LibraryType.novel, sourceId: 'n1', title: '剑来');
+
+    await pumpPreview(tester, const MinePage(), store: store);
+    expect(find.text('读到第 1 章'), findsNWidgets(2), reason: '在看卡片 + 历史行');
+
+    // 翻到第 5 章：历史与在看一起变，不能一个更新、一个停在第 1 章。
+    await store.saveProgress(
+      bookId: 'n1',
+      bookTitle: '剑来',
+      cover: '',
+      chapterId: 'c5',
+      chapterIndex: 4,
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+
+    expect(find.text('读到第 1 章'), findsNothing);
+    expect(find.text('读到第 5 章'), findsNWidgets(2));
+  });
+
   testWidgets('我的页-收藏混排：统一 3:4 封面 + 标签 + 长按移出', (tester) async {
     final store = ReadingStore();
     await store.addToShelf(

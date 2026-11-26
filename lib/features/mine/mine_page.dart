@@ -31,8 +31,8 @@ import '../../data/models/video_series.dart';
 /// 渐变整页一套。区块顺序固定为「在看 → 收藏 → 历史」。
 ///
 /// 页面根节点**不订阅任何数据 provider**：三个区块各自 watch 自己的通道，
-/// 阅读页落一次进度只重建「历史」，切换 pin 只重建「在看」，收藏变更只重建
-/// 「收藏」（CODE_REVIEW P1-5）。
+/// 阅读页落一次进度重建「历史」和「在看」（在看卡片要显示读到第几章），
+/// 切换 pin 只重建「在看」，收藏变更只重建「收藏」（CODE_REVIEW P1-5）。
 class MinePage extends ConsumerWidget {
   const MinePage({super.key, this.bottomInset = 0});
 
